@@ -219,6 +219,21 @@ music_library/
 
 If the folder has tracks, the proposal and asset stages should present them as options alongside generated music. See the proposal-director and asset-director skills for details.
 
+## SFX Library
+
+A curated, in-repo library of 20 reusable sound effects lives in `assets/sfx/` (checked in — not gitignored). These are ElevenLabs-generated transitions, impacts, UI/notification sounds, emphasis hits, educational textures, and outros designed for educational/informational reels and explainers.
+
+```
+assets/sfx/
+├── manifest.json        # canonical: slug, category, prompt, duration, usage
+├── whoosh-fast.mp3      # ... 20 effects across 6 categories
+└── ...
+```
+
+**Read [`skills/creative/sfx-library.md`](skills/creative/sfx-library.md)** at any pipeline's `assets` or `edit` stage when the brief calls for educational, explainer, or polished-motion-graphics audio. The skill documents each effect's intended use, scene-to-SFX mappings, placement/level rules, and how to wire SFX into Remotion / HyperFrames / FFmpeg edits.
+
+To extend the library, append entries to `scripts/generate_educational_sfx.py` and run with `--skip-existing`. Project-specific bespoke sounds still go to `projects/<name>/assets/audio/` — this library is for reusable cross-project effects.
+
 ## Available Pipelines
 
 | Pipeline | Best For | Stability |
