@@ -102,6 +102,7 @@ Key capability families to look for in the output:
 | â†³ HunyuanVideo Prompting | `creative/prompting/hunyuan-prompting.md` | HunyuanVideo formula, I2V best practices | â€" |
 | Storytelling | `creative/storytelling.md` | Narrative structure, hooks, pacing, Mayer's principles | â€" |
 | Sound Design | `creative/sound-design.md` | Audio ducking, LUFS targets, SFX timing, AI TTS mixing | `elevenlabs` |
+| SFX Library | `creative/sfx-library.md` | In-repo SFX at `assets/sfx/` — when to use each of the 20 effects, scene-to-SFX mappings, regen workflow | `sound-effects`, `elevenlabs` |
 | Typography | `creative/typography.md` | Font selection, text sizing, safe zones, caption styling | â€" |
 | Kinetic Whiteboard Captions | `creative/kinetic-whiteboard-captions.md` | Word-synced kinetic text, faceless social explainers, floating UI cards | `remotion-best-practices`, `gsap-core`, `gsap-timeline` |
 | Greg Isenberg Product Explainer | `creative/greg-isenberg-product-explainer.md` | Warm editorial AI/startup explainers, proof receipts, workflow diagrams, prompt/result artifacts, Greg-theme motion | `remotion-best-practices`, `gsap-core`, `gsap-timeline` |
