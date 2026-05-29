@@ -75,6 +75,23 @@ Use `anime_scene` type for each scene. Plan:
 Reference: `remotion-composer/public/demo-props/mori-no-seishin.json` — 6 scenes using this pattern.
 Reference: `remotion-composer/public/demo-props/deep-ocean.json` — 6 underwater scenes with different palette.
 
+### 3a. Greg-Theme Social Retention Rules
+
+When the active playbook is `greg-isenberg-product-explainer` or
+`greg-editorial`, plan the sequence like a premium short-form product reel:
+
+- Change one meaningful visual element every 0.5-1.5 seconds: phrase group,
+  receipt card, connector, prompt text, result row, or camera crop.
+- Open with a proof/problem board, source receipt, or large serif claim rather
+  than a generic title card.
+- Use concrete support visuals: proof receipts, b-roll inserts, generated UI
+  mockups, workflow diagrams, and artifact boards.
+- If `assets/greg-style-kit-expanded/` exists locally, reference its backgrounds,
+  icons, templates, and SFX as optional supporting assets; otherwise keep the
+  plan portable by requesting generated or sourced replacements.
+- Keep captions as designed phrase chunks around the focal visual, not a
+  bottom subtitle bar.
+
 ### 4. Use Metadata For Timing Rules
 
 Recommended metadata keys:

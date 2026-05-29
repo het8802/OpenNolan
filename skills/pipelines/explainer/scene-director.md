@@ -131,6 +131,23 @@ Show code with syntax highlighting. Highlight specific lines as the narrator exp
 - Tools: `code_snippet` tool + Remotion
 - Example: "Python code: `results = collection.query(embedding, n_results=5)`. Highlight `embedding` parameter when narrator says 'vector'."
 
+### Step 4a: Greg-Theme Social Retention Rules
+
+When the active playbook is `greg-isenberg-product-explainer` or
+`greg-editorial`, plan the sequence like a premium short-form product reel:
+
+- Change one meaningful visual element every 0.5-1.5 seconds: phrase group,
+  receipt card, connector, prompt text, result row, or camera crop.
+- Open with a proof/problem board, source receipt, or large serif claim rather
+  than a generic title card.
+- Use concrete support visuals: proof receipts, b-roll inserts, generated UI
+  mockups, workflow diagrams, and artifact boards.
+- If `assets/greg-style-kit-expanded/` exists locally, reference its backgrounds,
+  icons, templates, and SFX as optional supporting assets; otherwise keep the
+  plan portable by requesting generated or sourced replacements.
+- Keep captions as designed phrase chunks around the focal visual, not a
+  bottom subtitle bar.
+
 ### Step 4b: Write Narration with Duration Budget
 
 If the video includes narration, the script **must** be written to fit the video duration.

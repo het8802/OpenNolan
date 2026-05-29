@@ -54,6 +54,22 @@ Prefer the lowest-variance useful path:
 - `math_animate` for real math motion,
 - provided artwork before new generation.
 
+### 1a. Greg-Theme Asset Discipline
+
+When the active playbook is `greg-isenberg-product-explainer` or
+`greg-editorial`, make the asset kit concrete instead of relying on animated
+text alone:
+
+- Read `skills/creative/greg-isenberg-product-explainer.md` for the visual
+  grammar, asset mix, and proof-receipt expectations.
+- If `assets/greg-style-kit-expanded/` exists locally, reuse its backgrounds,
+  icons, UI cards, templates, and SFX as optional supporting material.
+- When no local kit asset fits the beat, generate subject-specific UI mockups,
+  proof cards, diagrams, or hero images using the playbook's
+  `image_prompt_prefix`.
+- Keep generated-image text decorative only; final readable text belongs in
+  OpenMontage/Remotion/HyperFrames.
+
 ### 1b. Sample Preview (Prevents Wasted Spend)
 
 Before batch-generating assets, produce one sample of each expensive type and show the user:

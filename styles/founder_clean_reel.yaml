@@ -1,0 +1,187 @@
+identity:
+  name: "Founder Clean Reel"
+  category: "cinematic"
+  mood: "premium founder editorial, smart, direct, internet-native, not cringey"
+  pace: "fast"
+  best_for: "Talking-head founder reels, AI/startup/business short-form, Instagram Reels, vertical short-form video for founders and internet-native audiences"
+
+# Format constraints (non-schema metadata, used by pipeline director)
+format:
+  aspect_ratio: "9:16"
+  resolution: "1080x1920"
+  fps: 30
+  target_duration_sec: "30-45"
+  platform: "Instagram Reels / TikTok / YouTube Shorts"
+
+# Layout constraints (non-schema metadata, used by Remotion/HyperFrames composer)
+layout:
+  safe_margin_px: 96
+  caption_zone: "lower_middle"
+  face_priority: true
+  max_on_screen_elements: 3
+  caption_bottom_offset_px: 160
+
+visual_language:
+  color_palette:
+    primary: ["#1A1814", "#252018"]       # warm off-black / charcoal for talking-head bg tint
+    accent: ["#C4735B", "#D4896B"]        # terracotta/coral — founder brand warmth, Anthropic-adjacent
+    background: "#F5F0E8"                  # cream/ivory for cards and overlays
+    text: "#F5F0E8"                        # cream on dark, or
+    muted: "#9A9490"                       # warm gray for secondary text
+    card_bg: "#FFFFFF"                     # clean white for editorial cards
+    card_text: "#1A1814"                   # near-black text on cards
+  composition: >
+    Face-forward center crop. Subject fills upper 60% of frame. Caption zone is
+    lower-middle inside 96px safe margins. Editorial cards appear lower-third or
+    center, never covering the mouth. Max 3 elements visible at once.
+  texture: "clean, no grain, no noise, no gradients — flat editorial surfaces only"
+
+typography:
+  headings:
+    font: "Inter"
+    weight: 800
+    tracking: "-0.03em"
+  body:
+    font: "Inter"
+    weight: 600
+    line_height: 1.3
+  stat_card:
+    font: "Inter"
+    weight: 800
+    size_multiplier: 2.6
+  scale_system: "major_third"
+  weight_matrix:
+    title: 800
+    heading: 800
+    body: 600
+    caption: 600
+
+# Caption discipline (non-schema metadata)
+captions:
+  words_per_chunk: "2-5"
+  max_lines: 2
+  position: "lower_middle"
+  style: "word-level or phrase-level timing"
+  emphasis_method: "weight and scale only — NO random color changes"
+  font: "Inter 600"
+  font_size_px: 52
+  emphasis_font: "Inter 800"
+  emphasis_scale: 1.06
+  readable_on_mobile: true
+  highlight_keywords_only: true
+  no_full_sentences_on_screen: true
+  shadow: "0 2px 8px rgba(0,0,0,0.6)"
+  color_active: "#FFFFFF"
+  color_inactive: "rgba(255,255,255,0.55)"
+
+motion:
+  transitions:
+    - "hard_cut"
+    - "match_cut"
+    - "subtle_slide"
+    - "quick_wipe"
+  animation_style: >
+    Spring/subtle easing only. 120-180ms micro-animations. No bounce, no spin,
+    no flip, no glitch, no random gradient sweeps. Punch-in zooms only on
+    emphasis moments: 3-5% scale (1.03–1.05), not dramatic zooms.
+    Transitions are mostly hard cuts — everything else is intentional and rare.
+  pacing_rules:
+    min_scene_hold_seconds: 0.8
+    max_scene_hold_seconds: 8
+    text_card_hold_seconds: 1.8
+    stat_card_hold_seconds: 2.0
+    transition_duration_seconds: 0.12
+  entrance: "spring fade-up, 0.95 -> 1.0 scale, 150ms"
+  exit: "fast fade-out 80ms"
+  banned_effects:
+    - "spin"
+    - "flip"
+    - "glitch"
+    - "random_bounce"
+    - "neon_glow"
+    - "particle_burst"
+    - "ken_burns_slow_pan"
+
+audio:
+  voice_style: "founder-native, direct, confident, not performatively excited — clean and clear"
+  music_mood: "low-key ambient/minimal electronic — sits under voice, never fights it"
+  music_volume: 0.06
+  sfx_style: "sparse: subtle whoosh or soft tick on major visual transitions only"
+  ducking_threshold_db: -6
+  voice_variation_allowed: false
+
+asset_generation:
+  image_prompt_prefix: >
+    9:16 vertical composition, premium editorial photograph, cinematic shallow depth of field,
+    clean negative space for caption overlay, founder/startup/AI/internet-business mood,
+    realistic natural lighting, minimal palette, no text, no logos, no robot/chip/brain clichés,
+  image_negative_prompt: >
+    neon, cyberpunk, generic AI robot, brain illustration, computer chip, dark moody,
+    lens flare, fake UI, cluttered background, over-detailed, text in image, logo,
+    celebrity likeness, trademark, low quality, stock photo cliché, glitch, grain
+  diagram_style: "minimal editorial, clean lines, soft shadow, rounded corners, Inter font"
+  consistency_anchors:
+    - "Warm charcoal (#1A1814) or cream (#F5F0E8) as primary surface — never neon or saturated"
+    - "Terracotta/coral (#C4735B) as the single accent — use sparingly on emphasis only"
+    - "All generated images: clean negative space upper-third for captions"
+    - "Realistic editorial photography style — cinematic but not fantastical"
+    - "Max 3 visual elements on screen at once; face is always primary layer"
+
+# AI visual rules (non-schema metadata)
+ai_visuals:
+  max_count: 6
+  style: "cinematic editorial, realistic, clean negative space"
+  role: "support spoken idea only — never decorative"
+  composition: "9:16 vertical with safe upper-third clear for caption zone"
+  banned:
+    - "text inside image"
+    - "fake logos or UI"
+    - "celebrity likeness"
+    - "robot clichés"
+    - "over-detailed backgrounds"
+    - "generic AI slop"
+    - "saturated tech-bro aesthetics"
+
+overlays:
+  stat_card:
+    bg: "#FFFFFF"
+    border: "#C4735B"
+    radius: 16
+    shadow: "0 4px 24px rgba(0,0,0,0.18)"
+  key_term:
+    bg: "#F5F0E8"
+    text: "#1A1814"
+    radius: 8
+    shadow: "0 2px 8px rgba(0,0,0,0.10)"
+  code_block:
+    bg: "#252018"
+    text: "#F5F0E8"
+    highlight: "#C4735B"
+
+quality_rules:
+  - "Minimum contrast ratio 4.5:1 for all caption text on any background"
+  - "Captions must be readable at 375px viewport width (iPhone SE)"
+  - "Face/talking-head is always the primary visual layer — never obscured by overlays"
+  - "No more than 3 visual elements on screen at once (face + caption + optional card)"
+  - "Caption zone must never overlap the speaker's mouth"
+  - "All generated images must have clean negative space for caption placement"
+  - "No neon, glitch, gradient sweep, or cyberpunk elements under any circumstances"
+  - "Jump cuts must feel intentional — silence and filler words are cut, not creativity"
+  - "Music must sit 15+ dB below voice level"
+  - "Punch-in zoom capped at 1.05x scale — no dramatic zoom-ins"
+  - "Max 2 caption lines visible simultaneously"
+  - "Editorial cards: rounded corners, soft shadow, Inter font only"
+  - "Every asset must pass the 'does it look like AI slop?' gut check before render"
+
+chart_palette:
+  - "#C4735B"
+  - "#1A1814"
+  - "#9A9490"
+  - "#F5F0E8"
+  - "#D4896B"
+  - "#252018"
+
+color_rules:
+  harmony_type: "analogous"
+  contrast_validation: true
+  colorblind_safe: true

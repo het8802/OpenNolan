@@ -51,6 +51,10 @@ orchestration:
 
 compatible_playbooks:
   recommended:
+    - greg-isenberg-product-explainer
+    - greg-editorial
+    - kinetic-whiteboard-captions
+    - pixel-rpg-product-explainer
     - flat-motion-graphics
     - anime-ghibli
   also_works:

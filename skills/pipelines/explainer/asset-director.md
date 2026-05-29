@@ -60,6 +60,17 @@ Also create tasks for:
 - **Background music** — one track for the whole video (use `music_gen` or select from library)
 - **Sound effects** — per playbook's `sfx_style` (optional, use `music_gen` or stock)
 
+For `greg-isenberg-product-explainer` and `greg-editorial` playbooks, treat the
+evidence pass as mandatory unless the user explicitly asks for text-only motion:
+
+- Read `skills/creative/greg-isenberg-product-explainer.md` before sourcing or
+  generating visual assets.
+- Reuse `assets/greg-style-kit-expanded/` only when it exists locally; otherwise
+  produce portable generated UI cards, proof receipts, workflow diagrams, and
+  hero images from the playbook prompt anchors.
+- Add every reused, sourced, or generated asset to the manifest with provenance
+  and on-screen role.
+
 ### Step 2: Check Budget
 
 Before generating anything:
