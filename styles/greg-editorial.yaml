@@ -1,0 +1,103 @@
+identity:
+  name: "Greg Editorial"
+  category: motion-graphics
+  mood: "warm editorial product motion graphics, smart, direct, internet-native"
+  pace: fast
+  best_for: "High-engagement short-form informational videos, Instagram Reels/TikTok, startup explainers, and AI product walkthroughs"
+
+visual_language:
+  color_palette:
+    primary: ["#173D35", "#0E2B25"]
+    accent: ["#9FD8B5", "#68B894"]
+    background: "#F5EFE6"
+    text: "#102D23"
+    muted: "#898984"
+  composition: "centered, bold framing, vertical 9:16 layout optimized with negative space"
+  texture: "warm organic paper texture, skeuomorphic shadows, dashed node paths"
+
+typography:
+  headings:
+    font: "Fraunces"
+    weight: 700
+    tracking: "-0.02em"
+  body:
+    font: "Inter"
+    weight: 400
+    line_height: 1.5
+  code:
+    font: "JetBrains Mono"
+    weight: 400
+  stat_card:
+    font: "Fraunces"
+    weight: 800
+    size_multiplier: 4.0
+  scale_system: "perfect_fourth"
+  weight_matrix:
+    title: 800
+    heading: 700
+    body: 400
+    caption: 300
+
+motion:
+  transitions: [soft-pop, fade, slide-up, morph]
+  animation_style: "spring(1, 80, 10), bouncy, overshooting micro-animations"
+  pacing_rules:
+    min_scene_hold_seconds: 1.0
+    max_scene_hold_seconds: 5.0
+    text_card_hold_seconds: 2.0
+    stat_card_hold_seconds: 2.0
+    transition_duration_seconds: 0.3
+  entrance: "soft pop on node reveal with spring bounce"
+  exit: "scale-down-fade"
+
+audio:
+  voice_style: "engaging, confident, rapid yet clear, editorial speaker"
+  music_mood: "warm lo-fi chill, acoustic editorial vibe"
+  music_volume: 0.10
+  sfx_style: "organic soft pops, subtle risers, whooshes on key moments"
+  ducking_threshold_db: -4
+
+asset_generation:
+  image_prompt_prefix: "warm paper editorial product illustration, forest green and mint accents, minimalist flat colors, soft mauve shadows, clean negative space, style of Greg Isenberg and Roberto Nickson, "
+  image_negative_prompt: "dark cyberpunk, neon glow, low contrast, photorealistic, 3D, stock photo, generic, cluttered, low quality, corporate blue"
+  diagram_style: "forest green lines, dashed curves, rounded warm cream paper card nodes with soft mauve shadows (#B98BB8)"
+  consistency_anchors:
+    - "Warm paper background (#F5EFE6) in all visuals"
+    - "Forest green (#173D35) and mint green (#9FD8B5) palette"
+    - "Skeuomorphic soft mauve shadows (#B98BB8)"
+    - "Minimally elegant illustrations with large negative space"
+
+overlays:
+  stat_card:
+    bg: "#FFF8EC"
+    border: "#173D35"
+    radius: 16
+    shadow: "0 8px 32px rgba(185, 139, 184, 0.15)"
+  key_term:
+    bg: "#FFF8EC"
+    text: "#173D35"
+    radius: 8
+  code_block:
+    bg: "#0E2B25"
+    text: "#F5EFE6"
+    highlight: "#9FD8B5"
+
+quality_rules:
+  - "Every scene must have a new dynamic element every 2-3 seconds to retain attention"
+  - "Prioritize custom local assets from assets/greg-style-kit-expanded/ whenever applicable"
+  - "Enforce strict editorial serif (Fraunces) and sans-serif (Inter) typographic hierarchy"
+  - "Generate custom subject-specific assets using the adapted visual prompt prefix rather than reverting to generic stock placeholders"
+  - "Maintain a clean, clutter-free vertical layout with ample negative space"
+
+chart_palette:
+  - "#173D35"
+  - "#9FD8B5"
+  - "#B98BB8"
+  - "#D96D5F"
+  - "#F4C84A"
+  - "#68B894"
+
+color_rules:
+  harmony_type: "split-complementary"
+  contrast_validation: true
+  colorblind_safe: true

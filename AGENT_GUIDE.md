@@ -605,6 +605,18 @@ Tool rules:
 | `clean-professional` | Corporate, educational, SaaS |
 | `flat-motion-graphics` | Social media, TikTok, startups |
 | `minimalist-diagram` | Technical deep-dives, architecture |
+| `greg-isenberg-product-explainer` | Warm editorial AI/startup/product Reels with proof receipts, workflow diagrams, prompt/result loops |
+| `greg-editorial` | Lightweight warm-paper editorial product motion using forest/mint accents |
+| `kinetic-whiteboard-captions` | Word-synced faceless social explainers and floating UI cards |
+| `pixel-rpg-product-explainer` | Game-map metaphor explainers with pixel/quest visual language |
+| `founder_clean_reel` | Talking-head founder reels with clean editorial captions and restrained overlays |
+
+For Greg-theme productions, prefer the portable playbook and skill pair:
+`styles/greg-isenberg-product-explainer.yaml` and
+`skills/creative/greg-isenberg-product-explainer.md`. If the optional local
+asset kit exists at `assets/greg-style-kit-expanded/`, use it as supporting
+source material, but do not make the production dependent on unavailable local
+media.
 
 ## Layer Map
 

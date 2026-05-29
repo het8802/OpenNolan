@@ -434,6 +434,7 @@ edit_decisions = {
         }
         for scene in scene_plan["scenes"]
     ],
+    "render_runtime": "remotion",
     "music": {
         "asset_id": "a_music",
         "volume": 0.2,

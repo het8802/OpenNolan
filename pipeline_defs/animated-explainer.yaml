@@ -51,9 +51,13 @@ orchestration:
 
 compatible_playbooks:
   recommended:
+    - greg-isenberg-product-explainer
+    - greg-editorial
+    - kinetic-whiteboard-captions
     - clean-professional
     - flat-motion-graphics
   also_works:
+    - pixel-rpg-product-explainer
     - minimalist-diagram
   custom_allowed: true
 

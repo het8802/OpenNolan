@@ -24,6 +24,9 @@ tests/qa/output/
 # Project workspaces (generated assets, renders — all regenerable)
 projects/
 
+# Pipeline checkpoints / local production runs (regenerable)
+/pipelines/
+
 # Corpus directories (downloaded stock clips, thumbnails, embeddings —
 # regenerable from source APIs via corpus_builder). Explicit rule even
 # though most corpora live under projects/ since agents sometimes
@@ -62,6 +65,10 @@ generated_image.png
 
 # Downloaded music files (Pixabay, Freesound — not source code)
 pixabay_music_*
+
+# Local source media and optional style-kit assets
+assets/talking-head/
+assets/greg-style-kit-expanded/
 
 # OS
 .DS_Store
