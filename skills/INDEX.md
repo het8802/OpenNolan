@@ -103,6 +103,9 @@ Key capability families to look for in the output:
 | Storytelling | `creative/storytelling.md` | Narrative structure, hooks, pacing, Mayer's principles | â€" |
 | Sound Design | `creative/sound-design.md` | Audio ducking, LUFS targets, SFX timing, AI TTS mixing | `elevenlabs` |
 | Typography | `creative/typography.md` | Font selection, text sizing, safe zones, caption styling | â€" |
+| Kinetic Whiteboard Captions | `creative/kinetic-whiteboard-captions.md` | Word-synced kinetic text, faceless social explainers, floating UI cards | `remotion-best-practices`, `gsap-core`, `gsap-timeline` |
+| Greg Isenberg Product Explainer | `creative/greg-isenberg-product-explainer.md` | Warm editorial AI/startup explainers, proof receipts, workflow diagrams, prompt/result artifacts, Greg-theme motion | `remotion-best-practices`, `gsap-core`, `gsap-timeline` |
+| Pixel RPG Product Explainer | `creative/pixel-rpg-product-explainer.md` | Game-map metaphors, pixel avatar/tool quests, floating UI proof, prompt/result loops, kinetic serif captions; no purple/obsidian defaults | `remotion-best-practices`, `gsap-core`, `gsap-timeline` |
 | ManimCE Usage | `creative/manim-usage.md` | Scene composition, animation timing, color usage | `manimce-best-practices` |
 | Image Gen Usage | `creative/image-gen-usage.md` | Prompt consistency, hero reference, batch strategy | `flux-best-practices`, `bfl-api` |
 | Image Provider Usage | `creative/image-provider-usage.md` | Provider selection (FLUX/Grok/OpenAI/Recraft/stock), cost-quality tradeoffs | `flux-best-practices`, `bfl-api`, `grok-media` |
@@ -289,6 +292,9 @@ Style playbooks (`styles/*.yaml`) define visual language, typography, motion, au
 |----------|----------|------|----------|
 | `clean-professional` | motion-graphics | polished, trustworthy | Corporate, educational, SaaS |
 | `flat-motion-graphics` | motion-graphics | energetic, bold | Social media, TikTok, startups |
+| `kinetic-whiteboard-captions` | motion-graphics | clean, premium, educational | Faceless Reels/TikToks/Shorts with word-synced text and floating UI cards |
+| `greg-isenberg-product-explainer` | motion-graphics | premium, editorial, warm | Greg-theme AI/startup explainers with proof receipts, workflow diagrams, prompt/result artifacts, and warm editorial motion |
+| `pixel-rpg-product-explainer` | motion-graphics | playful, premium, educational | AI/tool tutorials with pixel avatar quests, RPG map metaphors, floating UI proof, and prompt/result artifacts; no purple/obsidian defaults |
 | `minimalist-diagram` | whiteboard | focused, technical | Technical deep-dives, architecture |
 
 Load via `styles/playbook_loader.py`: `load_playbook("clean-professional")`

@@ -9,6 +9,34 @@ You are planning visual assets for a video and need supplementary footage (B-rol
 narration, establish context, or add visual variety. This skill teaches you when to reach for
 stock footage vs. AI generation, and how to get good results from each.
 
+
+## Evidence + Footage Pass for Scripted Social Videos
+
+For Greg-style, product-explainer, AI-news, and reference-driven reels, run this pass before scene planning is locked. A strong video should mix proof receipts, footage texture, and generated visuals — not just animated text.
+
+1. **Link screenshot extraction**
+   - Parse the script/research brief for URLs, company/product names, reports, articles, repos, docs, and social proof.
+   - Open/capture the relevant page state and save cropped screenshot receipts under `assets/images/source-receipts/`.
+   - Use screenshots as background proof cards; add the real readable claim as OpenMontage overlay text.
+
+2. **Footage search/extraction**
+   - For each concrete beat, write 2–4 stock queries with a POV keyword (`macro`, `OTS`, `top-down`, `handheld`, `drone`, `screen close-up`, etc.).
+   - Prefer `pexels_video`, `pixabay_video`, existing project clip corpus, and public-domain sources when available.
+   - YouTube can be used for analysis/reference or when the user provides owned/licensed footage. Do not directly use third-party YouTube footage in a commercial/social render unless the license/permission is clear. If unclear, recreate the visual using stock or generated assets.
+
+3. **Generated image coverage**
+   - If no good real footage exists, or if the beat is abstract/product-specific, generate images via the active image workflow.
+   - Plan a hero image plus scene-specific images; keep style anchors consistent but vary subject/framing per beat.
+
+4. **Asset mix recommendation**
+   - 30s reel: 1–3 screenshots, 1–3 b-roll clips, 2–4 generated images/UI mockups.
+   - 45–60s reel: 2–4 screenshots, 2–4 b-roll clips, 3–6 generated images/UI mockups.
+   - 60–90s reel: 3–6 screenshots, 3–6 b-roll clips, 5–10 generated images/UI mockups.
+
+5. **Manifest + QA**
+   - Track source URL, license/provenance, crop/trim timestamps, scene_id, and role (`proof`, `broll`, `generated`, `ui_mockup`, `texture`).
+   - Reject assets that are off-style, low-res, watermarked, wrongly licensed, or too busy to read at phone size.
+
 ## The Decision Matrix: Stock vs. Generated
 
 | Scene Need | Prefer Stock | Prefer Generated |

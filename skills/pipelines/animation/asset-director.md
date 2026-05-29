@@ -36,6 +36,15 @@ Quick routing for common animation-pipeline needs:
 
 ## Process
 
+### 0. Evidence + Visual-Interest Pass for Social/Reference-Driven Animations
+
+Before generating animation ingredients, ensure the video has real visual material, not just animated text:
+
+- Extract screenshot receipts from any relevant links, articles, product pages, repos, reports, docs, or social proof and save cropped proof cards under `assets/images/source-receipts/`.
+- Source real footage for concrete context beats via commercial-safe stock/project-corpus/public-domain sources. YouTube footage is only usable directly when owned/licensed/permissioned; otherwise analyze it as reference and recreate with stock/generated visuals.
+- Generate AI images/UI mockups for abstract, product-specific, or style-specific beats that would otherwise be text-only. For 45–60s social reels, plan roughly 2–4 screenshots, 2–4 b-roll/footage inserts, and 3–6 generated/stylized images.
+- Track all assets in the manifest with source URL/tool, license/provenance, scene_id, and role (`proof`, `broll`, `generated_hero`, `ui_mockup`, `texture`, `overlay`).
+
 ### 1. Start With Deterministic Assets
 
 Prefer the lowest-variance useful path:

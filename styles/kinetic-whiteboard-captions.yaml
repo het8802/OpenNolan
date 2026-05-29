@@ -1,0 +1,111 @@
+identity:
+  name: "Kinetic Whiteboard Captions"
+  category: motion-graphics
+  mood: clean, premium, educational, fast, social-native
+  pace: rapid
+  best_for: "Faceless Instagram Reels, TikToks, Shorts, AI-tool explainers, creator education, product tips, word-synced kinetic typography"
+
+visual_language:
+  color_palette:
+    primary: ["#111111", "#2A2A2A"]
+    accent: ["#E85D4F", "#F2C94C"]
+    background: "#F6F6F1"
+    text: "#111111"
+    muted: "#B7B7B0"
+  composition: "vertical 9:16, generous negative space, centered or upper-left kinetic text, floating UI/product cards offset to one side, safe-zone aware"
+  texture: "matte off-white canvas with faint grid/noise, soft shadows, sparse red starburst/circle accents, minimal grayscale 3D props"
+
+typography:
+  headings:
+    font: "Inter Tight"
+    weight: 800
+    tracking: "-0.045em"
+    line_height: 0.92
+  body:
+    font: "Inter Tight"
+    weight: 500
+    line_height: 1.18
+  code:
+    font: "Fira Code"
+    weight: 600
+  stat_card:
+    font: "Inter Tight"
+    weight: 900
+    size_multiplier: 2.6
+  scale_system: "major_third"
+  weight_matrix:
+    title: 900
+    heading: 800
+    body: 500
+    caption: 400
+
+motion:
+  transitions: [blur-wipe, snap-cut, zoom-reset, vertical-card-swipe]
+  animation_style: "restrained kinetic typography: phrase-level y 24px -> 0, blur 6px -> 0, opacity 0 -> 1; payoff scale 0.92 -> 1.04 -> 1.0; floating cards drift 6-14px with soft parallax"
+  pacing_rules:
+    min_scene_hold_seconds: 0.8
+    max_scene_hold_seconds: 5
+    text_card_hold_seconds: 1.4
+    stat_card_hold_seconds: 1.2
+    transition_duration_seconds: 0.18
+  entrance: "phrase snap-up or gray-to-black activation, staggered 3-6 frames per chunk"
+  exit: "fast blur-wipe or opacity/scale reset, avoid long crossfades"
+
+audio:
+  voice_style: "confident, fast but clear, creator-native, crisp consonants, short pauses before section titles and CTAs"
+  music_mood: "minimal upbeat bed, light electronic pulse, low volume so VO remains dominant"
+  music_volume: 0.09
+  sfx_style: "soft pops/clicks on section titles and payoff words, short whooshes on blur wipes, subtle riser into CTA"
+  ducking_threshold_db: -5
+  voice_variation_allowed: false
+
+asset_generation:
+  image_prompt_prefix: "premium faceless educational reel asset, matte off-white background, clean black typography space, floating SaaS UI card, soft shadow, minimal red accent starburst, subtle grid texture, "
+  image_negative_prompt: "cluttered, neon cyberpunk, busy background, generic robot, unreadable tiny text, over-saturated, heavy gradients, low contrast"
+  diagram_style: "minimal black and light-gray UI diagrams on off-white canvas, rounded cards, soft shadows, red accent for emphasis"
+  consistency_anchors:
+    - "Matte off-white (#F6F6F1) background in every scene"
+    - "Black active text with light-gray inactive/future text"
+    - "One muted red accent motif reused across scenes"
+    - "Floating UI/product cards with soft shadows and slight parallax"
+    - "Payoff phrases appear oversized, bold, and all-caps or inside black pills"
+
+overlays:
+  stat_card:
+    bg: "#FFFFFF"
+    border: "#E8E8E0"
+    text: "#111111"
+    radius: 22
+    shadow: "0 22px 60px rgba(17,17,17,0.12)"
+  key_term:
+    bg: "#111111"
+    text: "#FFFFFF"
+    radius: 12
+    shadow: "0 10px 24px rgba(17,17,17,0.18)"
+  code_block:
+    bg: "#181818"
+    text: "#F7F7F2"
+    highlight: "#F2C94C"
+    radius: 14
+    shadow: "0 18px 44px rgba(17,17,17,0.18)"
+
+quality_rules:
+  - "Text is the main visual actor; do not render normal full-sentence subtitles as the primary style."
+  - "Every 0.5-1.5 seconds, change one meaningful visual element: phrase activation, bullet, card movement, transition, or payoff word."
+  - "Keep inactive/future words light gray and active words black/bold."
+  - "Use no more than 1-2 focal elements per beat. Preserve negative space."
+  - "Payoff phrases must be readable at phone size and should land on stressed VO words."
+  - "Floating cards must prove the spoken point, not decorate it."
+  - "CTA keyword must remain readable under Instagram/Reels interface overlays."
+
+chart_palette:
+  - "#111111"
+  - "#E85D4F"
+  - "#F2C94C"
+  - "#8F8F86"
+  - "#FFFFFF"
+
+color_rules:
+  harmony_type: "split-complementary"
+  contrast_validation: true
+  colorblind_safe: true

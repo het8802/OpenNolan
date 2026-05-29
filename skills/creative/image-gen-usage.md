@@ -159,6 +159,7 @@ optimized for image/video generation providers.
 
 When using the `image_selector` tool in the asset stage:
 
+0. **Do not skip generated visuals for social explainers** — if a reel would otherwise be mostly text/cards, plan 3–6 generated/stylized images or UI mockups to add visual interest. Use them for abstract concepts, founder/product metaphors, warm hero backdrops, artifact boards, and branded-but-original UI scenes.
 1. **Design the visual system first** from the proposal or custom playbook: mood, palette, texture, motion energy
 2. **Generate a hero image first** at highest quality, use as reference for all others
 3. **Use `1920x1088`** for 16:9 video frames (FLUX multiple-of-16 requirement)
