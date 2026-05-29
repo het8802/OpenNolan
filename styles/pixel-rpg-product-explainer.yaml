@@ -1,0 +1,115 @@
+identity:
+  name: "Pixel RPG Product Explainer"
+  category: motion-graphics
+  mood: playful, premium, educational, urgent, creator-native
+  pace: rapid
+  best_for: "Vertical AI/tool tutorials, Reels/TikToks/Shorts, workflow explainers using game-map metaphors, floating UI proof, prompt/result loops, and kinetic serif captions"
+
+visual_language:
+  color_palette:
+    primary: ["#111111", "#24221F"]
+    accent: ["#5DC7A1", "#173D35", "#E9775F", "#F4CE5E"]
+    background: "#F5F0E8"
+    text: "#111111"
+    muted: "#B8B2AA"
+  composition: "1080x1920 vertical; top-down RPG map or warm off-white editorial canvas; central quest object or UI artifact; kinetic serif captions around the focal object; 2.5D floating cards with soft shadows and safe-zone margins"
+  texture: "warm beige tile grid, subtle paper grain, faint canvas emboss, soft drop shadows, gold/mint quest-object glow, black rounded UI cards with mint-green rim light; avoid purple/violet/obsidian fantasy accents unless explicitly requested"
+
+typography:
+  headings:
+    font: "Fraunces"
+    weight: 900
+    tracking: "-0.035em"
+    line_height: 0.9
+  body:
+    font: "Fraunces"
+    weight: 700
+    tracking: "-0.02em"
+    line_height: 0.98
+  code:
+    font: "Fira Code"
+    weight: 600
+  stat_card:
+    font: "Inter Tight"
+    weight: 850
+    size_multiplier: 2.1
+  scale_system: "major_third"
+  weight_matrix:
+    title: 900
+    heading: 850
+    body: 700
+    caption: 500
+
+motion:
+  transitions: [quest-ripple, desktop-window-stack, blur-wipe, zoom-reset, prompt-submit, artifact-morph]
+  animation_style: "Playful 2.5D editorial motion: pixel avatar walking on a top-down grid; threat labels snap outward from a gold/mint quest ripple; browser/news cards slide and stack with soft shadows; captions build as serif phrase collages; prompt bars type with mint glow; result cards morph into checklists, plans, or proof grids. Use restrained premium ease-outs, not meme bounces; do not use purple/violet/obsidian motifs unless explicitly requested."
+  pacing_rules:
+    min_scene_hold_seconds: 0.8
+    max_scene_hold_seconds: 5
+    text_card_hold_seconds: 1.2
+    stat_card_hold_seconds: 1.2
+    transition_duration_seconds: 0.18
+  entrance: "Meaningful objects slide 80-180px and settle over 0.28-0.45s; caption phrases rise 14-22px with 2-3px blur; key words color-hit and scale only to 1.03-1.06."
+  exit: "Object-driven cuts, short blur wipes, portal resets, or prompt-submit morphs; avoid long crossfades and repeated yoyo scaling."
+
+audio:
+  voice_style: "fast, conversational, slightly urgent creator narration with crisp workflow verbs and short pauses before level resets or moral beats"
+  music_mood: "soft electronic productivity pulse with light quest/game texture; low enough for narration dominance"
+  music_volume: 0.08
+  sfx_style: "tiny pixel footsteps, quest-object shimmer, window whoosh, prompt typing/click, checklist row pops, soft proof-board landing hit"
+  ducking_threshold_db: -5
+  voice_variation_allowed: false
+
+asset_generation:
+  image_prompt_prefix: "premium vertical AI workflow explainer asset, warm off-white beige tile grid, subtle paper texture, pixel-art productivity avatar, gold and mint quest object, dark rounded SaaS UI cards, mint green glow accents, soft 2.5D shadows, editorial serif caption space, "
+  image_negative_prompt: "neon cyberpunk, purple crystal, violet glow, obsidian fantasy UI, cluttered game HUD, low-resolution unreadable UI, generic robot, noisy background, over-saturated colors, harsh bounce motion, copied creator assets, copyrighted screenshots"
+  diagram_style: "top-down RPG map meets SaaS workflow diagram: dotted connectors, old-computer/connector nodes, gold-mint quest object, coral/green sidekick icon, dark prompt bars, mint pill labels, soft shadows"
+  consistency_anchors:
+    - "Warm off-white or beige tile-grid background in every light scene"
+    - "Gold/mint quest object or glow as the recurring progress object; no purple/violet/obsidian unless explicitly requested"
+    - "Black/dark rounded prompt and result cards with mint-green rim light"
+    - "Editorial serif captions with mint/forest/gold/coral keyword hits; no purple keyword hits"
+    - "2.5D floating browser/app/checklist cards that prove each workflow step"
+    - "Source receipt screenshots, commercial-safe b-roll cards, and generated quest/world images should support the proof and visual-interest beats"
+    - "Game metaphor always maps to a real action: connect, prompt, retrieve, plan, publish"
+
+overlays:
+  stat_card:
+    bg: "#181716"
+    border: "#2D2A27"
+    text: "#F7F2EA"
+    radius: 24
+    shadow: "0 24px 70px rgba(17,17,17,0.22)"
+  key_term:
+    bg: "#5DC7A1"
+    text: "#111111"
+    radius: 14
+    shadow: "0 10px 28px rgba(93,199,161,0.22)"
+  code_block:
+    bg: "#111111"
+    text: "#F7F2EA"
+    highlight: "#5DC7A1"
+    radius: 999
+    shadow: "0 22px 60px rgba(17,17,17,0.25)"
+
+quality_rules:
+  - "The RPG layer must clarify the workflow as levels/quests; do not add pixel art as decoration only."
+  - "Every 0.5-1.5 seconds, change one meaningful element: avatar movement, threat label, proof card, caption group, connector, prompt text, result row, or camera crop."
+  - "Primary instructional text must be OpenMontage-rendered captions, not tiny text inside screenshots."
+  - "Prompt/result loops must show transformation into a tangible artifact: checklist, plan, post grid, profile board, or content calendar."
+  - "Use soft premium motion: avoid heavy yoyo bounces, huge overshoot, and random glitch effects."
+  - "Light canvas and dark UI/card scenes should alternate for attention resets."
+  - "Final payoff should be proof-of-work or identity outcome, not a generic follow CTA."
+
+chart_palette:
+  - "#111111"
+  - "#173D35"
+  - "#5DC7A1"
+  - "#E9775F"
+  - "#F4CE5E"
+  - "#F5F0E8"
+
+color_rules:
+  harmony_type: "analogous"
+  contrast_validation: true
+  colorblind_safe: true

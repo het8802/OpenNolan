@@ -1,0 +1,116 @@
+identity:
+  name: "Greg Isenberg Product Explainer"
+  category: motion-graphics
+  mood: premium, editorial, warm, educational, founder-native
+  pace: rapid
+  best_for: "Vertical AI/startup/product explainers, Greg Isenberg-style informational Reels, workflow diagrams, proof receipts, prompt/result loops, and public proof-of-work payoffs"
+
+visual_language:
+  color_palette:
+    primary: ["#111111", "#173D35"]
+    accent: ["#68B894", "#9FD8B5", "#D96D5F", "#F4C84A", "#D6D0C7"]
+    background: "#F5EFE6"
+    text: "#111111"
+    muted: "#898984"
+  composition: "1080x1920 vertical; warm off-white editorial canvas; oversized cards cropped by frame edges; one hero idea per beat; serif phrase captions around product UI, proof receipts, workflow diagrams, and artifact boards"
+  texture: "subtle paper grain, warm-gray UI shadows, rounded cards, sticker badges, dashed connectors, clean vector props; no purple/violet/lavender glow, obsidian fantasy UI, or pixel RPG motifs"
+
+typography:
+  headings:
+    font: "Fraunces"
+    weight: 900
+    tracking: "-0.04em"
+    line_height: 0.9
+  body:
+    font: "Fraunces"
+    weight: 750
+    tracking: "-0.025em"
+    line_height: 0.96
+  code:
+    font: "Fira Code"
+    weight: 600
+  stat_card:
+    font: "Inter Tight"
+    weight: 850
+    size_multiplier: 2.1
+  scale_system: "major_third"
+  weight_matrix:
+    title: 900
+    heading: 850
+    body: 750
+    caption: 500
+
+motion:
+  transitions: [receipt-stack-in, phrase-collage-build, connector-draw, radial-pill-populate, prompt-submit, response-to-artifact, proof-board-land]
+  animation_style: "Premium editorial product motion: source receipts stack with soft shadows; large serif phrases build in short word groups; workflow connectors draw on; dark/forest prompt bars type with mint rim glow; AI responses transform into checklists, plans, grids, dashboards, or profile proof. Use restrained cubic ease-outs and subtle camera push-ins; avoid meme bounces, random glitch, purple flashes, obsidian portals, and pixel RPG references."
+  pacing_rules:
+    min_scene_hold_seconds: 0.8
+    max_scene_hold_seconds: 5
+    text_card_hold_seconds: 1.2
+    stat_card_hold_seconds: 1.2
+    transition_duration_seconds: 0.18
+  entrance: "Objects slide 80-180px and settle over 0.28-0.45s; caption phrases rise 14-22px with 2-3px blur; emphasis words scale only to 1.03-1.06 with mint/forest/gold hits."
+  exit: "Object-driven cuts, short blur wipes, prompt-submit morphs, receipt snaps, or camera reframes; avoid long crossfades and repeated yoyo scaling."
+
+audio:
+  voice_style: "fast, conversational, founder-native narration with crisp clauses mapped to motion events and short pauses before moral resets"
+  music_mood: "warm electronic productivity pulse with light founder/startup energy; low enough for narration dominance"
+  music_volume: 0.08
+  sfx_style: "soft card whooshes, cursor clicks, prompt typing ticks, connector draw blips, checklist row pops, proof-board landing hit"
+  ducking_threshold_db: -5
+  voice_variation_allowed: false
+
+asset_generation:
+  image_prompt_prefix: "premium vertical Greg Isenberg style AI product explainer asset, warm ivory paper background, forest green ink, mint and sage highlights, gold value accents, charcoal editorial serif caption space, rounded SaaS UI cards, soft warm-gray shadows, clean workflow diagram elements, founder/startup social media aesthetic, "
+  image_negative_prompt: "purple, violet, lavender, obsidian, crystal, pixel art, RPG character, neon cyberpunk, dark fantasy UI, cluttered dashboard, tiny unreadable text, generic robot, noisy background, over-saturated colors, harsh bounce motion, copied creator assets, copyrighted screenshots"
+  diagram_style: "warm editorial SaaS workflow diagram: dashed rounded system containers, orthogonal connectors, forest/mint nodes, sage pill labels, source receipt cards, prompt bars, artifact grids, soft shadows"
+  consistency_anchors:
+    - "Warm off-white/ivory paper canvas in most scenes"
+    - "Charcoal editorial serif phrase captions with mint/forest/gold emphasis"
+    - "Rounded white, charcoal, or forest product UI cards with sage/warm-gray shadows"
+    - "Source receipts and proof cards enter as layered desktop/browser windows"
+    - "Prompt/result loops always transform into tangible artifacts: checklist, plan, grid, dashboard, or profile proof"
+    - "Source receipt screenshots, commercial-safe b-roll cards, and generated/stylized images should support the proof and visual-interest beats"
+    - "No purple/violet/lavender/obsidian/crystal/pixel RPG motifs unless explicitly requested"
+
+overlays:
+  stat_card:
+    bg: "#173D35"
+    border: "#244D42"
+    text: "#F7F2EA"
+    radius: 24
+    shadow: "0 24px 70px rgba(17,17,17,0.18)"
+  key_term:
+    bg: "#9FD8B5"
+    text: "#111111"
+    radius: 14
+    shadow: "0 10px 28px rgba(79,174,145,0.18)"
+  code_block:
+    bg: "#111111"
+    text: "#F7F2EA"
+    highlight: "#68B894"
+    radius: 999
+    shadow: "0 22px 60px rgba(17,17,17,0.25)"
+
+quality_rules:
+  - "Maintain Greg-theme discipline: warm paper, serif editorial type, forest/mint/sage/gold accents; no purple/violet/obsidian/pixel RPG leakage."
+  - "Every 0.5-1.5 seconds, change one meaningful element: phrase group, receipt card, connector, prompt text, result row, or camera crop."
+  - "Primary instructional text must be OpenMontage-rendered captions, not tiny text inside screenshots."
+  - "Prompt/result loops must transform into tangible artifacts: checklist, plan, post grid, profile board, or content calendar."
+  - "Use soft premium motion: avoid heavy yoyo bounces, huge overshoot, random glitch, and generic TikTok subtitle boxes."
+  - "Light canvas and dark/forest UI-card scenes should alternate for attention resets."
+  - "Final payoff should be proof-of-work or identity/status outcome, not a generic follow CTA."
+
+chart_palette:
+  - "#111111"
+  - "#173D35"
+  - "#68B894"
+  - "#9FD8B5"
+  - "#D96D5F"
+  - "#F4C84A"
+  - "#F5EFE6"
+
+color_rules:
+  harmony_type: "analogous"
+  contrast_validation: true
+  colorblind_safe: true

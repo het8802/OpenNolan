@@ -38,7 +38,12 @@ Quick routing for common explainer needs:
 
 ### Step 1: Inventory Required Assets
 
-Walk every scene in the scene plan. For each `required_assets` entry, create an asset task:
+Walk every scene in the scene plan. For each `required_assets` entry, create an asset task. For scripted social/product explainers, also run an **evidence + visual-interest pass** even if the scene plan under-specifies assets:
+
+- Extract screenshot receipts from cited links, product pages, reports, repos, docs, or social proof and save crops under `assets/images/source-receipts/`.
+- Source commercial-safe stock/project/public-domain footage for concrete beats; YouTube is only usable directly when the user owns it or licensing/permission is clear. Otherwise use it as reference and recreate with stock/generated visuals.
+- Generate AI images/UI mockups for abstract or branded beats that would otherwise be only text/cards. A 45–60s reel should normally include 3–6 generated/stylized visuals plus proof receipts/b-roll.
+- Add each sourced/generated asset to the manifest with `scene_id`, source URL/tool, license/provenance, and role (`proof`, `broll`, `generated_hero`, `ui_mockup`, `texture`, `overlay`).
 
 ```
 Asset Task:
