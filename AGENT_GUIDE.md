@@ -674,6 +674,7 @@ The `.agents/skills/` directory is large. When you're not coming in through a to
 | **Capture** | `playwright-recording` (browser flows), `ffmpeg` (post) |
 | **Visualization** | `beautiful-mermaid`, `d3-viz`, `manim-composer`, `manimce-best-practices`, `manimgl-best-practices` |
 | **Media editing** | `video-edit`, `video-download`, `video-understand`, `video_toolkit`, `visual-style` |
+| **Social media & content marketing** | `instagram-reels` (short-form attention engineering, hook families), `instagram-carousel` (swipe-funnel carousel system), `daily-carousel-remix` (remix shared carousels into Het's Anthropic-inspired theme), `daily-tech-carousel` (daily "what happened in tech" digest carousel), `source-backed-reel-evidence-montage` (news/AI reels with article-screenshot proof chains), `editorial-ai-product-design-system` (premium editorial AI/product motion design — palette, mascots, workflow diagrams), `xurl` (X/Twitter API via official CLI — post, search, DM, media) |
 
 **When in doubt, read the category's meta routing file first:**
 - Picking an animation runtime? → `skills/meta/animation-runtime-selector.md` routes between Remotion primitives, GSAP plugins, framer-motion, Lottie, Manim, D3.
