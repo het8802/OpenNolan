@@ -245,6 +245,7 @@ To extend the library, append entries to `scripts/generate_educational_sfx.py` a
 | `podcast-repurpose` | Podcast highlights and derivatives | beta |
 | `cinematic` | Trailer, teaser, and mood-led edits | production |
 | `animation` | Motion-graphics and animation-first videos | production |
+| `article-broll-animations` | Source-verified news/AI reels: highlighted article cards + real B-roll + Greg-editorial motion | beta |
 | `character-animation` | Local rigged cartoon characters and reusable character acting | beta |
 | `hybrid` | Source footage plus support visuals | production |
 | `avatar-spokesperson` | Presenter-led avatar or lip-sync videos | production |

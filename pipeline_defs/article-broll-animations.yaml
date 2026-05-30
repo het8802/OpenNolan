@@ -1,0 +1,258 @@
+name: article-broll-animations
+version: "1.0"
+description: >
+  Source-backed news/AI explainer reels in warm editorial (Greg-Isenberg) motion-graphics
+  style. Every factual claim is verified against real articles first, then the narration is
+  backed by a visual evidence chain: faithful source-receipt cards with marker-sweep highlights
+  on the exact verified phrase, real stock B-roll, and animated motion-graphics beats (invoice
+  slams, racing counters, leaderboards, router diagrams). Renders as a deterministic, props-driven
+  custom vertical Remotion composition (1080x1920) with ElevenLabs VO + warm music + a cohesive
+  restrained premium SFX set. Built from the validated "The $500M Claude Bill" production.
+category: animation
+stability: beta
+default_checkpoint_policy: guided
+
+reference_input:
+  supported: true
+  analysis_depth: standard
+  analysis_tools:
+    - video_analyzer
+    - transcript_fetcher
+    - frame_sampler
+
+extensions:
+  custom_scripts: true
+  custom_playbooks: true
+  custom_skills: true
+  custom_tools: false
+
+orchestration:
+  mode: executive-producer
+  skill: pipelines/article-broll-animations/executive-producer
+  budget_default_usd: 2.00
+  max_revisions_per_stage: 3
+  max_send_backs: 2
+  max_wall_time_minutes: 20
+
+compatible_playbooks:
+  recommended:
+    - greg-isenberg-product-explainer
+    - greg-editorial
+  also_works:
+    - flat-motion-graphics
+    - kinetic-whiteboard-captions
+  custom_allowed: true
+
+required_skills:
+  - pipelines/article-broll-animations/executive-producer
+  - pipelines/article-broll-animations/research-director
+  - pipelines/article-broll-animations/proposal-director
+  - pipelines/article-broll-animations/script-director
+  - pipelines/article-broll-animations/scene-director
+  - pipelines/article-broll-animations/asset-director
+  - pipelines/article-broll-animations/edit-director
+  - pipelines/article-broll-animations/compose-director
+  - pipelines/article-broll-animations/publish-director
+  - meta/reviewer
+  - meta/checkpoint-protocol
+  - meta/animation-runtime-selector
+
+stages:
+  # ── Research / source verification (the distinctive gate) ──────────
+  - name: research
+    skill: pipelines/article-broll-animations/research-director
+    produces:
+      - research_brief
+    tools_available: []
+    checkpoint_required: false
+    human_approval_default: false
+    review_focus:
+      - Every factual claim has a real source URL, an exact supporting quote, a date, and a confidence label
+      - Reported-but-unverified claims are explicitly flagged (e.g. "an AI consultant told X", company unnamed)
+      - Numeric/derived claims (e.g. token math) are bounded as a RANGE with a stated assumption, never asserted exact
+      - Each claim maps to a proof-asset type (article card, logo, product UI, chart) and a B-roll need
+      - Exact highlight phrases are captured verbatim from the source for later marker-sweep targeting
+    success_criteria:
+      - Schema-valid research_brief
+      - claims[] table with url + exact_quote + date + confidence + proof_type per factual sentence
+      - At least 3 sources cited with URLs
+      - No claim left unsupported or unlabeled
+
+  # ── Proposal (human approval) ─────────────────────────────────────
+  - name: proposal
+    skill: pipelines/article-broll-animations/proposal-director
+    required_artifacts_in:
+      - research_brief
+    produces:
+      - proposal_packet
+      - decision_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - "render_runtime locked: BOTH Remotion and HyperFrames presented when available (HARD RULE); recommend Remotion for this pipeline (custom vertical scene stack + receipt cards)"
+      - "Aesthetic decided: warm editorial base + restrained dark-drama HITS on cost/burn/danger beats (NOT full dark/neon)"
+      - "Footage approach decided: real-only (stock B-roll + real screenshots/cards) vs real + sparing AI texture for abstract beats"
+      - "Music plan present; SFX plan present (cohesive restrained premium set, not cartoonish library defaults)"
+      - Cost estimate itemized and honest (VO + SFX + B-roll + optional images; render is free/local)
+    success_criteria:
+      - Schema-valid proposal_packet
+      - render_runtime locked and recorded in decision_log (category render_runtime_selection, both runtimes in options_considered)
+      - aesthetic + footage_approach + sfx_plan recorded
+      - approval.status is approved or approved_with_changes before proceeding
+
+  # ── Script (human approval) ───────────────────────────────────────
+  - name: script
+    skill: pipelines/article-broll-animations/script-director
+    required_artifacts_in:
+      - proposal_packet
+    optional_artifacts_in:
+      - research_brief
+    produces:
+      - script
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Per-beat VO is tight and founder-native; total word count maps to duration target (~150 wpm)
+      - "Claim integrity in copy: reported != verified, attribution named, derived numbers shown as labeled ranges with footnotes"
+      - On-screen phrases are restrained designed captions (NOT a running word-by-word subtitle bar)
+      - "Highlight phrases EXACTLY match the source text captured in research_brief"
+      - Any agent-reconstructed lines (from garbled user input) are flagged for human confirmation
+    success_criteria:
+      - Schema-valid script artifact
+      - Each section has vo + on_screen + (where factual) highlight phrase + source ref
+      - Reconstructed lines explicitly marked
+
+  # ── Scene plan (human approval) ───────────────────────────────────
+  - name: scene_plan
+    skill: pipelines/article-broll-animations/scene-director
+    required_artifacts_in:
+      - script
+    optional_artifacts_in:
+      - proposal_packet
+    produces:
+      - scene_plan
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Every factual sentence maps to exactly one primary proof asset + one emphasis (claim -> source -> crop -> highlight -> motion)
+      - Each scene declares bg (paper / paperWarm / darkHit), proof asset, B-roll slot, highlight phrase, SFX, and motion
+      - Dark-drama hits reserved for the high-tension beats only; everything else warm
+      - Transition vocabulary limited (<=4 distinct), motion serves hierarchy not decoration
+      - Something meaningful changes every 0.5-1.5s; safe zones respected
+    success_criteria:
+      - Schema-valid scene_plan artifact
+      - Ordered scenes with timing windows, proof, B-roll, highlight, SFX, motion per scene
+
+  # ── Assets ────────────────────────────────────────────────────────
+  - name: assets
+    skill: pipelines/article-broll-animations/asset-director
+    required_artifacts_in:
+      - scene_plan
+      - script
+    produces:
+      - asset_manifest
+    required_tools:
+      - tts_selector
+    optional_tools:
+      - video_selector
+      - pexels_video
+      - image_selector
+      - music_gen
+      - diagram_gen
+    tools_available:
+      - tts_selector
+      - video_selector
+      - pexels_video
+      - image_selector
+      - music_gen
+      - diagram_gen
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - "VO generated per-scene with a duration manifest — this manifest is the single source of truth for scene timing"
+      - "Faithful source-receipt cards built (real masthead + headline + date + URL + verified quote); live screenshots only when capturable + mobile-legible, else cards"
+      - Real portrait B-roll pulled from stock (orientation=portrait); no AI-generated impersonation of real products/companies
+      - "Cohesive RESTRAINED premium SFX (ElevenLabs sound-generation) — avoid cartoonish dings/sparkles/pops; reserve SFX for transitions + reveals"
+      - Music is low warm editorial pulse; Layer 3 skills (elevenlabs, sound-effects, music, ai-video-gen) read before generation
+    success_criteria:
+      - Schema-valid asset_manifest with provenance (provider, url, license) per asset
+      - VO duration manifest present with per-scene start/end
+      - Highlight phrase recorded per source-receipt asset
+      - layer3_skills_read list present
+
+  # ── Edit (composition props) ──────────────────────────────────────
+  - name: edit
+    skill: pipelines/article-broll-animations/edit-director
+    required_artifacts_in:
+      - scene_plan
+      - asset_manifest
+    optional_artifacts_in:
+      - script
+    produces:
+      - edit_decisions
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Scene windows are CONTIGUOUS (each scene runs to the next scene start) so VO breathing-gaps never flash empty/black
+      - SFX placements are tied to motion events, not every caption word; levels keep SFX under the VO
+      - "Audio levels: narration ~1.0, music ~0.09 with fade in/out, SFX ~0.45-0.7"
+      - render_runtime carried unchanged from proposal (no silent swap)
+    success_criteria:
+      - "Schema-valid edit_decisions (composition props: scene windows, sfx[], audio)"
+      - Timeline duration within 5% of VO manifest total
+
+  # ── Compose (custom vertical Remotion render + QA) ────────────────
+  - name: compose
+    skill: pipelines/article-broll-animations/compose-director
+    required_artifacts_in:
+      - edit_decisions
+      - asset_manifest
+    optional_artifacts_in:
+      - scene_plan
+    produces:
+      - render_report
+      - final_review
+    required_tools:
+      - video_compose
+    optional_tools:
+      - audio_mixer
+    tools_available:
+      - video_compose
+      - audio_mixer
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - "Custom vertical 1080x1920 composition registered in Root.tsx; assets staged under remotion-composer/public/<name>/"
+      - "MUST run npx remotion from INSIDE remotion-composer/ (npx from repo root fails: 'could not determine executable to run')"
+      - Marker-sweep highlight lands exactly on the verified phrase; receipt source/date/URL legible at phone size
+      - "QA MANDATORY: ffprobe (1080x1920/fps/duration), ffmpeg decode -f null, blackdetect, contact sheet visual review of every scene"
+      - "Render stills first for any layout change before the full MP4; post-render self-review with per-scene notes"
+    success_criteria:
+      - Schema-valid render_report; output passes ffprobe + decode QA; no long black segments
+      - self_review_completed true with per-scene quality notes
+      - claim integrity preserved in final (labels, ranges, attribution)
+
+  # ── Publish ───────────────────────────────────────────────────────
+  - name: publish
+    skill: pipelines/article-broll-animations/publish-director
+    required_artifacts_in:
+      - render_report
+    optional_artifacts_in:
+      - script
+      - proposal_packet
+    produces:
+      - publish_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Caption leads with the hook + names sources; claim integrity preserved (reported vs verified)
+      - Hashtags relevant to AI/tech/startup; no overclaiming in copy
+      - Thumbnail/cover concept matches the warm-editorial visual language
+    success_criteria:
+      - Schema-valid publish_log
+      - Export package contains the MP4 + metadata + source list
