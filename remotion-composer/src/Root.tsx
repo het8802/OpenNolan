@@ -16,6 +16,7 @@ import { ProductReveal, ProductRevealProps } from "./components/ProductReveal";
 import { CaptionOverlay, WordCaption } from "./components/CaptionOverlay";
 import { CollageBurst, CollageBurstProps } from "./CollageBurst";
 import { LyricOverlay, LyricOverlayProps } from "./LyricOverlay";
+import { Claude500MReel, Claude500MReelProps } from "./Claude500MReel";
 
 // ---------------------------------------------------------------------------
 // Theme System — prevents every video from looking like dark fintech
@@ -132,9 +133,62 @@ const calculateMetadata: CalculateMetadataFunction<ExplainerProps> = async ({
   return { durationInFrames: Math.ceil((lastEnd + 1) * 30) };
 };
 
+const SFX_DIR = "the-500m-claude-bill/audio/sfx-v2";
+const claude500MDefault: Claude500MReelProps = {
+  narration: "the-500m-claude-bill/audio/narration.mp3",
+  music: "the-500m-claude-bill/audio/music.mp3",
+  scenes: [
+    { id: "s1_hook", comp: "s1_hook", start: 0.0, dur: 4.627 },
+    { id: "s2_reported", comp: "s2_reported", start: 4.627, dur: 7.51 },
+    { id: "s3_electricity", comp: "s3_electricity", start: 12.137, dur: 6.092 },
+    { id: "s4_tokens", comp: "s4_tokens", start: 18.229, dur: 9.839 },
+    { id: "s5_leaderboard", comp: "s5_leaderboard", start: 28.068, dur: 7.896 },
+    { id: "s6_split", comp: "s6_split", start: 35.964, dur: 11.365 },
+    { id: "s7_router", comp: "s7_router", start: 47.329, dur: 10.538 },
+    { id: "s8_payoff", comp: "s8_payoff", start: 57.867, dur: 7.646 },
+  ],
+  sfx: [
+    { src: `${SFX_DIR}/impact-deep.mp3`, at: 0.18, vol: 0.7 },
+    { src: `${SFX_DIR}/cash-chime.mp3`, at: 0.34, vol: 0.7 },
+    { src: `${SFX_DIR}/swoosh.mp3`, at: 4.75, vol: 0.45 },
+    { src: `${SFX_DIR}/marker.mp3`, at: 6.0, vol: 0.6 },
+    { src: `${SFX_DIR}/marker.mp3`, at: 6.7, vol: 0.55 },
+    { src: `${SFX_DIR}/swoosh.mp3`, at: 12.2, vol: 0.5 },
+    { src: `${SFX_DIR}/power-morph.mp3`, at: 15.4, vol: 0.5 },
+    { src: `${SFX_DIR}/riser.mp3`, at: 18.0, vol: 0.5 },
+    { src: `${SFX_DIR}/swoosh.mp3`, at: 28.1, vol: 0.5 },
+    { src: `${SFX_DIR}/data-tick.mp3`, at: 29.2, vol: 0.55 },
+    { src: `${SFX_DIR}/deflate.mp3`, at: 31.6, vol: 0.5 },
+    { src: `${SFX_DIR}/swoosh.mp3`, at: 35.96, vol: 0.55 },
+    { src: `${SFX_DIR}/marker.mp3`, at: 37.2, vol: 0.6 },
+    { src: `${SFX_DIR}/marker.mp3`, at: 38.3, vol: 0.55 },
+    { src: `${SFX_DIR}/swoosh.mp3`, at: 47.4, vol: 0.45 },
+    { src: `${SFX_DIR}/click.mp3`, at: 49.3, vol: 0.55 },
+    { src: `${SFX_DIR}/click.mp3`, at: 50.4, vol: 0.55 },
+    { src: `${SFX_DIR}/confirm.mp3`, at: 51.5, vol: 0.55 },
+    { src: `${SFX_DIR}/boom-low.mp3`, at: 57.9, vol: 0.6 },
+    { src: `${SFX_DIR}/resolve.mp3`, at: 59.5, vol: 0.55 },
+    { src: `${SFX_DIR}/outro-swell.mp3`, at: 61.6, vol: 0.5 },
+  ],
+};
+const calc500M: CalculateMetadataFunction<Claude500MReelProps> = async ({ props }) => {
+  const last = Math.max(...props.scenes.map((s) => s.start + s.dur));
+  return { durationInFrames: Math.ceil(last * 30), width: 1080, height: 1920, fps: 30 };
+};
+
 export const Root: React.FC = () => {
   return (
     <>
+      <Composition
+        id="Claude500MReel"
+        component={Claude500MReel}
+        durationInFrames={1966}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={claude500MDefault}
+        calculateMetadata={calc500M}
+      />
       <Composition
         id="Explainer"
         component={Explainer}
