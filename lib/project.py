@@ -171,6 +171,23 @@ def _infer_legacy_project(projects_dir: Path, project_id: str) -> Optional[dict[
     }
 
 
+def get_project_record(
+    projects_dir: Path | str, project_id: str
+) -> Optional[dict[str, Any]]:
+    """The canonical 'is this a real project, and what is it' resolver.
+
+    Returns the project.json manifest if present, else a synthesized manifest
+    for a legacy/agent-created dir (one with checkpoints, artifacts, or renders),
+    else None. Use this — not read_project_manifest — to decide whether a
+    project exists, so legacy dirs are first-class everywhere (state, chat,
+    assets, threads), exactly as they appear in the project list.
+    """
+    rec = read_project_manifest(projects_dir, project_id)
+    if rec is None:
+        rec = _infer_legacy_project(Path(projects_dir), project_id)
+    return rec
+
+
 def list_projects(projects_dir: Path | str) -> list[dict[str, Any]]:
     """Return every real project, newest first.
 
@@ -185,9 +202,7 @@ def list_projects(projects_dir: Path | str) -> list[dict[str, Any]]:
     for child in sorted(projects_dir.iterdir()):
         if not child.is_dir():
             continue
-        manifest = read_project_manifest(projects_dir, child.name)
-        if manifest is None:
-            manifest = _infer_legacy_project(projects_dir, child.name)
+        manifest = get_project_record(projects_dir, child.name)
         if manifest is not None:
             out.append(manifest)
     out.sort(key=lambda m: m.get("created_at", ""), reverse=True)
