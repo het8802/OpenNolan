@@ -52,6 +52,11 @@ class ConfirmRequest(BaseModel):
     confirm_id: str
     approved: bool
 
+
+class AnswerRequest(BaseModel):
+    question_id: str
+    answer: str
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -254,6 +259,13 @@ def create_app(
         if runner is None:
             raise HTTPException(status_code=409, detail="no active agent runner")
         return {"resolved": runner.resolve_confirm(body.confirm_id, body.approved)}
+
+    @app.post("/api/projects/{project_id}/agent/answer")
+    def agent_answer(project_id: str, body: AnswerRequest) -> dict[str, Any]:
+        runner = app.state.agent_runner
+        if runner is None:
+            raise HTTPException(status_code=409, detail="no active agent runner")
+        return {"resolved": runner.resolve_answer(body.question_id, body.answer)}
 
     return app
 

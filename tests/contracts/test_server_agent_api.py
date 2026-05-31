@@ -62,3 +62,19 @@ def test_confirm_unknown_id_returns_resolved_false(tmp_path):
     )
     assert r.status_code == 200
     assert r.json() == {"resolved": False}
+
+
+def test_answer_without_runner_409(tmp_path):
+    r = _client(tmp_path).post(
+        "/api/projects/sky/agent/answer", json={"question_id": "x", "answer": "yes"}
+    )
+    assert r.status_code == 409
+
+
+def test_answer_unknown_id_returns_resolved_false(tmp_path):
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+    r = _client(tmp_path, agent_runner=runner).post(
+        "/api/projects/sky/agent/answer", json={"question_id": "nope", "answer": "a"}
+    )
+    assert r.status_code == 200
+    assert r.json() == {"resolved": False}

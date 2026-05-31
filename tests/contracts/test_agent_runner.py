@@ -81,6 +81,12 @@ def test_unknown_tool_confirmed():
     assert decide_tool("SomeMcpTool", {}).action == ACTION_CONFIRM
 
 
+def test_question_tools_always_allowed():
+    # The built-in question tool and our in-process ask_user tool never confirm.
+    assert decide_tool("AskUserQuestion", {}).action == ACTION_ALLOW
+    assert decide_tool("mcp__mc__ask_user", {"question": "?"}).action == ACTION_ALLOW
+
+
 # --- can_use_tool callback ------------------------------------------------
 
 def test_can_use_tool_allows_safe():
@@ -211,3 +217,109 @@ def test_confirm_without_active_stream_denies():
 def test_resolve_unknown_confirm_returns_false():
     runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
     assert runner.resolve_confirm("does-not-exist", True) is False
+
+
+# --- ask_user question round-trip -----------------------------------------
+
+def test_ask_user_resolves_with_selected_option():
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+
+    async def scenario():
+        events = []
+        runner._emit["p"] = lambda e: events.append(e)
+        task = asyncio.ensure_future(
+            runner._ask_user("p", "Pipeline", "Which pipeline?", ["animated-explainer", "cinematic"])
+        )
+        await asyncio.sleep(0)  # let _ask_user emit + register
+        assert events and events[0]["type"] == "question"
+        assert events[0]["options"] == ["animated-explainer", "cinematic"]
+        qid = events[0]["question_id"]
+        assert runner.resolve_answer(qid, "cinematic") is True
+        return await task
+
+    assert asyncio.run(scenario()) == "cinematic"
+
+
+def test_ask_user_without_stream_returns_default():
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+    ans = asyncio.run(runner._ask_user("nostream", "h", "q?", ["a", "b"]))
+    assert "best judgment" in ans  # no UI to ask -> agent proceeds
+
+
+def test_resolve_unknown_answer_returns_false():
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+    assert runner.resolve_answer("nope", "x") is False
+
+
+# --- session resume on error ----------------------------------------------
+
+def _errored_turn():
+    return [
+        AssistantMessage(content=[TextBlock(text="working…")], model="m"),
+        ResultMessage(subtype="error", duration_ms=5, duration_api_ms=4, is_error=True,
+                      num_turns=2, session_id="sess-123", total_cost_usd=0.02, result=None),
+    ]
+
+
+def test_build_agent_options_resume():
+    assert build_agent_options("/r", resume="sess-abc").resume == "sess-abc"
+    assert build_agent_options("/r").resume is None
+
+
+def test_error_drops_client_but_flags_resume_and_keeps_session_id():
+    fake = FakeClient(_errored_turn())
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: fake)
+    res = asyncio.run(runner.run_turn("proj", "go"))
+    assert res.is_error is True
+    # dead client removed...
+    assert "proj" not in runner._clients
+    # ...but the next turn is flagged to RESUME the same session, not start cold
+    assert runner._resume_next.get("proj") is True
+    assert runner._session_ids.get("proj") == "sess-123"
+
+
+def test_default_factory_consumes_resume_flag():
+    runner = AgentRunner(repo_root=".")  # real default factory
+    runner._resume_next["p"] = True
+    runner._session_ids["p"] = "sess-xyz"
+    runner._default_client_factory("p")  # construct only (no connect, no network)
+    # flag consumed so we don't resume twice
+    assert runner._resume_next.get("p", False) is False
+
+
+def test_resume_preamble_grounds_in_disk_state(tmp_path):
+    from lib.project import create_project
+    create_project(tmp_path / "projects", "Sky Resume", "animated-explainer")
+    # drop an artifact so there is "prior work" to resume
+    (tmp_path / "projects" / "sky-resume" / "artifacts" / "research_brief.json").write_text("{}")
+
+    runner = AgentRunner(repo_root=tmp_path)
+    pre = runner._resume_preamble("sky-resume")
+    assert pre is not None
+    assert "sky-resume" in pre
+    assert "animated-explainer" in pre
+    assert "research_brief.json" in pre
+
+
+def test_resume_preamble_none_for_fresh_project(tmp_path):
+    from lib.project import create_project
+    create_project(tmp_path / "projects", "Brand New", "animated-explainer")
+    runner = AgentRunner(repo_root=tmp_path)
+    # no checkpoints, no artifacts -> nothing to resume
+    assert runner._resume_preamble("brand-new") is None
+
+
+def test_fresh_client_prepends_preamble_only_once(tmp_path):
+    from lib.project import create_project
+    create_project(tmp_path / "projects", "Sky Two", "animated-explainer")
+    (tmp_path / "projects" / "sky-two" / "artifacts" / "script.json").write_text("{}")
+
+    fake = FakeClient(_scripted_turn())
+    runner = AgentRunner(repo_root=tmp_path, client_factory=lambda pid: fake)
+
+    asyncio.run(runner.run_turn("sky-two", "continue"))
+    asyncio.run(runner.run_turn("sky-two", "again"))
+    # first prompt is grounded with the resume preamble; second is the raw message
+    assert fake.queries[0].startswith("[RESUMING WORK")
+    assert "continue" in fake.queries[0]
+    assert fake.queries[1] == "again"
