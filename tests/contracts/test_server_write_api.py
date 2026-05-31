@@ -115,3 +115,44 @@ def test_upload_unknown_project_404(tmp_path):
         files={"file": ("x.png", b"d", "image/png")},
     )
     assert r.status_code == 404
+
+
+# --- list + serve assets --------------------------------------------------
+
+def test_list_assets_groups_by_kind_and_renders(tmp_path):
+    client, projects = _ctx(tmp_path)
+    pid = _make_project(client)
+    # upload one image, one audio (under music/), and drop a render on disk
+    client.post(f"/api/projects/{pid}/assets", data={"kind": "images"},
+                files={"file": ("logo.png", b"\x89PNG", "image/png")})
+    client.post(f"/api/projects/{pid}/assets", data={"kind": "music"},
+                files={"file": ("track.mp3", b"ID3", "audio/mpeg")})
+    (projects / pid / "renders").mkdir(parents=True, exist_ok=True)
+    (projects / pid / "renders" / "final.mp4").write_bytes(b"\x00\x00\x00\x18ftyp")
+
+    r = client.get(f"/api/projects/{pid}/assets")
+    assert r.status_code == 200
+    body = r.json()
+    assert any(f["name"] == "logo.png" for f in body["kinds"]["images"])
+    assert any(f["name"] == "track.mp3" for f in body["kinds"]["music"])
+    assert any(f["name"] == "final.mp4" for f in body["renders"])
+
+
+def test_get_file_serves_and_blocks_traversal(tmp_path):
+    client, projects = _ctx(tmp_path)
+    pid = _make_project(client)
+    client.post(f"/api/projects/{pid}/assets", data={"kind": "images"},
+                files={"file": ("pic.png", b"PNGDATA", "image/png")})
+
+    # serve a real file
+    ok = client.get(f"/api/projects/{pid}/file", params={"path": "assets/images/pic.png"})
+    assert ok.status_code == 200
+    assert ok.content == b"PNGDATA"
+
+    # traversal attempt is blocked
+    bad = client.get(f"/api/projects/{pid}/file", params={"path": "../../etc/hosts"})
+    assert bad.status_code in (400, 404)
+
+    # missing file
+    missing = client.get(f"/api/projects/{pid}/file", params={"path": "assets/images/nope.png"})
+    assert missing.status_code == 404

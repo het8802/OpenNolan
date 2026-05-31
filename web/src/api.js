@@ -12,6 +12,8 @@ export const getPipelines = () => fetch('/api/pipelines').then(json)
 export const getProjects = () => fetch('/api/projects').then(json)
 export const getState = (id) => fetch(`/api/projects/${id}/state`).then(json)
 export const getCapabilities = () => fetch('/api/capabilities').then(json)
+export const listAssets = (id) => fetch(`/api/projects/${id}/assets`).then(json)
+export const fileUrl = (id, path) => `/api/projects/${id}/file?path=${encodeURIComponent(path)}`
 
 export const createProject = (name, pipeline_type) =>
   fetch('/api/projects', {
