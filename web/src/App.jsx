@@ -336,7 +336,9 @@ function Dashboard({ pipelines, projects, onOpen, onCreate }) {
             <span className="tile-accent" style={{ background: `hsl(${hueOf(p.pipeline_type)} 52% 60%)` }} />
             <span className="tile-name">{p.name}</span>
             <span className="tile-meta">
-              <span className="tile-type">{p.pipeline_type}</span>
+              {p.pipeline_type
+                ? <span className="tile-type">{p.pipeline_type}</span>
+                : <span className="tile-type unknown">unknown type</span>}
               {p.legacy && <span className="tile-legacy">existing</span>}
             </span>
             {p.created_at && <span className="tile-date">{fmtDate(p.created_at)}</span>}

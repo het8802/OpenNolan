@@ -288,6 +288,7 @@ select { cursor: pointer; }
 .tile-meta { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; margin-top: auto; }
 .tile-type { font-size: 0.68rem; padding: 0.1rem 0.45rem; border-radius: 999px;
   background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.tile-type.unknown { background: #efe9df; color: var(--muted); font-weight: 500; font-style: italic; }
 .tile-legacy { font-size: 0.62rem; padding: 0.1rem 0.4rem; border-radius: 999px;
   background: #efe9df; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .tile-date { font-size: 0.7rem; color: var(--muted); }
