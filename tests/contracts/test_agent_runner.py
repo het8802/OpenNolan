@@ -181,10 +181,14 @@ def test_run_turn_collects_text_cost_and_reuses_session():
     assert any(it.get("kind") == "tool_use" for e in events if e["type"] == "assistant" for it in e["items"])
     assert fake.connects == 1
 
-    # Second turn reuses the same session (no reconnect).
+    # First turn is prefixed with the project-context binding; second turn is raw.
+    assert "make a video" in fake.queries[0]
+    assert "PROJECT CONTEXT" in fake.queries[0]
+
+    # Second turn reuses the same session (no reconnect) and is not re-prefixed.
     asyncio.run(runner.run_turn("proj", "again", on_event=lambda e: events.append(e)))
     assert fake.connects == 1
-    assert fake.queries == ["make a video", "again"]
+    assert fake.queries[1] == "again"
 
 
 # --- confirm round-trip mechanics ----------------------------------------
@@ -319,7 +323,29 @@ def test_fresh_client_prepends_preamble_only_once(tmp_path):
 
     asyncio.run(runner.run_turn("sky-two", "continue"))
     asyncio.run(runner.run_turn("sky-two", "again"))
-    # first prompt is grounded with the resume preamble; second is the raw message
-    assert fake.queries[0].startswith("[RESUMING WORK")
+    # first prompt is grounded (project binding + resume note); second is the raw message
+    assert "PROJECT CONTEXT" in fake.queries[0]
+    assert "RESUMING WORK" in fake.queries[0]
     assert "continue" in fake.queries[0]
     assert fake.queries[1] == "again"
+
+
+def test_project_context_binds_to_project_id(tmp_path):
+    from lib.project import create_project
+    create_project(tmp_path / "projects", "Bind Me", "animated-explainer")
+    runner = AgentRunner(repo_root=tmp_path)
+    ctx = runner._project_context("bind-me")
+    assert "bind-me" in ctx
+    assert "animated-explainer" in ctx
+    assert "do NOT create a new project" in ctx
+    assert "update_stage.py bind-me" in ctx
+
+
+def test_first_turn_preamble_includes_context_even_for_fresh_project(tmp_path):
+    from lib.project import create_project
+    create_project(tmp_path / "projects", "Fresh", "animated-explainer")
+    runner = AgentRunner(repo_root=tmp_path)
+    # no prior work -> resume note is None, but project context is always present
+    pre = runner._first_turn_preamble("fresh")
+    assert "PROJECT CONTEXT" in pre
+    assert "RESUMING WORK" not in pre
