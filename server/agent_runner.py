@@ -420,14 +420,35 @@ class AgentRunner:
             self._fresh_client[project_id] = True
         return client
 
+    def _project_context(self, project_id: str) -> str:
+        """The binding instruction: which project the agent works on. Always
+        injected on the first turn so the agent uses the UI-selected project_id
+        instead of inventing a new project dir from the topic (the cause of the
+        'stepper stuck on pending' bug — the agent wrote to a different project)."""
+        try:
+            from lib.project import get_project_pipeline_type
+            pt = get_project_pipeline_type(self.repo_root / "projects", project_id)
+        except Exception:
+            pt = None
+        pipeline_clause = f" using the '{pt}' pipeline" if pt else ""
+        stage_cmd = f"python scripts/update_stage.py {project_id} <stage> <status>" + (f" {pt}" if pt else "")
+        return (
+            f"[PROJECT CONTEXT: You are working on the existing project '{project_id}'{pipeline_clause}. "
+            f"Use EXACTLY this project_id for everything — do NOT create a new project directory. "
+            f"Write artifacts to projects/{project_id}/artifacts/, assets to projects/{project_id}/assets/, "
+            f"and the final render to projects/{project_id}/renders/. As you work each stage, update its "
+            f"status so the UI stepper reflects progress: run `{stage_cmd}` "
+            f"(status = in_progress at the start of a stage, completed when done, awaiting_human at approval gates).]"
+        )
+
     def _resume_preamble(self, project_id: str) -> Optional[str]:
         """A short note grounding the agent in on-disk progress, so a fresh or
         resumed session continues instead of redoing work. Returns None for a
         brand-new project with no prior work.
 
-        This is the durable safety net: even if SDK session resume fails or the
-        backend restarted (losing the in-memory session_id), the on-disk
-        checkpoints + artifacts let any agent pick up where the last one left off.
+        Durable safety net: even if SDK session resume fails or the backend
+        restarted (losing the in-memory session_id), the on-disk checkpoints +
+        artifacts let any agent pick up where the last one left off.
         """
         try:
             from lib.checkpoint import get_completed_stages, get_next_stage
@@ -451,6 +472,15 @@ class AgentRunner:
             )
         except Exception:
             return None
+
+    def _first_turn_preamble(self, project_id: str) -> str:
+        """What gets prepended to the first message of a fresh client: the
+        project binding (always) plus a resume/progress note (if prior work)."""
+        parts = [self._project_context(project_id)]
+        progress = self._resume_preamble(project_id)
+        if progress:
+            parts.append(progress)
+        return "\n".join(parts)
 
     async def _confirm(self, project_id, tool_name, tool_input, reason) -> bool:
         emit = self._emit.get(project_id)
@@ -530,9 +560,7 @@ class AgentRunner:
         # client is cold — e.g. after a backend restart — it's what preserves the work.)
         prompt = message
         if self._fresh_client.pop(project_id, False):
-            preamble = self._resume_preamble(project_id)
-            if preamble:
-                prompt = f"{preamble}\n\n{message}"
+            prompt = f"{self._first_turn_preamble(project_id)}\n\n{message}"
 
         texts: list[str] = []
         result = TurnResult(text="", is_error=False, num_turns=0, total_cost_usd=None)
