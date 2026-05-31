@@ -67,6 +67,7 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [renderingStage, setRenderingStage] = useState(null) // tool_use id of in-flight render
   const [toolResults, setToolResults] = useState({})          // tool_use_id -> result, for expansion
+  const [uploadTick, setUploadTick] = useState(0)             // bump to refresh asset listing
 
   useEffect(() => {
     api.getPipelines().then(d => setPipelines(d.pipelines || [])).catch(showError)
@@ -204,10 +205,12 @@ export default function App() {
         <Pipeline state={state} selected={selected} />
         <AssetPanel
           selected={selected}
+          uploadTick={uploadTick}
           onUpload={async (kind, file) => {
             try {
               const r = await api.uploadAsset(selected, kind, file)
               showOk(`Uploaded ${r.filename} → ${kind}`)
+              setUploadTick(t => t + 1)
             } catch (e) { showError(e) }
           }}
         />
@@ -463,22 +466,49 @@ function Pipeline({ state, selected }) {
 
 // ─── Assets Panel ─────────────────────────────────────────────────────────────
 
-function AssetPanel({ selected, onUpload }) {
+function AssetPanel({ selected, onUpload, uploadTick }) {
   const [activeKind, setActiveKind] = useState('images')
+  const [data, setData] = useState(null)
   const inputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
+
+  // Poll the asset listing for the selected project (live as the agent writes files).
+  useEffect(() => {
+    if (!selected) { setData(null); return }
+    let alive = true
+    const tick = () => api.listAssets(selected).then(d => alive && setData(d)).catch(() => {})
+    tick()
+    const id = setInterval(tick, 4000)
+    return () => { alive = false; clearInterval(id) }
+  }, [selected, uploadTick])
 
   function handleFiles(files) {
     if (!selected || !files?.length) return
     onUpload(activeKind, files[0])
   }
 
+  const renders = data?.renders || []
+  const files = data?.kinds?.[activeKind] || []
+
   return (
     <section className="panel assets">
       <h2>Assets</h2>
-      {!selected && <p className="empty">Select a project to upload.</p>}
+      {!selected && <p className="empty">Select a project to see its assets.</p>}
       {selected && (
-        <>
+        <div className="assets-scroll">
+          {/* Final render(s) — shown when the reel is done (#1) */}
+          {renders.length > 0 && (
+            <div className="renders">
+              <div className="renders-label">🎬 Final render</div>
+              {renders.map(r => (
+                <div key={r.path} className="render-item">
+                  <video controls src={api.fileUrl(selected, r.path)} />
+                  <a className="render-dl" href={api.fileUrl(selected, r.path)} download>{r.name}</a>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="asset-tabs">
             {ASSET_KINDS.map(k => (
               <button
@@ -486,10 +516,18 @@ function AssetPanel({ selected, onUpload }) {
                 className={`asset-tab ${activeKind === k ? 'active' : ''}`}
                 onClick={() => setActiveKind(k)}
               >
-                {k}
+                {k}{data?.kinds?.[k]?.length ? ` (${data.kinds[k].length})` : ''}
               </button>
             ))}
           </div>
+
+          <div className="asset-grid">
+            {files.length === 0 && <p className="empty">No {activeKind} yet.</p>}
+            {files.map(f => (
+              <AssetItem key={f.path} kind={activeKind} url={api.fileUrl(selected, f.path)} name={f.name} />
+            ))}
+          </div>
+
           <div
             className={`dropzone ${dragging ? 'drag' : ''}`}
             onClick={() => inputRef.current?.click()}
@@ -500,8 +538,19 @@ function AssetPanel({ selected, onUpload }) {
             Drop a <strong>{activeKind}</strong> file here, or click to choose
             <input ref={inputRef} type="file" hidden onChange={e => handleFiles(e.target.files)} />
           </div>
-        </>
+        </div>
       )}
     </section>
+  )
+}
+
+function AssetItem({ kind, url, name }) {
+  return (
+    <div className="asset-item" title={name}>
+      {kind === 'images' && <img src={url} alt={name} loading="lazy" />}
+      {kind === 'video' && <video src={url} controls preload="metadata" />}
+      {(kind === 'audio' || kind === 'music') && <audio src={url} controls preload="none" />}
+      <div className="asset-name">{name}</div>
+    </div>
   )
 }

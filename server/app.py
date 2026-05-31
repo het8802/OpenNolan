@@ -23,8 +23,23 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
+
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif"}
+VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
+AUDIO_EXTS = {".mp3", ".wav", ".aac", ".m4a", ".ogg", ".flac"}
+
+
+def _classify(rel_parts: tuple[str, ...], ext: str) -> Optional[str]:
+    ext = ext.lower()
+    if ext in IMAGE_EXTS:
+        return "images"
+    if ext in VIDEO_EXTS:
+        return "video"
+    if ext in AUDIO_EXTS:
+        return "music" if "music" in rel_parts else "audio"
+    return None
 
 from lib.pipeline_loader import get_stage_order, list_pipelines, load_pipeline
 from lib.project import (
@@ -184,6 +199,47 @@ def create_app(
             "path": str(target.relative_to(pdir.resolve())),
             "size_bytes": target.stat().st_size,
         }
+
+    @app.get("/api/projects/{project_id}/assets")
+    def list_assets(project_id: str) -> dict[str, Any]:
+        """List a project's asset files (grouped by kind) and rendered outputs.
+        Paths are relative to the project dir; fetch a file via /file?path=..."""
+        proj = pdir / project_id
+        if not proj.exists():
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+
+        kinds: dict[str, list[dict[str, Any]]] = {"images": [], "video": [], "audio": [], "music": []}
+        assets_dir = proj / "assets"
+        if assets_dir.is_dir():
+            for f in sorted(assets_dir.rglob("*")):
+                if not f.is_file() or f.name.startswith("."):
+                    continue
+                rel = f.relative_to(proj)
+                kind = _classify(rel.parts, f.suffix)
+                if kind:
+                    kinds[kind].append({"path": str(rel), "name": f.name, "size_bytes": f.stat().st_size})
+
+        renders: list[dict[str, Any]] = []
+        renders_dir = proj / "renders"
+        if renders_dir.is_dir():
+            for f in sorted(renders_dir.rglob("*")):
+                if f.is_file() and f.suffix.lower() in VIDEO_EXTS and not f.name.startswith("."):
+                    renders.append({"path": str(f.relative_to(proj)), "name": f.name,
+                                    "size_bytes": f.stat().st_size})
+
+        return {"project_id": project_id, "kinds": kinds, "renders": renders}
+
+    @app.get("/api/projects/{project_id}/file")
+    def get_file(project_id: str, path: str):
+        """Serve a single file from within the project dir (images/video/audio/render).
+        Path-traversal protected: the resolved target must stay inside the project."""
+        proj = (pdir / project_id).resolve()
+        target = (pdir / project_id / path).resolve()
+        if proj != target and proj not in target.parents:
+            raise HTTPException(status_code=400, detail="path traversal detected")
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="file not found")
+        return FileResponse(str(target))
 
     @app.get("/api/projects/{project_id}/state")
     def project_state(project_id: str) -> dict[str, Any]:
