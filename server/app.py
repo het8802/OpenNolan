@@ -15,12 +15,15 @@ runner are deliberately NOT here yet — this is the read slice.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import shutil
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from lib.pipeline_loader import get_stage_order, list_pipelines, load_pipeline
@@ -32,12 +35,22 @@ from lib.project import (
     read_project_manifest,
     sanitize_filename,
 )
+from server.agent_runner import AgentRunner, auth_configured
 from server.state import FileStateSource, StateSource
 
 
 class CreateProjectRequest(BaseModel):
     name: str
     pipeline_type: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+
+
+class ConfirmRequest(BaseModel):
+    confirm_id: str
+    approved: bool
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -65,6 +78,7 @@ def create_app(
     *,
     state_source: Optional[StateSource] = None,
     capabilities_provider: Optional[Callable[[], dict[str, Any]]] = None,
+    agent_runner: Optional[AgentRunner] = None,
 ) -> FastAPI:
     app = FastAPI(title="OpenMontage Mission Control", version="0.1.0")
 
@@ -75,6 +89,12 @@ def create_app(
     app.state.projects_dir = pdir
     app.state.state_source = source
     app.state.capabilities_cache = None  # lazily populated, then reused
+    app.state.agent_runner = agent_runner  # injected (tests) or lazily built
+
+    def _runner() -> Optional[AgentRunner]:
+        if app.state.agent_runner is None and auth_configured():
+            app.state.agent_runner = AgentRunner(repo_root=REPO_ROOT)
+        return app.state.agent_runner
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -176,6 +196,64 @@ def create_app(
                 # Surface discovery failure explicitly rather than 500-ing.
                 app.state.capabilities_cache = {"error": f"capability discovery failed: {exc}"}
         return app.state.capabilities_cache
+
+    @app.post("/api/projects/{project_id}/chat")
+    async def chat(project_id: str, body: ChatRequest):
+        """Stream an agent turn as Server-Sent Events.
+
+        Requires agent auth (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY);
+        returns 503 with setup guidance otherwise. Each agent event is one
+        `data: {json}` SSE line; a `confirm_request` event pauses the agent
+        until the client POSTs /agent/confirm.
+        """
+        if read_project_manifest(pdir, project_id) is None:
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        if not auth_configured():
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "agent auth not configured. Run `claude setup-token` and set "
+                    "CLAUDE_CODE_OAUTH_TOKEN (and unset ANTHROPIC_API_KEY to use your "
+                    "Claude subscription instead of per-token billing)."
+                ),
+            )
+        runner = _runner()
+        if runner is None:
+            raise HTTPException(status_code=503, detail="agent runner unavailable")
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def emit(evt: dict[str, Any]) -> None:
+            await queue.put(evt)
+
+        async def drive() -> None:
+            try:
+                await runner.run_turn(project_id, body.message, on_event=emit)
+            except Exception as exc:  # surface runner failure as an SSE event
+                await queue.put({"type": "error", "detail": str(exc)[:500]})
+            finally:
+                await queue.put(None)  # sentinel: stream complete
+
+        async def gen():
+            task = asyncio.create_task(drive())
+            try:
+                while True:
+                    evt = await queue.get()
+                    if evt is None:
+                        break
+                    yield f"data: {json.dumps(evt)}\n\n"
+            finally:
+                if not task.done():
+                    task.cancel()
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    @app.post("/api/projects/{project_id}/agent/confirm")
+    def agent_confirm(project_id: str, body: ConfirmRequest) -> dict[str, Any]:
+        runner = app.state.agent_runner
+        if runner is None:
+            raise HTTPException(status_code=409, detail="no active agent runner")
+        return {"resolved": runner.resolve_confirm(body.confirm_id, body.approved)}
 
     return app
 
