@@ -34,6 +34,13 @@ export const confirmTool = (id, confirm_id, approved) =>
     body: JSON.stringify({ confirm_id, approved }),
   }).then(json)
 
+export const answerQuestion = (id, question_id, answer) =>
+  fetch(`/api/projects/${id}/agent/answer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question_id, answer }),
+  }).then(json)
+
 // Stream an agent turn. /chat is POST, so we read the SSE body off fetch
 // (EventSource can't POST). Yields one parsed event object per `data:` line.
 export async function* chatStream(id, message, signal) {
