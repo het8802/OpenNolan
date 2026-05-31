@@ -605,6 +605,29 @@ class AgentRunner:
         result.text = "".join(texts)
         return result
 
+    async def switch_session(self, project_id: str, session_id: Optional[str]) -> None:
+        """Align the project's live session to a specific thread's session_id.
+
+        Reopening a stored thread should continue THAT conversation. If the live
+        session differs, tear it down; the next turn rebuilds — resuming the
+        given session_id (existing thread) or starting fresh (new thread, None).
+        Single live session per project (fine for single-user local).
+        """
+        if self._session_ids.get(project_id) == session_id and project_id in self._clients:
+            return
+        dead = self._clients.pop(project_id, None)
+        if dead is not None:
+            try:
+                await dead.disconnect()
+            except Exception:
+                pass
+        if session_id:
+            self._session_ids[project_id] = session_id
+            self._resume_next[project_id] = True   # rebuild WITH resume
+        else:
+            self._session_ids.pop(project_id, None)
+            self._resume_next.pop(project_id, None)  # brand-new thread -> fresh session
+
     async def aclose(self) -> None:
         for client in self._clients.values():
             try:

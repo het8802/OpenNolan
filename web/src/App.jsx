@@ -68,6 +68,11 @@ export default function App() {
   const [renderingStage, setRenderingStage] = useState(null) // tool_use id of in-flight render
   const [toolResults, setToolResults] = useState({})          // tool_use_id -> result, for expansion
   const [uploadTick, setUploadTick] = useState(0)             // bump to refresh asset listing
+  const [threads, setThreads] = useState([])                  // chat threads for the project
+  const [activeThread, setActiveThread] = useState(null)      // current thread id
+  const messagesRef = useRef([])                              // latest messages, for thread persistence
+  const sessionIdRef = useRef(null)                           // latest agent session_id
+  useEffect(() => { messagesRef.current = messages }, [messages])
 
   useEffect(() => {
     api.getPipelines().then(d => setPipelines(d.pipelines || [])).catch(showError)
@@ -101,13 +106,52 @@ export default function App() {
     return api.getProjects().then(d => setProjects(d.projects || [])).catch(showError)
   }
 
-  function newChat() {
+  function refreshThreads(projectId) {
+    const id = projectId || selected
+    if (!id) return Promise.resolve()
+    return api.listThreads(id).then(d => setThreads(d.threads || [])).catch(() => {})
+  }
+
+  function clearChat() {
     setMessages([])
     setPendingConfirm(null)
     setPendingQuestion(null)
     setRenderingStage(null)
     setToolResults({})
     setInput('')
+    sessionIdRef.current = null
+  }
+
+  // '+' new chat: start a fresh thread (created lazily on first message).
+  function newChat() {
+    clearChat()
+    setActiveThread(null)
+  }
+
+  async function loadThread(tid) {
+    if (!selected || !tid) return
+    try {
+      const rec = await api.getThread(selected, tid)
+      clearChat()
+      setMessages(rec.messages || [])
+      sessionIdRef.current = rec.session_id || null
+      setActiveThread(tid)
+    } catch (e) { showError(e) }
+  }
+
+  function deriveTitle(msgs) {
+    const firstUser = (msgs || []).find(m => m.role === 'user')
+    const t = (firstUser?.text || 'New chat').trim().replace(/\s+/g, ' ')
+    return t.length > 48 ? t.slice(0, 48) + '…' : t
+  }
+
+  function persistThread(tid) {
+    if (!selected || !tid) return
+    api.saveThread(selected, tid, {
+      messages: messagesRef.current,
+      session_id: sessionIdRef.current,
+      title: deriveTitle(messagesRef.current),
+    }).then(() => refreshThreads()).catch(() => {})
   }
 
   const send = useCallback(async (text) => {
@@ -116,8 +160,17 @@ export default function App() {
     setInput('')
     setMessages(m => [...m, { role: 'user', text: message }])
     setBusy(true)
+    // Ensure a thread exists to persist this conversation into.
+    let tid = activeThread
+    if (!tid) {
+      try {
+        const rec = await api.createThread(selected, deriveTitle([{ role: 'user', text: message }]))
+        tid = rec.thread_id
+        setActiveThread(tid)
+      } catch { /* persistence is best-effort; continue the chat regardless */ }
+    }
     try {
-      for await (const evt of api.chatStream(selected, message)) {
+      for await (const evt of api.chatStream(selected, message, tid)) {
         if (evt.type === 'assistant') {
           setMessages(m => {
             const last = m[m.length - 1]
@@ -137,6 +190,7 @@ export default function App() {
           }
         } else if (evt.type === 'result') {
           setRenderingStage(null)
+          if (evt.session_id) sessionIdRef.current = evt.session_id
           setMessages(m => {
             // Finalize the last assistant_stream -> assistant (KEEP its text),
             // then append the result line.
@@ -159,8 +213,10 @@ export default function App() {
       setMessages(m => [...m, { role: 'error', text: String(e.message || e) }])
     } finally {
       setBusy(false)
+      // Persist the conversation (messages + session_id) so the thread is revivable.
+      if (tid) setTimeout(() => persistThread(tid), 0)
     }
-  }, [input, selected, busy, renderingStage])
+  }, [input, selected, busy, renderingStage, activeThread])
 
   async function resolveConfirm(approved) {
     if (!pendingConfirm || !selected) return
@@ -181,7 +237,7 @@ export default function App() {
     <div className="app">
       <Header
         pipelines={pipelines} projects={projects} selected={selected}
-        onSelect={id => { setSelected(id); newChat() }}
+        onSelect={id => { setSelected(id); newChat(); refreshThreads(id) }}
         onCreate={async (name, pipeline) => {
           try {
             const m = await api.createProject(name, pipeline)
@@ -201,6 +257,7 @@ export default function App() {
           pendingConfirm={pendingConfirm} onConfirm={resolveConfirm}
           pendingQuestion={pendingQuestion} onAnswer={answerQuestion}
           renderingStage={renderingStage} toolResults={toolResults}
+          threads={threads} activeThread={activeThread} onLoadThread={loadThread}
         />
         <Pipeline state={state} selected={selected} />
         <AssetPanel
@@ -254,7 +311,7 @@ function Header({ pipelines, projects, selected, onSelect, onCreate, caps }) {
 
 // ─── Chat Panel ───────────────────────────────────────────────────────────────
 
-function ChatPanel({ messages, input, setInput, onSend, onNewChat, busy, disabled, pendingConfirm, onConfirm, pendingQuestion, onAnswer, renderingStage, toolResults }) {
+function ChatPanel({ messages, input, setInput, onSend, onNewChat, busy, disabled, pendingConfirm, onConfirm, pendingQuestion, onAnswer, renderingStage, toolResults, threads, activeThread, onLoadThread }) {
   const endRef = useRef(null)
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, pendingConfirm, pendingQuestion, renderingStage])
 
@@ -262,7 +319,23 @@ function ChatPanel({ messages, input, setInput, onSend, onNewChat, busy, disable
     <section className="panel chat">
       <div className="chat-header">
         <h2>Agent</h2>
-        <button className="new-chat-btn" onClick={onNewChat} title="New chat">＋</button>
+        <div className="chat-header-actions">
+          {threads && threads.length > 0 && (
+            <select
+              className="thread-select"
+              value={activeThread || ''}
+              onChange={e => e.target.value && onLoadThread(e.target.value)}
+              disabled={busy}
+              title="Chat history"
+            >
+              <option value="">{activeThread ? 'Switch thread…' : 'History…'}</option>
+              {threads.map(t => (
+                <option key={t.thread_id} value={t.thread_id}>{t.title}</option>
+              ))}
+            </select>
+          )}
+          <button className="new-chat-btn" onClick={onNewChat} title="New chat" disabled={busy}>＋</button>
+        </div>
       </div>
       <div className="messages">
         {messages.length === 0 && (
