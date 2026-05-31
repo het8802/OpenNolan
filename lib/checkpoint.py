@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 import jsonschema
 
+from lib.atomic_io import atomic_write_json
 from schemas.artifacts import ARTIFACT_NAMES, validate_artifact
 
 # All known stages across all pipelines (used only for artifact name lookup).
@@ -186,9 +187,9 @@ def _merge_decision_log(
         if decision.get("decision_id") not in existing_ids:
             existing["decisions"].append(decision)
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(existing, f, indent=2)
+    # Atomic: a /state poll reading the decision log mid-write must never see
+    # a truncated file.
+    atomic_write_json(path, existing)
 
 
 def write_checkpoint(
@@ -264,10 +265,10 @@ def write_checkpoint(
 
     validate_checkpoint(checkpoint)
 
+    # Atomic write: the UI polls /state by reading these files; a plain
+    # truncate-then-write would let a poll catch a half-written checkpoint.
     path = _checkpoint_path(pipeline_dir, project_id, stage)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(checkpoint, f, indent=2)
+    atomic_write_json(path, checkpoint)
 
     return path
 
@@ -339,3 +340,115 @@ def get_next_stage(
         if stage not in completed:
             return stage
     return None
+
+
+# ---------------------------------------------------------------------------
+# CLI
+#
+# A first-class entry point so a headless agent can persist/read checkpoints
+# without hand-composing `python -c` snippets (Rule Zero forbids ad-hoc
+# scripts) or guessing the `pipeline_dir`. Always pass --projects-dir projects
+# (checkpoints live under projects/<id>/, NOT pipelines/<id>/).
+#
+#   python -m lib.checkpoint write --projects-dir projects --project-id sky \
+#       --stage research --status completed --pipeline-type animated-explainer \
+#       --artifacts-file /tmp/artifacts.json
+#   python -m lib.checkpoint read --projects-dir projects --project-id sky --stage research
+#   python -m lib.checkpoint next --projects-dir projects --project-id sky --pipeline-type animated-explainer
+#   python -m lib.checkpoint completed --projects-dir projects --project-id sky --pipeline-type animated-explainer
+#
+# --artifacts-file is a JSON object mapping artifact name -> artifact payload,
+# e.g. {"research_brief": {...}}. For completed/awaiting_human stages the
+# canonical artifact is required (validation enforces it).
+# ---------------------------------------------------------------------------
+
+VALID_STATUSES = ("completed", "failed", "awaiting_human", "in_progress")
+
+
+def _cli(argv: Optional[list[str]] = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="python -m lib.checkpoint",
+        description="Read/write OpenMontage pipeline checkpoints.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def _common(p: "argparse.ArgumentParser") -> None:
+        p.add_argument(
+            "--projects-dir",
+            required=True,
+            help="Root dir holding project workspaces (use: projects).",
+        )
+        p.add_argument("--project-id", required=True)
+
+    w = sub.add_parser("write", help="Write a stage checkpoint.")
+    _common(w)
+    w.add_argument("--stage", required=True)
+    w.add_argument("--status", required=True, choices=VALID_STATUSES)
+    w.add_argument("--pipeline-type")
+    w.add_argument(
+        "--artifacts-file",
+        help="JSON file: {artifact_name: payload}. Omit for status=in_progress.",
+    )
+    w.add_argument("--style-playbook")
+    w.add_argument("--checkpoint-policy", default="guided")
+    w.add_argument("--human-approval-required", action="store_true")
+    w.add_argument("--human-approved", action="store_true")
+
+    r = sub.add_parser("read", help="Read a stage checkpoint (JSON to stdout).")
+    _common(r)
+    r.add_argument("--stage", required=True)
+
+    n = sub.add_parser("next", help="Print the next stage to run.")
+    _common(n)
+    n.add_argument("--pipeline-type")
+
+    c = sub.add_parser("completed", help="Print completed stages (JSON list).")
+    _common(c)
+    c.add_argument("--pipeline-type")
+
+    args = parser.parse_args(argv)
+    projects_dir = Path(args.projects_dir)
+
+    if args.command == "write":
+        artifacts: dict[str, Any] = {}
+        if args.artifacts_file:
+            with open(args.artifacts_file) as f:
+                artifacts = json.load(f)
+        path = write_checkpoint(
+            projects_dir,
+            args.project_id,
+            args.stage,
+            args.status,
+            artifacts,
+            pipeline_type=args.pipeline_type,
+            style_playbook=args.style_playbook,
+            checkpoint_policy=args.checkpoint_policy,
+            human_approval_required=args.human_approval_required,
+            human_approved=args.human_approved,
+        )
+        print(str(path))
+        return 0
+
+    if args.command == "read":
+        cp = read_checkpoint(projects_dir, args.project_id, args.stage)
+        print(json.dumps(cp, indent=2) if cp is not None else "null")
+        return 0 if cp is not None else 1
+
+    if args.command == "next":
+        nxt = get_next_stage(projects_dir, args.project_id, args.pipeline_type)
+        print(nxt if nxt is not None else "")
+        return 0
+
+    if args.command == "completed":
+        print(json.dumps(
+            get_completed_stages(projects_dir, args.project_id, args.pipeline_type)
+        ))
+        return 0
+
+    return 2  # unreachable: subparser is required
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli())

@@ -597,7 +597,7 @@ Primary files:
 
 Checkpoint rules:
 
-- Checkpoints live at `pipelines/<project_id>/checkpoint_<stage>.json`.
+- Checkpoints live at `projects/<project_id>/checkpoint_<stage>.json` (the same workspace as the project's artifacts/assets/renders — see `lib/checkpoint.py`, which writes to `pipeline_dir/<project_id>/`, and `pipeline_dir` is `projects/`).
 - `status` may be `completed`, `failed`, `awaiting_human`, or `in_progress`.
 - `completed` and `awaiting_human` checkpoints must include the canonical artifact.
 - Invalid checkpoints or invalid canonical artifacts are contract violations and should fail fast.
