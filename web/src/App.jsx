@@ -72,6 +72,9 @@ export default function App() {
     api.getPipelines().then(d => setPipelines(d.pipelines || [])).catch(showError)
     refreshProjects()
     api.getCapabilities().then(setCaps).catch(() => {})
+    // Poll the project list so externally/agent-created projects appear live.
+    const id = setInterval(refreshProjects, 4000)
+    return () => clearInterval(id)
   }, [])
 
   // Poll state

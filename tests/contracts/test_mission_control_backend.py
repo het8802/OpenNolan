@@ -192,6 +192,20 @@ def test_list_projects_filters_junk(tmp_path):
     assert ids == ["real-one"]
 
 
+def test_list_projects_includes_legacy_dirs_with_checkpoints(tmp_path):
+    projects = tmp_path / "projects"
+    # A legacy/agent-created project: a checkpoint but NO project.json manifest.
+    write_checkpoint(projects, "legacy-reel", "research", "in_progress", {}, pipeline_type="cinematic")
+    # An empty scratch dir must still be excluded.
+    (projects / "_analysis").mkdir(parents=True)
+
+    listed = {p["project_id"]: p for p in list_projects(projects)}
+    assert "legacy-reel" in listed
+    assert listed["legacy-reel"]["pipeline_type"] == "cinematic"
+    assert listed["legacy-reel"].get("legacy") is True
+    assert "_analysis" not in listed
+
+
 def test_pipeline_type_recovered_from_manifest_without_checkpoint(tmp_path):
     projects = tmp_path / "projects"
     create_project(projects, "Empty Project", PIPELINE)

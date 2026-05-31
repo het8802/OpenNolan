@@ -136,12 +136,47 @@ def is_project(projects_dir: Path | str, project_id: str) -> bool:
     return manifest_path(projects_dir, project_id).exists()
 
 
-def list_projects(projects_dir: Path | str) -> list[dict[str, Any]]:
-    """Return manifests of all real projects, newest first.
+def _infer_legacy_project(projects_dir: Path, project_id: str) -> Optional[dict[str, Any]]:
+    """Synthesize a manifest for a real project dir that has no project.json
+    (created before manifests, or by the agent directly). A dir counts as a
+    project iff it has a top-level checkpoint, an artifacts/ dir with content,
+    or a renders/ dir with content. Scratch dirs (_analysis, demos) and stray
+    files are excluded by this test."""
+    pdir = projects_dir / project_id
+    checkpoints = sorted(pdir.glob("checkpoint_*.json"))
+    has_artifacts = (pdir / "artifacts").is_dir() and any((pdir / "artifacts").iterdir())
+    has_renders = (pdir / "renders").is_dir() and any((pdir / "renders").iterdir())
+    if not checkpoints and not has_artifacts and not has_renders:
+        return None
 
-    Only directories containing a ``project.json`` are returned; scratch /
-    analysis dirs, stray files, and legacy (pre-manifest) projects are
-    excluded by construction.
+    pipeline_type = None
+    if checkpoints:
+        try:
+            data = json.loads(checkpoints[-1].read_text())
+            pt = data.get("pipeline_type")
+            pipeline_type = pt if pt and pt != "unknown" else None
+        except Exception:
+            pass
+    try:
+        created_at = datetime.fromtimestamp(pdir.stat().st_mtime, timezone.utc).isoformat()
+    except Exception:
+        created_at = ""
+    return {
+        "version": "1.0",
+        "project_id": project_id,
+        "name": project_id,
+        "pipeline_type": pipeline_type,
+        "created_at": created_at,
+        "legacy": True,
+    }
+
+
+def list_projects(projects_dir: Path | str) -> list[dict[str, Any]]:
+    """Return every real project, newest first.
+
+    A project is any dir with a project.json manifest OR (for legacy/agent-created
+    dirs) one that has checkpoints, artifacts, or renders. Scratch/analysis dirs
+    and stray files are excluded.
     """
     projects_dir = Path(projects_dir)
     if not projects_dir.exists():
@@ -151,6 +186,8 @@ def list_projects(projects_dir: Path | str) -> list[dict[str, Any]]:
         if not child.is_dir():
             continue
         manifest = read_project_manifest(projects_dir, child.name)
+        if manifest is None:
+            manifest = _infer_legacy_project(projects_dir, child.name)
         if manifest is not None:
             out.append(manifest)
     out.sort(key=lambda m: m.get("created_at", ""), reverse=True)
