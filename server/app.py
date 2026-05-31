@@ -46,8 +46,8 @@ from lib.project import (
     ASSET_SUBDIRS,
     ProjectExistsError,
     create_project,
+    get_project_record,
     list_projects,
-    read_project_manifest,
     sanitize_filename,
 )
 from server import threads as thread_store
@@ -180,7 +180,7 @@ def create_app(
         kind: str = Form(...),
         file: UploadFile = File(...),
     ) -> dict[str, Any]:
-        if read_project_manifest(pdir, project_id) is None:
+        if get_project_record(pdir, project_id) is None:
             raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
         if kind not in ASSET_SUBDIRS:
             raise HTTPException(
@@ -279,7 +279,7 @@ def create_app(
         `data: {json}` SSE line; a `confirm_request` event pauses the agent
         until the client POSTs /agent/confirm.
         """
-        if read_project_manifest(pdir, project_id) is None:
+        if get_project_record(pdir, project_id) is None:
             raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
         if not auth_configured():
             raise HTTPException(
@@ -341,9 +341,18 @@ def create_app(
             raise HTTPException(status_code=409, detail="no active agent runner")
         return {"resolved": runner.resolve_answer(body.question_id, body.answer)}
 
+    @app.post("/api/projects/{project_id}/agent/stop")
+    async def agent_stop(project_id: str) -> dict[str, Any]:
+        """Interrupt the agent mid-turn. Context is preserved; the next message
+        resumes normally. No-op (stopped=False) if nothing is running."""
+        runner = app.state.agent_runner
+        if runner is None:
+            raise HTTPException(status_code=409, detail="no active agent runner")
+        return {"stopped": await runner.interrupt(project_id)}
+
     # ── Chat threads (history + revival) ──────────────────────────────────
     def _require_project(project_id: str) -> None:
-        if read_project_manifest(pdir, project_id) is None and not (pdir / project_id).is_dir():
+        if get_project_record(pdir, project_id) is None:
             raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
 
     @app.get("/api/projects/{project_id}/threads")

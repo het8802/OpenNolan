@@ -95,6 +95,54 @@ def test_project_state_404(tmp_path):
     assert r.status_code == 404
 
 
+def test_project_state_reports_detected_runtime(tmp_path):
+    import json
+
+    projects = tmp_path / "projects"
+    create_project(projects, "Sky Runtime", PIPELINE)
+    art = projects / "sky-runtime" / "artifacts"
+    art.mkdir(parents=True, exist_ok=True)
+    # render_report.json is the authoritative source: workspace.runtime.
+    (art / "render_report.json").write_text(json.dumps({"workspace": {"runtime": "remotion"}}))
+
+    body = _client(tmp_path).get("/api/projects/sky-runtime/state").json()
+    assert body["runtime"] == "remotion"
+
+
+def test_project_state_runtime_none_when_undecided(tmp_path):
+    projects = tmp_path / "projects"
+    create_project(projects, "Sky Blank", PIPELINE)
+    body = _client(tmp_path).get("/api/projects/sky-blank/state").json()
+    assert body["runtime"] is None
+
+
+def test_detect_runtime_priority_and_fallbacks(tmp_path):
+    import json
+
+    from server.state import detect_runtime
+
+    projects = tmp_path / "projects"
+    proj = projects / "p1"
+    art = proj / "artifacts"
+    art.mkdir(parents=True, exist_ok=True)
+
+    # Directory fallback only.
+    (proj / "hyperframes").mkdir()
+    assert detect_runtime(projects, "p1") == "hyperframes"
+
+    # scene_plan beats the directory heuristic.
+    (art / "scene_plan.json").write_text(json.dumps({"render_runtime": "ffmpeg"}))
+    assert detect_runtime(projects, "p1") == "ffmpeg"
+
+    # render_report wins over everything.
+    (art / "render_report.json").write_text(json.dumps({"workspace": {"runtime": "remotion"}}))
+    assert detect_runtime(projects, "p1") == "remotion"
+
+    # Unknown values are ignored (not surfaced as a runtime).
+    (art / "render_report.json").write_text(json.dumps({"workspace": {"runtime": "bogus"}}))
+    assert detect_runtime(projects, "p1") == "ffmpeg"  # falls back to scene_plan
+
+
 def test_capabilities_cached(tmp_path):
     calls = {"n": 0}
 

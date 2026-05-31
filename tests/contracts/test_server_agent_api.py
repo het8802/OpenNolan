@@ -78,3 +78,34 @@ def test_answer_unknown_id_returns_resolved_false(tmp_path):
     )
     assert r.status_code == 200
     assert r.json() == {"resolved": False}
+
+
+def test_stop_without_runner_409(tmp_path):
+    r = _client(tmp_path).post("/api/projects/sky/agent/stop")
+    assert r.status_code == 409
+
+
+def test_stop_no_live_session_returns_stopped_false(tmp_path):
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+    r = _client(tmp_path, agent_runner=runner).post("/api/projects/sky/agent/stop")
+    assert r.status_code == 200
+    assert r.json() == {"stopped": False}
+
+
+def test_stop_interrupts_live_client():
+    import asyncio
+
+    class FakeClient:
+        def __init__(self):
+            self.interrupted = False
+
+        async def interrupt(self):
+            self.interrupted = True
+
+    fake = FakeClient()
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+    runner._clients["proj"] = fake
+    assert asyncio.run(runner.interrupt("proj")) is True
+    assert fake.interrupted is True
+    # No live client for another project -> False, no crash.
+    assert asyncio.run(runner.interrupt("other")) is False

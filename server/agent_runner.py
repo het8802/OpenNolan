@@ -605,6 +605,23 @@ class AgentRunner:
         result.text = "".join(texts)
         return result
 
+    async def interrupt(self, project_id: str) -> bool:
+        """Stop the agent mid-turn (the UI 'Stop' button).
+
+        Sends the SDK interrupt signal to the live session. The session and its
+        conversation context survive — the agent stops what it's doing and the
+        current turn ends; the next message continues normally. Returns True if
+        an interrupt was delivered, False if there was no live client to stop.
+        """
+        client = self._clients.get(project_id)
+        if client is None:
+            return False
+        try:
+            await client.interrupt()
+            return True
+        except Exception:
+            return False
+
     async def switch_session(self, project_id: str, session_id: Optional[str]) -> None:
         """Align the project's live session to a specific thread's session_id.
 
