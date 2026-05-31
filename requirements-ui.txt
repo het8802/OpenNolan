@@ -1,0 +1,6 @@
+# Mission Control local UI — read API (server/).
+# Install:  pip install -r requirements-ui.txt
+# Run:      uvicorn server.app:app --reload
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9   # asset uploads (later slice)
