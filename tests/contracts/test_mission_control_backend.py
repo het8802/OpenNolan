@@ -38,6 +38,7 @@ from lib.project import (
     get_project_pipeline_type,
     list_projects,
     read_project_manifest,
+    sanitize_filename,
     slugify,
 )
 
@@ -217,3 +218,24 @@ def test_slugify(name, expected):
 def test_slugify_rejects_empty(tmp_path):
     with pytest.raises(ValueError):
         slugify("!!!")
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("photo.png", "photo.png"),
+    ("../../etc/passwd", "passwd"),
+    ("/abs/path/clip.mp4", "clip.mp4"),
+    ("sub/dir/voice.mp3", "voice.mp3"),
+])
+def test_sanitize_filename_strips_traversal(raw, expected):
+    assert sanitize_filename(raw) == expected
+
+
+@pytest.mark.parametrize("bad", [
+    "", ".", "..", "   ", "/", "foo\x00.png",
+    # On POSIX, backslashes aren't path separators, so a Windows-style path
+    # arrives as one name containing "\" — safer to reject than to mis-parse.
+    "..\\..\\windows\\evil.exe",
+])
+def test_sanitize_filename_rejects_unsafe(bad):
+    with pytest.raises(ValueError):
+        sanitize_filename(bad)

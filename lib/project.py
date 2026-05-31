@@ -49,6 +49,27 @@ def slugify(name: str) -> str:
     return slug
 
 
+def sanitize_filename(filename: str) -> str:
+    """Return a safe basename for an uploaded file, or raise ValueError.
+
+    Strips any directory components (so ``../../etc/passwd`` becomes
+    ``passwd`` and ``/abs/x.png`` becomes ``x.png``) and rejects empty,
+    dot, separator, or null-byte names. Callers should still join the
+    result to the target dir and verify containment as defense in depth.
+    """
+    name = Path(filename).name
+    if (
+        not name
+        or not name.strip()        # whitespace-only
+        or name in (".", "..")
+        or "/" in name
+        or "\\" in name
+        or "\x00" in name
+    ):
+        raise ValueError(f"unsafe filename: {filename!r}")
+    return name
+
+
 def project_dir(projects_dir: Path | str, project_id: str) -> Path:
     return Path(projects_dir) / project_id
 

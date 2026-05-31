@@ -16,14 +16,28 @@ runner are deliberately NOT here yet — this is the read slice.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 
 from lib.pipeline_loader import get_stage_order, list_pipelines, load_pipeline
-from lib.project import list_projects
+from lib.project import (
+    ASSET_SUBDIRS,
+    ProjectExistsError,
+    create_project,
+    list_projects,
+    read_project_manifest,
+    sanitize_filename,
+)
 from server.state import FileStateSource, StateSource
+
+
+class CreateProjectRequest(BaseModel):
+    name: str
+    pipeline_type: str
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -92,6 +106,59 @@ def create_app(
     @app.get("/api/projects")
     def projects() -> dict[str, Any]:
         return {"projects": list_projects(pdir)}
+
+    @app.post("/api/projects", status_code=201)
+    def new_project(req: CreateProjectRequest) -> dict[str, Any]:
+        # Reject unknown pipelines before scaffolding anything.
+        if req.pipeline_type not in list_pipelines():
+            raise HTTPException(
+                status_code=422,
+                detail=f"unknown pipeline_type {req.pipeline_type!r}",
+            )
+        try:
+            return create_project(pdir, req.name, req.pipeline_type)
+        except ProjectExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except ValueError as exc:  # un-sluggable name
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @app.post("/api/projects/{project_id}/assets", status_code=201)
+    def upload_asset(
+        project_id: str,
+        kind: str = Form(...),
+        file: UploadFile = File(...),
+    ) -> dict[str, Any]:
+        if read_project_manifest(pdir, project_id) is None:
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        if kind not in ASSET_SUBDIRS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"invalid asset kind {kind!r}; expected one of {list(ASSET_SUBDIRS)}",
+            )
+
+        kind_dir = pdir / project_id / "assets" / kind
+        try:
+            safe_name = sanitize_filename(file.filename or "")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        target = (kind_dir / safe_name).resolve()
+        base = kind_dir.resolve()
+        # Defense in depth: the resolved target must stay inside the kind dir.
+        if target != base and base not in target.parents:
+            raise HTTPException(status_code=400, detail="path traversal detected")
+
+        kind_dir.mkdir(parents=True, exist_ok=True)
+        with open(target, "wb") as out:
+            shutil.copyfileobj(file.file, out)
+
+        return {
+            "project_id": project_id,
+            "kind": kind,
+            "filename": safe_name,
+            "path": str(target.relative_to(pdir.resolve())),
+            "size_bytes": target.stat().st_size,
+        }
 
     @app.get("/api/projects/{project_id}/state")
     def project_state(project_id: str) -> dict[str, Any]:
