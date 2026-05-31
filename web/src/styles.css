@@ -61,8 +61,10 @@ select { cursor: pointer; }
 .empty { color: var(--muted); font-size: 0.88rem; }
 
 /* ── Chat ── */
-.chat-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
+.chat-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; gap: 0.5rem; }
 .chat-header h2 { margin: 0; }
+.chat-header-actions { display: flex; align-items: center; gap: 0.4rem; }
+.thread-select { font-size: 0.76rem; max-width: 160px; padding: 0.25rem 0.4rem; color: var(--muted); }
 .new-chat-btn {
   background: transparent; border: 1px solid var(--line); color: var(--muted);
   padding: 0.2rem 0.5rem; font-size: 1rem; line-height: 1;

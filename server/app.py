@@ -50,6 +50,7 @@ from lib.project import (
     read_project_manifest,
     sanitize_filename,
 )
+from server import threads as thread_store
 from server.agent_runner import AgentRunner, auth_configured
 from server.state import FileStateSource, StateSource
 
@@ -61,6 +62,17 @@ class CreateProjectRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    thread_id: Optional[str] = None
+
+
+class ThreadCreate(BaseModel):
+    title: Optional[str] = None
+
+
+class ThreadSave(BaseModel):
+    messages: list[Any] = []
+    session_id: Optional[str] = None
+    title: Optional[str] = None
 
 
 class ConfirmRequest(BaseModel):
@@ -282,6 +294,12 @@ def create_app(
         if runner is None:
             raise HTTPException(status_code=503, detail="agent runner unavailable")
 
+        # If continuing a stored thread, align the live session to it so the agent
+        # resumes that conversation (its context), not whatever ran last.
+        if body.thread_id:
+            thread = thread_store.get_thread(pdir, project_id, body.thread_id)
+            await runner.switch_session(project_id, thread.get("session_id") if thread else None)
+
         queue: asyncio.Queue = asyncio.Queue()
 
         async def emit(evt: dict[str, Any]) -> None:
@@ -322,6 +340,34 @@ def create_app(
         if runner is None:
             raise HTTPException(status_code=409, detail="no active agent runner")
         return {"resolved": runner.resolve_answer(body.question_id, body.answer)}
+
+    # ── Chat threads (history + revival) ──────────────────────────────────
+    def _require_project(project_id: str) -> None:
+        if read_project_manifest(pdir, project_id) is None and not (pdir / project_id).is_dir():
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+
+    @app.get("/api/projects/{project_id}/threads")
+    def list_threads(project_id: str) -> dict[str, Any]:
+        return {"threads": thread_store.list_threads(pdir, project_id)}
+
+    @app.post("/api/projects/{project_id}/threads", status_code=201)
+    def create_thread(project_id: str, body: ThreadCreate) -> dict[str, Any]:
+        _require_project(project_id)
+        return thread_store.create_thread(pdir, project_id, title=body.title or "New chat")
+
+    @app.get("/api/projects/{project_id}/threads/{thread_id}")
+    def get_thread(project_id: str, thread_id: str) -> dict[str, Any]:
+        rec = thread_store.get_thread(pdir, project_id, thread_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail=f"thread {thread_id!r} not found")
+        return rec
+
+    @app.put("/api/projects/{project_id}/threads/{thread_id}")
+    def save_thread(project_id: str, thread_id: str, body: ThreadSave) -> dict[str, Any]:
+        return thread_store.save_thread(
+            pdir, project_id, thread_id,
+            messages=body.messages, session_id=body.session_id, title=body.title,
+        )
 
     return app
 

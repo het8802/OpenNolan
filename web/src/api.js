@@ -43,13 +43,29 @@ export const answerQuestion = (id, question_id, answer) =>
     body: JSON.stringify({ question_id, answer }),
   }).then(json)
 
+// Chat threads (history + revival)
+export const listThreads = (id) => fetch(`/api/projects/${id}/threads`).then(json)
+export const getThread = (id, tid) => fetch(`/api/projects/${id}/threads/${tid}`).then(json)
+export const createThread = (id, title) =>
+  fetch(`/api/projects/${id}/threads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  }).then(json)
+export const saveThread = (id, tid, body) =>
+  fetch(`/api/projects/${id}/threads/${tid}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(json)
+
 // Stream an agent turn. /chat is POST, so we read the SSE body off fetch
 // (EventSource can't POST). Yields one parsed event object per `data:` line.
-export async function* chatStream(id, message, signal) {
+export async function* chatStream(id, message, thread_id, signal) {
   const resp = await fetch(`/api/projects/${id}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, thread_id }),
     signal,
   })
   if (!resp.ok) {
