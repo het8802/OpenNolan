@@ -43,6 +43,9 @@ export const answerQuestion = (id, question_id, answer) =>
     body: JSON.stringify({ question_id, answer }),
   }).then(json)
 
+export const stopAgent = (id) =>
+  fetch(`/api/projects/${id}/agent/stop`, { method: 'POST' }).then(json)
+
 // Chat threads (history + revival)
 export const listThreads = (id) => fetch(`/api/projects/${id}/threads`).then(json)
 export const getThread = (id, tid) => fetch(`/api/projects/${id}/threads/${tid}`).then(json)

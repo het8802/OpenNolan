@@ -58,7 +58,6 @@ export default function App() {
   const [projects, setProjects] = useState([])
   const [selected, setSelected] = useState(null)
   const [state, setState] = useState(null)
-  const [caps, setCaps] = useState(null)
   const [messages, setMessages] = useState([])
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [pendingQuestion, setPendingQuestion] = useState(null)
@@ -72,12 +71,12 @@ export default function App() {
   const [activeThread, setActiveThread] = useState(null)      // current thread id
   const messagesRef = useRef([])                              // latest messages, for thread persistence
   const sessionIdRef = useRef(null)                           // latest agent session_id
+  const abortRef = useRef(null)                               // aborts the in-flight chat stream (Stop)
   useEffect(() => { messagesRef.current = messages }, [messages])
 
   useEffect(() => {
     api.getPipelines().then(d => setPipelines(d.pipelines || [])).catch(showError)
     refreshProjects()
-    api.getCapabilities().then(setCaps).catch(() => {})
     // Poll the project list so externally/agent-created projects appear live.
     const id = setInterval(refreshProjects, 4000)
     return () => clearInterval(id)
@@ -169,8 +168,10 @@ export default function App() {
         setActiveThread(tid)
       } catch { /* persistence is best-effort; continue the chat regardless */ }
     }
+    const controller = new AbortController()
+    abortRef.current = controller
     try {
-      for await (const evt of api.chatStream(selected, message, tid)) {
+      for await (const evt of api.chatStream(selected, message, tid, controller.signal)) {
         if (evt.type === 'assistant') {
           setMessages(m => {
             const last = m[m.length - 1]
@@ -210,13 +211,26 @@ export default function App() {
         }
       }
     } catch (e) {
-      setMessages(m => [...m, { role: 'error', text: String(e.message || e) }])
+      if (e.name === 'AbortError' || controller.signal.aborted) {
+        setRenderingStage(null)
+        setMessages(m => [...m, { role: 'note', text: '■ Stopped. Your next message resumes this session with its context.' }])
+      } else {
+        setMessages(m => [...m, { role: 'error', text: String(e.message || e) }])
+      }
     } finally {
+      abortRef.current = null
       setBusy(false)
       // Persist the conversation (messages + session_id) so the thread is revivable.
       if (tid) setTimeout(() => persistThread(tid), 0)
     }
   }, [input, selected, busy, renderingStage, activeThread])
+
+  async function stop() {
+    if (!selected) return
+    // Interrupt the agent server-side (context preserved), then stop reading.
+    try { await api.stopAgent(selected) } catch { /* best effort */ }
+    abortRef.current?.abort()
+  }
 
   async function resolveConfirm(approved) {
     if (!pendingConfirm || !selected) return
@@ -233,26 +247,37 @@ export default function App() {
     finally { setPendingQuestion(null) }
   }
 
-  return (
-    <div className="app">
-      <Header
-        pipelines={pipelines} projects={projects} selected={selected}
-        onSelect={id => { setSelected(id); newChat(); refreshThreads(id) }}
-        onCreate={async (name, pipeline) => {
-          try {
+  if (!selected) {
+    return (
+      <div className="app">
+        <Dashboard
+          pipelines={pipelines}
+          projects={projects}
+          onOpen={id => { setSelected(id); newChat(); refreshThreads(id) }}
+          onCreate={async (name, pipeline) => {
             const m = await api.createProject(name, pipeline)
             await refreshProjects()
             setSelected(m.project_id)
             newChat()
+            refreshThreads(m.project_id)
             showOk(`Created "${m.name}"`)
-          } catch (e) { showError(e) }
-        }}
-        caps={caps}
+          }}
+        />
+        {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="app">
+      <ProjectBar
+        state={state} projects={projects} selected={selected}
+        onBack={() => { setSelected(null); clearChat(); setActiveThread(null) }}
       />
       <main className="grid">
         <ChatPanel
           messages={messages} input={input} setInput={setInput}
-          onSend={send} onNewChat={newChat}
+          onSend={send} onNewChat={newChat} onStop={stop}
           busy={busy} disabled={!selected}
           pendingConfirm={pendingConfirm} onConfirm={resolveConfirm}
           pendingQuestion={pendingQuestion} onAnswer={answerQuestion}
@@ -277,33 +302,113 @@ export default function App() {
   )
 }
 
-// ─── Header ──────────────────────────────────────────────────────────────────
+// ─── Dashboard (project tiles + create) ────────────────────────────────────────
 
-function Header({ pipelines, projects, selected, onSelect, onCreate, caps }) {
+function hueOf(s) {
+  let h = 0
+  for (const c of (s || '')) h = (h * 31 + c.charCodeAt(0)) % 360
+  return h
+}
+function fmtDate(s) {
+  try {
+    const d = new Date(s)
+    if (isNaN(d.getTime())) return ''
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  } catch { return '' }
+}
+
+function Dashboard({ pipelines, projects, onOpen, onCreate }) {
+  const [creating, setCreating] = useState(false)
+  const sorted = [...projects].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+  return (
+    <div className="dashboard">
+      <header className="dash-header">
+        <div className="brand"><span className="dot" /> OpenMontage <span className="muted">· Mission Control</span></div>
+        <div className="dash-sub">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
+      </header>
+      <div className="dash-grid">
+        <button className="tile tile-new" onClick={() => setCreating(true)}>
+          <span className="tile-plus">＋</span>
+          <span className="tile-new-label">New project</span>
+        </button>
+        {sorted.map(p => (
+          <button key={p.project_id} className="tile tile-project" onClick={() => onOpen(p.project_id)}>
+            <span className="tile-accent" style={{ background: `hsl(${hueOf(p.pipeline_type)} 52% 60%)` }} />
+            <span className="tile-name">{p.name}</span>
+            <span className="tile-meta">
+              <span className="tile-type">{p.pipeline_type}</span>
+              {p.legacy && <span className="tile-legacy">existing</span>}
+            </span>
+            {p.created_at && <span className="tile-date">{fmtDate(p.created_at)}</span>}
+          </button>
+        ))}
+      </div>
+      {creating && (
+        <CreateModal pipelines={pipelines} onClose={() => setCreating(false)} onCreate={onCreate} />
+      )}
+    </div>
+  )
+}
+
+function CreateModal({ pipelines, onClose, onCreate }) {
   const [name, setName] = useState('')
   const [pipeline, setPipeline] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
   useEffect(() => { if (!pipeline && pipelines.length) setPipeline(pipelines[0].name) }, [pipelines])
-  const runtimes = caps?.composition_runtimes || {}
+
+  async function submit(e) {
+    e.preventDefault()
+    if (!name.trim() || !pipeline || busy) return
+    setBusy(true); setErr(null)
+    try { await onCreate(name.trim(), pipeline); onClose() }
+    catch (e) { setErr(String(e.message || e)); setBusy(false) }
+  }
+
   return (
-    <header className="header">
-      <div className="brand"><span className="dot" /> OpenMontage <span className="muted">· Mission Control</span></div>
-      <div className="controls">
-        <select value={selected || ''} onChange={e => onSelect(e.target.value || null)}>
-          <option value="">Select a project…</option>
-          {projects.map(p => <option key={p.project_id} value={p.project_id}>{p.name} ({p.pipeline_type})</option>)}
-        </select>
-        <form className="new-project" onSubmit={e => { e.preventDefault(); if (name.trim() && pipeline) { onCreate(name.trim(), pipeline); setName('') } }}>
-          <input placeholder="New project name…" value={name} onChange={e => setName(e.target.value)} />
+    <div className="modal-overlay" onClick={onClose}>
+      <form className="modal" onClick={e => e.stopPropagation()} onSubmit={submit}>
+        <h3>New project</h3>
+        <label className="modal-field">
+          <span>Name</span>
+          <input autoFocus placeholder="e.g. launch announcement reel"
+            value={name} onChange={e => setName(e.target.value)} />
+        </label>
+        <label className="modal-field">
+          <span>Pipeline type</span>
           <select value={pipeline} onChange={e => setPipeline(e.target.value)}>
             {pipelines.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
           </select>
-          <button type="submit">Create</button>
-        </form>
+        </label>
+        {err && <div className="modal-err">⚠ {err}</div>}
+        <div className="modal-actions">
+          <button type="button" className="modal-cancel" onClick={onClose}>Cancel</button>
+          <button type="submit" disabled={busy || !name.trim()}>{busy ? 'Creating…' : 'Create'}</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+// ─── Project Bar (slim top bar inside a project) ────────────────────────────────
+
+function ProjectBar({ state, projects, selected, onBack }) {
+  const p = projects.find(x => x.project_id === selected)
+  const name = state?.name || p?.name || selected
+  const type = state?.pipeline_type || p?.pipeline_type || ''
+  const runtime = state?.runtime || null
+  return (
+    <header className="header project-bar">
+      <button className="back-btn" onClick={onBack} title="Back to all projects">← Projects</button>
+      <div className="pb-title">
+        <span className="dot" />
+        <strong>{name}</strong>
+        {type && <span className="pb-type">{type}</span>}
       </div>
       <div className="runtimes">
-        {['remotion', 'hyperframes', 'ffmpeg'].map(r => (
-          <span key={r} className={`chip ${runtimes[r] ? 'on' : 'off'}`}>{r}</span>
-        ))}
+        {runtime
+          ? <span className="chip on runtime-used" title="Composition runtime used by this project">🎬 {runtime}</span>
+          : <span className="chip off" title="No render runtime chosen yet">runtime: not set</span>}
       </div>
     </header>
   )
@@ -311,7 +416,7 @@ function Header({ pipelines, projects, selected, onSelect, onCreate, caps }) {
 
 // ─── Chat Panel ───────────────────────────────────────────────────────────────
 
-function ChatPanel({ messages, input, setInput, onSend, onNewChat, busy, disabled, pendingConfirm, onConfirm, pendingQuestion, onAnswer, renderingStage, toolResults, threads, activeThread, onLoadThread }) {
+function ChatPanel({ messages, input, setInput, onSend, onNewChat, onStop, busy, disabled, pendingConfirm, onConfirm, pendingQuestion, onAnswer, renderingStage, toolResults, threads, activeThread, onLoadThread }) {
   const endRef = useRef(null)
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, pendingConfirm, pendingQuestion, renderingStage])
 
@@ -372,7 +477,9 @@ function ChatPanel({ messages, input, setInput, onSend, onNewChat, busy, disable
           }}
           disabled={disabled || busy}
         />
-        <button type="submit" disabled={disabled || busy || !input.trim()}>{busy ? '…' : 'Send'}</button>
+        {busy
+          ? <button type="button" className="stop-btn" onClick={onStop} title="Stop the agent">■ Stop</button>
+          : <button type="submit" disabled={disabled || !input.trim()}>Send</button>}
       </form>
     </section>
   )
@@ -419,6 +526,7 @@ function QuestionCard({ q, onAnswer }) {
 function Message({ m, onOptionClick, toolResults }) {
   if (m.role === 'user') return <div className="msg user">{m.text}</div>
   if (m.role === 'error') return <div className="msg error">⚠ {m.text}</div>
+  if (m.role === 'note') return <div className="msg note">{m.text}</div>
   if (m.role === 'result') {
     return (
       <div className="msg result">
