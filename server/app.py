@@ -50,6 +50,8 @@ from lib.project import (
     list_projects,
     sanitize_filename,
 )
+from server import activity as activity_mod
+from server import artifacts as artifacts_mod
 from server import threads as thread_store
 from server.agent_runner import AgentRunner, auth_configured
 from server.state import FileStateSource, StateSource
@@ -261,6 +263,37 @@ def create_app(
         if st is None:
             raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
         return st
+
+    @app.get("/api/projects/{project_id}/artifacts")
+    def list_artifacts(project_id: str) -> dict[str, Any]:
+        """Artifact manifest grouped by pipeline stage (+ the cross-cutting
+        decision_log summary). Fetch one artifact's content via /artifacts/{key}."""
+        manifest = artifacts_mod.list_artifacts(pdir, project_id)
+        if manifest is None:
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        return manifest
+
+    @app.get("/api/projects/{project_id}/artifacts/{key}")
+    def get_artifact(project_id: str, key: str) -> dict[str, Any]:
+        """Parsed content of a single artifact, addressed by its key (e.g.
+        scene_plan, decision_log). Key is a safe slug — no path traversal."""
+        try:
+            art = artifacts_mod.read_artifact(pdir, project_id, key)
+        except artifacts_mod.BadArtifactKey as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if art is None:
+            raise HTTPException(status_code=404, detail=f"artifact {key!r} not found")
+        return art
+
+    @app.get("/api/projects/{project_id}/activity")
+    def project_activity(
+        project_id: str, limit: Optional[int] = None, since: Optional[str] = None
+    ) -> dict[str, Any]:
+        """The agent's persisted tool-activity log (files touched, skills run,
+        tools used) plus a synthesized 'how this was made' summary."""
+        if get_project_record(pdir, project_id) is None:
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        return activity_mod.read_activity(pdir, project_id, limit=limit, since=since)
 
     @app.get("/api/capabilities")
     def capabilities() -> dict[str, Any]:
