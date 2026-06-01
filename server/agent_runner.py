@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
+from server.activity import record_tool_use
+
 DEFAULT_MODEL = "claude-sonnet-4-6"          # cheaper than Opus, held the contract in the spike
 DEFAULT_MAX_BUDGET_USD = 5.0                 # SDK-native hard ceiling per session
 DEFAULT_CONFIRM_TIMEOUT_S = 300
@@ -583,8 +585,17 @@ class AgentRunner:
                     await _maybe_await(on_event(evt))
                 if evt["type"] == "assistant":
                     for it in evt["items"]:
-                        if it.get("kind") == "text":
+                        kind = it.get("kind")
+                        if kind == "text":
                             texts.append(it["text"])
+                        elif kind == "tool_use":
+                            # Persist the tool call so the Activity tab can show
+                            # what files/skills/tools the agent touched, after the
+                            # turn and across restarts. Defensive: never raises.
+                            record_tool_use(
+                                self.repo_root / "projects", project_id,
+                                it.get("name", ""), it.get("detail", "") or "",
+                            )
                 elif evt["type"] == "result":
                     result.is_error = bool(evt.get("is_error"))
                     result.num_turns = int(evt.get("num_turns") or 0)
