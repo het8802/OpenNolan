@@ -57,7 +57,7 @@ from server.state import FileStateSource, StateSource
 
 class CreateProjectRequest(BaseModel):
     name: str
-    pipeline_type: str
+    pipeline_type: Optional[str] = None  # None/empty -> the agent picks one
 
 
 class ChatRequest(BaseModel):
@@ -161,14 +161,16 @@ def create_app(
 
     @app.post("/api/projects", status_code=201)
     def new_project(req: CreateProjectRequest) -> dict[str, Any]:
-        # Reject unknown pipelines before scaffolding anything.
-        if req.pipeline_type not in list_pipelines():
+        # pipeline_type is optional: omit it and the agent chooses one on its
+        # first turn. If provided, it must be a known pipeline.
+        pt = (req.pipeline_type or "").strip() or None
+        if pt is not None and pt not in list_pipelines():
             raise HTTPException(
                 status_code=422,
-                detail=f"unknown pipeline_type {req.pipeline_type!r}",
+                detail=f"unknown pipeline_type {pt!r}",
             )
         try:
-            return create_project(pdir, req.name, req.pipeline_type)
+            return create_project(pdir, req.name, pt)
         except ProjectExistsError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
         except ValueError as exc:  # un-sluggable name
