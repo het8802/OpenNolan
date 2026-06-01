@@ -30,22 +30,6 @@ const TOOL_ICON = {
   TodoWrite: '📋',
 }
 
-// Detect whether text contains option patterns like:
-//   A) ...   B) ...   or   1. ...   2. ...
-// Returns an array of {label, text} if found, empty array otherwise.
-function extractOptions(rawText) {
-  if (!rawText) return []
-  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean)
-  const letterOpt = /^([A-D])[).]\s+(.+)$/
-  const numOpt = /^(\d+)[).]\s+(.+)$/
-  let opts = []
-  for (const l of lines) {
-    const lm = l.match(letterOpt) || l.match(numOpt)
-    if (lm) opts.push({ label: lm[1], text: lm[2] })
-  }
-  return opts.length >= 2 ? opts : []
-}
-
 // Detect render-in-progress from a tool_use event
 function isRenderCommand(item) {
   if (item.kind !== 'tool_use' || item.name !== 'Bash') return false
@@ -331,19 +315,28 @@ function Dashboard({ pipelines, projects, onOpen, onCreate }) {
           <span className="tile-plus">＋</span>
           <span className="tile-new-label">New project</span>
         </button>
-        {sorted.map(p => (
-          <button key={p.project_id} className="tile tile-project" onClick={() => onOpen(p.project_id)}>
-            <span className="tile-accent" style={{ background: `hsl(${hueOf(p.pipeline_type)} 52% 60%)` }} />
-            <span className="tile-name">{p.name}</span>
-            <span className="tile-meta">
-              {p.pipeline_type
-                ? <span className="tile-type">{p.pipeline_type}</span>
-                : <span className="tile-type unknown">unknown type</span>}
-              {p.legacy && <span className="tile-legacy">existing</span>}
-            </span>
-            {p.created_at && <span className="tile-date">{fmtDate(p.created_at)}</span>}
-          </button>
-        ))}
+        {sorted.map(p => {
+          const h = hueOf(p.pipeline_type || p.project_id)
+          const cover = `linear-gradient(135deg, hsl(${h} 58% 63%), hsl(${(h + 42) % 360} 62% 72%))`
+          const mono = (p.name || p.project_id || '?').trim().charAt(0).toUpperCase()
+          return (
+            <button key={p.project_id} className="tile tile-project" onClick={() => onOpen(p.project_id)}>
+              <span className="tile-cover" style={{ background: cover }}>
+                <span className="tile-mono">{mono}</span>
+              </span>
+              <span className="tile-body">
+                <span className="tile-name">{p.name}</span>
+                <span className="tile-meta">
+                  {p.pipeline_type
+                    ? <span className="tile-type">{p.pipeline_type}</span>
+                    : <span className="tile-type unknown">{p.legacy ? 'unknown type' : 'agent picks'}</span>}
+                  {p.legacy && <span className="tile-legacy">existing</span>}
+                </span>
+                {p.created_at && <span className="tile-date">{fmtDate(p.created_at)}</span>}
+              </span>
+            </button>
+          )
+        })}
       </div>
       {creating && (
         <CreateModal pipelines={pipelines} onClose={() => setCreating(false)} onCreate={onCreate} />
@@ -354,14 +347,13 @@ function Dashboard({ pipelines, projects, onOpen, onCreate }) {
 
 function CreateModal({ pipelines, onClose, onCreate }) {
   const [name, setName] = useState('')
-  const [pipeline, setPipeline] = useState('')
+  const [pipeline, setPipeline] = useState('')   // '' = let the agent decide
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
-  useEffect(() => { if (!pipeline && pipelines.length) setPipeline(pipelines[0].name) }, [pipelines])
 
   async function submit(e) {
     e.preventDefault()
-    if (!name.trim() || !pipeline || busy) return
+    if (!name.trim() || busy) return
     setBusy(true); setErr(null)
     try { await onCreate(name.trim(), pipeline); onClose() }
     catch (e) { setErr(String(e.message || e)); setBusy(false) }
@@ -379,9 +371,13 @@ function CreateModal({ pipelines, onClose, onCreate }) {
         <label className="modal-field">
           <span>Pipeline type</span>
           <select value={pipeline} onChange={e => setPipeline(e.target.value)}>
+            <option value="">✨ Let the agent decide</option>
             {pipelines.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
           </select>
         </label>
+        <div className="modal-hint">
+          {pipeline ? `Stages locked to the ${pipeline} pipeline.` : 'The agent reads your request and picks the best-fit pipeline.'}
+        </div>
         {err && <div className="modal-err">⚠ {err}</div>}
         <div className="modal-actions">
           <button type="button" className="modal-cancel" onClick={onClose}>Cancel</button>
@@ -420,7 +416,29 @@ function ProjectBar({ state, projects, selected, onBack }) {
 
 function ChatPanel({ messages, input, setInput, onSend, onNewChat, onStop, busy, disabled, pendingConfirm, onConfirm, pendingQuestion, onAnswer, renderingStage, toolResults, threads, activeThread, onLoadThread }) {
   const endRef = useRef(null)
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, pendingConfirm, pendingQuestion, renderingStage])
+  const msgsRef = useRef(null)
+  const stickRef = useRef(true)        // auto-scroll only while parked at the bottom
+  const taRef = useRef(null)
+
+  // Auto-scroll to the newest message, but ONLY if the user hasn't scrolled up
+  // to read history. Scrolling up parks them there until they return to bottom.
+  useEffect(() => {
+    if (stickRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, pendingConfirm, pendingQuestion, renderingStage])
+
+  function onMessagesScroll() {
+    const el = msgsRef.current
+    if (!el) return
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  }
+
+  // Grow the composer with its content, up to ~10 lines, then scroll inside it.
+  useEffect(() => {
+    const el = taRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 220) + 'px'
+  }, [input])
 
   return (
     <section className="panel chat">
@@ -444,11 +462,11 @@ function ChatPanel({ messages, input, setInput, onSend, onNewChat, onStop, busy,
           <button className="new-chat-btn" onClick={onNewChat} title="New chat" disabled={busy}>＋</button>
         </div>
       </div>
-      <div className="messages">
+      <div className="messages" ref={msgsRef} onScroll={onMessagesScroll}>
         {messages.length === 0 && (
           <p className="empty">{disabled ? 'Select or create a project to start.' : 'Tell the agent what to make.'}</p>
         )}
-        {messages.map((m, i) => <Message key={i} m={m} onOptionClick={text => onSend(text)} toolResults={toolResults} />)}
+        {messages.map((m, i) => <Message key={i} m={m} toolResults={toolResults} />)}
         {renderingStage && <RenderProgress />}
         {pendingConfirm && (
           <div className="confirm-card">
@@ -466,6 +484,7 @@ function ChatPanel({ messages, input, setInput, onSend, onNewChat, onStop, busy,
       {pendingQuestion && <QuestionCard q={pendingQuestion} onAnswer={onAnswer} />}
       <form className="composer" onSubmit={e => { e.preventDefault(); onSend() }}>
         <textarea
+          ref={taRef}
           className="composer-input"
           rows={1}
           placeholder={busy ? 'Agent is working…' : 'Message the agent…  (Enter to send, Shift+Enter for newline)'}
@@ -525,7 +544,7 @@ function QuestionCard({ q, onAnswer }) {
 
 // ─── Message ─────────────────────────────────────────────────────────────────
 
-function Message({ m, onOptionClick, toolResults }) {
+function Message({ m, toolResults }) {
   if (m.role === 'user') return <div className="msg user">{m.text}</div>
   if (m.role === 'error') return <div className="msg error">⚠ {m.text}</div>
   if (m.role === 'note') return <div className="msg note">{m.text}</div>
@@ -538,33 +557,31 @@ function Message({ m, onOptionClick, toolResults }) {
       </div>
     )
   }
-  // assistant or assistant_stream
-  const textBlocks = (m.items || []).filter(it => it.kind === 'text')
-  // tool_use chips are interactive; standalone tool_result items are paired into
-  // their tool_use via toolResults, so we don't render them separately.
-  const activityBlocks = (m.items || []).filter(it => it.kind === 'tool_use' || it.kind === 'thinking')
-  const fullText = textBlocks.map(it => it.text).join('')
-  const options = extractOptions(fullText)
+  // assistant / assistant_stream — render items in the ORDER they happened so
+  // tool calls and text stay interleaved (text → tool → text → …), not all
+  // tool calls hoisted above all text. Consecutive text items are merged so a
+  // paragraph split across stream chunks renders as one markdown block.
+  const items = m.items || []
+  const nodes = []
+  let buf = []
+  const flush = (key) => {
+    if (!buf.length) return
+    nodes.push(
+      <div key={`t-${key}`} className="md-body"
+        dangerouslySetInnerHTML={{ __html: marked.parse(buf.join('')) }} />
+    )
+    buf = []
+  }
+  items.forEach((it, i) => {
+    if (it.kind === 'text') { buf.push(it.text); return }
+    if (it.kind === 'tool_use' || it.kind === 'thinking') {
+      flush(i)
+      nodes.push(<ActivityChip key={`a-${i}`} item={it} result={it.id ? toolResults?.[it.id] : null} />)
+    }
+  })
+  flush('end')
 
-  return (
-    <div className="msg assistant">
-      {activityBlocks.map((it, i) => (
-        <ActivityChip key={i} item={it} result={it.id ? toolResults?.[it.id] : null} />
-      ))}
-      {fullText && (
-        <div className="md-body" dangerouslySetInnerHTML={{ __html: marked.parse(fullText) }} />
-      )}
-      {options.length > 0 && (
-        <div className="options">
-          {options.map((o, i) => (
-            <button key={i} className="option-btn" onClick={() => onOptionClick(`${o.label}) ${o.text}`)}>
-              {o.label}) {o.text}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+  return <div className="msg assistant">{nodes}</div>
 }
 
 function formatToolInput(item) {
