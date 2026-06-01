@@ -48,14 +48,15 @@ _OP_BY_TOOL: dict[str, str] = {
 # Tool names we never log — internal plumbing, not "activity" the user cares about.
 _SKIP_TOOLS = ("mcp__mc__",)  # the in-process ask_user question tool
 
-# Bash invocations of OpenMontage Python tools/scripts: `python -m tools.elevenlabs_tts`,
-# `python scripts/update_stage.py`, `tools/foo.py`. Used to surface "tools/providers used".
-_BASH_TOOL_RES = [
-    re.compile(r"python[0-9.]*\s+-m\s+tools\.([a-zA-Z0-9_]+)"),
-    re.compile(r"\btools/([a-zA-Z0-9_]+)\.py"),
-    re.compile(r"python[0-9.]*\s+-m\s+scripts\.([a-zA-Z0-9_]+)"),
-    re.compile(r"\bscripts/([a-zA-Z0-9_]+)\.py"),
-]
+# Shell builtins / file viewers. A Bash command whose program is one of these is
+# NOT a tool run, so `cat scripts/gen_vo.py` doesn't masquerade as running gen_vo.
+_BASH_VIEWERS = frozenset({
+    "cat", "ls", "grep", "sed", "head", "tail", "less", "more", "echo", "printf",
+    "which", "mkdir", "rm", "cp", "mv", "touch", "find", "wc", "cd", "pip", "pip3",
+    "export", "sleep", "chmod", "open", "test", "true", "false", "git", "#",
+})
+# Render/encode/build tools invoked directly or via npx.
+_DIRECT_TOOLS = frozenset({"remotion", "ffmpeg", "ffprobe", "node"})
 
 _DEFAULT_MAX_EVENTS = 5000  # bound the read so a long project doesn't blow up a poll
 
@@ -90,11 +91,45 @@ def _category_for(tool: str, target: str, project_id: str) -> str:
 
 
 def _bash_tool_slug(target: str) -> Optional[str]:
-    """Extract the OpenMontage tool/script name a Bash command runs, if any."""
-    for rx in _BASH_TOOL_RES:
-        m = rx.search(target or "")
-        if m:
-            return m.group(1)
+    """The OpenMontage tool/provider a Bash command actually RUNS, if any: a
+    python tool/script (gen_vo, get_broll, update_stage, tools.elevenlabs_tts)
+    or a render/encode tool (remotion, ffmpeg). Returns None for plain shell
+    (ls/cat/mkdir) and inline `python -c`, so viewers don't look like tool runs."""
+    cmd = (target or "").strip()
+    if not cmd:
+        return None
+    for seg in re.split(r"&&|\|\||;|\|", cmd):
+        slug = _segment_tool(seg.strip())
+        if slug:
+            return slug
+    return None
+
+
+def _segment_tool(seg: str) -> Optional[str]:
+    if not seg:
+        return None
+    toks = seg.split()
+    i = 0
+    while i < len(toks) and re.match(r"^\w+=", toks[i]):  # skip VAR=val prefixes
+        i += 1
+    if i >= len(toks):
+        return None
+    prog = toks[i].split("/")[-1]
+    if prog in _BASH_VIEWERS:
+        return None
+    m = re.search(r"-m\s+(?:tools|scripts)\.([a-zA-Z0-9_]+)", seg)
+    if m:
+        return m.group(1)
+    if prog.startswith("python") or prog.startswith("py"):
+        if re.search(r"(^|\s)-c(\s|$)", seg):
+            return None  # inline snippet, not a tool
+        m = re.search(r"([a-zA-Z0-9_]+)\.py\b", seg)
+        return m.group(1) if m else None
+    if prog == "npx":
+        m = re.search(r"npx\s+(?:--[\w-]+\s+)*([a-zA-Z0-9_-]+)", seg)
+        return m.group(1) if m else None
+    if prog in _DIRECT_TOOLS:
+        return prog
     return None
 
 
@@ -106,7 +141,30 @@ def make_event(tool: str, target: str, project_id: str, *, ts: Optional[str] = N
         "op": _op_for(tool),
         "category": _category_for(tool, target, project_id),
         "target": target or "",
+        "label": _label_for(tool, target),
     }
+
+
+def _label_for(tool: str, target: str) -> str:
+    """A short, clean display name for the Files list / chips (the raw target is
+    often a long shell command or absolute path)."""
+    t = target or ""
+    if tool == "Bash":
+        slug = _bash_tool_slug(t)
+        if slug:
+            return slug
+        seg = re.split(r"&&|\|\||;", t, 1)[0].strip()
+        toks = seg.split()
+        i = 0
+        while i < len(toks) and re.match(r"^\w+=", toks[i]):
+            i += 1
+        prog = toks[i].split("/")[-1] if i < len(toks) else t
+        return (prog or t)[:40]
+    if tool in ("WebFetch", "WebSearch", "Skill"):
+        return t or tool
+    if "/" in t:
+        return t.split("/")[-1] or t
+    return t or tool
 
 
 def record_tool_use(
@@ -203,22 +261,19 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _skill_label(tool: str, target: str) -> Optional[str]:
-    """A readable skill name from a Skill call (target is the skill name) or a
-    Read of a skills/.../SKILL.md path (use the containing dir name)."""
+    """A readable skill name. For a Skill call the target IS the skill name; for
+    a Read of a skill file, use the file's own name (e.g. research-director from
+    skills/pipelines/<p>/research-director.md), falling back to its dir for a
+    bare SKILL.md (e.g. scene-planner from skills/scene-planner/SKILL.md)."""
     if tool == "Skill":
         return target or None
-    low = target.lower()
+    low = (target or "").lower()
     if "skills/" in low:
-        parts = [p for p in target.split("/") if p]
-        # the segment after the last 'skills' dir is the skill's folder name
-        try:
-            idx = max(i for i, p in enumerate(parts) if p.lower() == "skills")
-            if idx + 1 < len(parts):
-                nxt = parts[idx + 1]
-                return nxt if not nxt.lower().endswith(".md") else Path(target).parent.name
-        except ValueError:
-            pass
-        return Path(target).parent.name or Path(target).stem
+        p = Path(target)
+        if p.suffix.lower() == ".md":
+            stem = p.stem
+            return p.parent.name if stem.lower() in ("skill", "readme", "index") else stem
+        return p.stem or p.parent.name
     return None
 
 
@@ -236,7 +291,12 @@ def read_activity(
     ``limit`` keeps the most recent N (applied after ``since``). The summary is
     always computed over the returned events.
     """
-    events = _read_lines(activity_path(projects_dir, project_id), max_events)
+    raw = _read_lines(activity_path(projects_dir, project_id), max_events)
+    # Re-derive op/category/label from (tool, target) on read so categorization
+    # improvements apply retroactively to logs written by older code — no file
+    # migration needed. ts is preserved from the stored line.
+    events = [make_event(e.get("tool", ""), e.get("target", "") or "", project_id, ts=e.get("ts"))
+              for e in raw]
     if since:
         events = [e for e in events if (e.get("ts") or "") > since]
     if limit and len(events) > limit:

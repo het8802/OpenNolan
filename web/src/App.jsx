@@ -58,6 +58,14 @@ export default function App() {
   const abortRef = useRef(null)                               // aborts the in-flight chat stream (Stop)
   useEffect(() => { messagesRef.current = messages }, [messages])
 
+  // Persist the active thread continuously (debounced), not just at turn end —
+  // so reloading mid-turn (a full pipeline can run for minutes) keeps the chat.
+  useEffect(() => {
+    if (!selected || !activeThread || messages.length === 0) return
+    const t = setTimeout(() => persistThread(activeThread), 700)
+    return () => clearTimeout(t)
+  }, [messages, selected, activeThread])
+
   useEffect(() => {
     api.getPipelines().then(d => setPipelines(d.pipelines || [])).catch(showError)
     refreshProjects()
@@ -111,15 +119,29 @@ export default function App() {
     setActiveThread(null)
   }
 
-  async function loadThread(tid) {
-    if (!selected || !tid) return
+  async function loadThread(tid, projectId = selected) {
+    if (!projectId || !tid) return
     try {
-      const rec = await api.getThread(selected, tid)
+      const rec = await api.getThread(projectId, tid)
       clearChat()
       setMessages(rec.messages || [])
       sessionIdRef.current = rec.session_id || null
       setActiveThread(tid)
     } catch (e) { showError(e) }
+  }
+
+  // Open a project and revive its most recent conversation, so a reload lands
+  // you back in the chat you were in (not a blank one).
+  async function openProject(id) {
+    setSelected(id)
+    clearChat()
+    setActiveThread(null)
+    try {
+      const d = await api.listThreads(id)              // newest-updated first
+      setThreads(d.threads || [])
+      const latest = (d.threads || []).find(t => (t.message_count || 0) > 0)
+      if (latest) loadThread(latest.thread_id, id)
+    } catch { setThreads([]) }
   }
 
   function deriveTitle(msgs) {
@@ -237,7 +259,7 @@ export default function App() {
         <Dashboard
           pipelines={pipelines}
           projects={projects}
-          onOpen={id => { setSelected(id); newChat(); refreshThreads(id) }}
+          onOpen={openProject}
           onCreate={async (name, pipeline) => {
             const m = await api.createProject(name, pipeline)
             await refreshProjects()
@@ -862,11 +884,13 @@ function HiwmRow({ label, chips }) {
 }
 
 function FilesList({ events, artifacts, onOpen }) {
-  // Dedup by (category, target); aggregate ops + count + last-touched.
+  // Dedup by (category, label); aggregate ops + count + last-touched. The label
+  // is the clean server-side display name (tool slug, file basename, skill name).
   const byKey = new Map()
   for (const e of events) {
-    const key = `${e.category}|${e.target}`
-    const cur = byKey.get(key) || { target: e.target, category: e.category, ops: new Set(), count: 0, last: '' }
+    const label = e.label || (e.target || '').split('/').pop() || e.target || e.tool
+    const key = `${e.category}|${label}`
+    const cur = byKey.get(key) || { label, target: e.target, category: e.category, ops: new Set(), count: 0, last: '' }
     cur.ops.add(e.op)
     cur.count += 1
     if ((e.ts || '') > cur.last) cur.last = e.ts || ''
@@ -896,13 +920,12 @@ function FilesList({ events, artifacts, onOpen }) {
             <div className="files-group-head">{label} <span className="muted">({rows.length})</span></div>
             {rows.map((r, i) => {
               const ak = artKeyFor(r.target)
-              const base = (r.target || '').split('/').pop() || r.target
               return (
                 <div key={i} className={`file-row ${ak ? 'clickable' : ''}`} onClick={ak ? () => onOpen(ak) : undefined} title={r.target}>
                   <span className="file-ops">
                     {[...r.ops].map(op => <span key={op} className={`op-badge ${op}`}>{OP_LABEL[op] || op}</span>)}
                   </span>
-                  <span className="file-name">{base}</span>
+                  <span className="file-name">{r.label}</span>
                   {r.count > 1 && <span className="file-count">×{r.count}</span>}
                   {ak && <span className="file-open">view →</span>}
                 </div>
@@ -924,7 +947,7 @@ function TimelineList({ events }) {
         <div key={i} className="tl-row">
           <span className="tl-time">{fmtTime(e.ts)}</span>
           <span className={`op-badge ${e.op}`}>{OP_LABEL[e.op] || e.op}</span>
-          <span className="tl-tool">{e.tool}</span>
+          <span className="tl-tool">{e.label || e.tool}</span>
           <span className="tl-target" title={e.target}>{e.target}</span>
         </div>
       ))}
