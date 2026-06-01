@@ -115,6 +115,12 @@ def list_artifacts(projects_dir: Path | str, project_id: str) -> Optional[dict[s
             entry["review"] = cp.get("review")
             entry["style_playbook"] = cp.get("style_playbook")
             artifacts = cp.get("artifacts")
+            # Surface the style/playbook even when it lives inside the scene_plan
+            # artifact rather than the checkpoint's top-level field.
+            if not entry["style_playbook"] and isinstance(artifacts, dict):
+                spc = artifacts.get("scene_plan")
+                if isinstance(spc, dict) and spc.get("style_playbook"):
+                    entry["style_playbook"] = spc["style_playbook"]
             if isinstance(artifacts, dict):
                 for key, payload in artifacts.items():
                     if key == "decision_log":

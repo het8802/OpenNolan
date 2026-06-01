@@ -15,6 +15,20 @@ export const getCapabilities = () => fetch('/api/capabilities').then(json)
 export const listAssets = (id) => fetch(`/api/projects/${id}/assets`).then(json)
 export const fileUrl = (id, path) => `/api/projects/${id}/file?path=${encodeURIComponent(path)}`
 
+// Artifacts: stage-grouped manifest + a single artifact's parsed content.
+export const getArtifacts = (id) => fetch(`/api/projects/${id}/artifacts`).then(json)
+export const getArtifact = (id, key) =>
+  fetch(`/api/projects/${id}/artifacts/${encodeURIComponent(key)}`).then(json)
+
+// Activity log (files touched / skills / tools) + synthesized summary.
+export const getActivity = (id, { limit, since } = {}) => {
+  const q = new URLSearchParams()
+  if (limit) q.set('limit', limit)
+  if (since) q.set('since', since)
+  const qs = q.toString()
+  return fetch(`/api/projects/${id}/activity${qs ? `?${qs}` : ''}`).then(json)
+}
+
 export const createProject = (name, pipeline_type) =>
   fetch('/api/projects', {
     method: 'POST',

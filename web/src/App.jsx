@@ -268,7 +268,7 @@ export default function App() {
           renderingStage={renderingStage} toolResults={toolResults}
           threads={threads} activeThread={activeThread} onLoadThread={loadThread}
         />
-        <Pipeline state={state} selected={selected} />
+        <WorkPanel state={state} selected={selected} />
         <AssetPanel
           selected={selected}
           uploadTick={uploadTick}
@@ -633,34 +633,566 @@ function ActivityChip({ item, result }) {
   )
 }
 
-// ─── Pipeline ─────────────────────────────────────────────────────────────────
+// ─── Work Panel (Pipeline | Activity tabs) ──────────────────────────────────────
 
-function Pipeline({ state, selected }) {
+const ACTIVITY_GROUPS = [
+  ['project', 'Project files'],
+  ['skill', 'Skills'],
+  ['pipeline_def', 'Pipeline def'],
+  ['tool', 'Tools'],
+  ['web', 'Web'],
+  ['framework', 'Framework'],
+  ['other', 'Other'],
+]
+const OP_LABEL = { read: 'read', write: 'wrote', edit: 'edited', exec: 'ran', search: 'searched', fetch: 'fetched', skill: 'skill', tool: 'tool', todo: 'todo' }
+
+function prettyKey(k) {
+  return String(k).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+function fmtBytes(n) {
+  if (!n) return ''
+  if (n < 1024) return n + ' B'
+  if (n < 1048576) return (n / 1024).toFixed(0) + ' KB'
+  return (n / 1048576).toFixed(1) + ' MB'
+}
+function fmtDateTime(s) {
+  try {
+    const d = new Date(s)
+    if (isNaN(d.getTime())) return ''
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  } catch { return '' }
+}
+function fmtTime(s) {
+  try {
+    const d = new Date(s)
+    if (isNaN(d.getTime())) return ''
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  } catch { return '' }
+}
+
+function WorkPanel({ state, selected }) {
+  const [tab, setTab] = useState('pipeline')
+  const [artifacts, setArtifacts] = useState(null)
+  const [activity, setActivity] = useState(null)
+  const [openArtifact, setOpenArtifact] = useState(null)  // artifact key to inspect
+
+  // Artifacts drive the Pipeline tab; poll always so the spine stays live.
+  useEffect(() => {
+    if (!selected) { setArtifacts(null); return }
+    let alive = true
+    const tick = () => api.getArtifacts(selected).then(d => alive && setArtifacts(d)).catch(() => {})
+    tick()
+    const id = setInterval(tick, 2000)
+    return () => { alive = false; clearInterval(id) }
+  }, [selected])
+
+  // Activity is heavier; only poll it while its tab is showing.
+  useEffect(() => {
+    if (!selected || tab !== 'activity') return
+    let alive = true
+    const tick = () => api.getActivity(selected).then(d => alive && setActivity(d)).catch(() => {})
+    tick()
+    const id = setInterval(tick, 2000)
+    return () => { alive = false; clearInterval(id) }
+  }, [selected, tab])
+
   return (
-    <section className="panel pipeline">
-      <h2>Pipeline</h2>
+    <section className="panel work">
+      <div className="work-tabs">
+        <button className={`work-tab ${tab === 'pipeline' ? 'active' : ''}`} onClick={() => setTab('pipeline')}>Pipeline</button>
+        <button className={`work-tab ${tab === 'activity' ? 'active' : ''}`} onClick={() => setTab('activity')}>Activity</button>
+      </div>
       {!selected && <p className="empty">No project selected.</p>}
-      {selected && state && (
-        <>
-          <div className="pl-head">
-            <strong>{state.name}</strong>
-            <span className="muted"> · {state.pipeline_type || 'unknown'}</span>
-          </div>
-          <ol className="stepper">
-            {(state.stages || []).map(s => (
-              <li key={s.stage} className={`step ${s.status}`}>
-                <span className="bullet" />
-                <span className="step-name">{s.stage}</span>
-                <span className="step-status">{STATUS_LABEL[s.status] || s.status}</span>
-                {s.status === 'in_progress' && <span className="pulse" />}
-              </li>
-            ))}
-          </ol>
-          {state.next_stage && <div className="next">Next: <strong>{state.next_stage}</strong></div>}
-          {(!state.stages || state.stages.length === 0) && <p className="empty">No stages run yet.</p>}
-        </>
+      {selected && tab === 'pipeline' && (
+        <PipelineTab state={state} artifacts={artifacts} onOpen={setOpenArtifact} />
+      )}
+      {selected && tab === 'activity' && (
+        <ActivityTab activity={activity} artifacts={artifacts} state={state} onOpen={setOpenArtifact} />
+      )}
+      {openArtifact && (
+        <ArtifactModal selected={selected} artKey={openArtifact} onClose={() => setOpenArtifact(null)} />
       )}
     </section>
+  )
+}
+
+// ─── Pipeline tab (stepper, each stage expands to its artifacts) ────────────────
+
+function PipelineTab({ state, artifacts, onOpen }) {
+  // Prefer the artifact manifest's stages (status + produced artifacts + nested
+  // data); fall back to /state's stages before the manifest loads.
+  const stages = artifacts?.stages || state?.stages || []
+  const name = state?.name || artifacts?.project_id
+  const ptype = state?.pipeline_type || artifacts?.pipeline_type
+  const extras = artifacts?.extra_artifacts || []
+  const dlog = artifacts?.decision_log
+
+  return (
+    <div className="work-scroll">
+      <div className="pl-head">
+        <strong>{name}</strong>
+        <span className="muted"> · {ptype || 'agent picks'}</span>
+      </div>
+      <ol className="stepper">
+        {stages.map(s => <StageRow key={s.stage} s={s} onOpen={onOpen} />)}
+      </ol>
+      {stages.length === 0 && <p className="empty">No stages run yet.</p>}
+
+      {(extras.length > 0 || dlog?.present) && (
+        <div className="pl-extra">
+          <div className="pl-extra-label">Cross-cutting</div>
+          {dlog?.present && (
+            <button className="art-chip" onClick={() => onOpen('decision_log')}>
+              <span className="art-icon">⚖</span>
+              <span className="art-name">Decision log</span>
+              <span className="art-size">{dlog.decision_count} decision{dlog.decision_count === 1 ? '' : 's'}</span>
+            </button>
+          )}
+          {extras.map(a => (
+            <button key={a.key} className="art-chip" onClick={() => onOpen(a.key)}>
+              <span className="art-icon">{'{}'}</span>
+              <span className="art-name">{prettyKey(a.key)}</span>
+              <span className="art-size">{fmtBytes(a.size_bytes)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {state?.next_stage && <div className="next">Next: <strong>{state.next_stage}</strong></div>}
+    </div>
+  )
+}
+
+function StageRow({ s, onOpen }) {
+  const [open, setOpen] = useState(false)
+  const arts = s.artifacts || []
+  const hasDetail = arts.length > 0 || s.review || s.style_playbook || s.timestamp || s.human_approval_required
+  return (
+    <li className={`step ${s.status} ${open ? 'open' : ''}`}>
+      <button className="step-head" onClick={() => hasDetail && setOpen(o => !o)}>
+        <span className="bullet" />
+        <span className="step-name">{s.stage}</span>
+        {arts.length > 0 && <span className="step-count">{arts.length}</span>}
+        <span className="step-status">{STATUS_LABEL[s.status] || s.status}</span>
+        {s.status === 'in_progress' && <span className="pulse" />}
+        {hasDetail && <span className="step-caret">{open ? '▾' : '▸'}</span>}
+      </button>
+      {open && (
+        <div className="step-detail">
+          {s.timestamp && <div className="sd-meta">Updated {fmtDateTime(s.timestamp)}</div>}
+          {s.human_approval_required && (
+            <div className="sd-meta">{s.human_approved ? '✓ approved' : '⏳ awaiting approval'}</div>
+          )}
+          {s.style_playbook && <div className="sd-meta">Style · <strong>{s.style_playbook}</strong></div>}
+          {arts.length > 0 && (
+            <div className="sd-arts">
+              {arts.map(a => (
+                <button key={a.key} className={`art-chip ${a.canonical ? 'canonical' : ''}`} onClick={() => onOpen(a.key)}>
+                  <span className="art-icon">{'{}'}</span>
+                  <span className="art-name">{prettyKey(a.key)}</span>
+                  <span className="art-size">{fmtBytes(a.size_bytes)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {s.review && (
+            <div className="sd-review">
+              <div className="sd-review-label">review</div>
+              <GenericValue value={s.review} />
+            </div>
+          )}
+        </div>
+      )}
+    </li>
+  )
+}
+
+// ─── Activity tab (How-it-was-made + Files / Timeline) ──────────────────────────
+
+function ActivityTab({ activity, artifacts, state, onOpen }) {
+  const [view, setView] = useState('files')
+  const events = activity?.events || []
+  const summary = activity?.summary || {}
+  return (
+    <div className="work-scroll">
+      <HowItWasMade summary={summary} artifacts={artifacts} state={state} />
+      <div className="act-toggle">
+        <button className={view === 'files' ? 'active' : ''} onClick={() => setView('files')}>Files</button>
+        <button className={view === 'timeline' ? 'active' : ''} onClick={() => setView('timeline')}>Timeline</button>
+      </div>
+      {!activity && <p className="empty">Loading activity…</p>}
+      {activity && events.length === 0 && (
+        <p className="empty">No agent activity recorded yet. Run a turn and the files, skills, and tools the agent touches show up here.</p>
+      )}
+      {events.length > 0 && (view === 'files'
+        ? <FilesList events={events} artifacts={artifacts} onOpen={onOpen} />
+        : <TimelineList events={events} />)}
+    </div>
+  )
+}
+
+function HowItWasMade({ summary, artifacts, state }) {
+  const pipeline = state?.pipeline_type || artifacts?.pipeline_type
+  const runtime = state?.runtime
+  const style = (artifacts?.stages || []).map(s => s.style_playbook).find(Boolean)
+  const skills = summary?.skills || []
+  const tools = summary?.tools || []
+  const pdefs = summary?.pipeline_defs || []
+  return (
+    <div className="hiwm">
+      <div className="hiwm-title">How this was made</div>
+      <div className="hiwm-rows">
+        <HiwmRow label="Pipeline" chips={[pipeline || 'agent picks', ...pdefs.filter(p => p !== pipeline)]} />
+        {style && <HiwmRow label="Style" chips={[style]} />}
+        {runtime && <HiwmRow label="Runtime" chips={[runtime]} />}
+        {skills.length > 0 && <HiwmRow label="Skills" chips={skills} />}
+        {tools.length > 0 && <HiwmRow label="Tools" chips={tools} />}
+      </div>
+    </div>
+  )
+}
+function HiwmRow({ label, chips }) {
+  const list = (chips || []).filter(Boolean)
+  if (list.length === 0) return null
+  return (
+    <div className="hiwm-row">
+      <span className="hiwm-key">{label}</span>
+      <span className="hiwm-chips">{list.map((c, i) => <span key={i} className="hiwm-chip">{c}</span>)}</span>
+    </div>
+  )
+}
+
+function FilesList({ events, artifacts, onOpen }) {
+  // Dedup by (category, target); aggregate ops + count + last-touched.
+  const byKey = new Map()
+  for (const e of events) {
+    const key = `${e.category}|${e.target}`
+    const cur = byKey.get(key) || { target: e.target, category: e.category, ops: new Set(), count: 0, last: '' }
+    cur.ops.add(e.op)
+    cur.count += 1
+    if ((e.ts || '') > cur.last) cur.last = e.ts || ''
+    byKey.set(key, cur)
+  }
+  // Which targets are inspectable artifacts (open the modal on click).
+  const artKeys = new Set()
+  ;(artifacts?.stages || []).forEach(s => (s.artifacts || []).forEach(a => artKeys.add(a.key)))
+  ;(artifacts?.extra_artifacts || []).forEach(a => artKeys.add(a.key))
+  if (artifacts?.decision_log?.present) artKeys.add('decision_log')
+  const artKeyFor = (target) => {
+    const base = (target || '').split('/').pop().replace(/\.json$/, '')
+    return artKeys.has(base) ? base : null
+  }
+
+  const grouped = {}
+  for (const row of byKey.values()) (grouped[row.category] ||= []).push(row)
+  for (const k in grouped) grouped[k].sort((a, b) => (b.last || '').localeCompare(a.last || ''))
+
+  return (
+    <div className="files-list">
+      {ACTIVITY_GROUPS.map(([cat, label]) => {
+        const rows = grouped[cat]
+        if (!rows || rows.length === 0) return null
+        return (
+          <div key={cat} className="files-group">
+            <div className="files-group-head">{label} <span className="muted">({rows.length})</span></div>
+            {rows.map((r, i) => {
+              const ak = artKeyFor(r.target)
+              const base = (r.target || '').split('/').pop() || r.target
+              return (
+                <div key={i} className={`file-row ${ak ? 'clickable' : ''}`} onClick={ak ? () => onOpen(ak) : undefined} title={r.target}>
+                  <span className="file-ops">
+                    {[...r.ops].map(op => <span key={op} className={`op-badge ${op}`}>{OP_LABEL[op] || op}</span>)}
+                  </span>
+                  <span className="file-name">{base}</span>
+                  {r.count > 1 && <span className="file-count">×{r.count}</span>}
+                  {ak && <span className="file-open">view →</span>}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function TimelineList({ events }) {
+  // Newest first — most recent activity at the top.
+  const rows = [...events].reverse()
+  return (
+    <div className="timeline">
+      {rows.map((e, i) => (
+        <div key={i} className="tl-row">
+          <span className="tl-time">{fmtTime(e.ts)}</span>
+          <span className={`op-badge ${e.op}`}>{OP_LABEL[e.op] || e.op}</span>
+          <span className="tl-tool">{e.tool}</span>
+          <span className="tl-target" title={e.target}>{e.target}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── Artifact detail modal (generic renderer + marquee views + raw toggle) ──────
+
+function ArtifactModal({ selected, artKey, onClose }) {
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState(null)
+  const [raw, setRaw] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    setData(null); setErr(null)
+    api.getArtifact(selected, artKey)
+      .then(d => alive && setData(d))
+      .catch(e => alive && setErr(String(e.message || e)))
+    return () => { alive = false }
+  }, [selected, artKey])
+
+  const content = data?.content
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal artifact-modal" onClick={e => e.stopPropagation()}>
+        <div className="am-head">
+          <div className="am-title">
+            <h3>{prettyKey(artKey)}</h3>
+            {data && (data.stage || data.source) && (
+              <span className="am-sub">{data.stage ? `from ${data.stage} · ` : ''}{data.source}</span>
+            )}
+          </div>
+          <div className="am-actions">
+            {content != null && (
+              <button className="am-raw" onClick={() => setRaw(r => !r)}>{raw ? 'Formatted' : 'Raw JSON'}</button>
+            )}
+            <button className="am-close" onClick={onClose} title="Close">✕</button>
+          </div>
+        </div>
+        <div className="am-body">
+          {err && <div className="modal-err">⚠ {err}</div>}
+          {!data && !err && <p className="empty">Loading…</p>}
+          {content != null && (raw
+            ? <pre className="am-raw-pre">{JSON.stringify(content, null, 2)}</pre>
+            : <ArtifactView artKey={artKey} content={content} />)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ArtifactView({ artKey, content }) {
+  if (content == null || typeof content !== 'object') return <GenericValue value={content} />
+  if (artKey === 'scene_plan') return <ScenePlanView c={content} />
+  if (artKey === 'script') return <ScriptView c={content} />
+  if (artKey === 'decision_log') return <DecisionLogView c={content} />
+  if (artKey === 'render_report') return <RenderReportView c={content} />
+  return <GenericValue value={content} />
+}
+
+// ── Generic schema-driven renderer (handles any artifact, no raw JSON) ──
+
+function isUrl(s) { return typeof s === 'string' && /^https?:\/\//.test(s) }
+function fmtScalar(key, v) {
+  if (typeof v === 'number') {
+    const k = (key || '').toLowerCase()
+    if (/cost|usd|price|amount|spent|budget|reserved/.test(k)) return '$' + v.toFixed(2)
+    if (/seconds$/.test(k)) return v + 's'
+  }
+  return String(v)
+}
+
+function GenericValue({ value, k }) {
+  if (value === null || value === undefined) return <span className="gv-null">—</span>
+  if (typeof value === 'boolean') return <span className={`gv-bool ${value ? 'yes' : 'no'}`}>{value ? 'yes' : 'no'}</span>
+  if (typeof value !== 'object') {
+    if (isUrl(value)) return <a className="gv-link" href={value} target="_blank" rel="noreferrer">{value}</a>
+    return <span className="gv-scalar">{fmtScalar(k, value)}</span>
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="gv-null">none</span>
+    const allScalar = value.every(x => x === null || typeof x !== 'object')
+    if (allScalar) return <ul className="gv-list">{value.map((x, i) => <li key={i}>{String(x)}</li>)}</ul>
+    return (
+      <div className="gv-cards">
+        {value.map((x, i) => (
+          <div key={i} className="gv-card">
+            {x && typeof x === 'object' && !Array.isArray(x) ? <GenericObject obj={x} /> : <GenericValue value={x} />}
+          </div>
+        ))}
+      </div>
+    )
+  }
+  return <GenericObject obj={value} />
+}
+
+function GenericObject({ obj }) {
+  const entries = Object.entries(obj)
+  if (entries.length === 0) return <span className="gv-null">empty</span>
+  return (
+    <div className="gv-obj">
+      {entries.map(([k, v]) => {
+        const nested = v !== null && typeof v === 'object'
+        return (
+          <div key={k} className={`gv-row ${nested ? 'nested' : ''}`}>
+            <div className="gv-key">{prettyKey(k)}</div>
+            <div className="gv-value"><GenericValue value={v} k={k} /></div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Marquee views ──
+
+function Chip({ label, val }) {
+  return <span className="mv-chip"><span className="mvc-k">{label}</span><span className="mvc-v">{val}</span></span>
+}
+function timing(s) {
+  const a = s.start_seconds, b = s.end_seconds
+  if (a == null && b == null) return ''
+  return `${a ?? '?'}–${b ?? '?'}s`
+}
+
+function ScenePlanView({ c }) {
+  const scenes = c.scenes || []
+  const g = (c.metadata && c.metadata.global) || {}
+  return (
+    <div className="mv">
+      <div className="mv-summary">
+        {c.style_playbook && <Chip label="style" val={c.style_playbook} />}
+        {g.render_runtime && <Chip label="runtime" val={g.render_runtime} />}
+        {g.dimensions && <Chip label="size" val={g.dimensions} />}
+        {g.fps && <Chip label="fps" val={String(g.fps)} />}
+        <Chip label="scenes" val={String(scenes.length)} />
+      </div>
+      <div className="scene-cards">
+        {scenes.map((s, i) => (
+          <div key={s.id || i} className={`scene-card ${s.hero_moment ? 'hero' : ''}`}>
+            <div className="sc-top">
+              <span className="sc-id">{s.id || `sc${i + 1}`}</span>
+              {s.type && <span className="sc-type">{s.type}</span>}
+              {timing(s) && <span className="sc-time">{timing(s)}</span>}
+              {s.hero_moment && <span className="sc-hero">★ hero</span>}
+            </div>
+            {s.description && <div className="sc-desc">{s.description}</div>}
+            <div className="sc-attrs">
+              {s.framing && <span><b>framing</b> {s.framing}</span>}
+              {s.movement && <span><b>movement</b> {s.movement}</span>}
+              {s.narrative_role && <span><b>role</b> {prettyKey(s.narrative_role)}</span>}
+            </div>
+            {Array.isArray(s.required_assets) && s.required_assets.length > 0 && (
+              <div className="sc-assets">
+                {s.required_assets.map((a, j) => (
+                  <span key={j} className="sc-asset">{a.type}{a.source ? ` · ${a.source}` : ''}: {a.description}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ScriptView({ c }) {
+  const secs = c.sections || []
+  return (
+    <div className="mv">
+      <div className="mv-summary">
+        {c.title && <Chip label="title" val={c.title} />}
+        {c.total_duration_seconds != null && <Chip label="duration" val={c.total_duration_seconds + 's'} />}
+        <Chip label="sections" val={String(secs.length)} />
+      </div>
+      <ol className="script-secs">
+        {secs.map((s, i) => (
+          <li key={s.id || i} className="script-sec">
+            <div className="ss-head">
+              <span className="ss-id">{s.id || i + 1}</span>
+              {s.label && <span className="ss-label">{prettyKey(s.label)}</span>}
+              {timing(s) && <span className="ss-time">{timing(s)}</span>}
+            </div>
+            {s.text && <div className="ss-text">{s.text}</div>}
+            {s.speaker_directions && <div className="ss-dir">🎙 {s.speaker_directions}</div>}
+            {Array.isArray(s.enhancement_cues) && s.enhancement_cues.length > 0 && (
+              <div className="ss-cues">
+                {s.enhancement_cues.map((q, j) => (
+                  <span key={j} className="ss-cue">{q.type}{q.timestamp_seconds != null ? ` @${q.timestamp_seconds}s` : ''}: {q.description}</span>
+                ))}
+              </div>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+function DecisionLogView({ c }) {
+  const ds = c.decisions || []
+  return (
+    <div className="mv">
+      <div className="mv-summary"><Chip label="decisions" val={String(ds.length)} /></div>
+      <div className="decision-cards">
+        {ds.map((d, i) => (
+          <div key={d.decision_id || i} className="decision-card">
+            <div className="dc-head">
+              {d.category && <span className="dc-cat">{prettyKey(d.category)}</span>}
+              {d.confidence != null && <span className="dc-conf">{Math.round(d.confidence * 100)}% conf</span>}
+            </div>
+            {d.subject && <div className="dc-subject">{d.subject}</div>}
+            {Array.isArray(d.options_considered) && d.options_considered.length > 0 && (
+              <div className="dc-opts">
+                {d.options_considered.map((o, j) => {
+                  const chosen = o.option_id === d.selected
+                  return (
+                    <div key={j} className={`dc-opt ${chosen ? 'chosen' : ''}`}>
+                      <span className="dco-label">{chosen ? '✓ ' : ''}{o.label || o.option_id}</span>
+                      {o.score != null && <span className="dco-score">{o.score}</span>}
+                      <span className="dco-reason">{chosen ? o.reason : (o.rejected_because || o.reason)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {d.reason && <div className="dc-reason">{d.reason}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function RenderReportView({ c }) {
+  const outs = c.outputs || []
+  const ws = c.workspace || {}
+  return (
+    <div className="mv">
+      <div className="mv-summary">
+        {c.render_grammar && <Chip label="grammar" val={c.render_grammar} />}
+        {ws.runtime && <Chip label="runtime" val={ws.runtime} />}
+        {c.render_time_seconds != null && <Chip label="render time" val={c.render_time_seconds + 's'} />}
+      </div>
+      {outs.map((o, i) => (
+        <div key={i} className="render-out">
+          <div className="ro-path">{o.path}</div>
+          <div className="ro-meta">
+            {o.resolution && <span>{o.resolution}</span>}
+            {o.fps && <span>{o.fps} fps</span>}
+            {o.duration_seconds != null && <span>{o.duration_seconds}s</span>}
+            {o.codec && <span>{o.codec}</span>}
+            {o.file_size_bytes && <span>{fmtBytes(o.file_size_bytes)}</span>}
+            {o.platform_target && <span>{prettyKey(o.platform_target)}</span>}
+          </div>
+        </div>
+      ))}
+      {Array.isArray(c.verification_notes) && c.verification_notes.length > 0 && (
+        <div className="ro-block"><div className="ro-block-label">Verification</div>
+          <ul>{c.verification_notes.map((n, i) => <li key={i}>{n}</li>)}</ul></div>
+      )}
+      {Array.isArray(c.warnings) && c.warnings.length > 0 && (
+        <div className="ro-block warn"><div className="ro-block-label">Warnings</div>
+          <ul>{c.warnings.map((n, i) => <li key={i}>{n}</li>)}</ul></div>
+      )}
+    </div>
   )
 }
 
