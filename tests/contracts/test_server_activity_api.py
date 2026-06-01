@@ -38,6 +38,10 @@ def _client(tmp_path):
     ("Write", "projects/sky/artifacts/script.json", "write", "project"),
     ("Edit", "projects/sky/artifacts/edit_decisions.json", "edit", "project"),
     ("Bash", "python -m tools.elevenlabs_tts --text hi", "exec", "tool"),
+    ("Bash", ".venv/bin/python3 projects/p/scripts/gen_vo.py 2>&1", "exec", "tool"),
+    ("Bash", "mkdir -p out && npx remotion render Foo o.mp4", "exec", "tool"),
+    ("Bash", "cat /repo/scripts/retempo.py", "exec", "exec"),   # viewing != running
+    ("Bash", 'python3 -c "import json"', "exec", "exec"),       # inline snippet
     ("Bash", "ls -la", "exec", "exec"),
     ("WebFetch", "https://example.com/post", "fetch", "web"),
     ("WebSearch", "cheap inference 2026", "search", "web"),
@@ -47,6 +51,53 @@ def test_event_op_and_category(tool, target, op, cat):
     e = activity_mod.make_event(tool, target, "sky", ts="2026-05-31T00:00:00+00:00")
     assert e["op"] == op
     assert e["category"] == cat
+
+
+def test_label_for_clean_display_names():
+    L = lambda t, tg: activity_mod.make_event(t, tg, "p", ts="2026-05-31T00:00:00+00:00")["label"]
+    assert L("Bash", ".venv/bin/python3 projects/p/scripts/gen_vo.py") == "gen_vo"
+    assert L("Bash", "mkdir -p x && npx remotion render Foo") == "remotion"
+    assert L("Bash", "ls -la") == "ls"                              # plain shell -> program name
+    assert L("Read", "projects/p/artifacts/scene_plan.json") == "scene_plan.json"
+
+
+def test_generation_and_render_tools_detected(tmp_path):
+    _, projects = _client(tmp_path)
+    for tool, target in [
+        ("Bash", ".venv/bin/python3 projects/p/scripts/gen_vo.py 2>&1"),
+        ("Bash", ".venv/bin/python3 projects/p/scripts/get_broll.py"),
+        ("Bash", "mkdir -p out && npx remotion render Reel out.mp4"),
+        ("Bash", "cat projects/p/scripts/retempo.py"),   # viewing a script != running it
+    ]:
+        activity_mod.record_tool_use(projects, "p", tool, target)
+    tools = activity_mod.read_activity(projects, "p")["summary"]["tools"]
+    assert {"gen_vo", "get_broll", "remotion"}.issubset(set(tools))
+    assert "retempo" not in tools
+
+
+def test_skill_label_uses_file_name_not_category_dir(tmp_path):
+    _, projects = _client(tmp_path)
+    activity_mod.record_tool_use(
+        projects, "p", "Read",
+        "/repo/skills/pipelines/article-broll-animations/research-director.md")
+    skills = activity_mod.read_activity(projects, "p")["summary"]["skills"]
+    assert "research-director" in skills
+    assert "pipelines" not in skills
+
+
+def test_read_normalizes_legacy_events(tmp_path):
+    # A pre-existing log line (no 'label', stale category from older code) is
+    # re-derived on read, so categorization fixes apply without migration.
+    import json as _json
+    _, projects = _client(tmp_path)
+    p = activity_mod.activity_path(projects, "p")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_json.dumps({"ts": "2026-05-31T00:00:00+00:00", "tool": "Bash",
+                              "op": "exec", "category": "tool",
+                              "target": "cat scripts/gen_vo.py"}) + "\n")
+    e = activity_mod.read_activity(projects, "p")["events"][0]
+    assert e["category"] == "exec"   # cat is not a tool run
+    assert e["label"] == "cat"
 
 
 def test_record_skips_internal_ask_user(tmp_path):
