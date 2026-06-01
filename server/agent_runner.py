@@ -430,10 +430,20 @@ class AgentRunner:
             pt = get_project_pipeline_type(self.repo_root / "projects", project_id)
         except Exception:
             pt = None
-        pipeline_clause = f" using the '{pt}' pipeline" if pt else ""
-        stage_cmd = f"python scripts/update_stage.py {project_id} <stage> <status>" + (f" {pt}" if pt else "")
+        if pt:
+            pipeline_clause = f" using the '{pt}' pipeline"
+            choose_clause = ""
+            stage_cmd = f"python scripts/update_stage.py {project_id} <stage> <status> {pt}"
+        else:
+            pipeline_clause = ""
+            choose_clause = (
+                " No pipeline_type has been chosen for this project yet — read the user's request and the "
+                "available pipelines under pipeline_defs/, pick the best-fit pipeline, and then use that SAME "
+                "pipeline_type consistently for every checkpoint and update_stage call."
+            )
+            stage_cmd = f"python scripts/update_stage.py {project_id} <stage> <status> <pipeline_type>"
         return (
-            f"[PROJECT CONTEXT: You are working on the existing project '{project_id}'{pipeline_clause}. "
+            f"[PROJECT CONTEXT: You are working on the existing project '{project_id}'{pipeline_clause}.{choose_clause} "
             f"Use EXACTLY this project_id for everything — do NOT create a new project directory. "
             f"Write artifacts to projects/{project_id}/artifacts/, assets to projects/{project_id}/assets/, "
             f"and the final render to projects/{project_id}/renders/. As you work each stage, update its "

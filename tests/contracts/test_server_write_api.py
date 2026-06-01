@@ -54,6 +54,23 @@ def test_create_project_unknown_pipeline_422(tmp_path):
     assert r.status_code == 422
 
 
+def test_create_project_no_pipeline_lets_agent_decide(tmp_path):
+    client, projects = _ctx(tmp_path)
+    # Omitting pipeline_type entirely is allowed — the agent picks one later.
+    r = client.post("/api/projects", json={"name": "Decide Later"})
+    assert r.status_code == 201
+    assert r.json()["pipeline_type"] is None
+    assert (projects / "decide-later" / "project.json").exists()
+
+
+def test_create_project_empty_pipeline_normalized_to_none(tmp_path):
+    client, _ = _ctx(tmp_path)
+    # An empty/whitespace pipeline_type is treated as "agent decides", not a 422.
+    r = client.post("/api/projects", json={"name": "Blank PT", "pipeline_type": "   "})
+    assert r.status_code == 201
+    assert r.json()["pipeline_type"] is None
+
+
 # --- upload asset ---------------------------------------------------------
 
 def _make_project(client):

@@ -81,7 +81,7 @@ def manifest_path(projects_dir: Path | str, project_id: str) -> Path:
 def create_project(
     projects_dir: Path | str,
     name: str,
-    pipeline_type: str,
+    pipeline_type: Optional[str] = None,
     *,
     created_at: Optional[str] = None,
 ) -> dict[str, Any]:
