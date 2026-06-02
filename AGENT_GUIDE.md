@@ -241,6 +241,7 @@ To extend the library, append entries to `scripts/generate_educational_sfx.py` a
 | `animated-explainer` | Topic to fully generated explainer | production |
 | `talking-head` | Footage-led speaker videos | beta |
 | `screen-demo` | Screen recordings and walkthroughs | production |
+| `talking-head-screen-demo-reel` | Creator-led Reels with warm talking head + real browser/product proof + large PIP | beta |
 | `clip-factory` | Many clips from one long source | beta |
 | `podcast-repurpose` | Podcast highlights and derivatives | beta |
 | `cinematic` | Trailer, teaser, and mood-led edits | production |
@@ -624,6 +625,7 @@ Tool rules:
 | `greg-isenberg-product-explainer` | Warm editorial AI/startup/product Reels with proof receipts, workflow diagrams, prompt/result loops |
 | `greg-editorial` | Lightweight warm-paper editorial product motion using forest/mint accents |
 | `kinetic-whiteboard-captions` | Word-synced faceless social explainers and floating UI cards |
+| `talking-head-screen-demo-reel` | Creator-led product/workflow Reels with warm desk A-roll, real screen proof, large PIP, tactile keyboard inserts, short all-caps caption hits, and keyword CTA |
 | `pixel-rpg-product-explainer` | Game-map metaphor explainers with pixel/quest visual language |
 | `founder_clean_reel` | Talking-head founder reels with clean editorial captions and restrained overlays |
 

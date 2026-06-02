@@ -105,6 +105,7 @@ Key capability families to look for in the output:
 | SFX Library | `creative/sfx-library.md` | In-repo SFX at `assets/sfx/` — when to use each of the 20 effects, scene-to-SFX mappings, regen workflow | `sound-effects`, `elevenlabs` |
 | Typography | `creative/typography.md` | Font selection, text sizing, safe zones, caption styling | â€" |
 | Kinetic Whiteboard Captions | `creative/kinetic-whiteboard-captions.md` | Word-synced kinetic text, faceless social explainers, floating UI cards | `remotion-best-practices`, `gsap-core`, `gsap-timeline` |
+| Talking Head Screen Demo Reel | `creative/talking-head-screen-demo-reel.md` | Creator-led Reels with warm talking head, real browser/product proof, large PIP, tactile keyboard inserts, short phrase-hit captions, keyword CTA | `remotion-best-practices`, `hyperframes`, `gsap-core`, `playwright-recording` |
 | Greg Isenberg Product Explainer | `creative/greg-isenberg-product-explainer.md` | Warm editorial AI/startup explainers, proof receipts, workflow diagrams, prompt/result artifacts, Greg-theme motion | `remotion-best-practices`, `gsap-core`, `gsap-timeline` |
 | Pixel RPG Product Explainer | `creative/pixel-rpg-product-explainer.md` | Game-map metaphors, pixel avatar/tool quests, floating UI proof, prompt/result loops, kinetic serif captions; no purple/obsidian defaults | `remotion-best-practices`, `gsap-core`, `gsap-timeline` |
 | ManimCE Usage | `creative/manim-usage.md` | Scene composition, animation timing, color usage | `manimce-best-practices` |
@@ -294,6 +295,7 @@ Style playbooks (`styles/*.yaml`) define visual language, typography, motion, au
 | `clean-professional` | motion-graphics | polished, trustworthy | Corporate, educational, SaaS |
 | `flat-motion-graphics` | motion-graphics | energetic, bold | Social media, TikTok, startups |
 | `kinetic-whiteboard-captions` | motion-graphics | clean, premium, educational | Faceless Reels/TikToks/Shorts with word-synced text and floating UI cards |
+| `talking-head-screen-demo-reel` | custom | warm, credible, proof-first | Creator-led product/workflow Reels with real screen proof, large PIP, tactile keyboard inserts, punchy phrase captions, and keyword CTA |
 | `greg-isenberg-product-explainer` | motion-graphics | premium, editorial, warm | Greg-theme AI/startup explainers with proof receipts, workflow diagrams, prompt/result artifacts, and warm editorial motion |
 | `pixel-rpg-product-explainer` | motion-graphics | playful, premium, educational | AI/tool tutorials with pixel avatar quests, RPG map metaphors, floating UI proof, and prompt/result artifacts; no purple/obsidian defaults |
 | `minimalist-diagram` | whiteboard | focused, technical | Technical deep-dives, architecture |

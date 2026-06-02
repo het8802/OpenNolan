@@ -39,6 +39,7 @@ compatible_playbooks:
   recommended:
     - clean-professional
     - flat-motion-graphics
+    - talking-head-screen-demo-reel
   also_works:
     - minimalist-diagram
   custom_allowed: true

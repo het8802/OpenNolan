@@ -17,6 +17,7 @@ import { CaptionOverlay, WordCaption } from "./components/CaptionOverlay";
 import { CollageBurst, CollageBurstProps } from "./CollageBurst";
 import { LyricOverlay, LyricOverlayProps } from "./LyricOverlay";
 import { Claude500MReel, Claude500MReelProps } from "./Claude500MReel";
+import { HetOpenAIFinanceClicko } from "./HetOpenAIFinanceClicko";
 
 // ---------------------------------------------------------------------------
 // Theme System — prevents every video from looking like dark fintech
@@ -179,6 +180,14 @@ const calc500M: CalculateMetadataFunction<Claude500MReelProps> = async ({ props 
 export const Root: React.FC = () => {
   return (
     <>
+      <Composition
+        id="HetOpenAIFinanceClicko"
+        component={HetOpenAIFinanceClicko}
+        durationInFrames={Math.ceil(85.2 * 30)}
+        fps={30}
+        width={1080}
+        height={1920}
+      />
       <Composition
         id="Claude500MReel"
         component={Claude500MReel}

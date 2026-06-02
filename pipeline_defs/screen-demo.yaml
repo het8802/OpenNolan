@@ -71,7 +71,8 @@ compatible_playbooks:
   recommended:
     - minimalist-diagram
     - clean-professional
-  also_works: []
+  also_works:
+    - talking-head-screen-demo-reel
   custom_allowed: true
 
 stages:
