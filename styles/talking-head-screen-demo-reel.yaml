@@ -1,0 +1,111 @@
+identity:
+  name: "Talking Head Screen Demo Reel"
+  category: custom
+  mood: warm, credible, proof-first, fast, creator-native
+  pace: rapid
+  best_for: "Vertical Reels/TikToks/Shorts where a creator talks to camera while real browser/product footage, cursor actions, command popups, and generated outputs prove the workflow."
+
+visual_language:
+  color_palette:
+    primary: ["#111827", "#0B1020", "#1F2937"]
+    accent: ["#F97316", "#EF4444", "#22C55E", "#8B5CF6"]
+    background: "#0B1020"
+    text: "#FFFFFF"
+    muted: "#9CA3AF"
+  composition: "1080x1920 vertical; full-screen warm talking-head hook/CTA; real browser/app footage as primary proof; creator PIP bottom-center/bottom-left at 35-50% width during screen scenes; mobile-safe lower-third phrase captions."
+  texture: "Warm amber desk lighting contrasted against dark-mode browser/product screens; subtle screen glow; no decorative stock B-roll unless used as a tiny tactile insert."
+
+typography:
+  headings:
+    font: "Inter Tight"
+    weight: 900
+    tracking: "-0.04em"
+    line_height: 0.92
+  body:
+    font: "Inter Tight"
+    weight: 700
+    line_height: 1.05
+  code:
+    font: "Fira Code"
+    weight: 600
+  stat_card:
+    font: "Inter Tight"
+    weight: 900
+    size_multiplier: 1.8
+  scale_system: "major_third"
+  weight_matrix:
+    title: 900
+    heading: 850
+    body: 700
+    caption: 900
+
+motion:
+  transitions: [hard-cut, jump-cut, crop-punch-in, cursor-follow-reframe, keyboard-insert-cut]
+  animation_style: "Proof-led motion: straight cuts, 1.03-1.08 UI punch-ins, cursor/highlight/popup actions as transitions, caption chunks popping on stressed words, stable creator PIP over changing screen footage. Avoid fancy wipes."
+  pacing_rules:
+    min_scene_hold_seconds: 0.5
+    max_scene_hold_seconds: 4
+    text_card_hold_seconds: 1.0
+    stat_card_hold_seconds: 1.0
+    transition_duration_seconds: 0.1
+  entrance: "caption opacity/scale pop over 3-5 frames; hook text can use one larger mixed-size emphasis build; PIP cuts on, not ornate animated frames"
+  exit: "hard cut or fast opacity reset; UI panels exit by real scroll/click/crop rather than decorative transition"
+
+audio:
+  voice_style: "fast, direct, live creator delivery; voice is dominant; clean lav/USB mic; keep natural desk energy"
+  music_mood: "low-volume modern pulse or no music; never compete with speech"
+  music_volume: 0.06
+  sfx_style: "subtle keyboard tap, click, soft pop for extension/command panels, tiny caption hit on major words only"
+  ducking_threshold_db: -7
+  voice_variation_allowed: false
+
+asset_generation:
+  image_prompt_prefix: "warm creator desk setup, amber practical lamp, dark SaaS browser UI, vertical social reel frame, realistic product demo context, "
+  image_negative_prompt: "generic robot, fake stock montage, cluttered UI, unreadable text, cinematic trailer lighting, heavy glitch, overdesigned transitions"
+  diagram_style: "Use diagrams only as secondary support; primary visuals must be real UI proof, source screenshots, prompts, outputs, or screen recordings."
+  consistency_anchors:
+    - "Real browser/product footage appears by 8-10 seconds."
+    - "Creator face remains present: full-screen hook/CTA and large PIP during screen proof."
+    - "Caption chunks are 1-4 all-caps words, white with black stroke/drop shadow."
+    - "Every spoken claim maps to a visible page, click, highlight, prompt, output, or replacement."
+    - "The first action gets a tactile keyboard/mouse insert."
+
+overlays:
+  stat_card:
+    bg: "#111827"
+    border: "#374151"
+    text: "#FFFFFF"
+    radius: 18
+    shadow: "0 18px 48px rgba(0,0,0,0.35)"
+  key_term:
+    bg: "rgba(0,0,0,0.72)"
+    text: "#FFFFFF"
+    radius: 10
+    shadow: "0 8px 24px rgba(0,0,0,0.32)"
+  code_block:
+    bg: "#0B1020"
+    text: "#F9FAFB"
+    highlight: "#F97316"
+    radius: 14
+    shadow: "0 18px 44px rgba(0,0,0,0.35)"
+
+quality_rules:
+  - "Do not use full subtitles as the main text system; captions are short stressed phrase hits only."
+  - "Do not replace proof with generic B-roll; every feature claim needs visible UI action/result."
+  - "Creator PIP must be large enough for expressions and gestures to read on mobile."
+  - "UI text must be zoomed/cropped enough to read key output on a phone."
+  - "Visual change every 0.5-2 seconds: cut, crop, cursor action, popup, caption hit, or keyboard insert."
+  - "Hook must name audience + pain/outcome in the first 5 seconds."
+  - "CTA uses one keyword and appears outside Instagram bottom UI danger zone."
+
+chart_palette:
+  - "#FFFFFF"
+  - "#F97316"
+  - "#22C55E"
+  - "#8B5CF6"
+  - "#9CA3AF"
+
+color_rules:
+  harmony_type: "split-complementary"
+  contrast_validation: true
+  colorblind_safe: true

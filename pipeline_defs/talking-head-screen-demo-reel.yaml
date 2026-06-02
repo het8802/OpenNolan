@@ -1,0 +1,258 @@
+name: talking-head-screen-demo-reel
+version: "1.0"
+description: >
+  Hybrid talking-head + screen-demo pipeline for vertical social reels where a
+  creator delivers a warm direct-to-camera hook/CTA while real browser/product
+  footage, cursor actions, prompt boxes, generated outputs, and tactile keyboard
+  inserts prove the workflow. Based on the Arshman/Clicko reference grammar but
+  generalized for any AI/tool/SaaS/founder workflow topic.
+category: hybrid
+stability: beta
+default_checkpoint_policy: guided
+
+reference_input:
+  supported: true
+  analysis_depth: deep
+  analysis_tools:
+    - video_analyzer
+    - transcriber
+    - scene_detect
+    - frame_sampler
+
+orchestration:
+  mode: executive-producer
+  skill: pipelines/hybrid/executive-producer
+  budget_default_usd: 1.00
+  max_revisions_per_stage: 3
+  max_send_backs: 3
+  max_wall_time_minutes: 10
+
+extensions:
+  custom_scripts: true
+  custom_playbooks: true
+  custom_skills: true
+  custom_tools: false
+
+required_skills:
+  - creative/talking-head-screen-demo-reel
+  - creative/short-form
+  - creative/screen-recording
+  - creative/video-editing
+  - creative/sound-design
+  - pipelines/hybrid/executive-producer
+  - pipelines/hybrid/idea-director
+  - pipelines/hybrid/script-director
+  - pipelines/hybrid/scene-director
+  - pipelines/hybrid/asset-director
+  - pipelines/hybrid/edit-director
+  - pipelines/hybrid/compose-director
+  - pipelines/hybrid/publish-director
+  - meta/reviewer
+  - meta/checkpoint-protocol
+  - meta/animation-runtime-selector
+
+compatible_playbooks:
+  recommended:
+    - talking-head-screen-demo-reel
+  also_works:
+    - founder_clean_reel
+    - clean-professional
+  custom_allowed: true
+
+metadata:
+  default_format:
+    width: 1080
+    height: 1920
+    fps: 30
+    duration_seconds: 55-70
+  production_shape:
+    - full-screen talking-head hook
+    - product/browser proof by second 8-10
+    - large creator PIP over real screen footage
+    - tactile keyboard/mouse trigger insert
+    - prompt/result/rewrite proof loop
+    - full-screen or proof-backed keyword CTA
+  mandatory_style_rules:
+    - captions are 1-4 word all-caps stressed phrase hits, not full subtitles
+    - real UI proof replaces generic B-roll
+    - every feature claim maps to visible page/click/highlight/prompt/output/replacement
+    - visual change every 0.5-2 seconds
+
+stages:
+  - name: idea
+    skill: pipelines/hybrid/idea-director
+    produces:
+      - brief
+      - decision_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Brief names one concrete job-to-be-done, not a generic feature tour
+      - Audience pain/outcome is hookable in the first 5 seconds
+      - "Proof surfaces are identified: browser/app/doc/profile/dashboard/terminal"
+      - Runtime options are presented when both Remotion and HyperFrames are available
+    success_criteria:
+      - Schema-valid brief artifact
+      - Brief selects `talking-head-screen-demo-reel` playbook or explicitly explains why not
+
+  - name: script
+    skill: pipelines/hybrid/script-director
+    required_artifacts_in:
+      - brief
+    optional_artifacts_in:
+      - source_media_review
+      - video_analysis_brief
+    produces:
+      - script
+    required_tools:
+      - transcriber
+    optional_tools:
+      - scene_detect
+      - frame_sampler
+    tools_available:
+      - transcriber
+      - scene_detect
+      - frame_sampler
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Script follows pain -> promise -> concrete demo -> proof loop -> CTA
+      - Every spoken claim has an assigned visual proof action
+      - Caption chunks are listed as 1-4 word stressed phrases
+    success_criteria:
+      - Schema-valid script artifact
+      - Script includes proof_map notes for page/click/highlight/prompt/output/replacement moments
+
+  - name: scene_plan
+    skill: pipelines/hybrid/scene-director
+    required_artifacts_in:
+      - script
+    optional_artifacts_in:
+      - brief
+    produces:
+      - scene_plan
+    optional_tools:
+      - frame_sampler
+    tools_available:
+      - frame_sampler
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Actual screen proof appears by 8-10 seconds
+      - Creator PIP size/placement preserves face while not blocking UI
+      - Keyboard insert and prompt/result/rewrite moments are planned
+      - UI crop/zoom choices make key text readable on mobile
+    success_criteria:
+      - Schema-valid scene_plan artifact
+      - Scene plan contains hook, tool promise, use-case setup, first action, proof result, friction-removal, command, rewrite, CTA
+
+  - name: assets
+    skill: pipelines/hybrid/asset-director
+    required_artifacts_in:
+      - scene_plan
+    optional_artifacts_in:
+      - script
+    produces:
+      - asset_manifest
+    required_tools: []
+    optional_tools:
+      - screen_recorder
+      - cap_recorder
+      - subtitle_gen
+      - tts_selector
+      - audio_enhance
+      - image_selector
+      - bg_remove
+    tools_available:
+      - screen_recorder
+      - cap_recorder
+      - subtitle_gen
+      - tts_selector
+      - audio_enhance
+      - image_selector
+      - bg_remove
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Talking-head A-roll, screen proof clips, keyboard insert, and output screenshots are present or explicitly marked missing
+      - Source/provenance is recorded for every screenshot/clip
+      - Caption chunk file or timing notes exist
+      - Audio is clean enough for voice-dominant mix
+    success_criteria:
+      - Schema-valid asset_manifest artifact
+      - All referenced asset files exist on disk
+
+  - name: edit
+    skill: pipelines/hybrid/edit-director
+    required_artifacts_in:
+      - scene_plan
+      - asset_manifest
+    optional_artifacts_in:
+      - script
+    produces:
+      - edit_decisions
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Cut rhythm changes visual state every 0.5-2 seconds
+      - Captions remain phrase-hit style, not subtitles
+      - Screen actions drive transitions instead of decorative wipes
+      - render_runtime matches the approved proposal decision
+    success_criteria:
+      - Schema-valid edit_decisions artifact
+      - Cuts reference valid source files and include PIP/caption placement notes
+
+  - name: compose
+    skill: pipelines/hybrid/compose-director
+    required_artifacts_in:
+      - edit_decisions
+      - asset_manifest
+    optional_artifacts_in:
+      - scene_plan
+    produces:
+      - render_report
+      - final_review
+    required_tools:
+      - video_compose
+      - audio_mixer
+    optional_tools:
+      - video_trimmer
+      - audio_enhance
+    tools_available:
+      - video_compose
+      - hyperframes_compose
+      - audio_mixer
+      - video_trimmer
+      - audio_enhance
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Final video is playable at 1080x1920 and intended duration
+      - UI text and CTA are readable at phone size
+      - PIP does not cover important proof
+      - ffprobe, decode, blackdetect, volumedetect, and contact sheet QA are complete
+    success_criteria:
+      - Schema-valid render_report artifact
+      - Output file exists and passes ffprobe/decode validation
+
+  - name: publish
+    skill: pipelines/hybrid/publish-director
+    required_artifacts_in:
+      - render_report
+      - final_review
+    optional_artifacts_in:
+      - brief
+    produces:
+      - publish_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Caption/copy includes the comment keyword and promised benefit
+      - Thumbnail/hook frame reflects the pain/outcome and proof surface
+      - Export package records style, pipeline, and source/proof assets
+    success_criteria:
+      - Schema-valid publish_log artifact
+      - Export package includes video, metadata, thumbnail concept, and QA notes
