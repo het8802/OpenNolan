@@ -58,3 +58,16 @@ Store in `publish_log.metadata`:
 - Publishing the whole batch on the same day.
 - Using one caption everywhere.
 - Losing the rank/order logic after rendering is complete.
+
+## Content signal (optional, advisory)
+
+Before finalizing, you MAY offer a predicted virality signal on the finished clips via the
+`content_signal` tool (Meta TRIBE v2 on Replicate):
+
+- **Opt-in only** — ask first ("Want a predicted virality score before publishing?").
+- **Announce the paid call** (Replicate, ~$0.40/run and ~7 min per clip — the model is slow) per AGENT_GUIDE before running.
+- **Short-form only** — auto-skips if a render is >60s; needs `REPLICATE_API_TOKEN`.
+- **Per clip** — for a clip batch, score each clip individually (each is ≤60s); the headline
+  score can inform the posting order, but it NEVER blocks publishing.
+- **Advisory only** — the 0-100 headline + `sub_scores` + per-step `timeline` inform the user.
+  Produces a `content_signal_report` artifact per clip (cached by file hash, so re-runs are free).

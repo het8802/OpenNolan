@@ -194,7 +194,8 @@ stages:
       - brief
     produces:
       - publish_log
-    tools_available: []
+    tools_available:
+      - content_signal
     checkpoint_required: true
     human_approval_default: true
     review_focus:
