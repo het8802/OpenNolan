@@ -5,3 +5,5 @@ jsonschema>=4.20
 python-dotenv>=1.0
 Pillow>=10.0
 requests>=2.31
+ddgs>=9.0                  # DuckDuckGo image/web search (free, no API key)
+firecrawl-py>=4.0          # Web scraping, image search, webpage screenshots
