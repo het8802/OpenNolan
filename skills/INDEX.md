@@ -103,6 +103,7 @@ Key capability families to look for in the output:
 | Storytelling | `creative/storytelling.md` | Narrative structure, hooks, pacing, Mayer's principles | â€" |
 | Sound Design | `creative/sound-design.md` | Audio ducking, LUFS targets, SFX timing, AI TTS mixing | `elevenlabs` |
 | SFX Library | `creative/sfx-library.md` | In-repo SFX at `assets/sfx/` — when to use each of the 20 effects, scene-to-SFX mappings, regen workflow | `sound-effects`, `elevenlabs` |
+| Second-Hook SFX | `creative/second-hook-sfx.md` | Sound effects as the "second hook" in Reels/Shorts: fail stings, whooshes, risers, pop/click overlays, crickets pauses | `sound-effects`, `elevenlabs`, `ffmpeg` |
 | Typography | `creative/typography.md` | Font selection, text sizing, safe zones, caption styling | â€" |
 | Kinetic Whiteboard Captions | `creative/kinetic-whiteboard-captions.md` | Word-synced kinetic text, faceless social explainers, floating UI cards | `remotion-best-practices`, `gsap-core`, `gsap-timeline` |
 | Talking Head Screen Demo Reel | `creative/talking-head-screen-demo-reel.md` | Creator-led Reels with warm talking head, real browser/product proof, large PIP, tactile keyboard inserts, short phrase-hit captions, keyword CTA | `remotion-best-practices`, `hyperframes`, `gsap-core`, `playwright-recording` |
@@ -112,6 +113,7 @@ Key capability families to look for in the output:
 | Image Gen Usage | `creative/image-gen-usage.md` | Prompt consistency, hero reference, batch strategy | `flux-best-practices`, `bfl-api` |
 | Image Provider Usage | `creative/image-provider-usage.md` | Provider selection (FLUX/Grok/OpenAI/Recraft/stock), cost-quality tradeoffs | `flux-best-practices`, `bfl-api`, `grok-media` |
 | B-Roll Planning | `creative/broll-planning.md` | Stock vs. generated decision, query construction, footage evaluation | — |
+| Reaction GIF Finder | `creative/reaction-gif-finder.md` | No/low-text animated reaction GIFs/MP4 humor inserts from scripts | — |
 | Stock Sourcing Usage | `creative/stock-sourcing-usage.md` | Pexels/Pixabay usage, parameters, licensing, integration | — |
 | Scene Detect Usage | `creative/scene-detect-usage.md` | Threshold tuning, algorithm selection, content presets | â€" |
 | Diagram Gen Usage | `creative/diagram-gen-usage.md` | Complexity limits, progressive building, themes | `beautiful-mermaid` |
