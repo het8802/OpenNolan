@@ -23,8 +23,8 @@ COUNT:           20 effects across 6 categories
 Use this skill from any pipeline's **asset** or **edit** stage when:
 
 - The brief is educational, informational, explainer, tutorial, or product-walkthrough.
-- The brief asks for "engaging", "snappy", "punchy", "polished motion graphics", or any phrasing that implies SFX accents.
-- The edit needs whooshes, callout pops, stat-reveal impacts, or text-reveal textures.
+- The brief asks for "engaging", "snappy", "punchy", "polished motion graphics", "second hook", or any phrasing that implies SFX accents.
+- The edit needs whooshes, callout pops, stat-reveal impacts, text-reveal textures, or social-native comedy pauses.
 - A scene has a key visual moment (number reveal, text appearance, bullet drop, transition) that benefits from a non-music audio accent.
 
 **Do NOT use** when:
@@ -191,6 +191,7 @@ ElevenLabs SFX billing is credit-based; the full 20-effect library costs roughly
 
 ## Related
 
+- [`skills/creative/second-hook-sfx.md`](second-hook-sfx.md) — social-native Reel/Short mappings for fail stings, whooshes, risers, overlay pops/clicks, and crickets pauses.
 - [`skills/creative/sound-design.md`](sound-design.md) — full audio levels, ducking, LUFS targets.
 - [`skills/creative/music-gen-usage.md`](music-gen-usage.md) — BPM and music prompt guidance (use alongside SFX, not instead of).
 - [`.agents/skills/sound-effects/SKILL.md`](../../.agents/skills/sound-effects/SKILL.md) — Layer 3 ElevenLabs SFX API reference.
