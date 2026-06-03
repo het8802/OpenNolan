@@ -55,6 +55,7 @@ internal/
 # Local agent config (user-specific)
 .claude/memory/
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 # Agent skills lock (local install tracking)
 skills-lock.json
@@ -86,3 +87,4 @@ remotion-composer/public/*
 remotion-composer/public/demo-props/test-*
 remotion-composer/public/demo-props/talking-head-*
 remotion-composer/public/demo-props/caption-burn-*
+.gstack/
