@@ -50,3 +50,15 @@ Document the publish event with platform, status (draft), and export path.
 ### Step 6: Submit
 
 Validate the publish_log against the schema and persist via checkpoint.
+
+## Content signal (optional, advisory)
+
+Before finalizing, you MAY offer a predicted virality signal on the finished render via the
+`content_signal` tool (Meta TRIBE v2 on Replicate):
+
+- **Opt-in only** — ask first ("Want a predicted virality score before publishing?").
+- **Announce the paid call** (Replicate, ~$0.40/run and ~7 min — the model is slow) per AGENT_GUIDE before running.
+- **Short-form only** — auto-skips if the render is >60s (founder reels qualify, long talks do
+  not); needs `REPLICATE_API_TOKEN`.
+- **Advisory only** — the 0-100 headline + `sub_scores` + per-step `timeline` inform the user and
+  NEVER block publishing. Produces a `content_signal_report` artifact (cached by file hash).
