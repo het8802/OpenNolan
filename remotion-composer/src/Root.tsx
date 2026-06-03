@@ -17,6 +17,9 @@ import { CaptionOverlay, WordCaption } from "./components/CaptionOverlay";
 import { CollageBurst, CollageBurstProps } from "./CollageBurst";
 import { LyricOverlay, LyricOverlayProps } from "./LyricOverlay";
 import { Claude500MReel, Claude500MReelProps } from "./Claude500MReel";
+import { OpenAIAdsMgrReel } from "./OpenAIAdsMgrReel";
+import { CheapInferenceReel, CheapInferenceReelProps, cheapInferenceReelDefault, calcCheapInferenceMetadata } from "./CheapInferenceReel";
+import { AgentSleepReel0531 } from "./AgentSleepReel";
 
 // ---------------------------------------------------------------------------
 // Theme System — prevents every video from looking like dark fintech
@@ -179,6 +182,33 @@ const calc500M: CalculateMetadataFunction<Claude500MReelProps> = async ({ props 
 export const Root: React.FC = () => {
   return (
     <>
+      <Composition
+        id="CheapInferenceReel"
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        component={CheapInferenceReel as any}
+        durationInFrames={2020}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={cheapInferenceReelDefault}
+        calculateMetadata={calcCheapInferenceMetadata}
+      />
+      <Composition
+        id="OpenAIAdsMgrReel"
+        component={OpenAIAdsMgrReel}
+        durationInFrames={1815}
+        fps={30}
+        width={1080}
+        height={1920}
+      />
+      <Composition
+        id="AgentSleepReel0531"
+        component={AgentSleepReel0531}
+        durationInFrames={1977}
+        fps={30}
+        width={1080}
+        height={1920}
+      />
       <Composition
         id="Claude500MReel"
         component={Claude500MReel}
