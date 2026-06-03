@@ -240,6 +240,7 @@ To extend the library, append entries to `scripts/generate_educational_sfx.py` a
 |----------|----------|-----------|
 | `animated-explainer` | Topic to fully generated explainer | production |
 | `talking-head` | Footage-led speaker videos | beta |
+| `animation-talking-head-50-50` | Split-screen animated explainer: talking head bottom 45%, Greg-style animated panels top 55%, with full-frame modes per cut. HyperFrames + FFmpeg two-pass. Talking head video untouched (no color conversion). | beta |
 | `screen-demo` | Screen recordings and walkthroughs | production |
 | `clip-factory` | Many clips from one long source | beta |
 | `podcast-repurpose` | Podcast highlights and derivatives | beta |
@@ -467,6 +468,8 @@ Key capability families to look for in the output:
 - **avatar** — Talking head and lip sync generation.
 - **character_animation** — Local character specs, SVG rigs, pose libraries, action timelines, previews, and QA.
 - **enhancement** — Upscale, background removal, face enhance, color grading.
+- **web_image_search** — Real-world web image search (event photos, logos, press assets). Route via `web_image_search` selector (DDG free default → Firecrawl HD fallback). NOT for stock photos — use `image_selector` for those.
+- **webpage_screenshot** — Full-browser screenshot of any URL (articles, press pages, product pages). Returns a local PNG asset. Use `webpage_screenshot` tool directly (Firecrawl, 1 credit/page).
 
 Each tool in the registry declares `best_for`, `install_instructions`, `runtime` (LOCAL, API, LOCAL_GPU, HYBRID), and `status`. Read these fields — do not assume tool strengths from memory.
 
