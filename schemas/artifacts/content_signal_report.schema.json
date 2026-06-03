@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openmontage/artifacts/content_signal_report",
+  "title": "Content Signal Report",
+  "description": "Predicted social-media virality signal for a finished short-form render, produced by the Meta TRIBE v2 brain-encoding model hosted on Replicate (prakhar-bhartiya/meta-tribev2-social-media-content-signal). ADVISORY ONLY: this score never gates publishing. Field names mirror the model's verified output schema.",
+  "type": "object",
+  "required": ["version", "model", "video_path", "headline_score", "sub_scores", "timeline", "advisory"],
+  "properties": {
+    "version": { "type": "string", "const": "1.0" },
+    "model": { "type": "string", "description": "Replicate model slug" },
+    "model_version": { "type": ["string", "null"], "description": "Model's reported model_version (or the Replicate version id)" },
+    "scoring_version": { "type": ["string", "null"], "description": "Model's reported scoring_version" },
+    "provider": { "type": "string", "const": "replicate" },
+    "video_path": { "type": "string" },
+    "video_sha256": { "type": ["string", "null"], "description": "Content hash of the scored render; cache key (model is deterministic)" },
+    "video_duration_s": { "type": ["number", "null"], "minimum": 0, "description": "Duration the model reported for the scored video" },
+    "frame_count": { "type": ["integer", "null"], "minimum": 0 },
+    "headline_score": { "type": "number", "minimum": 0, "maximum": 100, "description": "Predicted virality, 0-100" },
+    "sub_scores": {
+      "type": "object",
+      "description": "Brain-region-mapped subscores (typically reward, emotion, attention, social_relevance, novelty). Keys are taken verbatim from the model output.",
+      "additionalProperties": { "type": "number" }
+    },
+    "timeline": {
+      "type": "array",
+      "description": "Per-step subscores over time (~2Hz), verbatim from the model. Each element is a flat object of numbers.",
+      "items": {
+        "type": "object",
+        "additionalProperties": { "type": "number" }
+      }
+    },
+    "cost_usd": { "type": "number", "minimum": 0 },
+    "cache_hit": { "type": "boolean", "description": "True when returned from the content-hash cache (no new paid call)" },
+    "advisory": { "type": "boolean", "const": true, "description": "Always true. This score is advisory and never blocks publishing." },
+    "license_note": { "type": "string" },
+    "raw_output": { "description": "Verbatim Replicate model output, kept for audit and re-parse." },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "generated_at": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

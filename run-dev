@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+#
+# run-dev — start the OpenMontage Mission Control dev servers.
+#
+# Usage:
+#   ./run-dev              start BOTH: backend (:8000) + frontend (:5173)
+#   ./run-dev --backend    start the FastAPI backend only
+#   ./run-dev --frontend   start the Vite frontend only
+#   ./run-dev --backend --frontend   same as no flag (both)
+#
+# Ctrl-C stops whatever is running (both, when running both).
+#
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+BACKEND_HOST="127.0.0.1"
+BACKEND_PORT="8000"
+FRONTEND_PORT="5173"
+
+run_backend=false
+run_frontend=false
+
+usage() {
+  cat <<EOF
+Usage: ./run-dev [--backend] [--frontend]
+
+  (no flag)    start both backend (http://$BACKEND_HOST:$BACKEND_PORT) and frontend (http://localhost:$FRONTEND_PORT)
+  --backend    start the FastAPI backend only
+  --frontend   start the Vite frontend only
+  -h, --help   show this help
+EOF
+}
+
+# No flag => both. Otherwise, enable each service named.
+if [ "$#" -eq 0 ]; then
+  run_backend=true
+  run_frontend=true
+else
+  for arg in "$@"; do
+    case "$arg" in
+      --backend)  run_backend=true ;;
+      --frontend) run_frontend=true ;;
+      -h|--help)  usage; exit 0 ;;
+      *) echo "run-dev: unknown flag '$arg'" >&2; usage >&2; exit 1 ;;
+    esac
+  done
+fi
+
+# Prefer the project virtualenv's Python, fall back to system python3/python.
+if [ -x ".venv/bin/python" ]; then
+  PYTHON=".venv/bin/python"
+else
+  PYTHON="$(command -v python3 || command -v python || true)"
+fi
+
+pids=()
+cleanup() {
+  trap - INT TERM EXIT
+  for pid in "${pids[@]:-}"; do
+    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+  done
+}
+trap cleanup INT TERM EXIT
+
+start_backend() {
+  if [ -z "${PYTHON:-}" ]; then
+    echo "run-dev: no Python interpreter found (looked for .venv/bin/python, python3, python)." >&2
+    exit 1
+  fi
+  (
+    # Prefer the Claude subscription (CLAUDE_CODE_OAUTH_TOKEN) over per-token
+    # billing: if the OAuth token is present, drop ANTHROPIC_API_KEY, which
+    # would otherwise take precedence. The agent chat returns 503 if NEITHER
+    # credential is set — the read/write endpoints still work without it.
+    if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+      unset ANTHROPIC_API_KEY
+    elif [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+      echo "run-dev: warning — no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY set;" >&2
+      echo "         agent chat will be disabled. Run \`claude setup-token\` to enable it." >&2
+    fi
+    echo "→ backend   http://$BACKEND_HOST:$BACKEND_PORT  (uvicorn)"
+    exec "$PYTHON" -m uvicorn server.app:app --host "$BACKEND_HOST" --port "$BACKEND_PORT"
+  ) &
+  pids+=("$!")
+}
+
+start_frontend() {
+  if [ ! -d "web/node_modules" ]; then
+    echo "run-dev: web/node_modules missing — installing frontend deps (npm install)…"
+    (cd web && npm install)
+  fi
+  (
+    echo "→ frontend  http://localhost:$FRONTEND_PORT  (vite)"
+    exec npm --prefix web run dev
+  ) &
+  pids+=("$!")
+}
+
+$run_backend && start_backend
+$run_frontend && start_frontend
+
+# Block until the started server(s) exit; the trap tears them down on Ctrl-C.
+wait

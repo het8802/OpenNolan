@@ -27,3 +27,16 @@ slam). Keep it consistent with the saved reel-aesthetic preference.
 - Caption preserves claim integrity + names sources; hook-led
 - Cover matches the visual system; hashtags relevant
 - Export package contains MP4 + metadata + source list
+
+## Content signal (optional, advisory)
+
+Before finalizing, you MAY offer a predicted virality signal on the finished reel via the
+`content_signal` tool (Meta TRIBE v2 on Replicate):
+
+- **Opt-in only** — ask first ("Want a predicted virality score before publishing?").
+- **Announce the paid call** (Replicate, ~$0.40/run and ~7 min — the model is slow) per AGENT_GUIDE before running.
+- **Short-form only** — auto-skips if the render is >60s; needs `REPLICATE_API_TOKEN`.
+- **Advisory only** — the 0-100 headline + `sub_scores` + per-step `timeline` inform the user
+  and NEVER block publishing. Surface the score and the weakest timeline moments, then let the
+  user decide whether to re-edit or publish as-is.
+- Produces a `content_signal_report` artifact (cached by file hash, so re-runs are free).
