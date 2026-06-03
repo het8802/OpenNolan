@@ -1,0 +1,285 @@
+name: animation-talking-head-50-50
+version: "1.0"
+description: >
+  Split-screen animated explainer with a talking head. The canvas is divided
+  into two zones — animated Greg-style editorial panels on top (~55%), talking
+  head video on the bottom (~45%) — that can swap per-cut between three layout
+  modes: split_screen_greg (both zones active), hero_talking_head (full-frame
+  talking head with animated overlays), and full_greg_card (full-frame animated
+  graphic, voice continues underneath). Designed specifically for the
+  greg-isenberg-product-explainer playbook but supports any playbook.
+
+  Composition is a two-pass render: HyperFrames renders the animated overlay
+  track (panels, overlays, captions) with SOLID IVORY where video would be;
+  FFmpeg assembles the final reel by compositing the original talking head
+  footage into those zones WITHOUT any color-space conversion.
+  The talking head video is NEVER re-encoded with color metadata changes —
+  it retains its original look at every stage of the pipeline.
+
+category: hybrid
+stability: beta
+default_checkpoint_policy: guided
+
+extensions:
+  custom_scripts: true
+  custom_playbooks: true
+  custom_skills: true
+  custom_tools: false
+
+required_skills:
+  - pipelines/animation-talking-head-50-50/executive-producer
+  - pipelines/animation-talking-head-50-50/idea-director
+  - pipelines/animation-talking-head-50-50/script-director
+  - pipelines/animation-talking-head-50-50/scene-director
+  - pipelines/animation-talking-head-50-50/asset-director
+  - pipelines/animation-talking-head-50-50/edit-director
+  - pipelines/animation-talking-head-50-50/compose-director
+  - pipelines/animation-talking-head-50-50/publish-director
+  - meta/reviewer
+  - meta/checkpoint-protocol
+
+orchestration:
+  mode: executive-producer
+  skill: pipelines/animation-talking-head-50-50/executive-producer
+  budget_default_usd: 0.50
+  max_revisions_per_stage: 3
+  max_send_backs: 2
+
+compatible_playbooks:
+  recommended:
+    - greg-isenberg-product-explainer
+  also_works:
+    - flat-motion-graphics
+    - clean-professional
+    - kinetic-whiteboard-captions
+  custom_allowed: true
+
+layout_modes:
+  split_screen_greg:
+    description: "Top panel (0–55% height): animated Greg card, diagram, or phrase build. Bottom panel (55–100% height): talking head video. Both active simultaneously. Preferred for beats where speaker + visual proof add value together."
+    top_panel_height_pct: 55
+    bottom_panel_height_pct: 45
+    top_panel_height_px: 1056
+    bottom_panel_height_px: 864
+    divider_color: "#E0D8CE"
+    divider_thickness_px: 2
+
+  hero_talking_head:
+    description: "Full-frame talking head (1080x1920). Animated overlays (sticker pills, comparison boards, CTA badges, phrase captions) composited on top via FFmpeg. Audio and video from talking head. Use for hook, strong personal statements, payoff/CTA beats."
+    max_unbroken_seconds: 8
+
+  full_greg_card:
+    description: "Full-frame animated graphic (1080x1920). No talking head visible. Narration (voice-only) continues from the talking head audio track. Use for complex multi-node diagrams, moral-reset phrase collages, and concept reveals that need the full canvas."
+
+render_strategy:
+  name: hyperframes_plus_ffmpeg
+  description: >
+    Two-pass composition that keeps the talking head video untouched.
+
+    Pass 1 — HyperFrames animated overlay track:
+      Renders the full 1080x1920 canvas for the full composition duration.
+      Video zones (bottom panel in split_screen_greg, full frame in hero_talking_head)
+      are filled with the playbook background color (#F5EFE6 for Greg).
+      All GSAP-animated panels, overlays, and word-synced captions are rendered here.
+      No talking head <video> elements in the HyperFrames composition.
+
+    Pass 2 — FFmpeg assembly:
+      For split_screen_greg scenes: crop talking head from original source
+        (scale to 1080xN, crop the face window, NO color-space flags),
+        overlay under the HyperFrames top panel using `vstack` or `overlay`.
+      For hero_talking_head scenes: overlay HyperFrames element track
+        (sticker pills, comparison boards, CTA) on top of original talking head.
+      For full_greg_card scenes: pass through HyperFrames output directly.
+      Mix original audio from talking head source (no re-encode if possible).
+
+  critical_rule: >
+    NEVER apply -colorspace, -color_primaries, -color_trc, -color_transfer,
+    or -x264-params colorprim/transfer/colormatrix flags to the talking head
+    video segments. NEVER apply -pix_fmt yuv420p to talking head clips.
+    These flags quantize 10-bit HDR footage to 8-bit SDR and produce visibly
+    dull, washed-out video. The talking head goes through crop and scale only.
+
+stages:
+  - name: idea
+    skill: pipelines/animation-talking-head-50-50/idea-director
+    produces:
+      - brief
+      - decision_log
+    optional_tools:
+      - video_analyzer
+    tools_available:
+      - video_analyzer
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Brief captures the topic, hook, target audience, and CTA
+      - Layout mode assignment strategy is decided (which beats get which mode)
+      - Playbook locked (default greg-isenberg-product-explainer)
+      - render_runtime recorded in decision_log (default hyperframes+ffmpeg)
+    success_criteria:
+      - Schema-valid brief artifact
+      - Brief references provided talking head footage with confirmed audio presence
+      - demo_beats[] list present, each with layout_mode assigned
+
+  - name: script
+    skill: pipelines/animation-talking-head-50-50/script-director
+    required_artifacts_in:
+      - brief
+    produces:
+      - script
+      - transcript
+    required_tools:
+      - transcriber
+    tools_available:
+      - transcriber
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Transcript confidence >= 0.80 avg word confidence
+      - Sections aligned to topic/beat changes with valid start/end timestamps
+      - Each section carries its layout_mode from the brief's demo_beats
+      - Enhancement cues specify exactly what the animated panel must show per section
+    success_criteria:
+      - Schema-valid script artifact
+      - Word-level timestamps present (for caption generation)
+      - All sections have layout_mode and enhancement_cues
+
+  - name: scene_plan
+    skill: pipelines/animation-talking-head-50-50/scene-director
+    required_artifacts_in:
+      - script
+      - brief
+    produces:
+      - scene_plan
+    optional_tools:
+      - frame_sampler
+      - face_tracker
+    tools_available:
+      - frame_sampler
+      - face_tracker
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Every scene has a layout_mode and a hyperframes_spec
+      - Alternation rule: no hero_talking_head run > 8s without a cutaway
+      - split_screen_greg scenes specify top panel animation type and GSAP timing
+      - full_greg_card scenes specify complete phrase/diagram content
+      - hero_talking_head scenes list their overlay elements
+      - Talking head crop parameters specified (face_crop_y for source video)
+      - Caption placement is LAYOUT-AWARE (split_screen_greg = centered above the divider; hero_talking_head + full_greg_card = lifted lower-third) — never bottom-pinned where the IG/TikTok/Shorts UI shadows it
+    success_criteria:
+      - Schema-valid scene_plan artifact
+      - All scenes have hyperframes_spec with enough detail to author the HTML
+      - caption_config present (font, words_per_chunk, and layout-aware placement: split=centered, hero/full-card=lifted lower-third — not bottom-pinned)
+
+  - name: assets
+    skill: pipelines/animation-talking-head-50-50/asset-director
+    required_artifacts_in:
+      - scene_plan
+    optional_artifacts_in:
+      - script
+    produces:
+      - asset_manifest
+    required_tools:
+      - subtitle_gen
+    optional_tools:
+      - audio_mixer
+      - image_selector
+    tools_available:
+      - subtitle_gen
+      - audio_mixer
+      - image_selector
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Talking head segments prepared with crop-only transforms (NO color conversion)
+      - HyperFrames workspace created at projects/<name>/hyperframes/
+      - index.html authored from scene_plan hyperframes_spec entries
+      - All asset paths exist in hyperframes/assets/ (real files, not symlinks)
+      - Word-level caption timing generated from transcript
+      - Audio extracted from original source (no color-space-related flags)
+    success_criteria:
+      - Schema-valid asset_manifest artifact
+      - hyperframes/index.html present and passes npx hyperframes lint
+      - All talking head segment files verified as SDR-safe OR original-pass-through
+
+  - name: edit
+    skill: pipelines/animation-talking-head-50-50/edit-director
+    required_artifacts_in:
+      - scene_plan
+      - asset_manifest
+    produces:
+      - edit_decisions
+    optional_tools:
+      - silence_cutter
+      - video_trimmer
+    tools_available:
+      - silence_cutter
+      - video_trimmer
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Cut list matches scene_plan layout modes and timing
+      - FFmpeg assembly commands specified for each scene type
+      - Audio source is original talking head (not re-encoded with color flags)
+      - render_runtime recorded as "hyperframes+ffmpeg"
+    success_criteria:
+      - Schema-valid edit_decisions artifact
+      - All cuts reference valid source files
+
+  - name: compose
+    skill: pipelines/animation-talking-head-50-50/compose-director
+    required_artifacts_in:
+      - edit_decisions
+      - asset_manifest
+    optional_artifacts_in:
+      - scene_plan
+    produces:
+      - render_report
+      - final_review
+    required_tools:
+      - hyperframes_compose
+      - audio_mixer
+    optional_tools:
+      - video_trimmer
+      - visual_qa
+      - face_tracker
+    tools_available:
+      - hyperframes_compose
+      - audio_mixer
+      - video_trimmer
+      - visual_qa
+      - face_tracker
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - HyperFrames lint passes (0 errors) before render
+      - HyperFrames validate passes (0 errors, contrast deferred if needed)
+      - SDR sources confirmed (no HDR layered composite mode triggered)
+      - FFmpeg assembly uses original talking head WITHOUT color-space flags
+      - Output is 9:16 1080x1920, playable H.264
+      - Split-screen visible at sample frames for split_screen_greg scenes
+      - Face visible (not cropped to ceiling) in bottom panel
+      - Captions layout-placed (split=centered, hero/full-card=lifted lower-third) and NOT bottom-pinned into the platform UI shadow zone
+    success_criteria:
+      - Schema-valid render_report artifact
+      - Output video exists and is playable
+      - Talking head color quality preserved (not dull/washed-out)
+
+  - name: publish
+    skill: pipelines/animation-talking-head-50-50/publish-director
+    required_artifacts_in:
+      - render_report
+      - final_review
+    produces:
+      - publish_log
+    optional_tools:
+      - content_signal
+    tools_available:
+      - content_signal
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Caption/hook, hashtags, and CTA are complete and platform-appropriate
+    success_criteria:
+      - Schema-valid publish_log artifact
