@@ -87,6 +87,19 @@ MAX SIZE:    500 MB (desktop), 287.6 MB (iOS), 72 MB (Android)
 | **Result first** | Show the finished result, then explain how | Tutorial/how-to |
 | **Controversy** | "Everyone gets this wrong" | Engagement bait |
 
+### Hook/content fit matrix
+
+Learned from Chase Dimond IG post `DZJWCnBzhbf` (full note: `skills/creative/references/hook-content-fit-matrix-dzjwcnbzhbf.md`): do not reuse the same hook type for every short-form video. Match the hook psychology to the content job:
+
+| Content type | Hook job | Hook energy | OpenMontage visual pairing |
+|---|---|---|---|
+| Educational / tutorial | Curiosity + learning promise | Useful, direct, save-worthy | Checklist, prompt/result card, workflow map, screen recording |
+| Storytelling | Emotional identification | Vulnerable, reflective, specific | Face/gesture, personal artifact, before/after, timeline |
+| Contrarian / myth-bust | Tension against a common belief | Challenging but defensible | A/B cards, red X/green check, expectation-vs-reality split |
+| Authority / proof | Credibility fast | Evidence-first, concrete | Dashboard, receipt, source screenshot, result montage |
+
+Treat a hook/content mismatch as a retention bug. A proof-heavy post needs receipts in frame 1; a personal story needs emotion; an educational post needs a clear useful artifact; a contrarian post needs tension.
+
 ### Hook Rules
 
 1. **Frame 1 must have visual interest** — no blank intros, no logos, no "hey guys"
