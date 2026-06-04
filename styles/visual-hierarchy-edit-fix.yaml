@@ -1,0 +1,104 @@
+identity:
+  name: "Visual Hierarchy Edit Fix"
+  category: motion-graphics
+  mood: educational, corrective, punchy, creator-led, design-school
+  pace: rapid
+  best_for: "Instagram/Reels/Shorts design teardowns, before-after edit fixes, typography/layout tutorials, OpenMontage skill demos"
+
+visual_language:
+  color_palette:
+    primary: ["#111111", "#FFFFFF", "#FFE11A"]
+    accent: ["#2348D8", "#37E62F", "#7A4DFF"]
+    background: "#FFFFFF"
+    text: "#111111"
+    muted: "#B8B8B8"
+  composition: "vertical 9:16; alternate creator talking-head closeups with full-frame edit canvases; creator PIP top-right on design examples; safe-zone-aware comment bubble in lower third"
+  texture: "clean digital design-classroom canvas, occasional hand-drawn yellow/blue markups, poster-like final frame with saturated green/blue shapes and grayscale cutouts"
+
+typography:
+  headings:
+    font: "Inter Tight"
+    weight: 900
+    tracking: "-0.055em"
+    line_height: 0.88
+  body:
+    font: "Inter Tight"
+    weight: 700
+    line_height: 1.04
+  scale_system: "perfect_fourth"
+  weight_matrix:
+    title: 900
+    heading: 900
+    body: 700
+    caption: 500
+
+motion:
+  transitions: [snap-cut, punch-in, freeze-and-markup, before-after-swipe, receipt-flash]
+  animation_style: "creator-led tutorial cuts plus layer-by-layer design rebuild; draw-on circles/ovals, text scale corrections, quick proof flashes, poster reveal push-in"
+  pacing_rules:
+    min_scene_hold_seconds: 0.6
+    max_scene_hold_seconds: 4.0
+    text_card_hold_seconds: 1.0
+    stat_card_hold_seconds: 1.0
+    transition_duration_seconds: 0.16
+  entrance: "snap or 12-frame slide/pop for each new design layer; draw-on annotation begins 1-2 frames before the spoken emphasis"
+  exit: "hard cut, quick wipe, or opacity reset; avoid slow crossfades during diagnostics"
+
+audio:
+  voice_style: "fast, direct, teacher/creator energy; short pauses before each principle name and the final reveal"
+  music_mood: "low-volume upbeat educational bed"
+  music_volume: 0.08
+  sfx_style: "clicks/pops for layer appearances, whoosh on before-after transitions, riser into final design reveal, soft tap on comment bubble"
+
+asset_generation:
+  image_prompt_prefix: "vertical social design teardown frame, bold typography hierarchy, clean educational layout, hand-drawn annotation circle, creator-design-class aesthetic, "
+  image_negative_prompt: "cluttered, generic robot, tiny unreadable text, overdecorated, cyberpunk, low contrast, messy alignment"
+  diagram_style: "simple wireframe/silhouette of the bad edit, then poster-like saturated final composition"
+  consistency_anchors:
+    - "Comment bubble challenge opens the video."
+    - "Bad edit is isolated before any redesign."
+    - "Each principle is shown with one visible markup or receipt."
+    - "Final frame uses strong scale contrast and color contrast."
+    - "Creator PIP never covers the design decision being explained."
+
+overlays:
+  stat_card:
+    bg: "#FFFFFF"
+    border: "#E7E7E7"
+    text: "#111111"
+    radius: 18
+    shadow: "0 14px 38px rgba(0,0,0,0.18)"
+  key_term:
+    bg: "#FFE11A"
+    text: "#111111"
+    radius: 12
+    shadow: "0 8px 22px rgba(0,0,0,0.16)"
+  code_block:
+    bg: "#111111"
+    text: "#FFFFFF"
+    highlight: "#FFE11A"
+    radius: 14
+    shadow: "0 18px 44px rgba(0,0,0,0.22)"
+
+quality_rules:
+  - "One element must visibly win the frame; hero number/word is 2-5x support text; support words cluster by proximity and alignment."
+  - "Every tutorial beat must have a visible design artifact; do not run long talking-head stretches without the edit on screen."
+  - "Pick one active principle per beat: scale, contrast, alignment, proximity, or hierarchy."
+  - "Show bad state -> principle receipt -> fix state; never jump straight to the polished after."
+  - "The before/after difference must be understandable from a muted contact sheet."
+  - "Final poster must pass phone-size readability: hero text, subject, and CTA are not hidden by platform UI."
+  - "Comment bubble uses stat_card style; creator PIP should be circular with white rim, ~142px diameter, top-right."
+  - "Hand-drawn markup circles use yellow #FFE11A, thick stroke, draw-on timing; final poster uses green #37E62F background and blue #2348D8 shape/text."
+  - "Motion accents must clarify the design decision; avoid random kinetic text decoration."
+
+chart_palette:
+  - "#111111"
+  - "#FFE11A"
+  - "#2348D8"
+  - "#37E62F"
+  - "#FFFFFF"
+
+color_rules:
+  harmony_type: "complementary"
+  contrast_validation: true
+  colorblind_safe: false
