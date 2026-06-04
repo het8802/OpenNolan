@@ -1,0 +1,358 @@
+{
+  "destination": "/home/ubuntu/projects/OpenMontage/skills/social-media",
+  "generated_at_utc": "2026-06-04T22:03:43Z",
+  "mirrored": [
+    {
+      "file_count": 1,
+      "files": [
+        {
+          "bytes": 4204,
+          "path": "SKILL.md",
+          "sha256": "ecb47f76212dabc5eb6ab9b5c3091623ca06b5976f247b650b7e3b9744006383"
+        }
+      ],
+      "skill": "daily-carousel-remix"
+    },
+    {
+      "file_count": 2,
+      "files": [
+        {
+          "bytes": 9971,
+          "path": "SKILL.md",
+          "sha256": "f237dcf579c4a2fcab2d9478316a2c9ec055e8badfa2d8878e79ca9c52f9f574"
+        },
+        {
+          "bytes": 4843,
+          "path": "references/hermes-cron-setup.md",
+          "sha256": "f73cd6c014e95d7bd8d935fc5dd333b0f16bde5adfa49aa2cbc3ddb90c45b83e"
+        }
+      ],
+      "skill": "daily-tech-carousel"
+    },
+    {
+      "file_count": 3,
+      "files": [
+        {
+          "bytes": 18455,
+          "path": "SKILL.md",
+          "sha256": "6fb42ede7f208e610d3f202937e2c08d1ea22ded30c8c0237044cda33ac2dc3e"
+        },
+        {
+          "bytes": 3970,
+          "path": "references/greg-style-expanded-asset-kit.md",
+          "sha256": "03972706cfcb3ec00174a2ec58eee3e074e44c428f808d9a4e06b3610ad2f123"
+        },
+        {
+          "bytes": 2316,
+          "path": "references/greg-style-kit-assets.md",
+          "sha256": "07fd7b9e8b25787d65d832125fcf08f6075d2c7d804dfa4e324961b988e798bb"
+        }
+      ],
+      "skill": "editorial-ai-product-design-system"
+    },
+    {
+      "file_count": 5,
+      "files": [
+        {
+          "bytes": 21136,
+          "path": "SKILL.md",
+          "sha256": "5ec8b28c8d5345c89daaaf311ec38a6015e060cd0739688ec095b55388bf7fbc"
+        },
+        {
+          "bytes": 3414,
+          "path": "references/anthropic-inspired-carousel-style.md",
+          "sha256": "c91e4e08278a457d269e816e6d4c25bc6a3579f0953564b69f48a495944451e1"
+        },
+        {
+          "bytes": 2201,
+          "path": "references/instagram-carousel-source-capture.md",
+          "sha256": "ad233ce714630253e70e20950c2359afbd92e19adbff5bf199d3661ba5445ffe"
+        },
+        {
+          "bytes": 2592,
+          "path": "references/product-card-grid-carousel-production.md",
+          "sha256": "d91c41810df4a2e567e7c354e0a3e1a41721865a71ae27b94e1a6cf13dfd5d44"
+        },
+        {
+          "bytes": 2587,
+          "path": "references/remixing-external-carousel-content.md",
+          "sha256": "2c896286bf205613179617a86f04cfc07f3d6ea8a48b2815f16c8e05fde4b164"
+        }
+      ],
+      "skill": "instagram-carousel"
+    },
+    {
+      "file_count": 11,
+      "files": [
+        {
+          "bytes": 49584,
+          "path": "SKILL.md",
+          "sha256": "5a28ac4f415a898a54d22c3e2521890e5611d5f2c581214789c676d7c238382a"
+        },
+        {
+          "bytes": 2188,
+          "path": "references/claude-content-prompts-dyeb85.md",
+          "sha256": "b275ec658fe99a8aff9b96bf09980f0221999dda6b9faeeeef8d3819724fc367"
+        },
+        {
+          "bytes": 4900,
+          "path": "references/dy5spas-pixel-rpg-product-explainer.md",
+          "sha256": "c116a1d4aa0adc313778fac421acbdbc2654e37e712b897e976ca29025589f75"
+        },
+        {
+          "bytes": 1999,
+          "path": "references/instagram-reel-learning-workflow.md",
+          "sha256": "88cf50585ab2d0657bb917098581dd3ba6ca864873408199497cb5288c717468"
+        },
+        {
+          "bytes": 2388,
+          "path": "references/instagram-reel-link-extraction.md",
+          "sha256": "afa9c73f9e533071e00abb210904adf82942173df4f18def9e378282ef7655f1"
+        },
+        {
+          "bytes": 4565,
+          "path": "references/openai-ads-greg-remotion-reel.md",
+          "sha256": "197411c997652c1c67b889b7897ea856c49c0220b02f1fb2c226252c09de6cfb"
+        },
+        {
+          "bytes": 6132,
+          "path": "references/openai-credits-greg-remotion-reel.md",
+          "sha256": "df96c66cf9d9555813f474948289fe9e3c71b546494be3c20d8cebc7fb7975e8"
+        },
+        {
+          "bytes": 7291,
+          "path": "references/openmontage-kinetic-whiteboard-captions.md",
+          "sha256": "50ae43308864b86dcd275530c4efc31bf30ebbc59b2ab27e26bab0d5f9ea2a22"
+        },
+        {
+          "bytes": 2530,
+          "path": "references/openmontage-social-media-skill-mirror.md",
+          "sha256": "ae895addcf9365ba4ffa565a22b05373d64e278739afc59bcdd4cabe67251280"
+        },
+        {
+          "bytes": 4669,
+          "path": "references/recalling-instagram-shared-resources.md",
+          "sha256": "3dc26d60c047eee540cc4f0cb4090368bff59e21e62a7d91c9358b1b6937bab8"
+        },
+        {
+          "bytes": 4677,
+          "path": "references/tribev2-video-analysis.md",
+          "sha256": "97185e5ce63474edafbd5378bba1f73d0bbcc13d840e11599c03d3d15e0e812e"
+        }
+      ],
+      "skill": "instagram-reels"
+    },
+    {
+      "file_count": 20,
+      "files": [
+        {
+          "bytes": 21608,
+          "path": "SKILL.md",
+          "sha256": "7dde37be776b7a502bb33f310a9124ec86ee0054071654d98eb98e13d96d9dc9"
+        },
+        {
+          "bytes": 4776,
+          "path": "references/ai-tech-creator-research-strategy.md",
+          "sha256": "97dcda9886418cf7dec25a5d868d87223ae5ce6b855a8ee22b9d8598fcdd1531"
+        },
+        {
+          "bytes": 3319,
+          "path": "references/apify-and-tool-roi.md",
+          "sha256": "5012ec1a75a3fb496eaf9c968fea0248d5db5cf55d762b92c83274baad2411bf"
+        },
+        {
+          "bytes": 1981,
+          "path": "references/approval-recovery.md",
+          "sha256": "5263b13f3bb33e9b4c78b31e70bf0ba9d52466b62f47f0ad3b3563fd3b25b75b"
+        },
+        {
+          "bytes": 5803,
+          "path": "references/creative-short-video-workflow.md",
+          "sha256": "c498a52ad1e59ebb54b43fe9658b9805f9fc0804ad602c9dcf66253b6764a438"
+        },
+        {
+          "bytes": 4082,
+          "path": "references/cron-delivery-audit.md",
+          "sha256": "ddfdfb9bd1c8d2b66ed00a57d4c7221dbcca166fcb600c985bc4f317b42bee51"
+        },
+        {
+          "bytes": 2117,
+          "path": "references/daily-script-cron-recovery.md",
+          "sha256": "13b95f1dfff0a8f2b3d555fa64272325783c57484c3edc060a6bdba449ff0257"
+        },
+        {
+          "bytes": 5021,
+          "path": "references/daily-tech-carousel-digest-workflow.md",
+          "sha256": "83a11384bafe39a324a7fe48af6bf48b8d4ebc1aa724985615c4f4c7a6a56fff"
+        },
+        {
+          "bytes": 2034,
+          "path": "references/figjam-hook-database-cron-integration.md",
+          "sha256": "395656c39129ef1a6f61321ab846847395a4d86f8bc2ffd378f74ce38482ed46"
+        },
+        {
+          "bytes": 4451,
+          "path": "references/hourly-marketing-cron.md",
+          "sha256": "afa57daed21d974f6d94ae84798cc27fa4f8eff69fbb2d15a8413544608ae328"
+        },
+        {
+          "bytes": 3005,
+          "path": "references/idea-4-v2-remotion-qa-notes.md",
+          "sha256": "f6739c3d0349d9b1566b5ea1bbd0f0d3a713dcd0cd7b6c5d8871a2961d9164be"
+        },
+        {
+          "bytes": 3079,
+          "path": "references/instagram-ai-tech-script-engine.md",
+          "sha256": "b8b9161c1ea62baf922a435940bce2c5d2cbcedc079d85263d0c102fe17fa425"
+        },
+        {
+          "bytes": 3579,
+          "path": "references/production-pipeline-project-scaffold.md",
+          "sha256": "77c482a817d95490d5a52c7cc773fdcb965fae8ccab550e996dd651e8d88291c"
+        },
+        {
+          "bytes": 4912,
+          "path": "references/remotion-short-video-production-notes.md",
+          "sha256": "31753c654229cbafcf1753b6ccdc6ff229b2bc0941b5f6e775fedae216b14ce6"
+        },
+        {
+          "bytes": 1579,
+          "path": "references/slack-media-attachment-limitation.md",
+          "sha256": "8fa289707e8ece172c9ea21792de9a29be4e91dabf73f72075827b3647752037"
+        },
+        {
+          "bytes": 4095,
+          "path": "references/social-link-intake-and-gated-post-summarization.md",
+          "sha256": "270fbe62e2d39907684097cc84293415a2eddd76781aa956647abfbbdd09fd66"
+        },
+        {
+          "bytes": 2567,
+          "path": "references/tts-voice-selection-and-slack-delivery-notes.md",
+          "sha256": "fbfce74703a46ee41fd88a43885424bb64ced161b0aef517e6af276dcaabd54f"
+        },
+        {
+          "bytes": 3378,
+          "path": "references/typed-ai-video-pipeline-v0.md",
+          "sha256": "0ab5ce0f0fe3f6198e6724842c4a228055dad85f958de6191321024048e498ea"
+        },
+        {
+          "bytes": 3024,
+          "path": "references/video-craft-learning-loop.md",
+          "sha256": "769bb4820859154c13049a64e4659dc38a4fde6291e1fd000831e962339ae5b5"
+        },
+        {
+          "bytes": 2725,
+          "path": "references/viral-claude-validation-angle.md",
+          "sha256": "d9367bae4146fbc1806feb999107c86df2b9f57c8ffe034c897c21d71e810c41"
+        }
+      ],
+      "skill": "marketing-ops-automation"
+    },
+    {
+      "file_count": 9,
+      "files": [
+        {
+          "bytes": 11721,
+          "path": "SKILL.md",
+          "sha256": "69bbda3e3491249d5c3d8b5d687c6a9f50fae76e51a7616889781cdce1c933fe"
+        },
+        {
+          "bytes": 2104,
+          "path": "references/approval-gate-short-qa.md",
+          "sha256": "a86c530f33e2f131390ef7a0e8eaa962126182647deb16c7f7cbec9243c39d7d"
+        },
+        {
+          "bytes": 4936,
+          "path": "references/codex-aesthetic-carousel-generation.md",
+          "sha256": "c0768bf05917580f3381733473822037e8bb48ddec2eac5d7a31237744770192"
+        },
+        {
+          "bytes": 3036,
+          "path": "references/figjam-video-hook-extraction.md",
+          "sha256": "01dcc1b231844012bd53f67cf13f00cf3d935490e310634924931fdb33ed1583"
+        },
+        {
+          "bytes": 3402,
+          "path": "references/humor-inserts-and-bg-removal-eval.md",
+          "sha256": "7765d95274d550d4f28a6bf4faf76684f9634b0c4810df6d9fb0a6a8f6205ceb"
+        },
+        {
+          "bytes": 3043,
+          "path": "references/local-motion-graphics-fallback.md",
+          "sha256": "80cde6a2c41e42bf24ea613597eb46ff938d288d6daded1f603fdca1bc953f3e"
+        },
+        {
+          "bytes": 2529,
+          "path": "references/openmontage-ffmpeg-draft-render.md",
+          "sha256": "63e350304188e217495dbecc65b3bd8226b9141b59fafb7e2a6c1752df1c79c7"
+        },
+        {
+          "bytes": 2759,
+          "path": "references/procedural-motion-graphics-rendering-notes.md",
+          "sha256": "161996bc847d123c1597c9385bd8542b62c0e67c2aaad56d238e8e0d4db7145d"
+        },
+        {
+          "bytes": 3661,
+          "path": "references/rvm-long-and-reaction-gif-eval.md",
+          "sha256": "e6d08b34ad02f95ce2182278bc41f12cac587f0c05340999cc95dc7d5ee2f2f6"
+        }
+      ],
+      "skill": "marketing-os-tools"
+    },
+    {
+      "file_count": 3,
+      "files": [
+        {
+          "bytes": 11605,
+          "path": "SKILL.md",
+          "sha256": "834f985601bc670e492444b85a1d5e07350d1de7e1c538087e98229a494932c7"
+        },
+        {
+          "bytes": 3618,
+          "path": "references/claude-500m-enterprise-ai-spend.md",
+          "sha256": "2f169a93402f789407437d95ad041bc42ec630068b9afca03be2819cd6351aa7"
+        },
+        {
+          "bytes": 2935,
+          "path": "references/faceless-evidence-montage-video-production.md",
+          "sha256": "fc359aec7e94b321a81a9eb0495bc5f34ec0731771b46b4843b1025332d257b6"
+        }
+      ],
+      "skill": "source-backed-reel-evidence-montage"
+    },
+    {
+      "file_count": 3,
+      "files": [
+        {
+          "bytes": 9858,
+          "path": "SKILL.md",
+          "sha256": "bf04459ac07fb8cb2c88c4c8d75aae75bebdd3f731a98ce4227538af633c1c72"
+        },
+        {
+          "bytes": 3728,
+          "path": "references/het-openai-finance-adaptation.md",
+          "sha256": "0d52e2f892679ca058fc65f5001903f88044f3223b0a0ed44ce11846be088afd"
+        },
+        {
+          "bytes": 2159,
+          "path": "references/remotion-polished-render-pattern.md",
+          "sha256": "93771c8827c8fe3922ea4ebb3bdde85d419a7977508c7def64270ea908dad4af"
+        }
+      ],
+      "skill": "talking-head-screen-demo-reel"
+    },
+    {
+      "file_count": 1,
+      "files": [
+        {
+          "bytes": 13993,
+          "path": "SKILL.md",
+          "sha256": "46a50c6f6d3fd233d5eaa8af829d5f78f81ad97472571fde7f233e069485a611"
+        }
+      ],
+      "skill": "xurl"
+    }
+  ],
+  "mirrored_count": 10,
+  "source": "/home/ubuntu/.hermes/skills/social-media"
+}

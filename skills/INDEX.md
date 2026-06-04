@@ -85,6 +85,10 @@ Key capability families to look for in the output:
 | Subtitle Sync | `core/subtitle-sync.md` | Subtitle timing and alignment | `remotion-best-practices` |
 | Color Grading | `core/color-grading.md` | FFmpeg color profiles, LUT workflow, accessibility | `ffmpeg` |
 
+## Social Media Skill Mirror
+
+Repo-local social-media mirrors live under `social-media/<skill>/SKILL.md`. They mirror Hermes skills from `~/.hermes/skills/social-media` so OpenMontage agents synced through GitHub can read Instagram/Reels/carousel/marketing operating knowledge without relying on absolute Hermes paths or symlinks. See `social-media/INDEX.md` and `social-media/mirror-manifest.json`.
+
 ## Creative Skills
 
 | Skill | File | Trigger | Agent Skills (Layer 3) |
