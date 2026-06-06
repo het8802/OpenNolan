@@ -41,6 +41,28 @@ listing ALL available runtimes (a decision logged with only one runtime consider
 were available is a critical reviewer finding). Lock `render_runtime` and `renderer_family`
 (`social-reel`) in the brief; later stages carry them forward unchanged.
 
+## HDR handling (detect → check device → decide; NEVER silently tonemap)
+
+iPhone/modern footage is often **HDR** (HLG or PQ, 10-bit). Tonemapping it to SDR silently
+degrades it — a real bug we hit once. At the idea/proposal stage:
+
+1. **Detect the source.** For each source clip call `is_hdr_source(path)` (in
+   `tools/video/_shared.py`). `hdr=True` (kind `hlg`/`pq`) means HDR.
+2. **Check the device.** Read `video_compose.get_info()["hdr_encode"]`. `available=False`
+   means this machine has no 10-bit HEVC encoder — HDR cannot be preserved here.
+3. **Decide WITH the user, record it:**
+   - HDR source + device can encode HDR → **preserve HDR** (default). Plan an HEVC main10
+     HLG/PQ render; expect bigger files.
+   - HDR source + the reel mixes SDR-only generated elements (restyle, cutout, AI images,
+     stock) → those can't be HDR. Surface the choice: **(a)** preserve HDR with visibly flat
+     SDR inserts, or **(b)** tonemap everything to SDR for consistency. Don't pick silently.
+   - HDR source + device CANNOT encode HDR → surface the limitation; only tonemap to SDR
+     with explicit user consent.
+   - SDR source → nothing to do (never fabricate HDR).
+   Record the outcome as an `hdr_handling` decision in `decision_log` (preserve / tonemap /
+   mixed) alongside `render_runtime_selection`.
+
 ## Quality bar
-Clear hook, platform, duration, tone, template decision, music plan, and a logged
-`render_runtime_selection`. Then checkpoint for human approval.
+Clear hook, platform, duration, tone, template decision, music plan, a logged
+`render_runtime_selection`, and (if any source is HDR) a logged `hdr_handling` decision.
+Then checkpoint for human approval.

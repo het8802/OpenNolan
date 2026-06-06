@@ -21,7 +21,15 @@ provenance for every asset (paths, source_tool, model, cost, scene linkage).
 Every generated asset gets an `asset_manifest` entry with `source_tool`, `model` (if any),
 `cost_usd`, `scene_id`, and `duration_seconds`. Paid generations must record their real cost.
 
+## HDR caveat for generated assets
+`object_cutout`, `restyle_video`, image/video generators, and stock all output **SDR**. If the
+source footage is HDR (the `hdr_handling` decision from idea stage is "preserve"), these
+generated assets will look flat next to it. Flag any SDR generated asset in the manifest when
+the reel is HDR, so the edit/compose stages can place it deliberately (or the user can drop it)
+rather than discovering the mismatch at render. Note the current Edits tools are 8-bit SDR
+(they don't preserve HDR) — see the deferred HDR-tooling follow-up.
+
 ## Quality bar
 Assets exist for every planned scene/move; paid tools were confirm-gated and cached; manifest
-is schema-valid with full provenance. Auto-proceed (no human gate) unless a paid run needs
-approval.
+is schema-valid with full provenance; SDR-vs-HDR mismatches flagged. Auto-proceed (no human
+gate) unless a paid run needs approval.

@@ -420,6 +420,19 @@ When `render_runtime="hyperframes"` is locked and HyperFrames is unavailable (No
 
 Routing is automatic — `video_compose` reads `edit_decisions.render_runtime` and dispatches to the matching engine (`_render_via_hyperframes`, `_remotion_render`, or `_render_via_ffmpeg`). But the **agent must know both Remotion and HyperFrames exist at proposal time** so it can design the visual approach intentionally. Don't default to Remotion for motion-graphics-heavy concepts that HTML/GSAP would express more naturally, and don't default to HyperFrames for briefs that reuse the existing React scene stack.
 
+### HDR Handling (HARD RULE — never silently tonemap HDR)
+
+Modern phone footage is frequently **HDR** (HLG or PQ, 10-bit). Converting it to SDR throws away the dynamic range the user shot. **Never silently tonemap HDR to SDR.** Before editing any source footage, run the three-step check:
+
+1. **Detect the source.** Call `is_hdr_source(path)` (in `tools/video/_shared.py`). `hdr=True` (with `kind` = `hlg` or `pq`) means the clip is HDR. SDR sources need no special handling — and you must NEVER fabricate HDR from an SDR source.
+2. **Check the device.** Read `video_compose.get_info()["hdr_encode"]`. `available=False` means this machine has no 10-bit HEVC encoder (`hevc_videotoolbox` or 10-bit `libx265`), so HDR cannot be preserved here.
+3. **Decide with the user, log it.** Record an `hdr_handling` decision (`preserve` / `tonemap` / `mixed`) in `decision_log`:
+   - HDR source + device can encode HDR → **preserve** (default): encode HEVC main10 `yuv420p10le` carrying the source's `color_primaries`/`color_trc`/`colorspace` + `-tag:v hvc1`; minimize re-encodes; stream-copy the video through audio muxing.
+   - HDR source mixed with SDR-only generated assets (cutout, restyle, AI/stock images) → those can't be HDR; surface the choice (preserve-with-flat-SDR-inserts vs tonemap-all-to-SDR). Don't pick silently.
+   - HDR source + device cannot encode HDR → surface the blocker; tonemap only with explicit consent.
+
+**Tool caveat:** the current video tools (`motion_ops`, the `video_compose` overlay/keyframe path, `object_cutout`) are **8-bit SDR only** — running HDR footage through them silently degrades it. For an HDR deliverable, do the cut with HDR-aware FFmpeg directly until the tools gain a 10-bit HLG/PQ passthrough mode. (The older `animation-talking-head-50-50` "tonemap for mixed SDR composite" guidance is a *deliberate, logged* choice for that pipeline — not license to tonemap HDR silently elsewhere.)
+
 ## Capability Discovery
 
 OpenMontage uses two layers for capability choice:

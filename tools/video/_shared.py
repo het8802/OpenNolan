@@ -634,7 +634,46 @@ def probe_output(path: Path) -> dict[str, Any]:
                     info["video_width"] = int(stream.get("width", 0))
                     info["video_height"] = int(stream.get("height", 0))
                     info["video_codec"] = stream.get("codec_name", "")
+                    # color metadata — needed to detect HDR (HLG/PQ) and avoid silently
+                    # tonemapping HDR footage down to SDR. Consumed by is_hdr_source().
+                    info["pix_fmt"] = stream.get("pix_fmt", "")
+                    info["color_transfer"] = stream.get("color_transfer", "")
+                    info["color_primaries"] = stream.get("color_primaries", "")
+                    info["color_space"] = stream.get("color_space", "")
                     break
     except Exception:
         pass
     return info
+
+
+# HDR transfer characteristics: HLG (broadcast / Apple) and PQ / SMPTE-2084 (HDR10 / Dolby).
+_HDR_TRANSFERS = {"arib-std-b67": "hlg", "smpte2084": "pq", "smpte-st-2084": "pq"}
+
+
+def is_hdr_source(path: Path) -> dict[str, Any]:
+    """Detect whether a video is HDR (HLG or PQ) so callers never silently tonemap it.
+
+    Returns {hdr, kind: 'hlg'|'pq'|None, transfer, primaries, color_space, pix_fmt, bit_depth}.
+    A clip is HDR when its transfer is an HDR curve (HLG/PQ). 10-bit + BT.2020 WITHOUT an HDR
+    transfer is wide-gamut-but-not-HDR -> hdr=False (we never fabricate HDR from SDR).
+    """
+    not_hdr = {
+        "hdr": False, "kind": None, "transfer": None, "primaries": None,
+        "color_space": None, "pix_fmt": None, "bit_depth": 8,
+    }
+    if not Path(path).exists():
+        return not_hdr
+    info = probe_output(path)
+    transfer = (info.get("color_transfer") or "").lower()
+    pix_fmt = (info.get("pix_fmt") or "").lower()
+    kind = _HDR_TRANSFERS.get(transfer)
+    bit_depth = 10 if any(t in pix_fmt for t in ("10le", "10be", "p010")) else 8
+    return {
+        "hdr": kind is not None,
+        "kind": kind,
+        "transfer": transfer or None,
+        "primaries": info.get("color_primaries") or None,
+        "color_space": info.get("color_space") or None,
+        "pix_fmt": info.get("pix_fmt") or None,
+        "bit_depth": bit_depth,
+    }
