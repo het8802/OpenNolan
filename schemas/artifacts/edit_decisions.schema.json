@@ -82,7 +82,29 @@
             "required": ["x", "y"]
           },
           "animation": { "type": "string" },
-          "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+          "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+          "keyframes": {
+            "type": "array",
+            "description": "Per-overlay motion timeline. Each keyframe sets the layer's transform/opacity at an absolute project time `t` (seconds). The renderer interpolates between consecutive keyframes using the `easing` of the earlier one. Omit for a static overlay (back-compatible).",
+            "items": {
+              "type": "object",
+              "required": ["t"],
+              "properties": {
+                "t": { "type": "number", "minimum": 0, "description": "Absolute project time in seconds (same axis as start_seconds)" },
+                "x": { "type": "number", "description": "X position in px (overlay origin)" },
+                "y": { "type": "number", "description": "Y position in px (overlay origin)" },
+                "scale": { "type": "number", "minimum": 0, "description": "Uniform scale multiplier (1.0 = native)" },
+                "rotation": { "type": "number", "description": "Rotation in degrees, clockwise" },
+                "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+                "easing": {
+                  "type": "string",
+                  "description": "Interpolation curve toward the NEXT keyframe",
+                  "enum": ["linear", "ease-in", "ease-out", "ease-in-out", "spring", "step"]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
         },
         "additionalProperties": false
       }
@@ -191,8 +213,8 @@
     },
     "renderer_family": {
       "type": "string",
-      "enum": ["explainer-data", "explainer-teacher", "cinematic-trailer", "documentary-montage", "product-reveal", "screen-demo", "presenter", "animation-first"],
-      "description": "Locked at proposal stage — creative grammar for this deliverable. Preserved from proposal_packet; edit MUST NOT change without a logged decision."
+      "enum": ["explainer-data", "explainer-teacher", "cinematic-trailer", "documentary-montage", "product-reveal", "screen-demo", "presenter", "animation-first", "social-reel"],
+      "description": "Locked at proposal stage — creative grammar for this deliverable. Preserved from proposal_packet; edit MUST NOT change without a logged decision. NOTE: video_compose._get_composition_id (RENDERER_FAMILY_MAP) RAISES on an unrecognized value — adding an enum value here is NOT sufficient on its own; a matching RENDERER_FAMILY_MAP entry + a real Remotion composition must exist before any artifact emits it. 'social-reel' is reserved for the instagram-reels-studio pipeline (Phase 2)."
     },
     "render_runtime": {
       "type": "string",
