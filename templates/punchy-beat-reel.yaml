@@ -1,0 +1,39 @@
+version: "1.0"
+name: "Punchy Beat Reel"
+description: >
+  Fast 5-clip vertical montage cut to music, with word-by-word captions. Pair with
+  beat_cutter to snap the cuts to the track. Good for energetic product/hype reels.
+aspect_ratio: "9:16"
+target_seconds: 15
+render_runtime: "ffmpeg"
+renderer_family: "social-reel"
+slots:
+  - slot_id: "hook"
+    kind: "video"
+    seconds: 3.0
+    transition_in: "cut"
+  - slot_id: "beat1"
+    kind: "video"
+    seconds: 3.0
+    transition_in: "cut"
+  - slot_id: "beat2"
+    kind: "video"
+    seconds: 3.0
+    transition_in: "cut"
+  - slot_id: "beat3"
+    kind: "video"
+    seconds: 3.0
+    transition_in: "cut"
+  - slot_id: "payoff"
+    kind: "video"
+    seconds: 3.0
+    transition_in: "fade"
+    transition_duration: 0.25
+music:
+  enabled: true
+  volume: 0.8
+  ducking: true
+subtitles:
+  enabled: true
+  style: "word-by-word"
+  position: "bottom-center"
