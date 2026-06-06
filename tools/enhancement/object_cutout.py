@@ -522,7 +522,24 @@ class ObjectCutout(BaseTool):
             "click_object_ids": ids,
         }
 
-    # ---- Replicate (official-model endpoint) ----
+    # ---- Replicate (versioned endpoint) ----
+    # Live testing showed meta/sam-2-video's official /v1/models/{slug}/predictions shortcut
+    # 404s — it must be run via the VERSIONED endpoint (resolve latest_version -> POST
+    # /v1/predictions with {version, input}), the content_signal community pattern.
+
+    def _resolve_version(self, token: str) -> str:
+        import requests
+
+        resp = requests.get(
+            f"{self.REPLICATE_BASE}/models/{self.MODEL_SLUG}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        version_id = ((resp.json() or {}).get("latest_version") or {}).get("id")
+        if not version_id:
+            raise _PredictionError(f"Could not resolve a version id for {self.MODEL_SLUG}.")
+        return version_id
 
     def _create_prediction(
         self, file_url: str, points: list[dict[str, Any]], mask_type: str, token: str
@@ -531,14 +548,15 @@ class ObjectCutout(BaseTool):
 
         payload_input: dict[str, Any] = {"input_video": file_url, "mask_type": mask_type}
         payload_input.update(self._serialize_points(points))
+        version = self._resolve_version(token)
         resp = requests.post(
-            f"{self.REPLICATE_BASE}/models/{self.MODEL_SLUG}/predictions",
+            f"{self.REPLICATE_BASE}/predictions",
             headers={
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
                 "Prefer": "wait",
             },
-            json={"input": payload_input},
+            json={"version": version, "input": payload_input},
             timeout=120,
         )
         if resp.status_code == 422:

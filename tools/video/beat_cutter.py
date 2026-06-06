@@ -252,15 +252,17 @@ class BeatCutter(BaseTool):
         if librosa is unavailable so the caller can give a clean install message."""
         try:
             import librosa  # noqa
+            import numpy as np
         except Exception as e:  # ImportError or a broken numba/llvmlite install
             raise _LibrosaMissing(str(e))
         y, sr = librosa.load(audio_path, mono=True)
         tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
         beat_times = librosa.frames_to_time(beat_frames, sr=sr)
-        tempo_val = float(tempo) if hasattr(tempo, "__float__") else (
-            float(tempo[0]) if hasattr(tempo, "__len__") and len(tempo) else None
-        )
-        return [round(float(t), 4) for t in beat_times], tempo_val
+        # librosa 0.11 + numpy 2.x return `tempo` as a 1-D array, not a scalar — float()
+        # on a non-0-d array raises. Flatten + take the first element robustly.
+        tempo_arr = np.asarray(tempo).flatten()
+        tempo_val = float(tempo_arr[0]) if tempo_arr.size else None
+        return [round(float(t), 4) for t in np.asarray(beat_times).flatten()], tempo_val
 
     # ---- boundary selection ----
 

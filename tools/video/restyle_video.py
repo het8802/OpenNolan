@@ -98,9 +98,17 @@ class RestyleVideo(BaseTool):
             "prompt": {"type": "string", "description": "Target style, e.g. 'claymation', 'cyberpunk neon'."},
             "mode": {
                 "type": "string",
-                "enum": ["adhere", "flex", "reimagine"],
+                "enum": [
+                    "adhere", "flex", "reimagine",
+                    "adhere_1", "adhere_2", "adhere_3",
+                    "flex_1", "flex_2", "flex_3",
+                    "reimagine_1", "reimagine_2", "reimagine_3",
+                ],
                 "default": "flex",
-                "description": "luma/modify-video strength: adhere=subtle, flex=stylistic, reimagine=dramatic.",
+                "description": (
+                    "luma/modify-video strength: adhere=subtle, flex=stylistic, reimagine=dramatic. "
+                    "luma requires a numbered variant (e.g. flex_2); a bare mode maps to the middle (_2)."
+                ),
             },
             "model_slug": {"type": "string", "description": f"Override the model (default {DEFAULT_MODEL})."},
             "endpoint": {
@@ -320,7 +328,10 @@ class RestyleVideo(BaseTool):
             "prompt": prompt,
         }
         if "modify-video" in model or model.startswith("luma/"):
-            payload_input["mode"] = mode
+            # luma/modify-video requires a NUMBERED strength: adhere_1..3 / flex_1..3 /
+            # reimagine_1..3 (1=subtlest, 3=strongest). Map a bare mode to the middle (_2);
+            # pass a numbered mode through unchanged.
+            payload_input["mode"] = mode if "_" in str(mode) else f"{mode}_2"
 
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json", "Prefer": "wait"}
         if self._is_official(model, inputs.get("endpoint", "auto")):
