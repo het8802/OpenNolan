@@ -149,6 +149,25 @@ ffmpeg -ss {hero_start} -i final.mp4 -vframes 1 -q:v 2 /tmp/output_check.jpg
 
 Read both frames. If the output looks noticeably more muted, flat, or desaturated than the source, the color protection rule was violated somewhere in the pipeline. FAIL and investigate.
 
+### 3b. Narration Sync Verification (MANDATORY — catches early reveals)
+
+The most common reviewer-caught defect in this format is animations revealing *before* the speaker says the words (it makes the reel feel pre-canned). Verify it explicitly.
+
+For each keyed element / overlay / reaction-GIF, sample TWO frames around its `trigger_word` timestamp `T` (from the scene_plan):
+
+```bash
+ffmpeg -ss $(echo "$T - 0.35" | bc) -i final.mp4 -vframes 1 /tmp/before_${T}.jpg   # element must be ABSENT
+ffmpeg -ss $(echo "$T + 0.25" | bc) -i final.mp4 -vframes 1 /tmp/on_${T}.jpg        # element must be PRESENT
+```
+
+Read both frames:
+- **before** (~0.35s before the word): the element must NOT yet be visible. If it's already on screen, it revealed too early → **CRITICAL finding, retime** the GSAP `abs_time` (or the FFmpeg overlay `-itsoffset`/`enable` window) to the word's `start`.
+- **on** (~0.25s after the word): the element should be visible.
+
+For a multi-part diagram, also sample a frame mid-clause and confirm it is still *building* (not already complete) — it should finish as the speaker finishes, not before.
+
+Treat any "visible before its trigger word" as a release blocker for that beat. Re-render the overlay (GSAP retime) or re-run FFmpeg (overlay window retime) and re-verify.
+
 ### 4. Caption check
 Sample one frame from a `split_screen_greg` scene and one from a `hero_talking_head`/`full_greg_card`
 scene and confirm captions are LAYOUT-PLACED (not bottom-pinned):
