@@ -5,6 +5,9 @@ description: Use when creating, critiquing, researching, or scripting Instagram 
 
 # Instagram Reels
 
+## OpenMontage mirror rule
+When Het shares Instagram algorithm, user psychology, engagement, hook, carousel, or editing lessons, store durable learning in the relevant Hermes social-media skill **and** mirror it into OpenMontage repo-local files under `/home/ubuntu/projects/OpenMontage/skills/social-media/` so his local synced AI agent can use it. Use real Markdown/support files, not symlinks. Session-specific details belong in `references/`; class-level operating rules belong in `SKILL.md`. See `references/openmontage-social-media-mirror.md`.
+
 ## Core principle
 Treat short-form as **attention engineering**, not video summarization. The first 2–5 seconds must combine a visual hook, spoken hook, and audio/SFX cue; the rest must reward the hook with useful, emotionally legible payoff.
 
@@ -235,15 +238,18 @@ Why it works:
 - It preserves utility: product screenshots and generated artifacts prove the workflow instead of decorating it.
 
 ### Visual hierarchy “fix this edit” tutorial Reel
-Learned from Aevy Video School Reel `DZHvGrfSQ4t` (Jun 2026), caption/title “This is how we will fix this edit”: design/editing tutorials become more compelling when they are framed as a **visible repair arc**, not abstract advice.
+Learned from Aevy Video School Reels `DZHvGrfSQ4t` and `DZNSZJ0TTb9` (Jun 2026), caption/title “This is how we will fix this edit”: design/editing tutorials become more compelling when they are framed as a **visible repair arc**, not abstract advice.
 
 Reusable structure:
 - Hook with a viewer comment bubble asking the exact question (`How exactly would you fix this?`) while the creator talks to camera. The comment supplies social proof and a clean problem statement.
 - Isolate the bad edit as a simplified canvas/wireframe/silhouette so the flaw is obvious before teaching.
-- Flash quick “principle receipts” such as typography anatomy, design-principle cards, or the actual editing timeline/waveform; circle one detail only.
-- Rebuild the frame one layer at a time: hero word/number first, support text second, subject/asset third, background shape last. The core lesson is: **motion cannot rescue unclear hierarchy**.
+- Start with the **actual flaw**, not a generic principle. In `DZNSZJ0TTb9`, the bad mental-health survey map fails because it mixes generic teal gradient, weak/hidden title hierarchy, random yellow doodles, poorly connected stat callout, and decorative avatars that do not reinforce the data story.
+- Flash quick “principle receipts” such as typography anatomy, design-principle cards, color-palette references, moodboards/Midjourney prompts, or the actual editing timeline/waveform; circle one detail only.
+- Rebuild the frame one layer at a time: hero geography/object first, title/date second, stat/data callout third, emotional/supporting asset fourth, background texture/shape last. The core lesson is: **motion cannot rescue unclear hierarchy**.
+- Use a **controlled palette** derived from the topic instead of random bright colors. For sensitive/serious content, a darker grounded background plus warm highlight color can feel more credible than default social-media neon.
+- Treat data visuals as a story system: title establishes subject/context, date establishes source/time, map/shape anchors location, percentage/stat gets one clear focal treatment, supporting illustration/avatars add emotion only after the core hierarchy reads.
 - Use hand-drawn yellow/blue circles, top-right creator PIP, snap cuts, punch-ins, and final poster reveal.
-- Final visual language observed: bright green background, deep blue curved blob, royal-blue bold text, grayscale cutout people/objects, strong scale contrast.
+- Final visual languages observed: (1) bright green background, deep blue curved blob, royal-blue bold text, grayscale cutout people/objects, strong scale contrast; (2) dark teal/yellow India map, small white survey title/date, soft texture/starburst accents, blurred/spotlight data callout, warm illustrated faces for emotional context.
 
 OpenMontage implementation created in `/home/ubuntu/projects/OpenMontage`: `skills/creative/visual-hierarchy-edit-fix.md` and `styles/visual-hierarchy-edit-fix.yaml`. Detailed notes are in `openmontage-video-production` reference `references/aevy-visual-hierarchy-edit-fix-reel.md`.
 
