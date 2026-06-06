@@ -494,4 +494,51 @@ select { cursor: pointer; }
 .ro-block ul { margin: 0; padding-left: 1.1rem; }
 .ro-block.warn { color: var(--red); }
 
+/* ── Content Signal (Meta TRIBE v2) ── */
+.cs-scores { display: flex; gap: 0.9rem; align-items: stretch; flex-wrap: wrap; }
+.cs-headline { display: flex; flex-direction: column; justify-content: center; align-items: center;
+  border: 1px solid var(--line); border-radius: 12px; padding: 0.5rem 0.95rem; background: #fff; min-width: 118px; }
+.cs-headline-val { font-size: 2.5rem; font-weight: 750; line-height: 1; letter-spacing: -0.02em; }
+.cs-of { font-size: 0.95rem; color: var(--muted); font-weight: 500; }
+.cs-headline-label { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
+  margin-top: 0.35rem; display: flex; align-items: center; gap: 0.35rem; }
+.cs-advisory { background: var(--amber-soft); color: var(--amber); border-radius: 999px; padding: 0.05rem 0.4rem;
+  font-weight: 700; font-size: 0.58rem; }
+.cs-subs { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 0.4rem; justify-content: center; }
+.cs-sub-top { display: flex; justify-content: space-between; font-size: 0.74rem; }
+.cs-sub-name { color: var(--muted); }
+.cs-sub-val { font-weight: 650; }
+.cs-bar { height: 6px; background: var(--line); border-radius: 999px; overflow: hidden; margin-top: 2px; }
+.cs-bar-fill { height: 100%; border-radius: 999px; }
+
+.cs-chart { border: 1px solid var(--line); border-radius: 12px; padding: 0.7rem 0.8rem; background: #fff; }
+.cs-chart-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+.cs-chart-title { font-size: 0.78rem; font-weight: 650; }
+.cs-legend { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.cs-leg { display: inline-flex; align-items: center; gap: 0.28rem; background: #fff; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px; padding: 0.12rem 0.5rem; font-size: 0.68rem; cursor: pointer; font-weight: 600; }
+.cs-leg:not(:disabled):hover { filter: none; background: var(--bg); }
+.cs-leg:not(.on) { opacity: 0.6; }
+.cs-leg-dot { width: 8px; height: 8px; border-radius: 50%; }
+.cs-weak { margin-top: 0.5rem; font-size: 0.76rem; color: var(--red); }
+.cs-note { font-size: 0.76rem; color: var(--muted); }
+
+/* reusable SVG line chart */
+.lc-wrap { position: relative; width: 100%; }
+.lc-svg { display: block; width: 100%; touch-action: none; }
+.lc-grid { stroke: var(--line); stroke-width: 1; }
+.lc-axis { fill: var(--muted); font-size: 9px; }
+.lc-axis-title { fill: var(--muted); font-size: 9px; letter-spacing: 0.03em; }
+.lc-line { stroke-width: 1.5; opacity: 0.85; }
+.lc-line.bold { stroke-width: 2.5; opacity: 1; }
+.lc-focus { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.6; }
+.lc-dot { stroke: #fff; stroke-width: 1; }
+.lc-tip { position: absolute; top: 6px; right: 6px; background: #fffdf9ee; border: 1px solid var(--line);
+  border-radius: 8px; padding: 0.35rem 0.5rem; font-size: 0.7rem; display: flex; flex-direction: column; gap: 0.12rem;
+  pointer-events: none; box-shadow: 0 2px 8px #0000000f; min-width: 96px; }
+.lc-tip-x { font-weight: 700; margin-bottom: 0.1rem; }
+.lc-tip-row { display: flex; align-items: center; gap: 0.3rem; }
+.lc-tip-row b { margin-left: auto; }
+.lc-tip-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+
 @media (max-width: 900px) { .grid { grid-template-columns: 1fr; overflow-y: auto; height: auto; } }

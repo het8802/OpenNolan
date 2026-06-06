@@ -35,6 +35,7 @@ Before finalizing, you MAY offer a predicted virality signal on the finished ree
 
 - **Opt-in only** — ask first ("Want a predicted virality score before publishing?").
 - **Announce the paid call** (Replicate, ~$0.40/run and ~7 min — the model is slow) per AGENT_GUIDE before running.
+- **Confirm-gated in code** — the tool refuses a fresh paid run unless called with `confirm: true`. Run `dry_run` first (it reports a cache hit → `$0.00` and the exact cost without spending), announce, then pass `confirm: true`. Headless/batch: set `CONTENT_SIGNAL_AUTOCONFIRM=1`. If a run times out client-side the prediction keeps running server-side — re-call with `use_cache: true` (auto-resumes the same prediction) or `resume_prediction_id`, never a plain re-run (avoids paying twice).
 - **Short-form only** — auto-skips if the render is >60s; needs `REPLICATE_API_TOKEN`.
 - **Advisory only** — the 0-100 headline + `sub_scores` + per-step `timeline` inform the user
   and NEVER block publishing. Surface the score and the weakest timeline moments, then let the

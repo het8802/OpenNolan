@@ -66,6 +66,7 @@ Before finalizing, you MAY offer a predicted virality signal on the finished cli
 
 - **Opt-in only** — ask first ("Want a predicted virality score before publishing?").
 - **Announce the paid call** (Replicate, ~$0.40/run and ~7 min per clip — the model is slow) per AGENT_GUIDE before running.
+- **Confirm-gated in code** — the tool refuses a fresh paid run unless called with `confirm: true`. Run `dry_run` first (it reports a cache hit → `$0.00` and the exact cost without spending), announce, then pass `confirm: true`. Headless/batch: set `CONTENT_SIGNAL_AUTOCONFIRM=1`. If a run times out client-side the prediction keeps running server-side — re-call with `use_cache: true` (auto-resumes the same prediction) or `resume_prediction_id`, never a plain re-run (avoids paying twice).
 - **Short-form only** — auto-skips if a render is >60s; needs `REPLICATE_API_TOKEN`.
 - **Per clip** — for a clip batch, score each clip individually (each is ≤60s); the headline
   score can inform the posting order, but it NEVER blocks publishing.

@@ -71,9 +71,14 @@ def _dummy_video(tmp_path: Path, name: str = "final.mp4", data: bytes = b"FAKEMP
 
 
 def _tool(monkeypatch, tmp_path, *, token: str = "r8_testtoken", duration: float | None = 30.0):
-    """A ContentSignal wired for tests: token set, cache scoped to tmp, duration stubbed."""
+    """A ContentSignal wired for tests: token set, cache scoped to tmp, duration stubbed.
+
+    Sets CONTENT_SIGNAL_AUTOCONFIRM so the (now-gated) paid-path tests proceed without
+    passing confirm=true everywhere — this mirrors a headless/non-interactive run. The
+    confirm gate itself is exercised separately in test_confirm_gate_*."""
     monkeypatch.setenv("REPLICATE_API_TOKEN", token)
     monkeypatch.setenv("OPENMONTAGE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CONTENT_SIGNAL_AUTOCONFIRM", "1")
     if duration is not None:
         monkeypatch.setattr(ContentSignal, "_video_duration", lambda self, p: duration)
     # Stub version resolution so execute() makes no extra GET (community-model versioned path).
@@ -267,6 +272,7 @@ def test_uses_versioned_endpoint_for_community_model(monkeypatch, tmp_path):
     the real _resolve_version path (no stub) and asserts the versioned endpoint + body."""
     monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_x")
     monkeypatch.setenv("OPENMONTAGE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CONTENT_SIGNAL_AUTOCONFIRM", "1")
     monkeypatch.setattr(ContentSignal, "_video_duration", lambda self, p: 30.0)
     tool = ContentSignal()
     video = _dummy_video(tmp_path)
@@ -355,6 +361,185 @@ def test_dry_run_no_http(monkeypatch, tmp_path):
     info = tool.dry_run({"video_path": str(_dummy_video(tmp_path))})
     assert info["estimated_cost_usd"] > 0
     assert info["would_execute"] is True
+
+
+def test_dry_run_cache_hit_is_free(monkeypatch, tmp_path):
+    tool = _tool(monkeypatch, tmp_path)
+    monkeypatch.setattr(requests, "post", _boom)
+    video = _dummy_video(tmp_path)
+    sha = tool._sha256(video)
+    cache_file = tool._cache_dir() / f"{sha}.json"
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(json.dumps({"headline_score": 50, "advisory": True}))
+    info = tool.dry_run({"video_path": str(video)})
+    assert info["cache_hit"] is True
+    assert info["estimated_cost_usd"] == 0.0
+    assert info["requires_confirmation"] is False
+    assert info["would_execute"] is True
+
+
+def test_dry_run_unconfirmed_paid_run_requires_confirmation(monkeypatch, tmp_path):
+    tool = _tool(monkeypatch, tmp_path)
+    monkeypatch.delenv("CONTENT_SIGNAL_AUTOCONFIRM", raising=False)
+    monkeypatch.setattr(requests, "post", _boom)
+    info = tool.dry_run({"video_path": str(_dummy_video(tmp_path))})
+    assert info["cache_hit"] is False
+    assert info["requires_confirmation"] is True
+    assert info["estimated_cost_usd"] > 0
+    assert info["would_execute"] is False
+
+
+# ----------------------------------------------------------------------
+# Token preflight — catch the .env inline-comment footgun before any upload
+# ----------------------------------------------------------------------
+
+
+def test_malformed_token_whitespace_no_http(monkeypatch, tmp_path):
+    # A single space before "# comment" in .env leaks the comment into the value.
+    tool = _tool(monkeypatch, tmp_path, token="r8_abcdef # Replicate token")
+    monkeypatch.setattr(requests, "post", _boom)
+    res = tool.execute({"video_path": str(_dummy_video(tmp_path))})
+    assert res.success is False
+    assert "malformed" in res.error.lower()
+    assert "footgun" in res.error.lower()
+
+
+def test_token_wrong_prefix_no_http(monkeypatch, tmp_path):
+    tool = _tool(monkeypatch, tmp_path, token="sk-not-a-replicate-token")
+    monkeypatch.setattr(requests, "post", _boom)
+    res = tool.execute({"video_path": str(_dummy_video(tmp_path))})
+    assert res.success is False
+    assert "r8_" in res.error
+
+
+def test_requests_missing_no_http(monkeypatch, tmp_path):
+    tool = _tool(monkeypatch, tmp_path)
+    monkeypatch.setattr(ContentSignal, "_requests_available", staticmethod(lambda: False))
+    monkeypatch.setattr(requests, "post", _boom)
+    res = tool.execute({"video_path": str(_dummy_video(tmp_path))})
+    assert res.success is False
+    assert "requests" in res.error.lower()
+    assert "venv" in res.error.lower()
+
+
+# ----------------------------------------------------------------------
+# Confirm-before-paid gate
+# ----------------------------------------------------------------------
+
+
+def test_confirm_gate_blocks_unconfirmed_paid_run(monkeypatch, tmp_path):
+    tool = _tool(monkeypatch, tmp_path)
+    monkeypatch.delenv("CONTENT_SIGNAL_AUTOCONFIRM", raising=False)
+    monkeypatch.setattr(requests, "post", _boom)  # must NOT upload/spend
+    res = tool.execute({"video_path": str(_dummy_video(tmp_path))})
+    assert res.success is False
+    assert res.data["requires_confirmation"] is True
+    assert res.data["estimated_cost_usd"] > 0
+    assert "confirm" in res.error.lower()
+
+
+def test_confirm_true_authorizes_paid_run(monkeypatch, tmp_path):
+    tool = _tool(monkeypatch, tmp_path)
+    monkeypatch.delenv("CONTENT_SIGNAL_AUTOCONFIRM", raising=False)
+    _make_post(monkeypatch, predict_payload={"status": "succeeded", "output": GOOD_OUTPUT, "version": "v1"})
+    out = tmp_path / "report.json"
+    res = tool.execute({"video_path": str(_dummy_video(tmp_path)), "output_path": str(out), "confirm": True})
+    assert res.success is True
+    assert res.data["headline_score"] == 78
+
+
+def test_cache_hit_bypasses_confirm_gate(monkeypatch, tmp_path):
+    tool = _tool(monkeypatch, tmp_path)
+    monkeypatch.delenv("CONTENT_SIGNAL_AUTOCONFIRM", raising=False)
+    video = _dummy_video(tmp_path)
+    sha = tool._sha256(video)
+    cache_file = tool._cache_dir() / f"{sha}.json"
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(json.dumps({"headline_score": 42, "advisory": True, "sub_scores": {}}))
+    monkeypatch.setattr(requests, "post", _boom)
+    res = tool.execute({"video_path": str(video), "output_path": str(tmp_path / "r.json")})
+    assert res.success is True  # cached -> free -> no confirmation needed
+    assert res.data["cache_hit"] is True
+
+
+# ----------------------------------------------------------------------
+# In-flight marker + resume (double-charge guard)
+# ----------------------------------------------------------------------
+
+
+def test_auto_resume_from_inflight_marker_no_upload(monkeypatch, tmp_path):
+    """A marker for this file's hash -> poll the existing prediction, never re-upload/create."""
+    tool = _tool(monkeypatch, tmp_path)
+    video = _dummy_video(tmp_path)
+    sha = tool._sha256(video)
+    tool._write_inflight(sha, {"prediction_id": "pred-running", "video_sha256": sha})
+
+    monkeypatch.setattr(requests, "post", _boom)  # no upload, no create
+
+    def fake_get(url, **kwargs):
+        assert url.endswith("/predictions/pred-running"), f"must resume by id, got {url}"
+        return FakeResp({"status": "succeeded", "output": GOOD_OUTPUT, "version": "v1"})
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    out = tmp_path / "report.json"
+    res = tool.execute({"video_path": str(video), "output_path": str(out)})
+    assert res.success is True
+    assert res.data["headline_score"] == 78
+    assert res.data.get("resumed") is True
+    assert not tool._inflight_path(sha).exists()  # cleared on success
+
+
+def test_explicit_resume_prediction_id_no_upload(monkeypatch, tmp_path):
+    tool = _tool(monkeypatch, tmp_path)
+    monkeypatch.setattr(requests, "post", _boom)
+
+    def fake_get(url, **kwargs):
+        assert url.endswith("/predictions/pred-xyz")
+        return FakeResp({"status": "succeeded", "output": GOOD_OUTPUT, "version": "v1"})
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    out = tmp_path / "report.json"
+    res = tool.execute(
+        {"video_path": str(_dummy_video(tmp_path)), "output_path": str(out), "resume_prediction_id": "pred-xyz"}
+    )
+    assert res.success is True
+    assert res.data["headline_score"] == 78
+    assert any("cannot verify" in w for w in res.data.get("warnings", []))
+
+
+def test_terminal_failure_clears_inflight_marker(monkeypatch, tmp_path):
+    tool = _tool(monkeypatch, tmp_path)
+    video = _dummy_video(tmp_path)
+    _make_post(monkeypatch, predict_payload={"status": "failed", "error": "boom", "id": "pred-f"})
+    res = tool.execute({"video_path": str(video), "output_path": str(tmp_path / "r.json")})
+    assert res.success is False
+    sha = tool._sha256(video)
+    assert not tool._inflight_path(sha).exists()  # failed -> forget the marker
+
+
+def test_timeout_keeps_inflight_marker_for_resume(monkeypatch, tmp_path):
+    tool = _tool(monkeypatch, tmp_path)
+    video = _dummy_video(tmp_path)
+    monkeypatch.setattr("tools.analysis.content_signal.time.sleep", lambda s: None)
+    # start=1000, deadline=1000+max_wait, next check far past deadline -> timeout
+    times = iter([1000.0, 1000.0, 1_000_000.0])
+    monkeypatch.setattr("tools.analysis.content_signal.time.time", lambda: next(times, 1_000_000.0))
+
+    def fake_post(url, **kwargs):
+        if url.endswith("/files"):
+            return FakeResp({"urls": {"get": "https://files/v.mp4"}})
+        return FakeResp({"status": "processing", "id": "pred-t", "urls": {"get": "https://api/pred/t"}})
+
+    def fake_get(url, **kwargs):
+        return FakeResp({"status": "processing", "id": "pred-t", "urls": {"get": "https://api/pred/t"}})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(requests, "get", fake_get)
+    res = tool.execute({"video_path": str(video), "output_path": str(tmp_path / "r.json")})
+    assert res.success is False
+    assert "resume_prediction_id" in res.error
+    sha = tool._sha256(video)
+    assert tool._inflight_path(sha).exists()  # still running server-side -> keep marker
 
 
 def test_schema_valid_and_invalid():

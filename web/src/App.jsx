@@ -1001,12 +1001,38 @@ function ArtifactModal({ selected, artKey, onClose }) {
   )
 }
 
+// Detect a content-signal report by its content SHAPE, not its filename/key, so any
+// re-score (content_signal_report_v3.json, or even a hand-written file under any name)
+// renders as the interactive chart. The headline_score(number)+sub_scores(object) combo
+// is unique to this artifact.
+function looksLikeContentSignal(c) {
+  return !!c && typeof c === 'object'
+    && typeof c.headline_score === 'number'
+    && !!c.sub_scores && typeof c.sub_scores === 'object' && !Array.isArray(c.sub_scores)
+}
+
+// Return a chart-ready report from either a parsed content_signal_report (scores at
+// top level) OR a raw Replicate prediction dump where the scores are nested under
+// `output` (e.g. a manual poll saved straight from the API). null if neither.
+function contentSignalReport(c) {
+  if (looksLikeContentSignal(c)) return c
+  if (c && typeof c === 'object' && looksLikeContentSignal(c.output)) {
+    return { model: c.model, ...c.output }  // lift model so the chip shows
+  }
+  return null
+}
+
 function ArtifactView({ artKey, content }) {
   if (content == null || typeof content !== 'object') return <GenericValue value={content} />
   if (artKey === 'scene_plan') return <ScenePlanView c={content} />
   if (artKey === 'script') return <ScriptView c={content} />
   if (artKey === 'decision_log') return <DecisionLogView c={content} />
   if (artKey === 'render_report') return <RenderReportView c={content} />
+  // Filename prefix is a cheap fast-path; content-shape detection (incl. raw
+  // prediction dumps with nested `output`) is the real guard.
+  const cs = contentSignalReport(content)
+  if (cs || (typeof artKey === 'string' && artKey.startsWith('content_signal_report')))
+    return <ContentSignalView c={cs || content} />
   return <GenericValue value={content} />
 }
 
@@ -1210,6 +1236,218 @@ function RenderReportView({ c }) {
       {Array.isArray(c.verification_notes) && c.verification_notes.length > 0 && (
         <div className="ro-block"><div className="ro-block-label">Verification</div>
           <ul>{c.verification_notes.map((n, i) => <li key={i}>{n}</li>)}</ul></div>
+      )}
+      {Array.isArray(c.warnings) && c.warnings.length > 0 && (
+        <div className="ro-block warn"><div className="ro-block-label">Warnings</div>
+          <ul>{c.warnings.map((n, i) => <li key={i}>{n}</li>)}</ul></div>
+      )}
+    </div>
+  )
+}
+
+// ── Content Signal (Meta TRIBE v2) view + reusable line chart ──
+
+const CS_COLORS = {
+  attention: '#c8643c',        // accent — the primary signal we plot bold
+  emotion: '#b8503f',
+  reward: '#4a8a55',
+  social_relevance: '#3b6ea5',
+  novelty: '#c9952b',
+}
+const CS_ORDER = ['attention', 'emotion', 'reward', 'social_relevance', 'novelty']
+
+function scoreColor(v) {
+  if (v >= 67) return 'var(--green)'
+  if (v >= 45) return 'var(--amber)'
+  return 'var(--red)'
+}
+
+// Reusable, dependency-free SVG line chart.
+// series: [{ key, label, color, points:[{x,y}], bold, hidden }]
+// x is the data domain (seconds here), y is 0..yMax.
+function LineChart({ series, xMax, yMax = 100, yTicks = [0, 25, 50, 75, 100], height = 240, xLabel = 'time (s)', yLabel = 'score' }) {
+  const wrapRef = useRef(null)
+  const [width, setWidth] = useState(560)
+  const [hoverPx, setHoverPx] = useState(null)
+
+  // Track the container width so the chart fills the modal responsively.
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect?.width
+      if (w) setWidth(Math.max(280, Math.floor(w)))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const pad = { top: 14, right: 14, bottom: 30, left: 32 }
+  const innerW = Math.max(1, width - pad.left - pad.right)
+  const innerH = Math.max(1, height - pad.top - pad.bottom)
+  const sx = x => pad.left + (xMax > 0 ? (x / xMax) * innerW : 0)
+  const sy = y => pad.top + innerH - (Math.max(0, Math.min(yMax, y)) / yMax) * innerH
+
+  const visible = series.filter(s => !s.hidden && s.points && s.points.length)
+  const nearest = (pts, x) => pts.reduce((a, b) => (Math.abs(b.x - x) < Math.abs(a.x - x) ? b : a))
+
+  const tickN = 6
+  const xTicks = []
+  for (let i = 0; i <= tickN; i++) xTicks.push(Math.round((xMax / tickN) * i))
+
+  // Hover: map cursor px -> data x, snap to the nearest point of the bold (or first) series.
+  const primary = visible.find(s => s.bold) || visible[0]
+  let focus = null
+  if (hoverPx != null && primary) {
+    const dataX = ((hoverPx - pad.left) / innerW) * xMax
+    focus = nearest(primary.points, dataX)
+  }
+
+  function onMove(e) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    setHoverPx(((e.clientX - rect.left) / rect.width) * width)
+  }
+
+  return (
+    <div className="lc-wrap" ref={wrapRef}>
+      <svg className="lc-svg" viewBox={`0 0 ${width} ${height}`} width="100%" height={height}
+        onMouseMove={onMove} onMouseLeave={() => setHoverPx(null)}
+        role="img" aria-label={`${yLabel} versus ${xLabel}`}>
+        {yTicks.map(t => (
+          <g key={`y${t}`}>
+            <line className="lc-grid" x1={pad.left} y1={sy(t)} x2={width - pad.right} y2={sy(t)} />
+            <text className="lc-axis" x={pad.left - 6} y={sy(t)} textAnchor="end" dominantBaseline="middle">{t}</text>
+          </g>
+        ))}
+        {xTicks.map((t, i) => (
+          <text key={`x${i}`} className="lc-axis" x={sx(t)} y={height - pad.bottom + 15} textAnchor="middle">{t}</text>
+        ))}
+        <text className="lc-axis-title" x={pad.left + innerW / 2} y={height - 2} textAnchor="middle">{xLabel}</text>
+
+        {visible.map(s => (
+          <polyline key={s.key} className={`lc-line ${s.bold ? 'bold' : ''}`} fill="none" stroke={s.color}
+            points={s.points.map(p => `${sx(p.x)},${sy(p.y)}`).join(' ')} />
+        ))}
+
+        {focus && (
+          <g>
+            <line className="lc-focus" x1={sx(focus.x)} y1={pad.top} x2={sx(focus.x)} y2={pad.top + innerH} />
+            {visible.map(s => {
+              const pt = nearest(s.points, focus.x)
+              return <circle key={s.key} className="lc-dot" cx={sx(pt.x)} cy={sy(pt.y)} r={s.bold ? 3.5 : 2.5} fill={s.color} />
+            })}
+          </g>
+        )}
+      </svg>
+      {focus && (
+        <div className="lc-tip">
+          <span className="lc-tip-x">{focus.x.toFixed(1)}s</span>
+          {visible.map(s => (
+            <span key={s.key} className="lc-tip-row">
+              <span className="lc-tip-dot" style={{ background: s.color }} />
+              {s.label}<b>{Math.round(nearest(s.points, focus.x).y)}</b>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ContentSignalView({ c }) {
+  const timeline = Array.isArray(c.timeline) ? c.timeline : []
+  const subs = (c.sub_scores && typeof c.sub_scores === 'object') ? c.sub_scores : {}
+
+  // Dimensions present anywhere (sub_scores keys ∪ timeline keys, minus the time axis).
+  const dimSet = new Set(Object.keys(subs))
+  timeline.forEach(p => Object.keys(p).forEach(k => { if (k !== 't') dimSet.add(k) }))
+  const dims = [...CS_ORDER.filter(d => dimSet.has(d)), ...[...dimSet].filter(d => !CS_ORDER.includes(d))]
+
+  // Attention is the line shown by default (the requested signal); others toggle on.
+  const [shown, setShown] = useState(() => {
+    const def = dimSet.has('attention') ? 'attention' : dims[0]
+    return new Set(def ? [def] : [])
+  })
+  const toggle = d => setShown(prev => {
+    const next = new Set(prev)
+    next.has(d) ? next.delete(d) : next.add(d)
+    return next
+  })
+
+  const xOf = (p, i) => (typeof p.t === 'number' ? p.t : i)
+  const xMax = c.video_duration_s || (timeline.length ? Math.max(...timeline.map(xOf)) : 0)
+
+  const series = dims.map(d => ({
+    key: d,
+    label: prettyKey(d),
+    color: CS_COLORS[d] || 'var(--muted)',
+    bold: d === 'attention',
+    hidden: !shown.has(d),
+    points: timeline.map((p, i) => ({ x: xOf(p, i), y: Number(p[d]) || 0 })),
+  }))
+
+  // Weakest attention moment — the spot worth re-cutting.
+  const attn = series.find(s => s.key === 'attention')
+  const weak = (attn && attn.points.length) ? attn.points.reduce((a, b) => (b.y < a.y ? b : a)) : null
+
+  return (
+    <div className="mv cs">
+      <div className="mv-summary">
+        {c.model && <Chip label="model" val="Meta TRIBE v2" />}
+        {c.scoring_version && <Chip label="scoring" val={`v${c.scoring_version}`} />}
+        {c.video_duration_s != null && <Chip label="duration" val={`${c.video_duration_s}s`} />}
+        {c.cost_usd != null && <Chip label="cost" val={`$${Number(c.cost_usd).toFixed(2)}`} />}
+        {c.cache_hit && <Chip label="cache" val="hit" />}
+      </div>
+
+      <div className="cs-scores">
+        <div className="cs-headline">
+          <div className="cs-headline-val" style={{ color: scoreColor(c.headline_score) }}>
+            {Math.round(c.headline_score)}<span className="cs-of">/100</span>
+          </div>
+          <div className="cs-headline-label">virality signal <span className="cs-advisory">advisory</span></div>
+        </div>
+        <div className="cs-subs">
+          {dims.map(d => (
+            <div key={d} className="cs-sub">
+              <div className="cs-sub-top">
+                <span className="cs-sub-name">{prettyKey(d)}</span>
+                <span className="cs-sub-val">{Math.round(subs[d] ?? 0)}</span>
+              </div>
+              <div className="cs-bar">
+                <div className="cs-bar-fill"
+                  style={{ width: `${Math.max(0, Math.min(100, subs[d] ?? 0))}%`, background: CS_COLORS[d] || 'var(--muted)' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {timeline.length > 0 ? (
+        <div className="cs-chart">
+          <div className="cs-chart-head">
+            <span className="cs-chart-title">Attention over time</span>
+            <div className="cs-legend">
+              {dims.map(d => (
+                <button key={d} className={`cs-leg ${shown.has(d) ? 'on' : ''}`} onClick={() => toggle(d)}
+                  style={shown.has(d) ? { borderColor: CS_COLORS[d], color: CS_COLORS[d] } : undefined}>
+                  <span className="cs-leg-dot" style={{ background: shown.has(d) ? (CS_COLORS[d] || 'var(--muted)') : 'var(--muted)' }} />
+                  {prettyKey(d)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <LineChart series={series} xMax={xMax} xLabel="time (s)" yLabel="score" />
+          {weak && (
+            <div className="cs-weak">⚠ Lowest attention at <b>{weak.x.toFixed(1)}s</b> ({Math.round(weak.y)}/100) — the spot to consider re-cutting.</div>
+          )}
+        </div>
+      ) : (
+        <p className="empty">No per-step timeline in this report.</p>
+      )}
+
+      {c.license_note && (
+        <div className="ro-block"><div className="ro-block-label">Note</div><div className="cs-note">{c.license_note}</div></div>
       )}
       {Array.isArray(c.warnings) && c.warnings.length > 0 && (
         <div className="ro-block warn"><div className="ro-block-label">Warnings</div>
