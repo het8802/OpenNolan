@@ -91,6 +91,44 @@ def test_keyframed_overlay_renders(vc, tmp_path):
 
 
 @needs_ffmpeg
+def test_keyframed_still_overlay_is_actually_visible(vc, tmp_path):
+    """Regression: a keyframed STILL image with opacity must be VISIBLE once faded in.
+
+    The first smoke test caught a bug where fade-on-a-single-still captured it at alpha~0 and
+    held it transparent — the file rendered but the overlay never showed. We loop the still so
+    fade has a timeline. This asserts pixels actually appear (not just that a file exists).
+    """
+    Image = pytest.importorskip("PIL.Image")
+    base = tmp_path / "base.mp4"
+    ov = tmp_path / "ov.png"
+    out = tmp_path / "out.mp4"
+    # black base so any overlay pixels are unambiguous
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:d=3:r=24",
+                    "-pix_fmt", "yuv420p", str(base)], capture_output=True, check=True)
+    # bright white still overlay
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=white:s=120x120:d=1",
+                    "-frames:v", "1", str(ov)], capture_output=True, check=True)
+    res = vc.execute({
+        "operation": "overlay", "input_path": str(base), "output_path": str(out),
+        "overlays": [{
+            "asset_path": str(ov), "x": 100, "y": 60, "start_seconds": 0, "end_seconds": 3,
+            "keyframes": [
+                {"t": 0.0, "x": -120, "opacity": 0.0},
+                {"t": 0.5, "x": 100, "opacity": 1.0},
+            ],
+        }],
+    })
+    assert res.success, res.error
+    # sample a frame at t=2.0 (well after the fade) — the white box must be present
+    frame = tmp_path / "f.png"
+    subprocess.run(["ffmpeg", "-y", "-ss", "2.0", "-i", str(out), "-frames:v", "1", str(frame)],
+                   capture_output=True, check=True)
+    img = Image.open(frame).convert("L")
+    brightest = img.getextrema()[1]  # max luminance
+    assert brightest > 200, f"overlay not visible (max luminance {brightest}); fade-on-still regressed"
+
+
+@needs_ffmpeg
 def test_static_overlay_still_works(vc, tmp_path):
     base = tmp_path / "base.mp4"
     ov = tmp_path / "ov.png"

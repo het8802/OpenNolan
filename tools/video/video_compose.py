@@ -2021,12 +2021,11 @@ class VideoCompose(BaseTool):
         prev_label = "0:v"
         warnings: list[str] = []
 
+        _IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
         for i, ov in enumerate(overlays):
             asset_path = Path(ov["asset_path"])
             if not asset_path.exists():
                 return ToolResult(success=False, error=f"Overlay asset not found: {asset_path}")
-
-            input_args.extend(["-i", str(asset_path)])
 
             # base position supports both the flat (x/y) and edit_decisions (position{}) shapes
             pos = ov.get("position") or {}
@@ -2034,6 +2033,15 @@ class VideoCompose(BaseTool):
             base_y = int(ov.get("y", pos.get("y", 0)))
             start = ov.get("start_seconds", 0)
             end = ov.get("end_seconds")
+
+            # A keyframed STILL image needs a timeline for the opacity `fade` to ramp across —
+            # a single frame would be captured at the fade start (alpha ~0) and held transparent.
+            # Loop the still to its on-screen window so fade/position evaluate per frame.
+            is_still = asset_path.suffix.lower() in _IMG_EXT
+            if ov.get("keyframes") and is_still and end:
+                input_args.extend(["-loop", "1", "-t", str(end), "-i", str(asset_path)])
+            else:
+                input_args.extend(["-i", str(asset_path)])
 
             overlay_input = f"{i + 1}:v"
 
