@@ -152,7 +152,7 @@ class FirecrawlWebpageScreenshot(BaseTool):
 
     def get_status(self) -> ToolStatus:
         try:
-            from firecrawl import FirecrawlApp  # noqa: F401
+            from firecrawl import Firecrawl  # noqa: F401
         except ImportError:
             return ToolStatus.UNAVAILABLE
         if os.environ.get("FIRECRAWL_API_KEY"):
@@ -164,7 +164,7 @@ class FirecrawlWebpageScreenshot(BaseTool):
 
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
         try:
-            from firecrawl import FirecrawlApp
+            from firecrawl import Firecrawl
         except ImportError:
             return ToolResult(
                 success=False,
@@ -186,48 +186,49 @@ class FirecrawlWebpageScreenshot(BaseTool):
         full_page = inputs.get("full_page", False)
         also_markdown = inputs.get("also_return_markdown", False)
 
-        formats = ["screenshot"]
+        viewport_w = inputs.get("viewport_width", 1280)
+        viewport_h = inputs.get("viewport_height", 800)
+
+        # Firecrawl v2 SDK (firecrawl-py >= 2.x, incl. 4.x): per-format options live
+        # inside the format object, and scrape() takes keyword args — NOT a legacy
+        # `params=` dict (that raised "scrape() got an unexpected keyword argument 'params'").
+        screenshot_format: dict[str, Any] = {
+            "type": "screenshot",
+            "full_page": full_page,
+            "viewport": {"width": viewport_w, "height": viewport_h},
+        }
+        formats: list[Any] = [screenshot_format]
         if also_markdown:
             formats.append("markdown")
 
-        scrape_options: dict[str, Any] = {
-            "formats": formats,
-            "screenshot": {
-                "fullPage": full_page,
-            },
-        }
-
+        scrape_kwargs: dict[str, Any] = {"formats": formats, "mobile": False}
         if inputs.get("wait_for_selector"):
-            scrape_options["waitFor"] = inputs["wait_for_selector"]
-
-        viewport_w = inputs.get("viewport_width", 1280)
-        viewport_h = inputs.get("viewport_height", 800)
-        if viewport_w != 1280 or viewport_h != 800:
-            scrape_options["mobile"] = False
+            scrape_kwargs["actions"] = [
+                {"type": "wait", "selector": inputs["wait_for_selector"]}
+            ]
 
         try:
-            app = FirecrawlApp(api_key=api_key)
-            result = app.scrape_url(url, params=scrape_options)
+            app = Firecrawl(api_key=api_key)
+            result = app.scrape(url, **scrape_kwargs)
         except Exception as e:
             return ToolResult(success=False, error=f"Firecrawl scrape failed: {e}")
 
-        # Extract screenshot URL
-        screenshot_url = None
-        markdown_text = None
-        metadata: dict[str, Any] = {}
+        # Extract from the returned Document (pydantic object in v2; dict-tolerant).
+        def _get(obj: Any, key: str, default: Any = None) -> Any:
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            return getattr(obj, key, default)
 
-        if isinstance(result, dict):
-            screenshot_url = result.get("screenshot")
-            if also_markdown:
-                markdown_text = result.get("markdown")
-            metadata = result.get("metadata", {})
+        screenshot_url = _get(result, "screenshot")
+        markdown_text = _get(result, "markdown") if also_markdown else None
+        raw_meta = _get(result, "metadata") or {}
+        if isinstance(raw_meta, dict):
+            metadata = raw_meta
         else:
-            screenshot_url = getattr(result, "screenshot", None)
-            if also_markdown:
-                markdown_text = getattr(result, "markdown", None)
-            raw_meta = getattr(result, "metadata", None)
-            if raw_meta:
-                metadata = raw_meta if isinstance(raw_meta, dict) else vars(raw_meta)
+            metadata = {
+                "title": _get(raw_meta, "title", "") or "",
+                "description": _get(raw_meta, "description", "") or "",
+            }
 
         if not screenshot_url:
             return ToolResult(
