@@ -29,7 +29,8 @@
         "additionalProperties": { "type": "number" }
       }
     },
-    "cost_usd": { "type": "number", "minimum": 0 },
+    "cost_usd": { "type": "number", "minimum": 0, "description": "Actual cost = predict_time_s × per-second hardware rate (falls back to a pre-run estimate only if Replicate omitted predict_time). Approximate — reconcile with Replicate billing." },
+    "predict_time_s": { "type": ["number", "null"], "minimum": 0, "description": "Replicate metrics.predict_time for this run (the basis for cost_usd). Null if not reported." },
     "cache_hit": { "type": "boolean", "description": "True when returned from the content-hash cache (no new paid call)" },
     "advisory": { "type": "boolean", "const": true, "description": "Always true. This score is advisory and never blocks publishing." },
     "license_note": { "type": "string" },
