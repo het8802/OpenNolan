@@ -303,7 +303,49 @@ class VideoCompose(BaseTool):
             "chosen runtime fails, surface a structured blocker and wait for "
             "user approval before switching."
         )
+
+        # HDR encode capability — preflight gate. If the SOURCE footage is HDR (HLG/PQ),
+        # the agent must check this BEFORE editing and must NOT silently tonemap to SDR.
+        # Detect the source with tools.video._shared.is_hdr_source(); if hdr and
+        # hdr_encode.available is False, surface the limitation and get explicit consent
+        # before falling back to SDR.
+        hdr_encoders = self._hdr_encoders()
+        info["hdr_encode"] = {
+            "available": bool(hdr_encoders),
+            "encoders": hdr_encoders,
+            "note": (
+                "10-bit HEVC HDR encode available via " + ", ".join(hdr_encoders) + ". "
+                "When the source is HDR (is_hdr_source().hdr), preserve it: encode HEVC "
+                "main10 yuv420p10le with the source's color_primaries/color_trc/colorspace "
+                "and -tag:v hvc1; do NOT tonemap unless the user opts in."
+                if hdr_encoders else
+                "NO 10-bit HEVC HDR encoder found (need hevc_videotoolbox or a 10-bit libx265). "
+                "If the source is HDR, you cannot preserve it on this machine — surface this "
+                "and get explicit consent before tonemapping to SDR."
+            ),
+        }
         return info
+
+    @staticmethod
+    def _hdr_encoders() -> list[str]:
+        """Names of available 10-bit-HEVC-capable encoders (for HDR preservation)."""
+        import shutil
+        import subprocess
+
+        if not shutil.which("ffmpeg"):
+            return []
+        try:
+            out = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-encoders"],
+                capture_output=True, text=True, timeout=15, check=False,
+            ).stdout
+        except Exception:
+            return []
+        found = []
+        for enc in ("hevc_videotoolbox", "libx265"):
+            if enc in out:
+                found.append(enc)
+        return found
 
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
         operation = inputs["operation"]
