@@ -114,10 +114,17 @@ def test_single_beat_falls_back_to_even_spacing(tool):
     assert len(res.data["cuts"]) == 3
 
 
-def test_librosa_missing_gives_clean_error(tool, tmp_path):
-    # librosa is absent in CI; detection path must fail with an install hint, not a crash.
+def test_librosa_missing_gives_clean_error(tool, tmp_path, monkeypatch):
+    # Force the missing-dependency path deterministically (works whether or not librosa is
+    # actually installed) and assert the clean install hint instead of a raw crash.
+    from tools.video.beat_cutter import _LibrosaMissing
+
+    def _raise_missing(audio_path):
+        raise _LibrosaMissing("No module named 'librosa'")
+
+    monkeypatch.setattr(tool, "_detect_beats", _raise_missing)
     audio = tmp_path / "track.wav"
-    audio.write_bytes(b"RIFF....WAVEfmt ")  # not real audio, but exists; librosa import fails first
+    audio.write_bytes(b"RIFF....WAVEfmt ")
     res = tool.execute({"clips": _clips(2), "audio_path": str(audio)})
     assert res.success is False
     assert "librosa" in res.error and "requirements-audio.txt" in res.error
