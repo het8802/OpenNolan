@@ -2018,6 +2018,7 @@ class VideoCompose(BaseTool):
         input_args = ["-i", str(input_path)]
         filter_parts = []
         prev_label = "0:v"
+        warnings: list[str] = []
 
         for i, ov in enumerate(overlays):
             asset_path = Path(ov["asset_path"])
@@ -2026,11 +2027,12 @@ class VideoCompose(BaseTool):
 
             input_args.extend(["-i", str(asset_path)])
 
-            x = int(ov.get("x", 0))
-            y = int(ov.get("y", 0))
+            # base position supports both the flat (x/y) and edit_decisions (position{}) shapes
+            pos = ov.get("position") or {}
+            base_x = int(ov.get("x", pos.get("x", 0)))
+            base_y = int(ov.get("y", pos.get("y", 0)))
             start = ov.get("start_seconds", 0)
             end = ov.get("end_seconds")
-            opacity = ov.get("opacity", 1.0)
 
             overlay_input = f"{i + 1}:v"
 
@@ -2041,13 +2043,22 @@ class VideoCompose(BaseTool):
                 filter_parts.append(f"[{overlay_input}]scale={w}:{h}[ov_scaled_{i}]")
                 overlay_input = f"ov_scaled_{i}"
 
-            # Build enable expression for timed overlays
             enable = f"between(t,{start},{end})" if end else f"gte(t,{start})"
             out_label = f"v{i}"
+            keyframes = ov.get("keyframes")
 
-            filter_parts.append(
-                f"[{prev_label}][{overlay_input}]overlay={x}:{y}:enable='{enable}'[{out_label}]"
-            )
+            if keyframes:
+                # --- keyframed (Edits-style) motion via time-varying expressions ---
+                kfw = self._keyframe_overlay(
+                    keyframes, base_x, base_y, start, i, overlay_input, prev_label, out_label, enable
+                )
+                filter_parts.extend(kfw["filters"])
+                warnings.extend(kfw["warnings"])
+            else:
+                # --- static overlay (original behavior) ---
+                filter_parts.append(
+                    f"[{prev_label}][{overlay_input}]overlay={base_x}:{base_y}:enable='{enable}'[{out_label}]"
+                )
             prev_label = out_label
 
         filter_complex = ";".join(filter_parts)
@@ -2061,15 +2072,94 @@ class VideoCompose(BaseTool):
 
         self.run_command(cmd)
 
-        return ToolResult(
-            success=True,
-            data={
-                "operation": "overlay",
-                "overlay_count": len(overlays),
-                "output": str(output_path),
-            },
-            artifacts=[str(output_path)],
+        data = {
+            "operation": "overlay",
+            "overlay_count": len(overlays),
+            "output": str(output_path),
+        }
+        if warnings:
+            data["warnings"] = warnings
+        return ToolResult(success=True, data=data, artifacts=[str(output_path)])
+
+    # ---- keyframe rendering (FFmpeg path; Edits-parity Wave 2 renderer) ----
+
+    @staticmethod
+    def _kf_points(keyframes: list, dim: str) -> list:
+        """(t, value) pairs for one dimension, from keyframes that specify it (sorted by t)."""
+        pts = [
+            (float(k["t"]), float(k[dim]))
+            for k in keyframes
+            if isinstance(k, dict) and "t" in k and dim in k and k[dim] is not None
+        ]
+        return sorted(pts, key=lambda p: p[0])
+
+    @staticmethod
+    def _piecewise_linear_expr(pts: list) -> str:
+        """FFmpeg expr: linear interpolation between keyframes, constant-held outside the ends."""
+        if len(pts) == 1:
+            return f"{pts[0][1]}"
+        expr = f"{pts[-1][1]}"  # after the last keyframe: hold the final value
+        for i in range(len(pts) - 2, -1, -1):
+            t0, v0 = pts[i]
+            t1, v1 = pts[i + 1]
+            if t1 == t0:
+                seg = f"{v1}"
+            else:
+                seg = f"({v0}+({v1}-{v0})*(t-{t0})/({t1}-{t0}))"
+            expr = f"if(lt(t,{t1}),{seg},{expr})"
+        t0, v0 = pts[0]
+        return f"if(lt(t,{t0}),{v0},{expr})"  # before the first keyframe: hold the initial value
+
+    def _keyframe_overlay(
+        self, keyframes, base_x, base_y, start, i, overlay_input, prev_label, out_label, enable
+    ) -> dict:
+        """Build the filtergraph parts for one keyframed overlay.
+
+        Supports POSITION (x/y) via time-varying overlay expressions and OPACITY via a fade
+        in/out on the overlay's alpha. scale/rotation are NOT supported by the FFmpeg path
+        (documented limitation) — warn so the agent can switch to a richer renderer if needed.
+        """
+        filters: list[str] = []
+        warnings: list[str] = []
+
+        if any(isinstance(k, dict) and ("scale" in k or "rotation" in k) for k in keyframes):
+            warnings.append(
+                "keyframe scale/rotation are not rendered by the FFmpeg overlay path "
+                "(position + opacity only); those dimensions were ignored."
+            )
+
+        xpts = self._kf_points(keyframes, "x") or [(start, base_x)]
+        ypts = self._kf_points(keyframes, "y") or [(start, base_y)]
+        x_expr = self._piecewise_linear_expr(xpts)
+        y_expr = self._piecewise_linear_expr(ypts)
+
+        # opacity -> fade in/out on alpha (covers slide_in/fade_in/fade_out presets)
+        opac = self._kf_points(keyframes, "opacity")
+        src = overlay_input
+        if opac:
+            fades = []
+            first_t, first_v = opac[0]
+            last_t, last_v = opac[-1]
+            if first_v <= 0.05 and len(opac) > 1:
+                rise_to = opac[1][0]
+                fades.append(f"fade=t=in:st={first_t}:d={max(0.05, rise_to - first_t)}:alpha=1")
+            if last_v <= 0.05 and len(opac) > 1:
+                fall_from = opac[-2][0]
+                fades.append(f"fade=t=out:st={fall_from}:d={max(0.05, last_t - fall_from)}:alpha=1")
+            if fades:
+                pre = f"ovk_{i}"
+                filters.append(f"[{src}]format=yuva420p,{','.join(fades)}[{pre}]")
+                src = pre
+            else:
+                warnings.append(
+                    "keyframe opacity was not a simple fade in/out; the FFmpeg path only "
+                    "renders monotonic fades, so opacity was left at full."
+                )
+
+        filters.append(
+            f"[{prev_label}][{src}]overlay=x='{x_expr}':y='{y_expr}':enable='{enable}'[{out_label}]"
         )
+        return {"filters": filters, "warnings": warnings}
 
     def _encode(self, inputs: dict[str, Any]) -> ToolResult:
         """Re-encode video with a specific profile/codec settings."""
