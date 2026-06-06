@@ -161,6 +161,7 @@ stages:
     human_approval_default: true
     review_focus:
       - Every scene has a layout_mode and a hyperframes_spec
+      - "NARRATION SYNC (hard rule): every animated reveal time is derived from transcript word-level timestamps and lands ON its trigger word, never before. Each gsap_entry/overlay records its trigger_word + timestamp. Multi-part diagrams build progressively across the spoken clause; reaction-GIF/overlay windows run trigger-word -> scene cut. (See scene-director 'Narration Sync — HARD RULE'.)"
       - Alternation rule: no hero_talking_head run > 8s without a cutaway
       - split_screen_greg scenes specify top panel animation type and GSAP timing
       - full_greg_card scenes specify complete phrase/diagram content
@@ -257,6 +258,7 @@ stages:
       - HyperFrames validate passes (0 errors, contrast deferred if needed)
       - SDR sources confirmed (no HDR layered composite mode triggered)
       - FFmpeg assembly uses original talking head WITHOUT color-space flags
+      - "NARRATION SYNC verified by before/after-word frame sampling: no animated element, overlay, or reaction-GIF is visible before its trigger word; multi-part diagrams are still building mid-clause. Any early reveal is a CRITICAL finding -> retime + re-render. (See compose-director 'Narration Sync Verification'.)"
       - Output is 9:16 1080x1920, playable H.264
       - Split-screen visible at sample frames for split_screen_greg scenes
       - Face visible (not cropped to ceiling) in bottom panel
@@ -265,6 +267,7 @@ stages:
       - Schema-valid render_report artifact
       - Output video exists and is playable
       - Talking head color quality preserved (not dull/washed-out)
+      - Narration-animation sync verified — no element/overlay/GIF reveals before its trigger word (before/after-word frame sampling passed)
 
   - name: publish
     skill: pipelines/animation-talking-head-50-50/publish-director

@@ -55,6 +55,8 @@ For each section (one per beat):
 }
 ```
 
+**Tie every cue to its trigger word + timestamp.** Each enhancement cue that reveals a specific element must name the word the speaker says when it should appear and that word's `start` from `transcript.json words[]` (use the `timestamp_seconds` field). The scene director will anchor the GSAP `abs_time` to this — reveals land ON the word, never before it (see scene-director "Narration Sync — HARD RULE"). For a multi-element build (steps, pills, diagram nodes), list each sub-element with its own trigger word in spoken order. Example: `"'SEARCH' pill on the word 'search' (~23.76s), 'COMPARE' on 'compare' (~24.40s), 'ADD TO CART' on 'add' (~24.98s)"`.
+
 **Enhancement cues must be concrete enough for the scene director to write HTML directly.** Do NOT write vague cues like "show a workflow diagram." Write:
 
 > "Top panel on ivory #F5EFE6: left node 'AI AGENT' coral #D96D5F rounded rect with ✗. Forest green connector #173D35 draws right 0.5s ease-out. Right node 'NARROW WORKFLOW' forest #173D35 with ✓. Dashed boundary box around right node strokes in. 'Human Approval Gate' charcoal pill badge pops (scale back.out 1.4) above the connector."

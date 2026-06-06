@@ -122,6 +122,15 @@ Forbidden flags (they change the color interpretation and make the video look du
 
 **Consequence of violation**: EP G4 gate will fail if `color_transfer` on a talking head segment differs from the source.
 
+> ### ⚠️ EXCEPTION — HDR source delivered as an SDR reel (the dull-colors trap)
+> The "never convert" rule above protects a **pure-HDR delivery**. But Instagram/TikTok reels and this animated composite are delivered **8-bit SDR**. If you leave HLG/BT.2020 footage "untouched" and just scale it into an SDR output, the wide HDR range flattens and clips → **dull, grey, washed-out skin** (the original looked rich on an HDR phone; SDR can't show that range without remapping). This is a well-documented iPhone-HDR issue and it bit the `chrome-devtools` reel: the creator shipped the "untouched" flat look, then asked "why are my colors dull?".
+>
+> **When the final deliverable is SDR (the normal case here), you SHOULD tonemap HLG→Rec.709 — and you must do it with the CORRECT chain or you wash it out worse.** Mandatory pieces: explicit input transfer (`tin=arib-std-b67`), a **float intermediate** (`format=gbrpf32le`), gamut-map to bt709 **before** tonemap, and **`desat=0`** (the default `desat=2.0` greys highlights — this is the #1 cause of "tonemap looked worse"):
+> ```
+> zscale=tin=arib-std-b67:t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=mobius:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p
+> ```
+> `tonemap=mobius` reads rich/warm; `hable` is the more natural alternative; `npl=400` reads darker/more graded. libplacebo is higher quality but needs Vulkan (often unavailable on macOS — check `ffmpeg -hwaccels`). **ALWAYS render a side-by-side still (flat vs hable vs mobius vs npl=400) and let the user choose the grade — it's their face — then apply that chain when building the footage segments/plate.** Record the chosen grade in `edit_decisions.metadata`. (Naive scale-only "untouched" is correct ONLY if you are genuinely delivering HDR, which reels are not.)
+
 ## Part 1: Talking Head Video Segments
 
 For each scene that includes talking head video:
@@ -285,6 +294,7 @@ Structure:
 ```
 
 Key HyperFrames authoring rules (read `skills/core/hyperframes.md` and `.agents/skills/hyperframes/SKILL.md` before writing):
+- **NARRATION SYNC (HARD RULE): every GSAP reveal time comes from `transcript.json words[]`, set to the start of the word it illustrates — never earlier.** When writing the `tl.fromTo(..., abs_time)` calls, look up each trigger word's timestamp and use it as the position parameter. Specific items reveal one-per-keyword in spoken order; multi-part diagrams build progressively across the spoken clause (don't finish drawing before the speaker gets there); reaction-GIF/overlay windows run from the trigger word to the scene cut. A reveal that precedes its word is a defect. (See scene-director "Narration Sync — HARD RULE".) Keep a comment next to each scene's tweens noting the trigger word, e.g. `/* tools land ON search/compare/cart */`.
 - All timed elements have `class="clip"` plus a descriptive class
 - Video elements are FORBIDDEN in this composition (see above)
 - All transforms set by GSAP must be absent from CSS (no conflicting CSS `transform`)

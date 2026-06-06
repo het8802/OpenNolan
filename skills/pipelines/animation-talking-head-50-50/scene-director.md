@@ -236,6 +236,30 @@ badge/sub-tag UP so the stack reads cleanly top→bottom (e.g. `@handle → CTA 
 sub-tag → caption`). On `clicky` the CTA badge moved to y1120 and the sub-tag to y1268 so
 the y1405 caption cleared them.
 
+## Narration Sync — HARD RULE (the speaker dictates the animation, never the reverse)
+
+The single most important quality rule for this format: **every animated reveal must land ON the word the speaker says — never before it.** If a diagram finishes drawing, a pill pops, or a GIF appears *before* the speaker reaches that point in the narration, the illusion that the speaker is driving the visuals breaks and the reel feels pre-canned and "off." This was a real, user-reported defect (the `chrome-devtools` reel v1: the harness diagram fully drew out before the speaker described it; the "WRONG" GIF fired on "right?" instead of "wrong"; step cards ran ahead of "screenshot → analyze → click"). Do not repeat it.
+
+**The source of truth for every `abs_time` is `transcript.json` `words[]` — not eyeballed estimates.**
+
+1. **Anchor to the trigger word.** For each animated element, identify the exact word (or first word of the phrase) it illustrates, read that word's `start` from `words[]`, and set the reveal `abs_time` to that value (you may add `+0.0` to `+0.15s` for a natural beat — **never set it earlier**). Record the trigger word + timestamp next to each `gsap_entry` so it is auditable.
+
+   | Element | Trigger word (example) | abs_time |
+   |---|---|---|
+   | "SEARCH" tool pill | the word "search" | `words[…].start` for "search" |
+   | "BANKRUPT" stamp / cash GIF | the word "bankrupt" | `words[…].start` for "bankrupt" |
+   | A scene **header** that merely names the beat | first word of the sentence | OK to lead slightly |
+
+2. **Never pre-reveal a specific element.** A scene header/eyebrow may appear on the first word of the sentence to frame the beat. But *specific* items — steps, tool pills, data labels, stamps, the punchline word — appear on their OWN keyword, one per word, in spoken order.
+
+3. **Build multi-part diagrams progressively across the narration window.** A connector map / step strip / "harness" diagram must spread its sub-element reveals across the whole clause that describes it, finishing as the speaker finishes — NOT all-at-once early. If the sub-elements aren't each named (e.g. the diagram's 4 labels while the speaker says one summary sentence), distribute the reveals evenly across that sentence's word span so it keeps building *while* they talk. The canvas should still be assembling when the speaker is mid-sentence.
+
+4. **Overlay / reaction-GIF windows = trigger word → scene cut.** A reaction GIF or sticker appears ON its trigger word and exits at the scene cut (or when the speaker starts the next idea). It must not appear before the word and must not linger into the next sentence. A short window (even ~0.5–0.7s) is fine for a comedic stab — punch it in fast (0.1–0.2s ease) rather than starting early to pad it.
+
+5. **Exit on time too.** Reveal-then-hold elements exit before the scene boundary (or when the next overlay needs the space), so the next beat starts clean.
+
+When you hand the scene_plan to the asset/compose directors, every `gsap_entry` and every overlay/GIF window MUST carry its `trigger_word` and the `words[]` timestamp it was derived from. The compose director will verify this with before/after-word frame sampling (see compose-director "Narration Sync Verification") and treat any early reveal as a CRITICAL finding.
+
 ## Alternation Rule
 
 Check before finalizing: no `hero_talking_head` run should exceed 8 seconds without a cutaway to `split_screen_greg` or `full_greg_card`. If a hero scene runs long (e.g., a 12s payoff that's purely talking head), consider splitting it: first 6s hero, then a full_greg comparison card, then last 6s hero.
@@ -249,6 +273,7 @@ Check before finalizing: no `hero_talking_head` run should exceed 8 seconds with
 | All split-screen | Bottom panel marked as solid-background placeholder (no video element) |
 | All hero | Overlays listed with positions and GSAP timing |
 | All full-card | All text/diagram content explicit (no "show a diagram") |
+| **Narration sync** | **Every reveal `abs_time` derived from `transcript.json words[]` and lands ON its trigger word, never before. Multi-part diagrams build progressively across the spoken clause. GIF/overlay windows = trigger word → cut. Each gsap_entry records its trigger_word + timestamp.** |
 | Alternation | No hero run > 8s |
 | Caption config | Present; placement is LAYOUT-AWARE (split=centered above divider, hero/full-card=lifted lower-third) — never bottom-pinned into the platform UI shadow zone |
 | CTA collision | On hero CTA scenes, lifted captions don't overlap the CTA badge stack |
