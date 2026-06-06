@@ -21,6 +21,7 @@ import { HetOpenAIFinanceClicko } from "./HetOpenAIFinanceClicko";
 import { OpenAIAdsMgrReel } from "./OpenAIAdsMgrReel";
 import { CheapInferenceReel, CheapInferenceReelProps, cheapInferenceReelDefault, calcCheapInferenceMetadata } from "./CheapInferenceReel";
 import { AgentSleepReel0531 } from "./AgentSleepReel";
+import { SocialReel, socialReelDefault, calcSocialReelMetadata } from "./SocialReel";
 
 // ---------------------------------------------------------------------------
 // Theme System — prevents every video from looking like dark fintech
@@ -183,6 +184,16 @@ const calc500M: CalculateMetadataFunction<Claude500MReelProps> = async ({ props 
 export const Root: React.FC = () => {
   return (
     <>
+      <Composition
+        id="SocialReel"
+        component={SocialReel}
+        durationInFrames={150}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={socialReelDefault}
+        calculateMetadata={calcSocialReelMetadata}
+      />
       <Composition
         id="HetOpenAIFinanceClicko"
         component={HetOpenAIFinanceClicko}

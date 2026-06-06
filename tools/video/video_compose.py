@@ -649,6 +649,7 @@ class VideoCompose(BaseTool):
         "screen-demo": "Explainer",
         "presenter": "TalkingHead",
         "animation-first": "Explainer",
+        "social-reel": "SocialReel",
     }
 
     @classmethod

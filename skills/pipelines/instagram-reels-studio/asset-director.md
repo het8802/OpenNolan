@@ -1,0 +1,27 @@
+# Asset Director — instagram-reels-studio
+
+Generate/collect the assets the scene plan calls for and produce the `asset_manifest` with
+provenance for every asset (paths, source_tool, model, cost, scene linkage).
+
+## Per planned move
+
+- **Cutouts** → `object_cutout` (SAM2 via Replicate). Before reading, read
+  `.agents/skills/sam2-cutouts/SKILL.md`. It's PAID and confirm-gated: announce the cost, pass
+  `confirm=true` (or set OBJECT_CUTOUT_AUTOCONFIRM for batch). Provide explicit click points —
+  there is no auto mode. Results cache by (video + clicks). If SAM2 is unavailable the tool
+  names `bg_remove` as a person-only fallback — surface that to the user, do NOT silently swap.
+- **Restyle** → `restyle_video` (≤10s hero clip, Luma modify-video by default). PAID +
+  confirm-gated; announce provider + cost. Read `.agents/skills/ai-video-gen`.
+- **Captions** → `subtitle_gen` (word-by-word or sentence per the template/brief).
+- **Music** → check `music_library/` first, else `music_gen`/`freesound_music`. A beat-synced
+  reel needs a real track for `beat_cutter`.
+- **Audio cleanup** → `audio_enhance` if the source voice is noisy.
+
+## Provenance (required)
+Every generated asset gets an `asset_manifest` entry with `source_tool`, `model` (if any),
+`cost_usd`, `scene_id`, and `duration_seconds`. Paid generations must record their real cost.
+
+## Quality bar
+Assets exist for every planned scene/move; paid tools were confirm-gated and cached; manifest
+is schema-valid with full provenance. Auto-proceed (no human gate) unless a paid run needs
+approval.
