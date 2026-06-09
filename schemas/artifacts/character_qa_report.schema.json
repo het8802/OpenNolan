@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/character_qa_report",
+  "$id": "opennolan/artifacts/character_qa_report",
   "title": "Character QA Report",
   "description": "Structured review of character rig integrity, motion, and render readiness.",
   "type": "object",

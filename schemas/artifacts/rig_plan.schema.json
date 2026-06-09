@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/rig_plan",
+  "$id": "opennolan/artifacts/rig_plan",
   "title": "Rig Plan",
   "description": "Rig parts, pivots, layers, constraints, and views for character animation.",
   "type": "object",

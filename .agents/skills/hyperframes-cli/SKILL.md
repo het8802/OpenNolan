@@ -4,11 +4,11 @@ description: HyperFrames CLI tool — hyperframes init, lint, validate, preview,
 ---
 
 <!--
-Vendored into OpenMontage from C:\Users\ishan\Documents\hyperframes\skills\hyperframes-cli\SKILL.md
+Vendored into OpenNolan from the upstream hyperframes repo: skills/hyperframes-cli/SKILL.md
 Source commit: d291358 (2026-04-17)
 See .agents/skills/hyperframes/PROVENANCE.md for re-sync instructions.
 
-OpenMontage-local edit: added `validate` to the top-line command list and a
+OpenNolan-local edit: added `validate` to the top-line command list and a
 dedicated "Validation" section — upstream omits it even though the CLI ships it
 and `hyperframes validate` is the real browser-based contract check (contrast,
 timelines, assets) that runs before render.

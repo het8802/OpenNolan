@@ -1,18 +1,18 @@
 # OpenAI/YC credits Greg-style Remotion reel — session reference
 
-Use this as a concrete reference when Het asks to turn a daily AI/tech script into a clean Greg Isenberg / Hyperagent-style informational Reel without talking head.
+Use this as a concrete reference when the user asks to turn a daily AI/tech script into a clean Greg Isenberg / Hyperagent-style informational Reel without talking head.
 
 ## Source and output
-- Source script: `/home/ubuntu/.hermes/marketing-os/scripts/2026-05-21/daily-ai-tech-video.md`
-- Project: `/home/ubuntu/openai-credits-greg-reel`
-- Silent/design MP4: `/home/ubuntu/openai-credits-greg-reel/openai-credits-greg-reel.mp4`
-- Final MP4 with ElevenLabs VO: `/home/ubuntu/openai-credits-greg-reel/openai-credits-greg-reel-with-vo.mp4`
-- Contact sheets: `/home/ubuntu/openai-credits-greg-reel/contact-sheet.jpg`, `/home/ubuntu/openai-credits-greg-reel/contact-sheet-with-vo.jpg`
-- Main source: `/home/ubuntu/openai-credits-greg-reel/src/Composition.tsx`
-- Generated topical asset: `/home/ubuntu/openai-credits-greg-reel/public/generated/ai-credit-cap-table.png`
-- Voiceover script: `/home/ubuntu/openai-credits-greg-reel/voiceover-script.md`
-- Raw ElevenLabs VO: `/home/ubuntu/openai-credits-greg-reel/public/voiceover/openai-credits-vo-elevenlabs.mp3`
-- Timed VO: `/home/ubuntu/openai-credits-greg-reel/public/voiceover/openai-credits-vo-timed.m4a`
+- Source script: `~/marketing-os/scripts/2026-05-21/daily-ai-tech-video.md`
+- Project: `~/openai-credits-greg-reel`
+- Silent/design MP4: `~/openai-credits-greg-reel/openai-credits-greg-reel.mp4`
+- Final MP4 with ElevenLabs VO: `~/openai-credits-greg-reel/openai-credits-greg-reel-with-vo.mp4`
+- Contact sheets: `~/openai-credits-greg-reel/contact-sheet.jpg`, `~/openai-credits-greg-reel/contact-sheet-with-vo.jpg`
+- Main source: `~/openai-credits-greg-reel/src/Composition.tsx`
+- Generated topical asset: `~/openai-credits-greg-reel/public/generated/ai-credit-cap-table.png`
+- Voiceover script: `~/openai-credits-greg-reel/voiceover-script.md`
+- Raw ElevenLabs VO: `~/openai-credits-greg-reel/public/voiceover/openai-credits-vo-elevenlabs.mp3`
+- Timed VO: `~/openai-credits-greg-reel/public/voiceover/openai-credits-vo-timed.m4a`
 
 ## Working storyboard pattern
 Topic: OpenAI reportedly offered current YC startups $2M in OpenAI tokens in exchange for equity via uncapped SAFE, compared with Google Cloud and Cloudflare startup credits.
@@ -27,7 +27,7 @@ Topic: OpenAI reportedly offered current YC startups $2M in OpenAI tokens in exc
 7. CTA: Comment CREDITS for founder checklist.
 
 ## Technique that worked
-- Use `/home/ubuntu/greg-style-kit` as the design system and copy it into `public/greg-style-kit`.
+- Use `~/greg-style-kit` as the design system and copy it into `public/greg-style-kit`.
 - Use Codex CLI native `$imagegen` for one topical 9:16 visual, then use Remotion as the deterministic assembler.
 - Keep AI-generated image text as decorative context only; overlay the actual readable text in Remotion.
 - Render stills at representative frames before full render.

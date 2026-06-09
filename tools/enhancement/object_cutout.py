@@ -4,7 +4,7 @@ Wraps Meta's OFFICIAL Replicate model `meta/sam-2-video`. Given a video plus one
 more point prompts (positive/negative clicks on a frame), SAM 2 tracks the selected
 object(s) across every frame and returns a mask video. This tool then composites the
 source footage + that mask into an RGBA cutout clip (transparent background) via FFmpeg
-`alphamerge`. This is the OpenMontage equivalent of Instagram Edits' "Cutouts".
+`alphamerge`. This is the OpenNolan equivalent of Instagram Edits' "Cutouts".
 
 Design contract (Edits-parity plan, /plan-eng-review 2026-06-06):
   - OFFICIAL model -> official endpoint `POST /v1/models/meta/sam-2-video/predictions`
@@ -768,7 +768,7 @@ class ObjectCutout(BaseTool):
         return hashlib.sha256(raw.encode()).hexdigest()
 
     def _cache_dir(self) -> Path:
-        base = os.environ.get("OPENMONTAGE_CACHE_DIR") or (Path.home() / ".cache" / "openmontage")
+        base = os.environ.get("OPENNOLAN_CACHE_DIR") or (Path.home() / ".cache" / "opennolan")
         return Path(base) / "object_cutout"
 
     def _read_cache(self, key: str) -> Optional[dict[str, Any]]:

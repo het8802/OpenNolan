@@ -320,7 +320,7 @@ class DoubaoTTS(BaseTool):
             "disable_markdown_filter": bool(inputs.get("disable_markdown_filter", False)),
         }
         return {
-            "user": {"uid": inputs.get("user_id", "openmontage")},
+            "user": {"uid": inputs.get("user_id", "opennolan")},
             "unique_id": request_id,
             "req_params": {
                 "text": inputs["text"],

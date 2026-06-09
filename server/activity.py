@@ -91,7 +91,7 @@ def _category_for(tool: str, target: str, project_id: str) -> str:
 
 
 def _bash_tool_slug(target: str) -> Optional[str]:
-    """The OpenMontage tool/provider a Bash command actually RUNS, if any: a
+    """The OpenNolan tool/provider a Bash command actually RUNS, if any: a
     python tool/script (gen_vo, get_broll, update_stage, tools.elevenlabs_tts)
     or a render/encode tool (remotion, ffmpeg). Returns None for plain shell
     (ls/cat/mkdir) and inline `python -c`, so viewers don't look like tool runs."""

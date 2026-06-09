@@ -1,6 +1,6 @@
 # RVM long-clip + reaction GIF workflow notes
 
-Use this when evaluating talking-head background removal plus humorous GIF inserts for Het's short-form Reels.
+Use this when evaluating talking-head background removal plus humorous GIF inserts for your short-form Reels.
 
 ## RVM long-clip validation pattern
 

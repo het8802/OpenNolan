@@ -1,6 +1,6 @@
 # Instagram Reel link-list extraction
 
-Use when Het shares an Instagram Reel that names a stack/list of tools, skills, repos, or resources and asks for the links.
+Use when the user shares an Instagram Reel that names a stack/list of tools, skills, repos, or resources and asks for the links.
 
 ## Workflow proven on Reel `DXt6opNiAN1` — “50 Best Claude Code Skills”
 
@@ -19,7 +19,7 @@ Use when Het shares an Instagram Reel that names a stack/list of tools, skills, 
 4. Search the web for an authoritative companion page when the Reel caption promises “comment for links” or the topic title is distinctive. For `DXt6opNiAN1`, searching `"50 Best Claude Code Skills" links` found an AIFLOXIUM blog with the same list and install commands.
 5. If a companion page contains `/plugin marketplace add owner/repo` commands, parse those commands to map item names to GitHub links. Verify unique repos with `git ls-remote https://github.com/<owner>/<repo>.git HEAD` before returning links.
 6. Return a compact table: number, visible Reel name, and canonical link. Note when multiple visible skills live inside the same repository.
-7. Clean up temporary Reel media unless Het asks to keep it.
+7. Clean up temporary Reel media unless the user asks to keep it.
 
 ## Pitfalls
 

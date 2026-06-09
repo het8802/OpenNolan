@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/research_brief",
+  "$id": "opennolan/artifacts/research_brief",
   "title": "Research Brief",
   "description": "Structured web research findings that ground a video in real data, trends, and audience insights. Produced by the Research Director before any creative work begins.",
   "type": "object",

@@ -34,7 +34,7 @@ Use this when creating Instagram carousel PNGs from Marketing OS scripts, especi
 5. Verify every slide is exactly `1080x1350` with Pillow before visual QA.
 6. QA the contact sheet with vision before delivery.
 7. If QA flags readability or polish issues, run a second Codex refinement pass targeted at those issues, then regenerate and re-QA. This worked better than accepting the first Codex pass.
-8. Deliver individual slide images in numeric order first. A zip/archive is optional backup only; do not make Het download a zip just to review.
+8. Deliver individual slide images in numeric order first. A zip/archive is optional backup only; do not make the user download a zip just to review.
 
 ## Prompt pattern
 
@@ -83,7 +83,7 @@ Refine the existing carousel. Keep the same concept and aesthetic, but fix QA is
 - Does slide order match the narrative arc?
 - Are all slides `1080x1350`?
 - Are actual `slide-XX.png` files free of repeated headers, footers, date bars, slide numbers, brand bars, and template chrome?
-- Did Slack/channel delivery include ordered individual images first, not only a zip?
+- Did delivery-channel output include ordered individual images first, not only a zip?
 
 ## Common refinement fixes
 

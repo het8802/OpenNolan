@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/render_report",
+  "$id": "opennolan/artifacts/render_report",
   "title": "Render Report",
   "description": "Output report produced by the Composer agent after rendering.",
   "type": "object",

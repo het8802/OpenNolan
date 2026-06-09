@@ -111,7 +111,7 @@ class CharacterSpecGenerator(BaseTool):
     version = "0.1.0"
     tier = ToolTier.CORE
     capability = "character_animation"
-    provider = "openmontage"
+    provider = "opennolan"
     stability = ToolStability.BETA
     execution_mode = ExecutionMode.SYNC
     determinism = Determinism.DETERMINISTIC
@@ -187,7 +187,7 @@ class SvgRigBuilder(BaseTool):
     version = "0.1.0"
     tier = ToolTier.CORE
     capability = "character_animation"
-    provider = "openmontage"
+    provider = "opennolan"
     stability = ToolStability.BETA
     execution_mode = ExecutionMode.SYNC
     determinism = Determinism.DETERMINISTIC
@@ -285,7 +285,7 @@ class PoseLibraryBuilder(BaseTool):
     version = "0.1.0"
     tier = ToolTier.CORE
     capability = "character_animation"
-    provider = "openmontage"
+    provider = "opennolan"
     stability = ToolStability.BETA
     execution_mode = ExecutionMode.SYNC
     determinism = Determinism.DETERMINISTIC
@@ -372,7 +372,7 @@ class ActionTimelineCompiler(BaseTool):
     version = "0.1.0"
     tier = ToolTier.CORE
     capability = "character_animation"
-    provider = "openmontage"
+    provider = "opennolan"
     stability = ToolStability.BETA
     execution_mode = ExecutionMode.SYNC
     determinism = Determinism.DETERMINISTIC
@@ -468,7 +468,7 @@ class CharacterRigRenderer(BaseTool):
     version = "0.1.0"
     tier = ToolTier.CORE
     capability = "character_animation"
-    provider = "openmontage"
+    provider = "opennolan"
     stability = ToolStability.BETA
     execution_mode = ExecutionMode.SYNC
     determinism = Determinism.DETERMINISTIC
@@ -635,7 +635,7 @@ class CharacterRigRenderer(BaseTool):
         )
         (workspace_path / "DESIGN.md").write_text(
             "# DESIGN\n\n"
-            "Generated for OpenMontage character animation.\n\n"
+            "Generated for OpenNolan character animation.\n\n"
             "- Background: `#9bd7ff` sky and `#75c878` ground\n"
             "- Foreground: `#202632` ink outlines\n"
             "- Accent: saturated cartoon body colors\n"
@@ -790,7 +790,7 @@ class CharacterAnimationReviewer(BaseTool):
     version = "0.1.0"
     tier = ToolTier.ANALYZE
     capability = "character_animation"
-    provider = "openmontage"
+    provider = "opennolan"
     stability = ToolStability.BETA
     execution_mode = ExecutionMode.SYNC
     determinism = Determinism.DETERMINISTIC

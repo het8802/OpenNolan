@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/final_review",
+  "$id": "opennolan/artifacts/final_review",
   "title": "Final Review",
   "description": "Structured self-review of the rendered output. The compose stage must produce this artifact to prove the agent inspected the actual rendered video before presenting it to the user. If status is 'revise' or 'fail', the agent must not present the video as complete.",
   "type": "object",

@@ -1,6 +1,6 @@
 # Faceless evidence-montage video production reference
 
-Session pattern: Het asked to turn an existing daily AI/tech script into a Reel using the source-backed evidence montage style learned from Reel `DYhssDhN-ti`.
+Session pattern: the user asked to turn an existing daily AI/tech script into a Reel using the source-backed evidence montage style learned from Reel `DYhssDhN-ti`.
 
 ## When this reference helps
 Use when the user asks for an actual MP4/Reel draft from a source-backed script but no talking-head footage is available yet.
@@ -27,7 +27,7 @@ For the 2026-05-27 script about Devin/Cognition and OpenAI Codex tax agents:
 - Chart supported: `25% → 86%` at the 75% field-completion threshold within six weeks.
 
 ## Deterministic fallback implementation
-If Remotion/OpenMontage is unnecessary or unavailable, a PIL + FFmpeg pipeline works for a fast draft:
+If Remotion/OpenNolan is unnecessary or unavailable, a PIL + FFmpeg pipeline works for a fast draft:
 - Generate scenes as 1080x1920 JPEG frames with PIL.
 - Render source cards, highlights, captions, loop diagrams, metric cards, and charts programmatically.
 - Encode frames with FFmpeg to H.264 MP4.

@@ -95,7 +95,7 @@ overlays:
 quality_rules:
   - "Maintain Greg-theme discipline: warm paper, serif editorial type, forest/mint/sage/gold accents; no purple/violet/obsidian/pixel RPG leakage."
   - "Every 0.5-1.5 seconds, change one meaningful element: phrase group, receipt card, connector, prompt text, result row, or camera crop."
-  - "Primary instructional text must be OpenMontage-rendered captions, not tiny text inside screenshots."
+  - "Primary instructional text must be OpenNolan-rendered captions, not tiny text inside screenshots."
   - "Prompt/result loops must transform into tangible artifacts: checklist, plan, post grid, profile board, or content calendar."
   - "Use soft premium motion: avoid heavy yoyo bounces, huge overshoot, random glitch, and generic TikTok subtitle boxes."
   - "Light canvas and dark/forest UI-card scenes should alternate for attention resets."

@@ -3,12 +3,12 @@ name: sam2-cutouts
 description:
   How to drive the object_cutout tool (Meta SAM 2 video on Replicate) to isolate and
   track a subject into a transparent alpha cutout. Use when cutting out a person or
-  object from a clip to overlay, keyframe, or restyle separately — the OpenMontage
+  object from a clip to overlay, keyframe, or restyle separately — the OpenNolan
   equivalent of Instagram Edits' "Cutouts". Covers click-prompt design, multi-object
   tracking, fixing tracking drift, mask types, and cost/caching.
 license: MIT
 metadata:
-  author: openmontage
+  author: opennolan
   version: '1.0.0'
 ---
 

@@ -7,13 +7,13 @@ Session learning: when the user proposes an AI-news/Instagram video system, trea
 Initial project path:
 
 ```bash
-/home/ubuntu/ai-video-pipeline
+~/ai-video-pipeline
 ```
 
 Verification run:
 
 ```bash
-cd /home/ubuntu/ai-video-pipeline
+cd ~/ai-video-pipeline
 npm run typecheck
 npm test
 npm run tool:list
@@ -46,7 +46,7 @@ Topic / query
   -> Optional human-approved publishing
 ```
 
-This is especially important for Harness/Hermes-style agents because tools should have explicit typed inputs and outputs; do not rely on vague browser access or ambient permissions.
+This is especially important for tool-using agents because tools should have explicit typed inputs and outputs; do not rely on vague browser access or ambient permissions.
 
 ## Files created in scaffold
 

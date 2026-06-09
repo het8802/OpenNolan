@@ -95,7 +95,7 @@ overlays:
 quality_rules:
   - "The RPG layer must clarify the workflow as levels/quests; do not add pixel art as decoration only."
   - "Every 0.5-1.5 seconds, change one meaningful element: avatar movement, threat label, proof card, caption group, connector, prompt text, result row, or camera crop."
-  - "Primary instructional text must be OpenMontage-rendered captions, not tiny text inside screenshots."
+  - "Primary instructional text must be OpenNolan-rendered captions, not tiny text inside screenshots."
   - "Prompt/result loops must show transformation into a tangible artifact: checklist, plan, post grid, profile board, or content calendar."
   - "Use soft premium motion: avoid heavy yoyo bounces, huge overshoot, and random glitch effects."
   - "Light canvas and dark UI/card scenes should alternate for attention resets."

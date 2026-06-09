@@ -1,9 +1,9 @@
 # TRIBE v2 / social-signal analysis for Reel replication
 
-Use this when Het asks for TRIBE v2, social-signal scoring, or a model-backed critique of a Reel/TikTok/Short.
+Use this when the user asks for TRIBE v2, social-signal scoring, or a model-backed critique of a Reel/TikTok/Short.
 
 ## Principle
-Do **not** present heuristic or LLM-only critique as real TRIBE v2 inference. Het explicitly cares about separating true hosted/API inference from style analysis. If the model did not actually run, say so and still provide a clearly-labeled qualitative creator-pattern analysis if useful.
+Do **not** present heuristic or LLM-only critique as real TRIBE v2 inference. The user explicitly cares about separating true hosted/API inference from style analysis. If the model did not actually run, say so and still provide a clearly-labeled qualitative creator-pattern analysis if useful.
 
 ## Replicate hosted-model pattern
 Known hosted model used in a prior session:
@@ -11,9 +11,9 @@ Known hosted model used in a prior session:
 - Model slug: `prakhar-bhartiya/meta-tribev2-social-media-content-signal`
 - Expected input: a public video URL or a locally downloaded video uploaded/provided as API input, depending on the client path.
 - Model/schema limit observed in session: video input must be `≤60s`. If the candidate is longer, create an explicit trimmed copy (e.g. `ffmpeg -i input.mp4 -t 59.8 ... trim60.mp4`) and report both the original and trimmed paths/durations.
-- Paid inference input discipline: before running Replicate, state/verify the exact video being scored. If Het supplied a reference Reel for style analysis but asks about “today’s script,” “our created video,” or a generated draft, do **not** score the reference URL. Locate the generated artifact first, confirm its path/topic, and only then run inference. This avoids conflating reference-style analysis with evaluation of the produced video.
+- Paid inference input discipline: before running Replicate, state/verify the exact video being scored. If the user supplied a reference Reel for style analysis but asks about “today’s script,” “our created video,” or a generated draft, do **not** score the reference URL. Locate the generated artifact first, confirm its path/topic, and only then run inference. This avoids conflating reference-style analysis with evaluation of the produced video.
 - If the Python `replicate.run(...)` call times out locally, check Replicate `/v1/predictions` for the latest prediction ID and poll its `get` URL; the hosted job may still complete successfully.
-- If the API returns HTTP `402 Insufficient credit`, stop claiming model scores. Tell Het billing/credits are needed, preserve the local video path if useful, and offer to rerun once funded.
+- If the API returns HTTP `402 Insufficient credit`, stop claiming model scores. Tell the user billing/credits are needed, preserve the local video path if useful, and offer to rerun once funded.
 - If credits are fixed but the token is no longer available, state that the video artifact is still prepared and ask only for the missing token; do not restart analysis from scratch.
 
 Suggested result language:
@@ -34,7 +34,7 @@ Return:
 - Overall score and main sub-scores exactly as reported by the model/API.
 - Timeline peaks/drops if provided.
 - A short interpretation tied to replication: hook timing, VO/text alignment, visual novelty, emotional reward, caption density, background/motion flow.
-- Then separate a clearly-labeled **replication recipe**: text animation, background grammar, transition pacing, SFX/VO alignment, and implementation notes for Remotion/OpenMontage/HyperFrames.
+- Then separate a clearly-labeled **replication recipe**: text animation, background grammar, transition pacing, SFX/VO alignment, and implementation notes for Remotion/OpenNolan/HyperFrames.
 
 ## Input verification pitfall
 Before reporting scores or qualitative findings, explicitly verify and name the exact media that was scored/analyzed:

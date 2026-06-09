@@ -1,6 +1,6 @@
 # Instagram Reel “Learn this” extraction workflow
 
-Use when Het shares an Instagram Reel and asks to learn the pattern, especially when the normal web/browser path returns an Instagram login shell.
+Use when the user shares an Instagram Reel and asks to learn the pattern, especially when the normal web/browser path returns an Instagram login shell.
 
 ## Proven fallback from Reel `DWUCCNVjCYT`
 
@@ -24,7 +24,7 @@ Use when Het shares an Instagram Reel and asks to learn the pattern, especially 
    PY
    ```
 7. Use the contact sheet + transcript + caption metadata to extract the reusable creative pattern, then patch the appropriate skill.
-8. Delete temporary media/artifacts unless Het explicitly asks to keep them.
+8. Delete temporary media/artifacts unless the user explicitly asks to keep them.
 
 ## Pitfalls
 

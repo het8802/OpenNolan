@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# run-dev — start the OpenMontage Mission Control dev servers.
+# run-dev — start the OpenNolan Mission Control dev servers.
 #
 # Usage:
 #   ./run-dev              start BOTH: backend (:8000) + frontend (:5173)

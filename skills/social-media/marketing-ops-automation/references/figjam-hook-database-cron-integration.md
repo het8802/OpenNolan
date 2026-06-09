@@ -1,6 +1,6 @@
 # FigJam Hook Database Cron Integration
 
-Session learning: Het wants the daily Instagram AI/Tech Script Engine asset pack to include the relevant hook from Kallaway's FigJam board, not just assets/B-roll.
+Session learning: the daily Instagram AI/Tech Script Engine asset pack should include the relevant hook from Kallaway's FigJam board, not just assets/B-roll.
 
 ## Requirement
 
@@ -43,4 +43,4 @@ On 2026-05-18, the following jobs were patched:
 - `15fea8cb2d24` — `Instagram AI/Tech Script Engine — daily concept + talking script`
 - `14edf0fbfbcd` — `Instagram AI/Tech Script Engine — daily asset + B-roll pack`
 
-Verify future edits by checking `~/.hermes/cron/jobs.json` for `Recommended FigJam hook combo`, `FigJam hook requirement`, and `hook-recommendation.md`.
+Verify future edits by checking `~/cron/jobs.json` for `Recommended FigJam hook combo`, `FigJam hook requirement`, and `hook-recommendation.md`.

@@ -1,13 +1,13 @@
 # Slack media attachment limitation for Marketing OS videos
 
-Session learning from a Tech/AI Content OS test draft sent to `slack:hermes-home`.
+Session learning from a Tech/AI Content OS test draft sent to your delivery channel.
 
 ## What happened
 
 A verified MP4 existed locally and was included in a Slack `send_message` body as:
 
 ```text
-MEDIA:/home/ubuntu/.hermes/marketing-os/productions/.../openai-campus-network-short.mp4
+MEDIA:~/marketing-os/productions/.../openai-campus-network-short.mp4
 ```
 
 The Slack send succeeded, but the tool response warned:

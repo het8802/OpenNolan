@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/edit_decisions",
+  "$id": "opennolan/artifacts/edit_decisions",
   "title": "Edit Decisions",
   "description": "Editorial decisions produced by the Edit Agent.",
   "type": "object",

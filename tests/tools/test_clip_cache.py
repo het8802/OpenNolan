@@ -56,23 +56,23 @@ def _default_metadata(clip_id: str = "test_001") -> dict:
 
 
 def test_default_cache_dir_uses_env_override(monkeypatch, tmp_path):
-    monkeypatch.setenv("OPENMONTAGE_CACHE_DIR", str(tmp_path / "overridden"))
+    monkeypatch.setenv("OPENNOLAN_CACHE_DIR", str(tmp_path / "overridden"))
     assert default_cache_dir() == tmp_path / "overridden"
 
 
 def test_default_cache_dir_falls_back_to_home(monkeypatch):
-    monkeypatch.delenv("OPENMONTAGE_CACHE_DIR", raising=False)
+    monkeypatch.delenv("OPENNOLAN_CACHE_DIR", raising=False)
     result = default_cache_dir()
-    assert result == Path.home() / ".openmontage" / "clips_cache"
+    assert result == Path.home() / ".opennolan" / "clips_cache"
 
 
 def test_default_max_total_bytes_respects_env_override(monkeypatch):
-    monkeypatch.setenv("OPENMONTAGE_CACHE_MAX_GB", "5")
+    monkeypatch.setenv("OPENNOLAN_CACHE_MAX_GB", "5")
     assert default_max_total_bytes() == 5 * 1024 * 1024 * 1024
 
 
 def test_default_max_total_bytes_ignores_garbage_override(monkeypatch):
-    monkeypatch.setenv("OPENMONTAGE_CACHE_MAX_GB", "not-a-number")
+    monkeypatch.setenv("OPENNOLAN_CACHE_MAX_GB", "not-a-number")
     assert default_max_total_bytes() == 20 * 1024 * 1024 * 1024
 
 
@@ -422,7 +422,7 @@ def test_stats_reports_cache_state_and_session_counters(tmp_path):
 
 def test_get_default_cache_honors_env_var(monkeypatch, tmp_path):
     reset_default_cache()
-    monkeypatch.setenv("OPENMONTAGE_CACHE_DIR", str(tmp_path / "envcache"))
+    monkeypatch.setenv("OPENNOLAN_CACHE_DIR", str(tmp_path / "envcache"))
     cache = get_default_cache()
     assert Path(cache.cache_dir) == tmp_path / "envcache"
     reset_default_cache()
@@ -430,7 +430,7 @@ def test_get_default_cache_honors_env_var(monkeypatch, tmp_path):
 
 def test_get_default_cache_returns_same_instance(monkeypatch, tmp_path):
     reset_default_cache()
-    monkeypatch.setenv("OPENMONTAGE_CACHE_DIR", str(tmp_path / "singleton"))
+    monkeypatch.setenv("OPENNOLAN_CACHE_DIR", str(tmp_path / "singleton"))
     a = get_default_cache()
     b = get_default_cache()
     assert a is b

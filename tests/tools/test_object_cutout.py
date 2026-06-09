@@ -25,7 +25,7 @@ VALID_TOKEN = "r8_" + "x" * 37
 @pytest.fixture
 def tool(tmp_path, monkeypatch):
     # Isolate the cache so tests never read/write the real ~/.cache.
-    monkeypatch.setenv("OPENMONTAGE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("OPENNOLAN_CACHE_DIR", str(tmp_path / "cache"))
     return ObjectCutout()
 
 

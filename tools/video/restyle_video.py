@@ -488,7 +488,7 @@ class RestyleVideo(BaseTool):
         return hashlib.sha256(raw.encode()).hexdigest()
 
     def _cache_dir(self) -> Path:
-        base = os.environ.get("OPENMONTAGE_CACHE_DIR") or (Path.home() / ".cache" / "openmontage")
+        base = os.environ.get("OPENNOLAN_CACHE_DIR") or (Path.home() / ".cache" / "opennolan")
         return Path(base) / "restyle_video"
 
     def _read_cache(self, key: str) -> Optional[dict[str, Any]]:

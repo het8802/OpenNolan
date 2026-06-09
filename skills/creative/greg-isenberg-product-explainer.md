@@ -4,9 +4,9 @@
 
 Use this skill for vertical AI/startup/product explainers that should feel like a Greg Isenberg / premium editorial product reel: warm off-white canvas, large serif ideas, crisp product UI mockups, workflow diagrams, founder/startup metaphors, proof receipts, and phrase-synced motion.
 
-Use it when Het asks for the “Greg theme,” “Greg Isenberg style,” “Hyperagent-style,” premium AI-product informational Reels, or OpenMontage videos that must stay aligned with the warm editorial AI/startup vibe.
+Use it when the user asks for the “Greg theme,” “Greg Isenberg style,” “Hyperagent-style,” premium AI-product informational Reels, or OpenNolan videos that must stay aligned with the warm editorial AI/startup vibe.
 
-Do **not** use pixelated RPG characters, purple crystals, obsidian/fantasy UI, violet glow, or purple keyword accents in this skill. Those belong to a separate reference world and should not leak into Het’s Greg-theme output.
+Do **not** use pixelated RPG characters, purple crystals, obsidian/fantasy UI, violet glow, or purple keyword accents in this skill. Those belong to a separate reference world and should not leak into your Greg-theme output.
 
 ## Core Principle
 
@@ -43,7 +43,7 @@ Before composing a Greg-theme reel, build an asset evidence kit. The reel should
 
 1. **Extract source screenshots from links**
    - If the script references articles, product pages, reports, repos, launch pages, tweets/posts, or docs, capture cropped screenshots as proof receipts.
-   - Use them as layered cards, not full-screen dense screenshots. Overlay the actual readable claim in OpenMontage text.
+   - Use them as layered cards, not full-screen dense screenshots. Overlay the actual readable claim in OpenNolan text.
    - Store screenshot assets under `projects/<project>/assets/images/source-receipts/` with source URL and timestamp in the asset manifest.
 
 2. **Source relevant footage when the beat is real-world**
@@ -54,7 +54,7 @@ Before composing a Greg-theme reel, build an asset evidence kit. The reel should
 3. **Generate AI images for abstract/product beats**
    - Create 1 hero image for the visual system and 3–8 scene-specific supporting images when the video would otherwise feel text-only.
    - Good generated assets for this style: warm editorial product hero scenes, simplified UI cards, founder metaphor props, workflow boards, agent/evaluation icons, abstract concept backdrops.
-   - Never ask the image model to render final text; add readable text in OpenMontage.
+   - Never ask the image model to render final text; add readable text in OpenNolan.
 
 4. **Use an asset mix per 45–60s reel**
    - Minimum target: 2–4 source screenshots/receipts, 2–4 b-roll clips or extracted footage moments, 3–6 generated/stylized images or UI mockups, plus reusable overlays/icons.
@@ -73,7 +73,7 @@ Before composing a Greg-theme reel, build an asset evidence kit. The reel should
 2. **Receipt stack / premise proof**
    - Stack source cards, charts, screenshots, or browser receipts.
    - Cards slide from different edges by 80–180px, rotate -2°→0°, and settle with soft shadow growth.
-   - Highlight only one phrase per receipt. Generated microtext is decorative; overlay real text in OpenMontage.
+   - Highlight only one phrase per receipt. Generated microtext is decorative; overlay real text in OpenNolan.
 
 3. **Chapter line**
    - Large serif text builds in phrase chunks: `There are` → `3 layers` → `to this`.
@@ -150,7 +150,7 @@ Before composing a Greg-theme reel, build an asset evidence kit. The reel should
 
 Prefer **HyperFrames** for HTML/CSS/GSAP kinetic typography, prompt bars, floating cards, and editorial UI staging.
 
-Prefer **Remotion** when reusing React scene components, deterministic captions, charts, screen mockups, or an existing OpenMontage Remotion project.
+Prefer **Remotion** when reusing React scene components, deterministic captions, charts, screen mockups, or an existing OpenNolan Remotion project.
 
 If both are available, follow `AGENT_GUIDE.md`: present both options before locking the render runtime.
 
@@ -191,7 +191,7 @@ If both are available, follow `AGENT_GUIDE.md`: present both options before lock
 
 - Importing pixel RPG, purple crystal, or Obsidian/fantasy aesthetics from the reference reel.
 - Using one-line bottom subtitles instead of designed phrase captions.
-- Making screenshots carry the actual message; overlay readable OpenMontage text.
+- Making screenshots carry the actual message; overlay readable OpenNolan text.
 - Skipping the asset evidence kit: source screenshots, b-roll/footage, and generated images are required for visual richness.
 - Using unlicensed third-party YouTube footage directly; if licensing is unclear, recreate the beat with stock/generated assets.
 - Overusing bounces/glitches; this style is premium, restrained, and editorial.

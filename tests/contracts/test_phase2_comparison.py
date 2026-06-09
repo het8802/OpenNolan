@@ -16,9 +16,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-FOOTAGE = Path(
-    r"C:\Users\ishan\Documents\SocialMedia\IshanAIVideos\pipeline\2026-03-08\seg1_intro.mp4"
-)
+FOOTAGE = Path("/path/to/talking_head_intro.mp4")
 
 
 def _has_ffmpeg() -> bool:

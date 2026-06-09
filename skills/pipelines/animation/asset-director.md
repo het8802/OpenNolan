@@ -68,7 +68,7 @@ text alone:
   proof cards, diagrams, or hero images using the playbook's
   `image_prompt_prefix`.
 - Keep generated-image text decorative only; final readable text belongs in
-  OpenMontage/Remotion/HyperFrames.
+  OpenNolan/Remotion/HyperFrames.
 
 ### 1b. Sample Preview (Prevents Wasted Spend)
 

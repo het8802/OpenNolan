@@ -38,7 +38,7 @@ class TemplateApply(BaseTool):
     version = "0.1.0"
     tier = ToolTier.CORE
     capability = "video_post"
-    provider = "openmontage"
+    provider = "opennolan"
     stability = ToolStability.EXPERIMENTAL
     execution_mode = ExecutionMode.SYNC
     determinism = Determinism.DETERMINISTIC

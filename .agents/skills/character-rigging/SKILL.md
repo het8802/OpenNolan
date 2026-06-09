@@ -6,7 +6,7 @@ license: MIT
 
 # Character Rigging
 
-Use this skill when building OpenMontage `rig_plan` artifacts or renderer input
+Use this skill when building OpenNolan `rig_plan` artifacts or renderer input
 for local 2D character animation.
 
 ## Proven Patterns

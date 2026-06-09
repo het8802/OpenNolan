@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/brief",
+  "$id": "opennolan/artifacts/brief",
   "title": "Video Brief",
   "description": "Creative brief produced by the Idea Explorer agent.",
   "type": "object",

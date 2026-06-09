@@ -1,12 +1,12 @@
-# OpenMontage Kinetic Whiteboard Captions
+# OpenNolan Kinetic Whiteboard Captions
 
-Session-derived implementation note for turning Instagram Reel reference analysis into a reusable OpenMontage style/skill.
+Session-derived implementation note for turning Instagram Reel reference analysis into a reusable OpenNolan style/skill.
 
 ## When this applies
 
-Use when Het likes a faceless Reel where the voiceover drives kinetic text, floating UI/product cards, clean off-white background, and a keyword CTA, and asks to replicate that motion/background/flow in OpenMontage.
+Use when the user likes a faceless Reel where the voiceover drives kinetic text, floating UI/product cards, clean off-white background, and a keyword CTA, and asks to replicate that motion/background/flow in OpenNolan.
 
-## OpenMontage artifacts to create
+## OpenNolan artifacts to create
 
 Create or update a class-level Layer 2 creative skill plus a style playbook, not a one-off project note:
 
@@ -23,12 +23,12 @@ The creative skill should teach:
 - Structure: word-built hook → numbered section card → problem micro-list → oversized payoff phrase → repeat → keyword CTA/product mockup/follow gate.
 - Motion vocabulary: `gray-to-black`, `snap-up`, `scale-pop`, `black-pill`, `stacked-payoff`, `blur-wipe`, `card-float`.
 - Timing workflow: VO first → word/phrase timings → reveal each phrase slightly before or exactly on spoken stress → subtle SFX on section titles/payoffs.
-- Runtime guidance: HyperFrames for HTML/CSS/GSAP kinetic typography; Remotion for React timeline, deterministic frame math, and existing word-level caption components. If both runtimes are available, OpenMontage requires presenting both before locking runtime.
+- Runtime guidance: HyperFrames for HTML/CSS/GSAP kinetic typography; Remotion for React timeline, deterministic frame math, and existing word-level caption components. If both runtimes are available, OpenNolan requires presenting both before locking runtime.
 - QA: render contact sheet every 1s, watch at phone size, check safe zones and CTA legibility under Instagram UI.
 
 ## Style playbook shape
 
-The YAML should validate against OpenMontage `schemas/styles/playbook.schema.json` and include:
+The YAML should validate against OpenNolan `schemas/styles/playbook.schema.json` and include:
 
 - `identity.name: "Kinetic Whiteboard Captions"`
 - `identity.category: motion-graphics`
@@ -39,9 +39,9 @@ The YAML should validate against OpenMontage `schemas/styles/playbook.schema.jso
 - motion rules for phrase-level snap-up, gray-to-black activation, scale-pop payoff, fast blur-wipe transitions
 - quality rules requiring meaningful visual change every 0.5–1.5s and active/inactive/payoff hierarchy
 
-## Validation commands used in OpenMontage
+## Validation commands used in OpenNolan
 
-Run from `/home/ubuntu/projects/OpenMontage` after writing the files:
+Run from your OpenNolan checkout after writing the files:
 
 ```bash
 python - <<'PY'
@@ -63,10 +63,10 @@ PY
 
 ## Production run pattern learned from the 2026-05-28 Proof Loops Reel
 
-When Het asks to create the actual video from a daily script using this style, a workable OpenMontage/HyperFrames path is:
+When the user asks to create the actual video from a daily script using this style, a workable OpenNolan/HyperFrames path is:
 
 1. Read the daily script/brief, especially the optional word-for-word VO and on-screen text ideas.
-2. Present Remotion vs HyperFrames if both are available; lock HyperFrames only after explicit approval because OpenMontage treats runtime choice as a proposal-stage contract.
+2. Present Remotion vs HyperFrames if both are available; lock HyperFrames only after explicit approval because OpenNolan treats runtime choice as a proposal-stage contract.
 3. Generate narration first, then transcribe it with word timestamps. Use those timings to drive phrase-level reveals.
 4. Scaffold a dedicated project workspace under `projects/<slug>/hyperframes/`; do not stage this in `remotion-composer/public/`.
 5. Author a single 1080×1920 root composition with:
@@ -77,7 +77,7 @@ When Het asks to create the actual video from a daily script using this style, a
    - floating UI/proof cards and one bold CTA card
 6. Run `npm run check` / `npx hyperframes lint && validate && inspect` before rendering.
 7. Render a draft MP4, then verify with `ffprobe`, create a contact sheet, and visually inspect at phone scale before delivery.
-8. Copy the final MP4 and contact sheet into Hermes media cache and send both.
+8. Copy the final MP4 and contact sheet into your marketing pipeline media cache and send both.
 
 ## HyperFrames implementation pitfalls for this style
 
@@ -93,4 +93,4 @@ When Het asks to create the actual video from a daily script using this style, a
 
 ## Delivery note
 
-If Het asks to “send it to me,” package the OpenMontage skill and style playbook into a media-cache archive and include it as `MEDIA:/...` in the reply. If Het asks for an actual video, deliver both the MP4 and a QA contact sheet. Do not treat this as a commit/push unless he explicitly asks to publish repository changes.
+If the user asks to “send it to me,” package the OpenNolan skill and style playbook into a media-cache archive and include it as `MEDIA:/...` in the reply. If the user asks for an actual video, deliver both the MP4 and a QA contact sheet. Do not treat this as a commit/push unless the user explicitly asks to publish repository changes.

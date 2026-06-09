@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/decision_log",
+  "$id": "opennolan/artifacts/decision_log",
   "title": "Decision Log",
   "description": "Audit trail of every meaningful choice made during production. Prevents hidden system behavior, enables reviewer inspection, and guards against context drift.",
   "type": "object",

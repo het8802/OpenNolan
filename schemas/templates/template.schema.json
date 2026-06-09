@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/templates/template",
+  "$id": "opennolan/templates/template",
   "title": "Reel Template",
   "description": "A reusable, parametrized reel structure. template_apply fills the slots with the agent's/user's assets and emits a valid edit_decisions artifact.",
   "type": "object",

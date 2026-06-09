@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/source_media_review",
+  "$id": "opennolan/artifacts/source_media_review",
   "title": "Source Media Review",
   "description": "Structured review of user-supplied media files. Created before the first planning stage when user media exists. Ensures the agent inspects actual media content instead of planning around assumptions.",
   "type": "object",

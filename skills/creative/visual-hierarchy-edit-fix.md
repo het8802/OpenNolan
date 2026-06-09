@@ -80,7 +80,7 @@ This is not a generic design lecture. It is a visible before/after autopsy.
 - Use a light riser into the final redesign reveal.
 - Keep background music low; the tutorial depends on clear VO and visible design decisions.
 
-## OpenMontage / HyperFrames implementation notes
+## OpenNolan / HyperFrames implementation notes
 
 - Best runtime: HyperFrames for GSAP-style text/shape rebuilds and hand-drawn SVG markups; Remotion also works if using existing text/card primitives.
 - Useful components: `comment_bubble`, `creator_pip`, `bad_edit_wireframe`, `principle_receipt_card`, `handdrawn_circle`, `hierarchy_rebuild_stack`, `poster_after_state`.
