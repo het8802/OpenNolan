@@ -1,6 +1,6 @@
-# OpenMontage Mission Control (web)
+# OpenNolan Mission Control (web)
 
-Local single-user UI for OpenMontage: create projects, pick a pipeline, upload
+Local single-user UI for OpenNolan: create projects, pick a pipeline, upload
 assets, watch the pipeline run live, and chat with the agent.
 
 ## Run it
