@@ -1,6 +1,6 @@
 # Hourly Marketing Cron Reference
 
-This reference captures a concrete Slack-based Marketing OS cron setup that can be adapted for future users.
+This reference captures a concrete Marketing OS cron setup that can be adapted for future users.
 
 ## Job shape
 
@@ -11,7 +11,7 @@ Use four independent cron jobs:
    - Delivery: `local`
    - Toolsets: `web`, `browser`, `terminal`, `file`, `code_execution`, `delegation`, `session_search`
    - Purpose: gather trend evidence without spamming the user.
-   - Output: `~/.hermes/marketing-os/trends/YYYY-MM-DD.jsonl`
+   - Output: `~/marketing-os/trends/YYYY-MM-DD.jsonl`
 
 2. **Daily ideas report**
    - Schedule: `0 17 * * *` (or user timezone equivalent)
@@ -23,14 +23,14 @@ Use four independent cron jobs:
    - Schedule: `0 19 * * *`
    - Delivery: `origin`
    - Purpose: find explicit approvals in recent session history, deepen research, write scripts.
-   - Output: `~/.hermes/marketing-os/scripts/YYYY-MM-DD/idea-N.md`
+   - Output: `~/marketing-os/scripts/YYYY-MM-DD/idea-N.md`
 
 4. **Production**
    - Schedule: `0 21 * * *`
    - Delivery: `origin`
    - Toolsets add: `image_gen`, `vision`, `video`
    - Purpose: generate images/assets and Remotion/ffmpeg video deliverables when possible.
-   - Output: `~/.hermes/marketing-os/productions/YYYY-MM-DD/idea-N/`
+   - Output: `~/marketing-os/productions/YYYY-MM-DD/idea-N/`
 
 ## Critical prompt clauses
 
@@ -41,7 +41,7 @@ Use four independent cron jobs:
 - Do not deliver a long human-facing report.
 - Save each JSONL record with: `timestamp_utc`, `platform`, `trend_name`, `evidence_url`, `evidence_summary`, `why_it_matters`, `suggested_angle`, `confidence_1_to_5`, `source_type`, and `tool_gap_or_recommended_integration`.
 - Avoid duplicates already present in today's file.
-- Maintain `~/.hermes/marketing-os/tool-wishlist.md` for exact tool/API/Actor recommendations discovered during research.
+- Maintain `~/marketing-os/tool-wishlist.md` for exact tool/API/Actor recommendations discovered during research.
 - Tool recommendations must prefer free options, name exact Apify Actors/apps instead of saying “Apify”, include pricing for paid tools, compare free alternatives, state ROI, and check startup credits/discounts.
 - Verify JSONL exists and is valid before finalizing.
 

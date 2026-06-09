@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/scene_plan",
+  "$id": "opennolan/artifacts/scene_plan",
   "title": "Scene Plan",
   "description": "Ordered scene list produced by the Scene Planner agent.",
   "type": "object",

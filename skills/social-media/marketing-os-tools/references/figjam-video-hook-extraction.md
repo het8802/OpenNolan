@@ -1,6 +1,6 @@
 # FigJam Video Hook Extraction Notes
 
-Session learning: Het may ask for the **actual video hook from FigJam**, meaning a playable/reference clip embedded in the Kallaway FigJam board that he can edit into a Reel—not a text hook taxonomy or a generated PNG/SVG asset.
+Session learning: the user may ask for the **actual video hook from FigJam**, meaning a playable/reference clip embedded in the Kallaway FigJam board that they can edit into a Reel—not a text hook taxonomy or a generated PNG/SVG asset.
 
 ## Correct interpretation
 
@@ -16,7 +16,7 @@ If the user says "send me the FigJam hook" after discussing hooks, clarify/assum
 
 ```bash
 node - <<'NODE'
-const { chromium } = require('/home/ubuntu/.hermes/hermes-agent/node_modules/playwright');
+const { chromium } = require('playwright');
 (async()=>{
   const browser=await chromium.launch({headless:true,args:['--enable-webgl','--ignore-gpu-blocklist','--use-gl=swiftshader','--no-sandbox']});
   const page=await browser.newPage({viewport:{width:1400,height:900}});

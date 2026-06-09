@@ -24,7 +24,7 @@ Do not build this format as only a pixel map plus text. The reference works beca
 
 1. **Extract screenshots from relevant links**
    - For every cited article, product page, report, repo, or social proof link, capture a screenshot/crop and convert it into a layered proof card.
-   - Screenshots are proof texture; overlay the key readable phrase in OpenMontage text.
+   - Screenshots are proof texture; overlay the key readable phrase in OpenNolan text.
    - Store under `projects/<project>/assets/images/source-receipts/` and record the source URL in the manifest.
 
 2. **Source or extract relevant footage**
@@ -34,7 +34,7 @@ Do not build this format as only a pixel map plus text. The reference works beca
 
 3. **Generate supporting images**
    - Generate a hero visual system image plus scene-specific supporting images: quest map background, tool shrine/object, workflow board, agent sidekick, UI card backdrops, checklist/profile/post-grid artifacts.
-   - Use the active playbook prompt prefix and negative prompt; keep final text out of generated images and add it in OpenMontage.
+   - Use the active playbook prompt prefix and negative prompt; keep final text out of generated images and add it in OpenNolan.
 
 4. **Asset mix target**
    - For a 45–60s reel, aim for at least 2–4 screenshot receipts, 2–4 b-roll/extracted footage inserts, 3–6 generated/stylized images, and reusable UI/card overlays.
@@ -138,7 +138,7 @@ Make the viewer feel the workflow is a game loop: **threat → sidekick/tool →
 ## Typography System
 
 - Use a chunky editorial serif for narration captions: bold black, tight line height, mixed size hierarchy.
-- Important verbs/nouns may be italic, mint, forest, gold, or coral. Avoid purple/violet keyword hits for Het's Greg-aligned vibe.
+- Important verbs/nouns may be italic, mint, forest, gold, or coral. Avoid purple/violet keyword hits for your Greg-aligned vibe.
 - Do not use one-line subtitles across the bottom. Build a phrase collage around the visual object.
 - Keep setup words small; make payoff words 1.4–2.2× larger.
 - Text should feel hand-composed: slight baseline offsets are allowed, but never unreadable.
@@ -148,7 +148,7 @@ Make the viewer feel the workflow is a game loop: **threat → sidekick/tool →
 - Palette: warm off-white/tile beige background, charcoal/black UI, mint/forest highlights, gold quest-object accents, coral/orange sidekick accents, yellow marker highlights for proof cards. Avoid purple/violet/obsidian fantasy accents unless explicitly requested.
 - Reusable motifs: pixel avatar, old computer/connector node, gold/mint quest object, coral/green agent sidekick, dotted connectors, dark rounded prompt bar, mint pill tags.
 - Use real product screenshots/mockups only as proof layers; recreate or anonymize where needed. Do not copy protected reference assets directly.
-- Proof cards should be readable enough to identify their purpose, but primary message comes from OpenMontage text overlays.
+- Proof cards should be readable enough to identify their purpose, but primary message comes from OpenNolan text overlays.
 - Mix light canvas and dark UI/cards to create attention resets.
 
 ## Audio and SFX
@@ -168,7 +168,7 @@ Make the viewer feel the workflow is a game loop: **threat → sidekick/tool →
 ### Prefer Remotion when
 
 - You want deterministic React components for pixel avatar movement, checklist rows, prompt typing, and frame-perfect caption timing.
-- The video is part of an existing Remotion/OpenMontage social pipeline.
+- The video is part of an existing Remotion/OpenNolan social pipeline.
 
 If both are available, follow `AGENT_GUIDE.md`: present both runtime options before locking the render path.
 

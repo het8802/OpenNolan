@@ -3,7 +3,7 @@
 Writing JSON with a plain ``open(path, "w")`` truncates the file before the
 new bytes land, so any concurrent reader — the Mission Control UI polling
 ``/state``, a file watcher, or a second CLI run — can observe a half-written,
-invalid file. Every state file OpenMontage persists (checkpoints, decision
+invalid file. Every state file OpenNolan persists (checkpoints, decision
 logs, project manifests) goes through ``atomic_write_json`` instead:
 
     write to a temp file in the same directory  ->  fsync  ->  os.replace

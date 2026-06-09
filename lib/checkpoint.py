@@ -370,7 +370,7 @@ def _cli(argv: Optional[list[str]] = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="python -m lib.checkpoint",
-        description="Read/write OpenMontage pipeline checkpoints.",
+        description="Read/write OpenNolan pipeline checkpoints.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

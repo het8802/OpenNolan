@@ -1,10 +1,10 @@
 ---
-description: OpenMontage project rules
+description: OpenNolan project rules
 globs: ["**/*"]
 alwaysApply: true
 ---
 
-# OpenMontage
+# OpenNolan
 
 MANDATORY: Read `AGENT_GUIDE.md` before responding to ANY user message.
 

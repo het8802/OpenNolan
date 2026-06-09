@@ -1,4 +1,4 @@
-# Het OpenAI Finance Talking-Head → Screen-Demo Adaptation
+# OpenAI Finance Talking-Head → Screen-Demo Adaptation
 
 Session reference for adapting raw talking-head footage into the Clicko-style proof/demo reel system.
 
@@ -12,23 +12,23 @@ OpenAI launched a personal finance preview for ChatGPT Pro users in the U.S. Use
 ## Visual diagnosis
 - Footage is already vertical and usable as creator layer.
 - Static bedroom/white-wall background with blinds and a visible ceiling vent. Crop/push in 112–118% to reduce ceiling/vent and place eyes near upper third.
-- Het holds a small mic near mouth throughout. This reads creator-native but can feel static if left full-screen too long.
+- The creator holds a small mic near mouth throughout. This reads creator-native but can feel static if left full-screen too long.
 - Lighting is cool/flat compared to the warm reference desk setup; add slight warmth/contrast.
-- Best use: full-screen Het only for hook, thesis, and CTA. Most middle should become screen footage or proof cards with Het as PIP.
+- Best use: full-screen creator only for hook, thesis, and CTA. Most middle should become screen footage or proof cards with the creator as PIP.
 
 ## Edit map
 | Time | Audio / beat | Visual treatment | Caption hits |
 |---|---|---|---|
-| 0–4s | OpenAI launched personal finance preview | Full-screen Het, punch-in, large hook text | `CHATGPT CAN SEE YOUR MONEY`, `PERSONAL FINANCE` |
-| 4–10s | Connect accounts through Plaid, dashboard | OpenAI article screenshot + Plaid logo + Het PIP | `REAL ACCOUNTS`, `PLAID`, `DASHBOARD` |
+| 0–4s | OpenAI launched personal finance preview | Full-screen creator, punch-in, large hook text | `CHATGPT CAN SEE YOUR MONEY`, `PERSONAL FINANCE` |
+| 4–10s | Connect accounts through Plaid, dashboard | OpenAI article screenshot + Plaid logo + creator PIP | `REAL ACCOUNTS`, `PLAID`, `DASHBOARD` |
 | 10–16s | Spending, subscriptions, investments, goals | Dashboard mock / screen recording | `SPENDING`, `SUBSCRIPTIONS`, `GOALS` |
-| 16–24s | Not budgeting tips | Full-screen Het thesis moment | `NOT BUDGETING TIPS` |
+| 16–24s | Not budgeting tips | Full-screen creator thesis moment | `NOT BUDGETING TIPS` |
 | 24–32s | Permission access to data + memory + decisions | Diagram: model + Plaid + memory + dashboard | `REAL DATA`, `MEMORY`, `DECISIONS` |
 | 32–44s | Consumer AI direction | ChatGPT/Finances UI, source card, layer stack | `CONNECTOR LAYER`, `TRUST LAYER` |
 | 44–56s | Not professional financial advice caveat | OpenAI source quote highlight | `NOT FINANCIAL ADVICE`, `HIGH TRUST` |
-| 56–64s | Winning AI app earns trust with sensitive context | Het PIP over trust/security visual | `SENSITIVE CONTEXT` |
+| 56–64s | Winning AI app earns trust with sensitive context | Creator PIP over trust/security visual | `SENSITIVE CONTEXT` |
 | 64–78s | Builder questions | Three checklist cards animate one-by-one | `WHAT SYSTEM?`, `WHAT CONTEXT?`, `WHAT DECISION?` |
-| 78–84s | Would you connect bank account + CTA | Full-screen Het, big CTA overlay | `WOULD YOU CONNECT?`, `COMMENT FINANCE` |
+| 78–84s | Would you connect bank account + CTA | Full-screen creator, big CTA overlay | `WOULD YOU CONNECT?`, `COMMENT FINANCE` |
 
 ## Required proof/screen assets
 1. OpenAI article screenshot: `https://openai.com/index/personal-finance-chatgpt/`

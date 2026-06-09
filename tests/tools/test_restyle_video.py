@@ -17,7 +17,7 @@ VALID_TOKEN = "r8_" + "y" * 37
 
 @pytest.fixture
 def tool(tmp_path, monkeypatch):
-    monkeypatch.setenv("OPENMONTAGE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("OPENNOLAN_CACHE_DIR", str(tmp_path / "cache"))
     return RestyleVideo()
 
 

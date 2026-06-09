@@ -1,10 +1,10 @@
 # Product-card grid carousel production pattern
 
-Use when Het asks to create/remix an AI/tech carousel in the @okaashish-style product-card/grid design system.
+Use when the user asks to create/remix an AI/tech carousel in the product-card/grid design system.
 
 ## Source content pattern
 - Best for resource stacks, tool lists, skill marketplaces, agent workflows, and “save these links” posts.
-- Preserve the source slide count/order when remixing an external carousel unless Het asks to compress.
+- Preserve the source slide count/order when remixing an external carousel unless the user asks to compress.
 - Extract the source into: cover promise, one resource/tool per slide, save-worthy link bank, keyword CTA.
 
 ## Visual system

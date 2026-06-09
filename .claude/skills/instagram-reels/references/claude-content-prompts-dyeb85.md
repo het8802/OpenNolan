@@ -1,6 +1,6 @@
-# Het-shared Claude content prompt carousel (`DYeB85-CHph`)
+# Shared Claude content prompt carousel
 
-Source context: Het replied to an Instagram carousel link `https://www.instagram.com/p/DYeB85-CHph/?img_index=3` with “Learn this. And implement these strategies when creating the morning scripts,” then later said “try again.” The relevant lesson is for the morning AI/tech Reel/script workflow, especially hook refinement.
+Source context: the user shared an Instagram carousel with “Learn this. And implement these strategies when creating the morning scripts,” then later said “try again.” The relevant lesson is for the morning AI/tech Reel/script workflow, especially hook refinement.
 
 ## Accessible evidence from session
 Instagram itself showed a login shell / blocked extraction. Public search snippets for the shortcode exposed the post title/caption and slide text:
@@ -12,7 +12,7 @@ Instagram itself showed a login shell / blocked extraction. Public search snippe
 - Relevant slide 3 snippet: `USE FOR: HOOK WRITING. Here's my current hook: [paste it]. Rewrite it 5 different ways. Make each version stop a scroll. Try: a bold claim, a personal confession, a surprising stat, a question, and a "you've been doing X wrong" angle.`
 
 ## Durable rule for future morning scripts
-When creating or revising Het’s morning scripts, do not settle for the first hook. Run a 5-angle hook rewrite pass:
+When creating or revising your morning scripts, do not settle for the first hook. Run a 5-angle hook rewrite pass:
 
 1. Bold claim
 2. Personal confession / experiment

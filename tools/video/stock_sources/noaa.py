@@ -69,7 +69,7 @@ class NOAASource:
                 "https://www.noaa.gov/search",
                 params={"query": query, "type": "video"},
                 timeout=30,
-                headers={"User-Agent": "OpenMontage/1.0"},
+                headers={"User-Agent": "OpenNolan/1.0"},
             )
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "html.parser")
@@ -141,7 +141,7 @@ class NOAASource:
         try:
             r = requests.get(
                 detail_url, timeout=30,
-                headers={"User-Agent": "OpenMontage/1.0"},
+                headers={"User-Agent": "OpenNolan/1.0"},
             )
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "html.parser")
@@ -187,7 +187,7 @@ class NOAASource:
 
         with requests.get(
             url, stream=True, timeout=180,
-            headers={"User-Agent": "OpenMontage/1.0"},
+            headers={"User-Agent": "OpenNolan/1.0"},
         ) as r:
             r.raise_for_status()
             with open(out_path, "wb") as f:

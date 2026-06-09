@@ -1,7 +1,7 @@
 """Shared clip bytes cache for the corpus builder.
 
 Phase 1 of the shared-corpus architecture: a process-safe, LRU-evicted
-cache of downloaded clip files at ``~/.openmontage/clips_cache/``.
+cache of downloaded clip files at ``~/.opennolan/clips_cache/``.
 When the corpus builder decides to fetch a candidate, it first asks
 this cache whether the bytes are already on disk from a previous
 project run. If yes, the cache hard-links (or copies on cross-drive)
@@ -37,7 +37,7 @@ Design decisions
   caller doesn't need to care either way.
 
 - **LRU eviction at cap.** Default cap is 20 GB, overridable via
-  ``OPENMONTAGE_CACHE_MAX_GB``. When ``ingest()`` would push total
+  ``OPENNOLAN_CACHE_MAX_GB``. When ``ingest()`` would push total
   bytes above the cap, the cache evicts least-recently-accessed
   entries until there's room. Evictions unlink the blob file and drop
   the manifest row. In-flight entries (currently being ingested) are
@@ -76,7 +76,7 @@ except ImportError:
     _HAVE_FILELOCK = False
 
 
-# Default 20 GB cap. Overridable via OPENMONTAGE_CACHE_MAX_GB.
+# Default 20 GB cap. Overridable via OPENNOLAN_CACHE_MAX_GB.
 _DEFAULT_MAX_TOTAL_BYTES = 20 * 1024 * 1024 * 1024
 
 # Reject ingesting a source file under this size — almost always a
@@ -92,25 +92,25 @@ _MIN_USABLE_BYTES = 1024
 def default_cache_dir() -> Path:
     """Resolve the cache directory.
 
-    Honors ``OPENMONTAGE_CACHE_DIR`` if set, else falls back to
-    ``~/.openmontage/clips_cache``. Does not create the directory —
+    Honors ``OPENNOLAN_CACHE_DIR`` if set, else falls back to
+    ``~/.opennolan/clips_cache``. Does not create the directory —
     that happens in ``ClipCache.__init__`` on first use.
     """
-    override = os.environ.get("OPENMONTAGE_CACHE_DIR")
+    override = os.environ.get("OPENNOLAN_CACHE_DIR")
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".openmontage" / "clips_cache"
+    return Path.home() / ".opennolan" / "clips_cache"
 
 
 def default_max_total_bytes() -> int:
     """Resolve the max-cache-size budget.
 
-    Honors ``OPENMONTAGE_CACHE_MAX_GB`` (float or int) if set, else
+    Honors ``OPENNOLAN_CACHE_MAX_GB`` (float or int) if set, else
     returns the default 20 GB. Invalid overrides silently fall back to
     the default rather than crashing — the cache shouldn't bring down
     a production run over a bad env var.
     """
-    override = os.environ.get("OPENMONTAGE_CACHE_MAX_GB")
+    override = os.environ.get("OPENNOLAN_CACHE_MAX_GB")
     if override:
         try:
             return int(float(override) * 1024 * 1024 * 1024)
@@ -566,7 +566,7 @@ def get_default_cache() -> ClipCache:
 
 def reset_default_cache() -> None:
     """Drop the cached singleton so a subsequent ``get_default_cache()``
-    re-reads env vars. Useful for tests that mutate ``OPENMONTAGE_CACHE_DIR``.
+    re-reads env vars. Useful for tests that mutate ``OPENNOLAN_CACHE_DIR``.
     """
     global _DEFAULT_CACHE
     _DEFAULT_CACHE = None

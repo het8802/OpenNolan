@@ -1,4 +1,4 @@
-# SFX Library for OpenMontage
+# SFX Library for OpenNolan
 
 > Curated in-repo sound-effects library at `assets/sfx/`. Generated with
 > ElevenLabs `/v1/sound-generation` (text-to-sound-effects v2). Lives outside

@@ -53,7 +53,7 @@ def _scrub_unicode_dashes(value: Any) -> Any:
 
 
 class ToolRegistry:
-    """Central registry of all OpenMontage tools."""
+    """Central registry of all OpenNolan tools."""
 
     def __init__(self) -> None:
         self._tools: dict[str, BaseTool] = {}

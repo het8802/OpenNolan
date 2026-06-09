@@ -1,6 +1,6 @@
 ---
 name: instagram-carousel
-description: Use when creating, critiquing, researching, or redesigning Instagram carousel posts, swipe-funnel educational posts, slide-by-slide carousel copy, carousel visual systems, or CTA/save-worthy carousel content for Het.
+description: Use when creating, critiquing, researching, or redesigning Instagram carousel posts, swipe-funnel educational posts, slide-by-slide carousel copy, carousel visual systems, or CTA/save-worthy carousel content.
 ---
 
 # Instagram Carousel
@@ -8,10 +8,10 @@ description: Use when creating, critiquing, researching, or redesigning Instagra
 ## Core principle
 A carousel is a **swipe funnel, not a slideshow**. Every slide has a conversion job: stop the scroll, prove the promise, keep swiping, deliver standalone value, create a save moment, and drive the CTA.
 
-## Source library learned from Het's shared Instagram posts
-These rules come from Instagram posts Het explicitly said to “Learn this,” especially @growithalex's carousel system. Update this section whenever Het shares more high-signal creator posts.
+## Source library learned from high-performing Instagram posts
+These rules come from high-performing Instagram posts worth learning from, especially a proven creator carousel system. Update this section whenever you find more high-signal creator posts.
 
-### @growithalex swipe-funnel system
+### Swipe-funnel system
 | Slide role | Job | Failure mode |
 |---|---|---|
 | Cover | Stop the scroll with a sharp promise, tension, or visual contradiction | Pretty but vague cover; no reason to swipe |
@@ -20,8 +20,8 @@ These rules come from Instagram posts Het explicitly said to “Learn this,” e
 | Save slide | At least one slide must be useful enough to save | Insight evaporates; no reusable framework/checklist |
 | Final slide | CTA that fits the value delivered | Generic “follow for more” with no specific next action |
 
-### @michaelaiacademy personal-experiment cover pattern
-Source: Het shared `instagram.com/p/DYQicBjCKsE` and said “Learn this.” Visible caption: “They said AI was done and then this happens in front of your eyes. Comment ‘PROMPT’ below and I’ll send you the steps to set this up.” Visible slide used huge cropped uppercase text, likely “I gave my Instagram … to Claude,” with “Instagram” highlighted in orange.
+### Personal-experiment cover pattern
+A high-performing reference used this pattern. Caption: “They said AI was done and then this happens in front of your eyes. Comment ‘PROMPT’ below and I’ll send you the steps to set this up.” The slide used huge cropped uppercase text, “I gave my Instagram … to Claude,” with “Instagram” highlighted in orange.
 
 Reusable pattern:
 - **Hook formula:** “I [unexpected action] my [asset/platform/business] to/with [AI/tool/person]…” Lead with a first-person experiment, not a generic tutorial title.
@@ -30,8 +30,8 @@ Reusable pattern:
 - **Visual system:** white/cream background, giant bold uppercase type, black primary copy, one accent color for the key noun, intentional edge cropping, minimal/no imagery. Make the cover feel like a poster, not a template card.
 - **CTA gate:** if the carousel teaches a setup/process/prompt, end with a keyword CTA tied to the artifact: “Comment PROMPT/AUDIT/WORKFLOW for the steps.”
 
-### @marketing.shekhar oversized hook-library poster pattern
-Source: Het shared `instagram.com/p/DX5F_-4Gbea/?img_index=3` and said “Learn these.” Public metadata: @marketing.shekhar, caption “Comment ‘Hooks’ to get 1000+ hand-picked viral hooks.” Accessible preview slide appears to say roughly “10 hooks that stop …” with the word “stop” highlighted.
+### Oversized hook-library poster pattern
+A high-performing reference used this pattern. Caption: “Comment ‘Hooks’ to get 1000+ hand-picked viral hooks.” The preview slide read roughly “10 hooks that stop …” with the word “stop” highlighted.
 
 Reusable pattern:
 - **Promise type:** sell a swipe-file/library, not vague advice. Examples: “10 hooks that stop the scroll,” “7 opening lines founders can steal,” “12 AI demo hooks that get saves.”
@@ -39,10 +39,10 @@ Reusable pattern:
 - **Poster typography:** warm cream background, massive black bold sans text, one key verb/noun highlighted in a mustard/orange rounded rectangle (`stop`, `steal`, `save`, `copy`).
 - **Intentional cropping:** let oversized headline text bleed past the frame edges. This creates scroll-stopping tension and makes the cover feel editorial, not templated.
 - **CTA gate:** pair the post with a keyword tied to the asset: “Comment HOOKS for the swipe file,” “Comment SCRIPT for the AI founder hook bank.”
-- **Use case for Het:** when creating AI/tech/startup carousels, package generic hook education as a niche library: `10 hooks that stop AI founders mid-scroll`, then make each middle slide one reusable hook shell + an AI/startup-specific example.
+- **Use case:** when creating AI/tech/startup carousels, package generic hook education as a niche library: `10 hooks that stop AI founders mid-scroll`, then make each middle slide one reusable hook shell + an AI/startup-specific example.
 
-### @dnityasingh soft-selling CTA library pattern
-Source: Het shared `instagram.com/p/DYZ9tCrAXQh/?img_index=3` and said “Learn this.” Public metadata/caption signal: @dnityasingh, “30 Soft-Selling CTAs That Don’t Sound Salesy but convert like crazy,” caption CTA “SAVE this magic + comment ‘strategy’...” Instaloader captured 10 slides; slide 3 says “Instead of saying: Buy Now” and reframes it into softer invitation CTAs.
+### Soft-selling CTA library pattern
+A high-performing reference used this pattern: “30 Soft-Selling CTAs That Don’t Sound Salesy but convert like crazy,” caption CTA “SAVE this magic + comment ‘strategy’...” Across 10 slides, slide 3 reads “Instead of saying: Buy Now” and reframes it into softer invitation CTAs.
 
 Reusable pattern:
 - **Promise type:** package a conversion problem as a phrase bank/swap list. Example: `30 Soft-Selling CTAs That Don’t Sound Salesy` rather than “How to write better CTAs.”
@@ -51,10 +51,10 @@ Reusable pattern:
 - **Audience-first tone:** make CTAs feel like helpful invitations, not pressure. Use empathy words (`if`, `maybe`, `when you’re ready`, `take a look`, `tiny upgrade`, `one small decision`) and avoid hard-sell verbs (`buy`, `sign up`, `click now`).
 - **Swipe rhythm:** cover = big library promise; slide 2 = why hard CTAs repel; slides 3–8 = one bad CTA replacement per slide; slide 9 = principle summary; slide 10 = creator/follow CTA.
 - **Visual system:** beige/taupe editorial background, elegant italic serif for the “Instead of saying” prompt, small sans bullet alternatives, sparse curved arrows pointing to “tap/follow/save,” tiny bookmark icon, minimal portrait on final slide. Looks like a refined note sheet, not a loud marketing template.
-- **Use case for Het:** for AI/tech/startup carousels, create “CTA/DM/comment banks” around low-friction actions: `Instead of saying: Try my AI tool`, `Instead of saying: Book a demo`, `Instead of saying: Join the waitlist`, then provide founder/operator-friendly alternatives.
+- **Use case:** for AI/tech/startup carousels, create “CTA/DM/comment banks” around low-friction actions: `Instead of saying: Try my AI tool`, `Instead of saying: Book a demo`, `Instead of saying: Join the waitlist`, then provide founder/operator-friendly alternatives.
 
-### @okaashish Claude-skills product-card carousel system
-Source: Het shared `instagram.com/p/DYT_rHrD8nA/` and said “I like this design for carousel. Analyze it and update your carousel skill to use this design system.” Public metadata: @okaashish / Aashish Pahwa, posted May 14 2026, caption begins “Comment ‘SKILLS’ to get all the links. Stop satisfying yourself with generic AI-generated UIs...” Instaloader captured 7 slides.
+### Product-card carousel system
+A high-performing reference used this design system worth adopting. Caption begins “Comment ‘SKILLS’ to get all the links. Stop satisfying yourself with generic AI-generated UIs...” The post ran 7 slides.
 
 Reusable pattern:
 - **Best use case:** AI/tech resource lists, tool stacks, skill marketplaces, agent workflows, “save these” posts, and productized frameworks where the visual should feel like a clean design-system canvas rather than a loud marketing poster.
@@ -64,21 +64,21 @@ Reusable pattern:
 - **Palette:** off-white/very light gray paper, faint gray grid lines/dots, near-black text, clay/rust orange (#d56f50-ish) for primary bars/starburst/highlights, pale blush/pink badges and note strips, occasional dark navy/black screenshots for contrast.
 - **Components/motifs:** grid canvas, floating cards, tiny star-count badges, screenshot windows, rounded pill labels, thin divider lines, soft drop shadows, small account handle bottom-left, tiny `Swipe` button bottom-right. Treat these as functional wayfinding, not decorative clutter.
 - **Content hierarchy:** one resource per slide; title first, metric badge second, explanation third, proof screenshot fourth, `Best for` fifth. Put the practical takeaway in the `Best for` strip so every slide has a save reason.
-- **Use case for Het:** package AI/tech posts as tool/resource stacks: `5 AI workflow patterns replacing interns`, `4 agent skills for startup operators`, `7 Claude Code workflows to steal`. Use real screenshots/logos only when available and permitted; otherwise use original generic product mockups. Always turn one slide into a link/source bank when the post promises resources.
+- **Use case:** package AI/tech posts as tool/resource stacks: `5 AI workflow patterns replacing interns`, `4 agent skills for startup operators`, `7 Claude Code workflows to steal`. Use real screenshots/logos only when available and permitted; otherwise use original generic product mockups. Always turn one slide into a link/source bank when the post promises resources.
 - **Pitfalls:** do not overfill the grid with too many cards; do not use tiny unreadable screenshots as the only proof; avoid exact brand/logo copying when restyling; make star/metric badges factual or omit them; keep the repeated bottom handle/swipe chrome subtle.
 
 ### Text-only command poster: “Don’t just tell it. Design it.”
-Source: Het shared a square cream poster image and said “Learn this.” Visible text: “DON’T / JUST / TELL IT. / DESIGN IT.” Bottom copy: “So next time you tell a story... Don’t just tell it. Design it. And watch how people stop scrolling and start listening.”
+A high-performing reference used this pattern: a square cream poster reading “DON’T / JUST / TELL IT. / DESIGN IT.” Bottom copy: “So next time you tell a story... Don’t just tell it. Design it. And watch how people stop scrolling and start listening.”
 
 Reusable pattern:
 - **Core principle:** the message itself becomes the visual. No icons, screenshots, gradients, or AI decoration required when the headline hierarchy is strong.
-- **Hook formula:** `DON’T JUST [COMMON ACTION]. [BETTER STRATEGIC ACTION] IT.` or `STOP [LOW-LEVEL BEHAVIOR]. [HIGHER-LEVERAGE BEHAVIOR].` Examples for Het: `DON’T JUST PROMPT IT. SYSTEMIZE IT.`, `DON’T JUST USE AI. DIRECT IT.`, `STOP COPYING PROMPTS. BUILD WORKFLOWS.`
+- **Hook formula:** `DON’T JUST [COMMON ACTION]. [BETTER STRATEGIC ACTION] IT.` or `STOP [LOW-LEVEL BEHAVIOR]. [HIGHER-LEVERAGE BEHAVIOR].` Examples: `DON’T JUST PROMPT IT. SYSTEMIZE IT.`, `DON’T JUST USE AI. DIRECT IT.`, `STOP COPYING PROMPTS. BUILD WORKFLOWS.`
 - **Typography:** huge uppercase condensed black sans (`Anton`, `Impact`, `Bebas Neue`, `League Gothic`, `Druk`-like), tight line-height, left-aligned stack. Use a smaller neutral sans for the explanatory payoff.
 - **Single-word hero:** pick one verb/noun (`DESIGN`, `SYSTEMIZE`, `AUTOMATE`, `WORKFLOW`, `CONTEXT`) and reverse it out in white/cream on a saturated accent rectangle. This is the only strong color on the slide.
 - **Offset completion:** place the final word (`IT.`) to the right of the highlighted block to create movement and a visual pause.
 - **Palette/layout:** warm cream background, near-black type, one red/orange/clay accent block, generous negative space on the right, bottom-left explanatory copy aligned with the headline column.
 - **Caption payoff:** add one calm 1–2 line sentence at the bottom that turns the command into a lesson. Example: “So next time you use AI, don’t start with tools. Start with the workflow you want to improve.”
-- **Use case for Het:** ideal for AI/tech carousel covers, Reel title cards, or save slides where the idea is a strategic reframe rather than a factual news item.
+- **Use case:** ideal for AI/tech carousel covers, Reel title cards, or save slides where the idea is a strategic reframe rather than a factual news item.
 
 ## Carousel planning workflow
 Before designing slides, write the **funnel map**:
@@ -88,7 +88,7 @@ Before designing slides, write the **funnel map**:
 4. **Save-worthy asset:** checklist, formula, decision tree, teardown, prompt, scorecard, or framework.
 5. **CTA:** comment keyword, save prompt, or follow-up asset tied to the post.
 
-## Recommended 8-slide structure for Het
+## Recommended 8-slide structure
 1. **Cover:** tension-first hook. Example: “Stop building AI assistants. Build the invoice chaser.”
 2. **Proof/payoff:** show the pattern immediately. Example: “The labs are packaging jobs, not chatbots.”
 3. **Evidence:** cite source-backed proof in simple terms.
@@ -99,7 +99,7 @@ Before designing slides, write the **funnel map**:
 8. **CTA:** “Comment WORKFLOW for the checklist,” “Save this before naming your AI startup,” etc.
 
 ## Daily tech digest carousel variant
-Use this variant for “What happened in tech today” posts created from Het's AI/tech research pool. This is not the same as the selected-idea carousel: the selected idea still gets a full swipe-funnel post, while the digest turns other strong research signals into one idea per slide.
+Use this variant for “What happened in tech today” posts created from your AI/tech research pool. This is not the same as the selected-idea carousel: the selected idea still gets a full swipe-funnel post, while the digest turns other strong research signals into one idea per slide.
 
 Suggested structure:
 1. **Cover:** “What happened in tech today” + date/period + sharp subtitle.
@@ -115,7 +115,7 @@ Rules:
 ## Visual quality bar
 Carousels should look like premium editorial/social design, not generated HTML cards.
 
-For an Anthropic-inspired AI/tech look Het approved for trial refinement, see `references/anthropic-inspired-carousel-style.md`.
+For an Anthropic-inspired AI/tech look, see `references/anthropic-inspired-carousel-style.md`.
 
 For Greg Isenberg/Hyperagent-inspired warm editorial product motion assets — off-white canvas, green/red/mauve system colors, serif + sans typography, stylized UI mockups, agent mascots, workflow diagrams — load `editorial-ai-product-design-system`.
 
@@ -138,20 +138,20 @@ Avoid:
 ## Production workflow for generated carousel assets
 
 ### Saving Instagram carousels as future video/source material
-When Het sends an Instagram carousel/post and says to “save these,” “save the repos,” or “we might make a video out of it,” treat it as source capture, not carousel creation. Archive the post assets, extract the reusable list/ideas, verify links where possible, and save a concise Notion/source note. Use `references/instagram-carousel-source-capture.md` for the proven workflow, including the Instagram shortcode/Instaloader fallback, contact-sheet OCR, GitHub normalization, and deliverable shape.
+When the user sends an Instagram carousel/post and says to “save these,” “save the repos,” or “we might make a video out of it,” treat it as source capture, not carousel creation. Archive the post assets, extract the reusable list/ideas, verify links where possible, and save a concise Notion/source note. Use `references/instagram-carousel-source-capture.md` for the proven workflow, including the Instagram shortcode/Instaloader fallback, contact-sheet OCR, GitHub normalization, and deliverable shape.
 
 When asked to find or send an already-created carousel:
-1. Prefer carousel output folders before generic asset-pack folders: `~/.hermes/marketing-os/carousels/`, especially names containing `codex`, `aesthetic`, or the topic/date.
+1. Prefer carousel output folders before generic asset-pack folders: `~/marketing-os/carousels/`, especially names containing `codex`, `aesthetic`, or the topic/date.
 2. If the user mentions “created with Codex,” search prior sessions and local PNGs by mtime/name before assuming the daily asset pack is the carousel.
 3. Send slides by numeric filename order (`slide-01.png`, `slide-02.png`, …), not README asset-list order unless the README explicitly defines carousel order.
 
 When asked to create a carousel:
 1. Load this skill and `instagram-reels` if the carousel supports a Reel/script.
-2. Resolve the source concept before writing copy. If the request is in a Slack/thread reply and says “this,” “out of this,” or similar, build the carousel from the referenced parent/thread concept and saved script. Do **not** substitute a daily digest, rejected/non-winning ideas carousel, or alternate research bucket unless the user explicitly asks for those.
-3. If Het provides an external Instagram carousel and asks for “exactly this content” in our style, follow `references/remixing-external-carousel-content.md`: capture the source slides, preserve slide count/order/content roles, verify live repo/link metadata when relevant, then restyle into Het’s warm editorial system rather than copying the source aesthetic.
+2. Resolve the source concept before writing copy. If the request is in a thread reply and says “this,” “out of this,” or similar, build the carousel from the referenced parent/thread concept and saved script. Do **not** substitute a daily digest, rejected/non-winning ideas carousel, or alternate research bucket unless the user explicitly asks for those.
+3. If the user provides an external Instagram carousel and asks for “exactly this content” in our style, follow `references/remixing-external-carousel-content.md`: capture the source slides, preserve slide count/order/content roles, verify live repo/link metadata when relevant, then restyle into your warm editorial system rather than copying the source aesthetic.
 4. Draft slide-by-slide copy using the swipe-funnel roles.
 5. Use **Codex CLI native image generation** (`$imagegen`) as the preferred image-generation method for aesthetic carousel slides. In the Codex prompt, explicitly say not to write Python/SVG/HTML/CSS/Canvas unless a deterministic fallback is needed.
-6. For @okaashish-style product-card/grid carousels or other text-heavy resource decks, use `references/product-card-grid-carousel-production.md` as the deterministic fallback playbook: fixed 1080×1350 PIL/Canvas generator, reusable grid/pill/card/mockup components, automated layout checks, contact sheet, and individual-slide QA.
+6. For product-card/grid carousels or other text-heavy resource decks, use `references/product-card-grid-carousel-production.md` as the deterministic fallback playbook: fixed 1080×1350 PIL/Canvas generator, reusable grid/pill/card/mockup components, automated layout checks, contact sheet, and individual-slide QA.
 7. Default AI/tech carousel visual direction: Anthropic-inspired warm editorial/product-strategy design — ivory/cream paper, charcoal ink, clay/orange accents, sand/tan cards, muted olive states, simple line icons, tactile collage/sticky notes, workflow cards, connector diagrams, approval-gate motifs, grain, and soft shadows. Use original/generic icons only; do not copy logos or proprietary brand assets.
 8. Save ordered PNG slides (`slide-01.png`, `slide-02.png`, …). If native Codex produces a non-Instagram size, keep the original and resize/crop only as a transparent post-processing step if needed.
 9. Generate a contact sheet.
@@ -173,7 +173,7 @@ When asked to create a carousel:
 - Is the CTA specific to the value delivered?
 
 ## Evolving this skill
-When Het shares a new Instagram carousel/post and says “learn this”:
+When you find a new high-performing Instagram carousel/post worth learning from:
 1. Use `social-link-summarization` to extract metadata, caption, preview image, and accessible slide lessons.
 2. If it is a carousel/content strategy pattern, patch this skill with the distilled rule and source note.
 3. If it is about Reels/hooks/scripts, patch `instagram-reels` instead.

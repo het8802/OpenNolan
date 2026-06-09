@@ -21,7 +21,7 @@ ffmpeg -hide_banner -nostats -i final.mp4 -vf blackdetect=d=0.25:pic_th=0.98 -an
 ffprobe -v error -show_entries stream=codec_type,codec_name,width,height,r_frame_rate -show_entries format=duration,size -of json final.mp4
 ```
 
-If ElevenLabs TTS is unavailable in Hermes, `edge-tts` is a practical fallback. The CLI on this host uses `--file`, not `--text-file`:
+If ElevenLabs TTS is unavailable, `edge-tts` is a practical fallback. The CLI uses `--file`, not `--text-file`:
 
 ```bash
 edge-tts --voice en-US-GuyNeural --rate +22% --pitch +3Hz \

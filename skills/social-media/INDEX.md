@@ -1,6 +1,6 @@
 # Social Media Skill Mirror
 
-This directory mirrors Hermes social-media skills from `/home/ubuntu/.hermes/skills/social-media` into real repo-local files for OpenMontage/GitHub/local-agent sync. Do not replace these directories with symlinks.
+This directory holds repo-local copies of the social-media skill set for OpenNolan/GitHub/local-agent sync. Do not replace these directories with symlinks.
 
 ## Mirrored skills
 
@@ -15,4 +15,4 @@ This directory mirrors Hermes social-media skills from `/home/ubuntu/.hermes/ski
 - `talking-head-screen-demo-reel` — 3 files
 - `xurl` — 1 files
 
-Regenerate the mirror after changing Hermes social-media skills. Verify hashes before committing.
+Regenerate the mirror after changing the social-media skills. Verify hashes before committing.

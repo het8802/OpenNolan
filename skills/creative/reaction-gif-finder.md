@@ -148,7 +148,7 @@ projects/<project-name>/assets/reaction-gifs/shortlist/
 projects/<project-name>/artifacts/reaction-gif-shortlist.json
 ```
 
-## OpenMontage Integration
+## OpenNolan Integration
 
 Use reaction GIFs as **brief pattern interrupts**:
 

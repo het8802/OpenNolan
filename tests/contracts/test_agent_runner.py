@@ -129,7 +129,14 @@ def test_build_agent_options():
 def test_auth_configured(monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    # No env token AND no resolvable CLI → no way to authenticate.
+    monkeypatch.setattr("server.agent_runner.claude_cli_available", lambda: False)
     assert auth_configured() is False
+    # A resolvable `claude` CLI is enough — it self-authenticates from its stored login.
+    monkeypatch.setattr("server.agent_runner.claude_cli_available", lambda: True)
+    assert auth_configured() is True
+    # An explicit env token also works, independent of the CLI.
+    monkeypatch.setattr("server.agent_runner.claude_cli_available", lambda: False)
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
     assert auth_configured() is True
 

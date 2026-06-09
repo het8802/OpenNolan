@@ -923,7 +923,7 @@ class ContentSignal(BaseTool):
         return path.parent / "content_signal_report.json"
 
     def _cache_dir(self) -> Path:
-        base = os.environ.get("OPENMONTAGE_CACHE_DIR") or (Path.home() / ".cache" / "openmontage")
+        base = os.environ.get("OPENNOLAN_CACHE_DIR") or (Path.home() / ".cache" / "opennolan")
         return Path(base) / "content_signal"
 
     def _read_cache(self, sha: str) -> Optional[dict[str, Any]]:

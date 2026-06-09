@@ -1,6 +1,6 @@
 ---
 name: daily-tech-carousel
-description: Use when creating or scheduling Het's daily "What happened in tech today" Instagram carousel from unused AI/tech research collector signals.
+description: Use when creating or scheduling a daily "What happened in tech today" Instagram carousel from unused AI/tech research collector signals.
 ---
 
 # Daily Tech Carousel
@@ -16,10 +16,10 @@ This is a **daily digest carousel**, not the main selected-idea carousel. Use th
 
 ## Inputs
 Read these first:
-1. `~/.hermes/marketing-os/research/latest.md`
-2. `~/.hermes/marketing-os/research/YYYY-MM-DD/*.jsonl` for today and previous day
-3. `~/.hermes/marketing-os/research/YYYY-MM-DD/daily-5pm-synthesis.md` if present
-4. `~/.hermes/marketing-os/scripts/YYYY-MM-DD/daily-ai-tech-video.md` if present
+1. `~/marketing-os/research/latest.md`
+2. `~/marketing-os/research/YYYY-MM-DD/*.jsonl` for today and previous day
+3. `~/marketing-os/research/YYYY-MM-DD/daily-5pm-synthesis.md` if present
+4. `~/marketing-os/scripts/YYYY-MM-DD/daily-ai-tech-video.md` if present
 5. Existing approval/status file for the same date if rerunning
 
 ## Topic selection
@@ -66,7 +66,7 @@ Follow `instagram-carousel` visual quality standards:
 Create a detailed design brief and per-slide prompt file before generating images. Then use Codex/local tooling to generate deterministic PNGs and a contact sheet.
 
 Expected output folder:
-`~/.hermes/marketing-os/daily-carousels/YYYY-MM-DD/what-happened-in-tech/`
+`~/marketing-os/daily-carousels/YYYY-MM-DD/what-happened-in-tech/`
 
 Required files:
 - `README.md` — overview, selected topics, source files, status, usage notes.
@@ -80,11 +80,11 @@ Required files:
 - `slide-01.png`, `slide-02.png`, ... — final PNG slides.
 
 ## Approval-to-post workflow
-When Het replies in the relevant Slack thread with `post it`, `approve carousel`, `approved`, or equivalent, treat it as explicit approval for that package.
+When the user replies in the relevant delivery thread with `post it`, `approve carousel`, `approved`, or equivalent, treat it as explicit approval for that package.
 
-If the baseline posting time has already passed, do not only mark approval and wait for the 30-minute checker if the user asked to post now. Post immediately via the Instagram/Composio carousel pattern in `composio-connected-tools`, then verify the published media/permalink and update `approval-status.json` to `status: posted`.
+If the baseline posting time has already passed, do not only mark approval and wait for the 30-minute checker if the user asked to post now. Post immediately via the Instagram carousel pattern from your Instagram API integration, then verify the published media/permalink and update `approval-status.json` to `status: posted`.
 
-If Instagram/Composio verification fails before media creation (for example `INSTAGRAM_GET_USER_INFO` returns top-level `HTTP 401 Unauthorized`), do **not** create child or parent containers and do not imply the post went live. Update `approval-status.json` to a blocked-approved state such as `status: approved_posting_blocked`, preserve `approved_at`/`approved_by`, add `last_post_attempt` with the exact error summary, write a short attempt log in the package directory, and tell Het to re-link/refresh Composio before retrying.
+If Instagram verification fails before media creation (for example `INSTAGRAM_GET_USER_INFO` returns top-level `HTTP 401 Unauthorized`), do **not** create child or parent containers and do not imply the post went live. Update `approval-status.json` to a blocked-approved state such as `status: approved_posting_blocked`, preserve `approved_at`/`approved_by`, add `last_post_attempt` with the exact error summary, write a short attempt log in the package directory, and tell the user to re-link/refresh your Instagram API integration before retrying.
 
 Before publishing, clean the public caption: remove internal approval/revision commands, local file paths, and workflow notes. Keep only viewer-facing copy, CTA, and hashtags.
 
@@ -102,15 +102,15 @@ Use this status schema:
 }
 ```
 
-Only set `approved` after explicit Het approval such as `approve carousel`, `approve today's carousel`, `approved`, `post this`, or `schedule this` in the relevant Slack context or a durable approval file.
+Only set `approved` after explicit user approval such as `approve carousel`, `approve today's carousel`, `approved`, `post this`, or `schedule this` in the relevant delivery context or a durable approval file.
 
-If Het asks to schedule for a specific/custom future time, `scheduled_for` is authoritative. The posting checker must not use the default weekday baseline while `scheduled_for` is in the future; it should only post when current America/Los_Angeles time is within the due window for `scheduled_for`. If creating an additional one-shot cron job, also make sure the generic approved-posting checker cannot post the same package earlier at its baseline time.
+If the user asks to schedule for a specific/custom future time, `scheduled_for` is authoritative. The posting checker must not use the default weekday baseline while `scheduled_for` is in the future; it should only post when the current local time is within the due window for `scheduled_for`. If creating an additional one-shot cron job, also make sure the generic approved-posting checker cannot post the same package earlier at its baseline time.
 
 ## Posting-time baseline
-Use America/Los_Angeles unless Het says otherwise.
+Use your local timezone unless the user says otherwise.
 
 ### Saved Instagram timing reference
-Source: Het shared @digitally_create_ post `instagram.com/p/DYfoT0jEY90/` on 2026-05-28 and asked to analyze/save the times. The post's OCR-visible recommendation lists three candidate windows per day:
+A high-performing creator reference recommended three candidate posting windows per day:
 - Monday: 7:30 AM, 12:15 PM, 8:00 PM PT
 - Tuesday: 8:15 AM, 1:00 PM, 7:30 PM PT
 - Wednesday: 9:00 AM, 2:00 PM, 9:15 PM PT
@@ -120,12 +120,12 @@ Source: Het shared @digitally_create_ post `instagram.com/p/DYfoT0jEY90/` on 202
 - Sunday: 9:45 AM, 1:30 PM, 7:45 PM PT
 
 Interpretation:
-- Treat these as a creator-sourced posting-time hypothesis, not as Het's account-specific Instagram Insights.
+- Treat these as a creator-sourced posting-time hypothesis, not as your account-specific Instagram Insights.
 - The pattern clusters around morning activation, lunch/early-afternoon breaks, and evening scrolling windows.
 - For scheduled daily carousel posting, prefer the lunch/early-afternoon slot when approval is ready; use the evening slot as a same-day fallback if approval lands late. Morning slots are useful for pre-scheduled content, but the current carousel approval workflow often needs post-draft review first.
 
 ### Primary scheduling targets for this workflow
-Until Het's own Instagram Insights override them, use these practical daily-carousel targets:
+Until your own Instagram Insights override them, use these practical daily-carousel targets:
 - Monday: 12:15 PM PT; fallback 8:00 PM PT
 - Tuesday: 1:00 PM PT; fallback 7:30 PM PT
 - Wednesday: 2:00 PM PT; fallback 9:15 PM PT
@@ -134,13 +134,13 @@ Until Het's own Instagram Insights override them, use these practical daily-caro
 - Saturday: 3:00 PM PT; fallback 8:00 PM PT
 - Sunday: 1:30 PM PT; fallback 7:45 PM PT
 
-Treat these as a starting baseline; update based on Het's Instagram Insights when available.
+Treat these as a starting baseline; update based on your Instagram Insights when available.
 
 ## Delivery
-Draft delivery goes to Slack `daily-carousels` when available. The message must say status is pending approval and must include individual slide images in exact posting order (`slide-01.png`, `slide-02.png`, ...), followed by the contact sheet, caption path, and exact approval/revision commands. Do not send only a zip folder; archives are optional secondary backups only.
+Draft delivery goes to your delivery channel when available. The message must say status is pending approval and must include individual slide images in exact posting order (`slide-01.png`, `slide-02.png`, ...), followed by the contact sheet, caption path, and exact approval/revision commands. Do not send only a zip folder; archives are optional secondary backups only.
 
-## Hermes cron architecture
-For implementation/audit details, use `references/hermes-cron-setup.md`. The proven pattern is two jobs: a 7AM PT draft generator to `slack:daily-carousels`, plus a separate 30-minute posting checker that only acts after explicit approval and at the weekday posting-time baseline. Keep this separate from the selected-idea 6AM carousel job.
+## Cron architecture
+For implementation/audit details, use `references/cron-setup.md`. The proven pattern is two jobs: a 7AM draft generator to your delivery channel, plus a separate 30-minute posting checker that only acts after explicit approval and at the weekday posting-time baseline. Keep this separate from the selected-idea 6AM carousel job.
 
 ## Common mistakes
 - Creating another full carousel for the selected daily script instead of unused research ideas.
@@ -149,5 +149,5 @@ For implementation/audit details, use `references/hermes-cron-setup.md`. The pro
 - Treating weak creator snippets as factual tech news.
 - Sending only text without generated slide files/contact sheet.
 - Sending only a zip archive instead of ordered individual slide images.
-- Assuming Slack media attached successfully. If the Slack/message tool warns that `MEDIA` attachments were omitted, do not claim the images were delivered; send ordered absolute paths and/or attach the ordered slide images in the active user thread where native media upload is supported.
+- Assuming delivery-channel media attached successfully. If the message tool warns that `MEDIA` attachments were omitted, do not claim the images were delivered; send ordered absolute paths and/or attach the ordered slide images in the active user thread where native media upload is supported.
 - Forgetting to write `approval-status.json`, which breaks later scheduling/posting checks.

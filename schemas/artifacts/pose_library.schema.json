@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/pose_library",
+  "$id": "opennolan/artifacts/pose_library",
   "title": "Pose Library",
   "description": "Named reusable poses, expressions, and transition hints for character rigs.",
   "type": "object",

@@ -1,6 +1,6 @@
 # Daily Tech Carousel Digest Workflow
 
-Use this reference for Het's secondary Instagram AI/Tech carousel workflow: a daily "What happened in tech so far" digest built from research signals that did **not** become the main selected talking-head concept.
+Use this reference for a secondary Instagram AI/Tech carousel workflow: a daily "What happened in tech so far" digest built from research signals that did **not** become the main selected talking-head concept.
 
 ## Purpose
 
@@ -15,20 +15,20 @@ Add a separate draft-only workflow that converts the remaining strong research s
 ## Recommended Architecture
 
 1. **Research source**
-   - Read `~/.hermes/marketing-os/research/latest.md`.
-   - Read current/previous day `~/.hermes/marketing-os/research/YYYY-MM-DD/*.jsonl`.
+   - Read `~/marketing-os/research/latest.md`.
+   - Read current/previous day `~/marketing-os/research/YYYY-MM-DD/*.jsonl`.
    - Read `daily-5pm-synthesis.md` and the daily script to identify the main selected winner.
    - Exclude or de-emphasize the selected winner so the digest does not duplicate the main workflow.
 
 2. **7AM draft-generation cron**
-   - Schedule: `0 7 * * *` in America/Los_Angeles / Pacific time.
+   - Schedule: `0 7 * * *` in your local timezone.
    - Skills: `marketing-ops-automation`, `marketing-os-tools`, `instagram-carousel`, `instagram-reels` if needed for hook alignment, and `codex` for deterministic local image generation.
-   - Deliver draft to Slack channel `#daily-carousels` once Het creates/invites the bot.
+   - Deliver draft to your delivery channel once the user creates/invites the bot.
 
 3. **Output folder**
 
 ```text
-~/.hermes/marketing-os/daily-carousels/YYYY-MM-DD/what-happened-in-tech/
+~/marketing-os/daily-carousels/YYYY-MM-DD/what-happened-in-tech/
 ```
 
 Expected files:
@@ -66,7 +66,7 @@ slide-02.png
 
 ## Approval Gate
 
-Hard rule: **never post the carousel automatically before explicit Het approval.**
+Hard rule: **never post the carousel automatically before explicit user approval.**
 
 Track status in `approval-status.json`:
 
@@ -86,9 +86,9 @@ Revision language includes: `revise slide 3`, `remove topic 5`, `change cover`, 
 
 ## Posting-Time Baseline
 
-Use these Pacific-time defaults until Het's own Instagram Insights provide better data. Current saved timing source: Het shared @digitally_create_ post `instagram.com/p/DYfoT0jEY90/` on 2026-05-28 and asked to analyze/save its Instagram posting windows. Treat these as creator-sourced hypotheses, not account-specific proof.
+Use these defaults (in your local timezone) until your own Instagram Insights provide better data. These windows were derived from a creator's posting-time analysis. Treat them as creator-sourced hypotheses, not account-specific proof.
 
-| Day | Primary target PT | Same-day fallback PT | Other saved window PT |
+| Day | Primary target | Same-day fallback | Other saved window |
 |---|---:|---:|---:|
 | Monday | 12:15 PM | 8:00 PM | 7:30 AM |
 | Tuesday | 1:00 PM | 7:30 PM | 8:15 AM |
@@ -100,9 +100,9 @@ Use these Pacific-time defaults until Het's own Instagram Insights provide bette
 
 Operational rule: prefer the primary lunch/early-afternoon slot when the carousel is approved in time; use the evening fallback if approval lands late; use morning slots mainly for fully pre-approved/pre-scheduled content.
 
-## Slack Channel
+## Delivery Channel
 
-Use a separate Slack channel named `#daily-carousels` for draft review/approval. Hermes may not be able to create Slack channels directly; Het should create it and invite the bot, then configure the cron delivery to that channel ID.
+Use a separate channel for draft review/approval. The marketing-OS may not be able to create channels directly; the user should create it and invite the bot, then configure the cron delivery to that channel ID.
 
 ## Common Pitfalls
 

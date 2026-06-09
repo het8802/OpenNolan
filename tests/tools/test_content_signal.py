@@ -77,7 +77,7 @@ def _tool(monkeypatch, tmp_path, *, token: str = "r8_testtoken", duration: float
     passing confirm=true everywhere — this mirrors a headless/non-interactive run. The
     confirm gate itself is exercised separately in test_confirm_gate_*."""
     monkeypatch.setenv("REPLICATE_API_TOKEN", token)
-    monkeypatch.setenv("OPENMONTAGE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("OPENNOLAN_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("CONTENT_SIGNAL_AUTOCONFIRM", "1")
     if duration is not None:
         monkeypatch.setattr(ContentSignal, "_video_duration", lambda self, p: duration)
@@ -271,7 +271,7 @@ def test_uses_versioned_endpoint_for_community_model(monkeypatch, tmp_path):
     official-model /v1/models/{slug}/predictions shortcut (which 404s). This exercises
     the real _resolve_version path (no stub) and asserts the versioned endpoint + body."""
     monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_x")
-    monkeypatch.setenv("OPENMONTAGE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("OPENNOLAN_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("CONTENT_SIGNAL_AUTOCONFIRM", "1")
     monkeypatch.setattr(ContentSignal, "_video_duration", lambda self, p: 30.0)
     tool = ContentSignal()

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/publish_log",
+  "$id": "opennolan/artifacts/publish_log",
   "title": "Publish Log",
   "description": "Per-platform publish/export results produced by the Publisher agent.",
   "type": "object",

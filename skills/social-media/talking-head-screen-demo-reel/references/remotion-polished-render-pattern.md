@@ -1,6 +1,6 @@
 # Remotion polished render pattern for talking-head + screen-proof Reels
 
-Session learning from Het's OpenAI personal-finance Reel recreation.
+Session learning from an OpenAI personal-finance Reel recreation.
 
 ## When this applies
 Use when the user wants the Clicko/Arshman style specifically rendered as a polished Remotion edit: full-screen creator moments, creator PIP over proof/source cards, kinetic punch captions, and screen/demo-style evidence behind the speaker.

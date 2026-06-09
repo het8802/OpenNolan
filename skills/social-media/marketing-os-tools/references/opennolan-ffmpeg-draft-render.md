@@ -1,21 +1,21 @@
-# OpenMontage + FFmpeg Draft Render Fallback
+# OpenNolan + FFmpeg Draft Render Fallback
 
-Use this reference when producing a fast vertical social-video draft with a cloned OpenMontage repo but the preferred provider path is blocked or too slow.
+Use this reference when producing a fast vertical social-video draft with a cloned OpenNolan repo but the preferred provider path is blocked or too slow.
 
 ## Trigger conditions
 
-- OpenMontage is installed and usable, but API-gated TTS fails (example: OpenAI TTS returns `invalid_api_key`).
+- OpenNolan is installed and usable, but API-gated TTS fails (example: OpenAI TTS returns `invalid_api_key`).
 - Remotion can render technically but ETA is too long for the host/task.
 - The user needs a reviewable first draft now, not a fully polished final.
 
 ## Practical workflow
 
-1. Keep the work inside the OpenMontage project tree, e.g. `projects/<slug>/` with `assets/`, `qa/`, and `renders/`.
+1. Keep the work inside the OpenNolan project tree, e.g. `projects/<slug>/` with `assets/`, `qa/`, and `renders/`.
 2. Use the existing script and asset/B-roll pack if available. Do not invent a new topic or switch scripts unless asked.
 3. Generate voice locally when cloud TTS fails:
-   - Prefer Piper if already installed by OpenMontage setup.
+   - Prefer Piper if already installed by OpenNolan setup.
    - Otherwise use the local fallback voice path documented in `local-motion-graphics-fallback.md`.
-4. Render a lightweight 9:16 motion-graphics draft with OpenMontage conventions plus FFmpeg/Python/Pillow as needed:
+4. Render a lightweight 9:16 motion-graphics draft with OpenNolan conventions plus FFmpeg/Python/Pillow as needed:
    - `1080x1920`
    - H.264 MP4
    - readable scene cards/captions

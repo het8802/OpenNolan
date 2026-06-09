@@ -20,7 +20,7 @@ A useful v0 is an end-to-end local pipeline, not only architecture docs. Build r
 
 ## Concrete project shape used
 
-Project root: `/home/ubuntu/ai-video-pipeline`
+Project root: `~/ai-video-pipeline`
 
 Key files:
 
@@ -42,7 +42,7 @@ Key files:
 Run dry-run:
 
 ```bash
-cd /home/ubuntu/ai-video-pipeline
+cd ~/ai-video-pipeline
 npm run v0:run -- ./runs/dry-run "AI agents need production pipelines"
 ```
 

@@ -1,5 +1,5 @@
 {
-  "destination": "/home/ubuntu/projects/OpenMontage/skills/social-media",
+  "destination": "skills/social-media",
   "generated_at_utc": "2026-06-05T19:15:50Z",
   "mirrored": [
     {
@@ -8,8 +8,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 4204,
-          "sha256": "ecb47f76212dabc5eb6ab9b5c3091623ca06b5976f247b650b7e3b9744006383"
+          "bytes": 4101,
+          "sha256": "26d90bfc4066aa84d015b3372a742ad82da92536a31606a80483e82dd16adf22"
         }
       ]
     },
@@ -19,13 +19,13 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 9971,
-          "sha256": "f237dcf579c4a2fcab2d9478316a2c9ec055e8badfa2d8878e79ca9c52f9f574"
+          "bytes": 9822,
+          "sha256": "b8e208b3c0bfec25a8c7f78b421633e885f2802c9dd0ccd7809f07c3a388a7b5"
         },
         {
-          "path": "references/hermes-cron-setup.md",
-          "bytes": 4843,
-          "sha256": "f73cd6c014e95d7bd8d935fc5dd333b0f16bde5adfa49aa2cbc3ddb90c45b83e"
+          "path": "references/cron-setup.md",
+          "bytes": 4781,
+          "sha256": "9badf53e36943fcb476ee53f03ed1c23b1e866f11f08a9741f90cd72a71b3472"
         }
       ]
     },
@@ -35,18 +35,18 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 18455,
-          "sha256": "6fb42ede7f208e610d3f202937e2c08d1ea22ded30c8c0237044cda33ac2dc3e"
+          "bytes": 18465,
+          "sha256": "f4bfe45b28d1493963501e42766010ca6cdb9cdd35b848ef425a66b35baabf02"
         },
         {
           "path": "references/greg-style-expanded-asset-kit.md",
-          "bytes": 3970,
-          "sha256": "03972706cfcb3ec00174a2ec58eee3e074e44c428f808d9a4e06b3610ad2f123"
+          "bytes": 3876,
+          "sha256": "c7250c56138ca00e95d391fae4b70fa1d55d3d2efc25879e86d70dc7dfac2c44"
         },
         {
           "path": "references/greg-style-kit-assets.md",
-          "bytes": 2316,
-          "sha256": "07fd7b9e8b25787d65d832125fcf08f6075d2c7d804dfa4e324961b988e798bb"
+          "bytes": 2308,
+          "sha256": "54ba7c778ed25d6a88be763757987dd66259881fbce97b0225cc6d383dfa9f70"
         }
       ]
     },
@@ -56,28 +56,28 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 21136,
-          "sha256": "5ec8b28c8d5345c89daaaf311ec38a6015e060cd0739688ec095b55388bf7fbc"
+          "bytes": 20512,
+          "sha256": "be1e0d7c16a3b313b6ea42895c33c3b91750f7c12c262b0e900be1ddca693de1"
         },
         {
           "path": "references/anthropic-inspired-carousel-style.md",
-          "bytes": 3414,
-          "sha256": "c91e4e08278a457d269e816e6d4c25bc6a3579f0953564b69f48a495944451e1"
+          "bytes": 3392,
+          "sha256": "2bd1d3fd5616986ba0b6b6c6814c82470a79cacf83a0cb9eb4ebb7efe3554aaa"
         },
         {
           "path": "references/instagram-carousel-source-capture.md",
-          "bytes": 2201,
-          "sha256": "ad233ce714630253e70e20950c2359afbd92e19adbff5bf199d3661ba5445ffe"
+          "bytes": 2198,
+          "sha256": "9aa816ff5369290360ed452b23f8a9783f48e33307d19cdc8ef13effdf5bf56f"
         },
         {
           "path": "references/product-card-grid-carousel-production.md",
-          "bytes": 2592,
-          "sha256": "d91c41810df4a2e567e7c354e0a3e1a41721865a71ae27b94e1a6cf13dfd5d44"
+          "bytes": 2585,
+          "sha256": "69a41636c1ffd2c690a19a7992fc32b75005e59ee98c257c4a5300a76efb7012"
         },
         {
           "path": "references/remixing-external-carousel-content.md",
-          "bytes": 2587,
-          "sha256": "2c896286bf205613179617a86f04cfc07f3d6ea8a48b2815f16c8e05fde4b164"
+          "bytes": 2594,
+          "sha256": "66fecc9b919655ffa23def0c19b18898b33c7918163045dc60a2dc5e7c464395"
         }
       ]
     },
@@ -87,63 +87,63 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 51229,
-          "sha256": "f69c5123c2257b62b95521ab911ec2e2d0a538a31c3bffd24e6150eb04b061e0"
+          "bytes": 50858,
+          "sha256": "6ef62a77a364f719e4705177661fab205b96cbc34a36911eb648f8d7a7a69b8e"
         },
         {
           "path": "references/claude-content-prompts-dyeb85.md",
-          "bytes": 2188,
-          "sha256": "b275ec658fe99a8aff9b96bf09980f0221999dda6b9faeeeef8d3819724fc367"
+          "bytes": 2106,
+          "sha256": "d31a12f45799a6cf31950b0f20c58292e470fdce5e22a4bfd278b415f9ba6a33"
         },
         {
           "path": "references/dy5spas-pixel-rpg-product-explainer.md",
-          "bytes": 4900,
-          "sha256": "c116a1d4aa0adc313778fac421acbdbc2654e37e712b897e976ca29025589f75"
+          "bytes": 4883,
+          "sha256": "a7893a79a2dbcec99e07fc3e93db6d68cd859aad73b26a6288da85baccf37ff4"
         },
         {
           "path": "references/instagram-reel-learning-workflow.md",
-          "bytes": 1999,
-          "sha256": "88cf50585ab2d0657bb917098581dd3ba6ca864873408199497cb5288c717468"
+          "bytes": 2009,
+          "sha256": "4eca0fa184e0b110b3621f08c78c0b3c705e905fd47ebea964b563519aa04f52"
         },
         {
           "path": "references/instagram-reel-link-extraction.md",
-          "bytes": 2388,
-          "sha256": "afa9c73f9e533071e00abb210904adf82942173df4f18def9e378282ef7655f1"
+          "bytes": 2398,
+          "sha256": "59a7d356d213bde22664d58db869624aec91ec67ea729c0cacc8ec75e887b701"
         },
         {
           "path": "references/openai-ads-greg-remotion-reel.md",
-          "bytes": 4565,
-          "sha256": "197411c997652c1c67b889b7897ea856c49c0220b02f1fb2c226252c09de6cfb"
+          "bytes": 4524,
+          "sha256": "e9c5f6f3850daae1b7f558484786a911e10f85785d207b16c6a58fded93f0396"
         },
         {
           "path": "references/openai-credits-greg-remotion-reel.md",
-          "bytes": 6132,
-          "sha256": "df96c66cf9d9555813f474948289fe9e3c71b546494be3c20d8cebc7fb7975e8"
+          "bytes": 5997,
+          "sha256": "15bf9ab634c978f95b4912b559ba0633a463f911841f0d2a9ed56d8632fb393f"
         },
         {
-          "path": "references/openmontage-kinetic-whiteboard-captions.md",
-          "bytes": 7291,
-          "sha256": "50ae43308864b86dcd275530c4efc31bf30ebbc59b2ab27e26bab0d5f9ea2a22"
+          "path": "references/opennolan-kinetic-whiteboard-captions.md",
+          "bytes": 7302,
+          "sha256": "25e0464f5f2ad6d379ec00a687a7430c7258602f65e124a4545ce1fb99209194"
         },
         {
-          "path": "references/openmontage-social-media-mirror.md",
-          "bytes": 1625,
-          "sha256": "f17706f4fbd70cb3934d76cc6bf2553283a69fa93f134141061263fac50f4267"
+          "path": "references/opennolan-social-media-mirror.md",
+          "bytes": 1563,
+          "sha256": "7f4d1c6210a18bec0ed9df1e9c37b5c8320d0d6c361dd5bc5a51fbfdd134fde7"
         },
         {
-          "path": "references/openmontage-social-media-skill-mirror.md",
-          "bytes": 2530,
-          "sha256": "ae895addcf9365ba4ffa565a22b05373d64e278739afc59bcdd4cabe67251280"
+          "path": "references/opennolan-social-media-skill-mirror.md",
+          "bytes": 2428,
+          "sha256": "56a2b65dd160ec3a7f2dc2fcedf16ab6efd2d40c5c7915f5ea9cf1d37878379f"
         },
         {
           "path": "references/recalling-instagram-shared-resources.md",
-          "bytes": 4669,
-          "sha256": "3dc26d60c047eee540cc4f0cb4090368bff59e21e62a7d91c9358b1b6937bab8"
+          "bytes": 4710,
+          "sha256": "7cbd5e641405323d82b30d440dc792a98bdcdb2664e642ff41d7de110b0c2e19"
         },
         {
           "path": "references/tribev2-video-analysis.md",
-          "bytes": 4677,
-          "sha256": "97185e5ce63474edafbd5378bba1f73d0bbcc13d840e11599c03d3d15e0e812e"
+          "bytes": 4695,
+          "sha256": "17b5bdc510946237082031f695cc80c959ebebe132acb3fa3c2558b3d55849a1"
         }
       ]
     },
@@ -153,23 +153,23 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 21608,
-          "sha256": "7dde37be776b7a502bb33f310a9124ec86ee0054071654d98eb98e13d96d9dc9"
+          "bytes": 21431,
+          "sha256": "d252566fd0240f9812de1315e05f78b8f011911bfcc40f40459f2710ed9f1e5f"
         },
         {
           "path": "references/ai-tech-creator-research-strategy.md",
-          "bytes": 4776,
-          "sha256": "97dcda9886418cf7dec25a5d868d87223ae5ce6b855a8ee22b9d8598fcdd1531"
+          "bytes": 4770,
+          "sha256": "cf8cd034be07fbd6da96732edf5ae1dcd1e06f002fa512d3b3c5e815af8b34c5"
         },
         {
           "path": "references/apify-and-tool-roi.md",
-          "bytes": 3319,
-          "sha256": "5012ec1a75a3fb496eaf9c968fea0248d5db5cf55d762b92c83274baad2411bf"
+          "bytes": 3317,
+          "sha256": "32cdc5cd34f71636f4423d3d76cfafa016c996c9e9644b2123e6dd9a133d0bcc"
         },
         {
           "path": "references/approval-recovery.md",
-          "bytes": 1981,
-          "sha256": "5263b13f3bb33e9b4c78b31e70bf0ba9d52466b62f47f0ad3b3563fd3b25b75b"
+          "bytes": 1927,
+          "sha256": "e63008f4a423c9eb1d18da253f4f3ab294ca6636597a1075ce0ade0a142131a8"
         },
         {
           "path": "references/creative-short-video-workflow.md",
@@ -178,43 +178,43 @@
         },
         {
           "path": "references/cron-delivery-audit.md",
-          "bytes": 4082,
-          "sha256": "ddfdfb9bd1c8d2b66ed00a57d4c7221dbcca166fcb600c985bc4f317b42bee51"
+          "bytes": 3875,
+          "sha256": "af998358c5d7af01f699c3de0d8d42d519d8d07bdb40965083bda3ac22d23d8b"
         },
         {
           "path": "references/daily-script-cron-recovery.md",
-          "bytes": 2117,
-          "sha256": "13b95f1dfff0a8f2b3d555fa64272325783c57484c3edc060a6bdba449ff0257"
+          "bytes": 2113,
+          "sha256": "bfcd73e8e645953748b47e13c0defc4e3dff710f8005fd04f3b559b51ead1b76"
         },
         {
           "path": "references/daily-tech-carousel-digest-workflow.md",
-          "bytes": 5021,
-          "sha256": "83a11384bafe39a324a7fe48af6bf48b8d4ebc1aa724985615c4f4c7a6a56fff"
+          "bytes": 4856,
+          "sha256": "7896547e3a5b0cc5452dcf7c02c7abe3ccdecd6605e828e1f213729a46eac742"
         },
         {
           "path": "references/figjam-hook-database-cron-integration.md",
-          "bytes": 2034,
-          "sha256": "395656c39129ef1a6f61321ab846847395a4d86f8bc2ffd378f74ce38482ed46"
+          "bytes": 2020,
+          "sha256": "3b88297469b31d05fef1d25651c87dbd2fa89dedf426c39ee725c2c2733162b0"
         },
         {
           "path": "references/hourly-marketing-cron.md",
-          "bytes": 4451,
-          "sha256": "afa57daed21d974f6d94ae84798cc27fa4f8eff69fbb2d15a8413544608ae328"
+          "bytes": 4407,
+          "sha256": "e6e2aae6951eb889afbf4276090628959978c85b1761f8b3f7a9aaa5aa17487a"
         },
         {
           "path": "references/idea-4-v2-remotion-qa-notes.md",
-          "bytes": 3005,
-          "sha256": "f6739c3d0349d9b1566b5ea1bbd0f0d3a713dcd0cd7b6c5d8871a2961d9164be"
+          "bytes": 2997,
+          "sha256": "71a3102740a06819f3776c9724f5d2c917a73c63819d80af45b750727856b770"
         },
         {
           "path": "references/instagram-ai-tech-script-engine.md",
-          "bytes": 3079,
-          "sha256": "b8b9161c1ea62baf922a435940bce2c5d2cbcedc079d85263d0c102fe17fa425"
+          "bytes": 3035,
+          "sha256": "1ebd52d9f6f5256d4ea73bf1384ed2d223cc41d0c1275f4a680ea2927d5fee7b"
         },
         {
           "path": "references/production-pipeline-project-scaffold.md",
-          "bytes": 3579,
-          "sha256": "77c482a817d95490d5a52c7cc773fdcb965fae8ccab550e996dd651e8d88291c"
+          "bytes": 3547,
+          "sha256": "0851b1094d9811c7b6b09a8bfc99872678b00c9d273bb49fdba054003bebfd83"
         },
         {
           "path": "references/remotion-short-video-production-notes.md",
@@ -223,28 +223,28 @@
         },
         {
           "path": "references/slack-media-attachment-limitation.md",
-          "bytes": 1579,
-          "sha256": "8fa289707e8ece172c9ea21792de9a29be4e91dabf73f72075827b3647752037"
+          "bytes": 1562,
+          "sha256": "4fba01188757a8b6fa6b9a82fca6fc8a269ec4bd16982628f1707ad94b6f9c0b"
         },
         {
           "path": "references/social-link-intake-and-gated-post-summarization.md",
-          "bytes": 4095,
-          "sha256": "270fbe62e2d39907684097cc84293415a2eddd76781aa956647abfbbdd09fd66"
+          "bytes": 4099,
+          "sha256": "18b3261926787ce7b8b73ce0064f87989f8049c0c1fb1d1eae09e51286fb560c"
         },
         {
           "path": "references/tts-voice-selection-and-slack-delivery-notes.md",
-          "bytes": 2567,
-          "sha256": "fbfce74703a46ee41fd88a43885424bb64ced161b0aef517e6af276dcaabd54f"
+          "bytes": 2580,
+          "sha256": "a532dbca7736f871762ee8d847942c96d500e4aceaf225137f54ffd7bd1397b7"
         },
         {
           "path": "references/typed-ai-video-pipeline-v0.md",
-          "bytes": 3378,
-          "sha256": "0ab5ce0f0fe3f6198e6724842c4a228055dad85f958de6191321024048e498ea"
+          "bytes": 3356,
+          "sha256": "b52a8ab5eb75e7857b2b8fdf093912caf32b883c43c640e8eec3a6fb538c7336"
         },
         {
           "path": "references/video-craft-learning-loop.md",
-          "bytes": 3024,
-          "sha256": "769bb4820859154c13049a64e4659dc38a4fde6291e1fd000831e962339ae5b5"
+          "bytes": 3016,
+          "sha256": "39163d200dad573da115d860d12ee9496fbede20b0b77c529a1f985de6fb7708"
         },
         {
           "path": "references/viral-claude-validation-angle.md",
@@ -259,8 +259,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 11721,
-          "sha256": "69bbda3e3491249d5c3d8b5d687c6a9f50fae76e51a7616889781cdce1c933fe"
+          "bytes": 11722,
+          "sha256": "ad118c6fcc9c47b2e790a27bf43c16c79bc92f599671146b349716c197624940"
         },
         {
           "path": "references/approval-gate-short-qa.md",
@@ -269,28 +269,28 @@
         },
         {
           "path": "references/codex-aesthetic-carousel-generation.md",
-          "bytes": 4936,
-          "sha256": "c0768bf05917580f3381733473822037e8bb48ddec2eac5d7a31237744770192"
+          "bytes": 4942,
+          "sha256": "7e73d94d58872ef78a6bdb8f1dc26196456d30134f1d7c45ae88abf2fde00dc1"
         },
         {
           "path": "references/figjam-video-hook-extraction.md",
-          "bytes": 3036,
-          "sha256": "01dcc1b231844012bd53f67cf13f00cf3d935490e310634924931fdb33ed1583"
+          "bytes": 2996,
+          "sha256": "99a9ff478f2b6fa88e27d75c5e3bf37108c2533b042ad55d7f7e641fbb3368ab"
         },
         {
           "path": "references/humor-inserts-and-bg-removal-eval.md",
-          "bytes": 3402,
-          "sha256": "7765d95274d550d4f28a6bf4faf76684f9634b0c4810df6d9fb0a6a8f6205ceb"
+          "bytes": 3412,
+          "sha256": "03951c7f5adfd48b76e84ee9796c13164039162aae6fd175692b21509eadb49c"
         },
         {
           "path": "references/local-motion-graphics-fallback.md",
-          "bytes": 3043,
-          "sha256": "80cde6a2c41e42bf24ea613597eb46ff938d288d6daded1f603fdca1bc953f3e"
+          "bytes": 3020,
+          "sha256": "9047c7d7f6a327a93ca0bd74581fcd60b46ccb98ffcb30afb2ef55c7b6bd9ef6"
         },
         {
-          "path": "references/openmontage-ffmpeg-draft-render.md",
-          "bytes": 2529,
-          "sha256": "63e350304188e217495dbecc65b3bd8226b9141b59fafb7e2a6c1752df1c79c7"
+          "path": "references/opennolan-ffmpeg-draft-render.md",
+          "bytes": 2517,
+          "sha256": "d26dff036d4e1fb96cecd97ae694c3090d003211323ecf53ccddf62d048bfc43"
         },
         {
           "path": "references/procedural-motion-graphics-rendering-notes.md",
@@ -299,8 +299,8 @@
         },
         {
           "path": "references/rvm-long-and-reaction-gif-eval.md",
-          "bytes": 3661,
-          "sha256": "e6d08b34ad02f95ce2182278bc41f12cac587f0c05340999cc95dc7d5ee2f2f6"
+          "bytes": 3660,
+          "sha256": "a8508dc0f4831e3eaf4ac374424df9700bd60ebdb74d31b90e0efbef5888f176"
         }
       ]
     },
@@ -320,8 +320,8 @@
         },
         {
           "path": "references/faceless-evidence-montage-video-production.md",
-          "bytes": 2935,
-          "sha256": "fc359aec7e94b321a81a9eb0495bc5f34ec0731771b46b4843b1025332d257b6"
+          "bytes": 2938,
+          "sha256": "e32f3ac90a0f759f345fcb2066cfd2fe6b43fdf926b92f745ed17f049c0ca212"
         }
       ]
     },
@@ -331,18 +331,18 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 9858,
-          "sha256": "bf04459ac07fb8cb2c88c4c8d75aae75bebdd3f731a98ce4227538af633c1c72"
+          "bytes": 9848,
+          "sha256": "9cc588bb80feb4b63cb6d2121e813327b8dbee974b8c8aa15aa3f81fe21f0f9c"
         },
         {
-          "path": "references/het-openai-finance-adaptation.md",
-          "bytes": 3728,
-          "sha256": "0d52e2f892679ca058fc65f5001903f88044f3223b0a0ed44ce11846be088afd"
+          "path": "references/openai-finance-adaptation.md",
+          "bytes": 3764,
+          "sha256": "15f05b82d1219d3e23c4fe829ff5d10fdd48ddffa67e66a5537d300686d8931b"
         },
         {
           "path": "references/remotion-polished-render-pattern.md",
-          "bytes": 2159,
-          "sha256": "93771c8827c8fe3922ea4ebb3bdde85d419a7977508c7def64270ea908dad4af"
+          "bytes": 2156,
+          "sha256": "efac549432d59636c4f7bb21d515e7501629982ac6efc5a79dc59367c67b327a"
         }
       ]
     },
@@ -352,8 +352,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 13993,
-          "sha256": "46a50c6f6d3fd233d5eaa8af829d5f78f81ad97472571fde7f233e069485a611"
+          "bytes": 13924,
+          "sha256": "5b8bcd6b2d038d078be2e86d7f5c3369c232fac535098742f86af558ba1485b2"
         }
       ]
     }

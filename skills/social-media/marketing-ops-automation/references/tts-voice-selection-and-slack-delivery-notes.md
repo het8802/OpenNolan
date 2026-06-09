@@ -8,11 +8,11 @@ Session learning from a Marketing OS test short:
 - For creator-style shorts, prefer a more energetic social-media voice.
 - Current preferred voice: `Liam - Energetic, Social Media Creator` (`TX3LPaxmHKxFdv7VOQHJ`).
 - Keep provider `elevenlabs` and model `eleven_multilingual_v2` unless there is a reason to test another model.
-- Configure with:
+- Configure with your marketing-OS config, for example:
 
 ```bash
-hermes config set tts.elevenlabs.voice_id TX3LPaxmHKxFdv7VOQHJ
-hermes config set tts.elevenlabs.model_id eleven_multilingual_v2
+config set tts.elevenlabs.voice_id TX3LPaxmHKxFdv7VOQHJ
+config set tts.elevenlabs.model_id eleven_multilingual_v2
 ```
 
 - Generate a short sample before full video production:
@@ -25,13 +25,12 @@ OpenAI just opened a new door for student AI clubs. If your campus has builders,
 
 ## ElevenLabs voice discovery
 
-Use the configured Hermes env reader, not raw `os.environ`, because `.env` may not be shell-exported:
+Use the configured marketing-OS env reader, not raw `os.environ`, because `.env` may not be shell-exported:
 
 ```bash
-cd ~/.hermes/hermes-agent
 python3 - <<'PY'
 import requests
-from hermes_cli.config import get_env_value
+from marketing_os.config import get_env_value
 key = get_env_value('ELEVENLABS_API_KEY')
 r = requests.get('https://api.elevenlabs.io/v1/voices', headers={'xi-api-key': key}, timeout=30)
 r.raise_for_status()
@@ -50,7 +49,7 @@ Useful available voices seen in this environment:
 
 ## Slack delivery pitfall
 
-Hermes `send_message` accepts `MEDIA:/path` in text, but for Slack the media attachment was omitted with a warning: native media delivery is not currently supported for Slack by this connector. When sending Marketing OS videos to Slack:
+The `send_message` connector accepts `MEDIA:/path` in text, but for Slack the media attachment was omitted with a warning: native media delivery is not currently supported for Slack by this connector. When sending Marketing OS videos to Slack:
 
 1. Send the script, source, QA summary, and local file path.
 2. Do not imply the MP4 is attached unless the Slack connector explicitly confirms an upload.

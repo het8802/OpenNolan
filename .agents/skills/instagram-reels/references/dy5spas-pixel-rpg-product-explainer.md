@@ -1,6 +1,6 @@
 # Reel DY5SPASumP8 — Pixel RPG Product Explainer Pattern
 
-Use as session-specific reference when Het asks for OpenMontage/HyperFrames/Remotion videos inspired by the Instagram Reel `https://www.instagram.com/reel/DY5SPASumP8/`.
+Use as session-specific reference when the user asks for OpenNolan/HyperFrames/Remotion videos inspired by the Instagram Reel `https://www.instagram.com/reel/DY5SPASumP8/`.
 
 ## Grounded analysis notes
 
@@ -35,15 +35,15 @@ Use as session-specific reference when Het asks for OpenMontage/HyperFrames/Remo
 - `response-to-artifact`: result card morphs/shrinks into checklist/plan/proof grid.
 - `proof-grid-land`: final profile/cards scale/y-settle with soft shadow and small push-in.
 
-## OpenMontage codification created during session
+## OpenNolan codification created during session
 
-A class-level OpenMontage skill/playbook was created in the OpenMontage repo:
+A class-level OpenNolan skill/playbook was created in the OpenNolan repo:
 
 - `skills/creative/pixel-rpg-product-explainer.md`
 - `styles/pixel-rpg-product-explainer.yaml`
 - `skills/INDEX.md` entries for both
 
-Validation commands used from `/home/ubuntu/projects/OpenMontage`:
+Validation commands used from the OpenNolan repo root:
 
 ```bash
 python - <<'PY'
@@ -67,7 +67,7 @@ PY
 
 - Treat the game/RPG layer as a workflow metaphor: each level must map to a real action (`connect`, `prompt`, `retrieve`, `plan`, `publish`).
 - Do not make pixel art decorative only; product proof must remain legible and central.
-- Primary instructional text should be OpenMontage-rendered overlays, not tiny screenshot text.
+- Primary instructional text should be OpenNolan-rendered overlays, not tiny screenshot text.
 - Alternate light canvas/map scenes with dark UI/prompt cards for attention resets.
 - Use soft premium ease-out motion; avoid heavy yoyo bounces and random glitch effects.
 - Final payoff should be a tangible proof board/profile/checklist/content plan, not a generic “follow for more.”

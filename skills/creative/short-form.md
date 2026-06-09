@@ -91,7 +91,7 @@ MAX SIZE:    500 MB (desktop), 287.6 MB (iOS), 72 MB (Android)
 
 Learned from Chase Dimond IG post `DZJWCnBzhbf` (full note: `skills/creative/references/hook-content-fit-matrix-dzjwcnbzhbf.md`): do not reuse the same hook type for every short-form video. Match the hook psychology to the content job:
 
-| Content type | Hook job | Hook energy | OpenMontage visual pairing |
+| Content type | Hook job | Hook energy | OpenNolan visual pairing |
 |---|---|---|---|
 | Educational / tutorial | Curiosity + learning promise | Useful, direct, save-worthy | Checklist, prompt/result card, workflow map, screen recording |
 | Storytelling | Emotional identification | Vulnerable, reflective, specific | Face/gesture, personal artifact, before/after, timeline |
@@ -203,7 +203,7 @@ Treat a hook/content mismatch as a retention bug. A proof-heavy post needs recei
 [55-60s] CTA + LOOP: End connects back to start for replay
 ```
 
-## Applying to OpenMontage
+## Applying to OpenNolan
 
 When building short-form content:
 

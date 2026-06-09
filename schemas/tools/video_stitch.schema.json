@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/tools/video_stitch",
+  "$id": "opennolan/tools/video_stitch",
   "title": "Video Stitch Tool",
   "description": "Multi-clip assembly tool with validation, transitions, and spatial layouts.",
   "type": "object",

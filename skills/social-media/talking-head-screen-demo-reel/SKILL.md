@@ -6,7 +6,7 @@ description: Use when creating or analyzing Instagram Reels/TikToks/Shorts that 
 # Talking-Head Screen Demo Reel
 
 ## Source pattern
-Learned from Arshman Khalid Reel `DY6UXkINLri` / Clicko LinkedIn Chrome-extension demo. Use this when Het wants a Reel where the creator speaks directly to camera while actual product/browser footage runs behind him, with fast proof edits and small punchy captions.
+Learned from Arshman Khalid Reel `DY6UXkINLri` / Clicko LinkedIn Chrome-extension demo. Use this when the user wants a Reel where the creator speaks directly to camera while actual product/browser footage runs behind them, with fast proof edits and small punchy captions.
 
 ## Core principle
 This style sells a tool/workflow by making the viewer feel: **“I watched the creator use it in real time.”** The talking head supplies trust and momentum; the screen footage supplies proof; captions emphasize only the stressed phrase, not every word.
@@ -58,13 +58,13 @@ This style sells a tool/workflow by making the viewer feel: **“I watched the c
 7. **Edit assembly:** start with talking head, then alternate full-screen UI + PIP creator. Use jump cuts and crop zooms every 0.5–2s. Show actual results long enough to read the key line.
 8. **Caption pass:** add only stressed phrase chunks, all-caps white with black stroke/drop shadow. Place over torso/lower third. For hook, add one larger stylized text/logo composition.
 9. **Motion pass:** add subtle push-in on UI screenshots, cursor-follow crops, quick scale punches on caption hits, and small pop/click SFX for command panels.
-10. **Remotion polish pass when requested:** if Het asks for the polished Remotion version, return to Remotion rather than treating an FFmpeg fallback as final. Use `OffthreadVideo` for reused full-screen/PIP footage, keep embedded video layers muted, preserve one clean audio track, and run a Remotion still-frame check before the full render.
+10. **Remotion polish pass when requested:** if the user asks for the polished Remotion version, return to Remotion rather than treating an FFmpeg fallback as final. Use `OffthreadVideo` for reused full-screen/PIP footage, keep embedded video layers muted, preserve one clean audio track, and run a Remotion still-frame check before the full render.
 11. **CTA:** keyword comment CTA in the final 2–4s, spoken and optionally captioned. Keep it simple: `Comment [KEYWORD] and I'll send it.`
 12. **QA:** mobile contact sheet must prove captions are readable, UI text/key results visible, PIP does not cover important UI, and there is a meaningful visual change every 1–2 seconds. For Remotion renders, also run ffprobe, decode, blackdetect, and contact-sheet checks before delivery.
 
 ## Reference adaptations
-- Pipeline playbook: `/home/ubuntu/ai-video-pipeline/style-playbooks/talking-head-screen-demo-reel-pipeline.md` — reusable production spec for recreating the Arshman/Clicko talking-head + browser-proof style for any topic.
-- `references/het-openai-finance-adaptation.md` — concrete mapping from Het's raw OpenAI personal-finance talking-head footage into this screen-proof/PIP style, including crop notes, proof assets, caption chunks, and timestamped edit map.
+- Pipeline playbook: `~/ai-video-pipeline/style-playbooks/talking-head-screen-demo-reel-pipeline.md` — reusable production spec for recreating the Arshman/Clicko talking-head + browser-proof style for any topic.
+- `references/openai-finance-adaptation.md` — concrete mapping from raw OpenAI personal-finance talking-head footage into this screen-proof/PIP style, including crop notes, proof assets, caption chunks, and timestamped edit map.
 - `references/remotion-polished-render-pattern.md` — session note on producing the polished Remotion version after an FFmpeg proof draft, including `OffthreadVideo`, still-frame preflight, runtime-swap communication, and final QA checks.
 
 ## Topic adaptation examples
