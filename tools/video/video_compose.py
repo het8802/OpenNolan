@@ -1045,6 +1045,7 @@ class VideoCompose(BaseTool):
             return self._render_via_ffmpeg(
                 inputs=inputs,
                 edit_decisions=edit_decisions,
+                asset_manifest=asset_manifest,
                 resolved_cuts=resolved_cuts,
                 output_path=output_path,
                 profile=profile,
@@ -1267,12 +1268,29 @@ class VideoCompose(BaseTool):
         resolved_cuts: list[dict],
         output_path: Path,
         profile: Optional[str],
+        asset_manifest: Optional[dict[str, Any]] = None,
     ) -> ToolResult:
         """Explicit FFmpeg-only render path.
 
         Use when the proposal locked `render_runtime="ffmpeg"` — e.g. simple
-        source-footage concat/trim jobs that don't benefit from composition.
+        source-footage concat/trim jobs that don't benefit from composition,
+        and Edits-style reels whose motion lives in FFmpeg filter expressions.
         Still runs the mandatory final self-review.
+
+        Two-pass pipeline (overlays are applied here, NOT inside `_compose`):
+
+            edit_decisions.cuts ─▶ _compose ─▶ <base>.mp4   (concat + audio + subtitles)
+                                                  │
+              edit_decisions.overlays (resolve    ▼
+              asset_id→path via asset_manifest) ─▶ _overlay ─▶ output_path
+                                                  (keyframes via _keyframe_overlay)
+
+        Historically `_compose` ignored `edit_decisions.overlays[]`, so an
+        ffmpeg-runtime render silently dropped every overlay/keyframe (the
+        Wave-2 keyframe renderer was only reachable via operation="overlay").
+        Applying overlays here fixes that for the agent pipeline AND the manual
+        editor. When there are no overlays this collapses to the original
+        single _compose call (no behavior change, no extra encode).
         """
         options = inputs.get("options", {})
         subtitle_burn = options.get("subtitle_burn", True)
@@ -1283,15 +1301,78 @@ class VideoCompose(BaseTool):
             if ed_subs.get("enabled") and ed_subs.get("source"):
                 subtitle_path = ed_subs["source"]
 
+        # Resolve overlay asset_id → file path (mirror the cuts resolution in
+        # _render). An overlay whose asset_id isn't in the manifest is passed
+        # through as a literal path; _overlay surfaces a clear "not found" error.
+        overlays = edit_decisions.get("overlays") or []
+        resolved_overlays: list[dict] = []
+        if overlays:
+            asset_lookup = {a["id"]: a for a in (asset_manifest or {}).get("assets", [])}
+            for ov in overlays:
+                resolved = dict(ov)
+                aid = ov.get("asset_id", "")
+                resolved["asset_path"] = (
+                    asset_lookup[aid]["path"] if aid in asset_lookup else aid
+                )
+                # _overlay reads width/height at the item's top level for scaling,
+                # but edit_decisions nests them in `position`. Lift them so overlay
+                # sizing is honored (top-level wins if both are somehow present).
+                pos = ov.get("position") or {}
+                if "width" not in resolved and "width" in pos:
+                    resolved["width"] = pos["width"]
+                if "height" not in resolved and "height" in pos:
+                    resolved["height"] = pos["height"]
+                resolved_overlays.append(resolved)
+
+        # When overlays exist, _compose writes a base file and _overlay composites
+        # onto it to produce output_path. Otherwise _compose writes output_path
+        # directly (unchanged single-pass behavior).
+        compose_target = (
+            output_path.with_name(f"{output_path.stem}_base{output_path.suffix}")
+            if resolved_overlays
+            else output_path
+        )
+
         compose_inputs = dict(inputs)
         compose_inputs["edit_decisions"] = dict(edit_decisions, cuts=resolved_cuts)
-        compose_inputs["output_path"] = str(output_path)
+        compose_inputs["output_path"] = str(compose_target)
         if subtitle_path:
             compose_inputs["subtitle_path"] = subtitle_path
         if profile:
             compose_inputs["profile"] = profile
 
         render_result = self._compose(compose_inputs)
+
+        # Second pass: composite overlays (incl. keyframed motion) onto the base.
+        if render_result.success and resolved_overlays:
+            if not compose_target.exists():
+                return ToolResult(
+                    success=False,
+                    error=f"FFmpeg compose reported success but base file is missing: {compose_target}",
+                    data=render_result.data,
+                )
+            overlay_result = self._overlay({
+                "input_path": str(compose_target),
+                "overlays": resolved_overlays,
+                "output_path": str(output_path),
+            })
+            try:
+                compose_target.unlink()  # drop the intermediate base
+            except OSError:
+                pass
+            if not overlay_result.success:
+                return ToolResult(
+                    success=False,
+                    error=f"Overlay pass failed: {overlay_result.error}",
+                    data=render_result.data,
+                )
+            # Carry overlay warnings (e.g. scale/rotation not supported in FFmpeg).
+            if render_result.data is None:
+                render_result.data = {}
+            ov_warn = (overlay_result.data or {}).get("warnings")
+            if ov_warn:
+                render_result.data.setdefault("warnings", []).extend(ov_warn)
+            render_result.artifacts = [str(output_path)]
 
         if render_result.success and output_path.exists():
             final_review = self._run_final_review(
