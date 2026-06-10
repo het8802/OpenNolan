@@ -51,10 +51,16 @@ def test_kf_points_sorted_by_time(vc):
 
 # --- warning logic (pure) -------------------------------------------------
 
-def test_scale_rotation_keyframes_warn(vc):
-    kfs = [{"t": 0, "x": 0}, {"t": 1, "x": 100, "scale": 1.2}]
-    res = vc._keyframe_overlay(kfs, 0, 0, 0, 0, "1:v", "0:v", "v0", "between(t,0,2)")
-    assert any("scale/rotation" in w for w in res["warnings"])
+def test_rotation_keyframes_warn_scale_renders(vc):
+    """Scale keyframes now RENDER on the FFmpeg path; only rotation still warns."""
+    kfs = [{"t": 0, "x": 0}, {"t": 1, "x": 100, "scale": 1.2, "rotation": 45}]
+    res = vc._keyframe_overlay(
+        kfs, 0, 0, 0, 0, "1:v", "0:v", "v0", "between(t,0,2)", nat_w=50, nat_h=50
+    )
+    assert len(res["warnings"]) == 1 and "rotation" in res["warnings"][0]
+    joined = ";".join(res["filters"])
+    assert "eval=frame" in joined  # time-varying scale emitted
+    assert "overlay_w/2" in joined  # center-anchored compensation
     assert any("overlay=x=" in f for f in res["filters"])
 
 

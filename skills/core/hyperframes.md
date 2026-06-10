@@ -43,7 +43,7 @@ logged in `decision_log`. Silent runtime swaps are a contract violation.
 | Website-to-video / UI-driven composition | **HyperFrames** | The `website-to-hyperframes` workflow exists for exactly this. |
 | Registry block needed (data chart, grain overlay, shimmer sweep, shader transition) | **HyperFrames** | The registry is HyperFrames-only. Remotion does not have `hyperframes add`. |
 | Synthetic UI / fake terminal / fake browser demo | Either — depends on existing coverage | OpenNolan already ships Remotion `TerminalScene` (see `synthetic-screen-recording` Layer 3). For UI chrome beyond terminal, HyperFrames HTML is easier. |
-| Pure concat / trim of source clips, no composition | **FFmpeg** | Neither Remotion nor HyperFrames add value here. |
+| Footage-led cut/trim/concat edit, incl. xfade transitions, keyframed/text overlays, PiP, crop | **FFmpeg** | The FFmpeg runtime renders these natively now; Remotion/HyperFrames add value when you need component scenes, still-image animation, or HTML/GSAP motion. |
 | Remotion is not installed on this machine | **HyperFrames** (if available) or **FFmpeg** | Do not silently fall back. Tell the user before downgrading. |
 
 ### Hard rule: present both runtimes when both are available

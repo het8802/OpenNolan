@@ -7,6 +7,7 @@ ffmpeg skipif and assert the resulting duration change + asset_manifest provenan
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 
@@ -85,19 +86,53 @@ def _frame_md5(path, t=0.0):
     raise AssertionError(f"no frame decoded from {path} at t={t}")
 
 
-def _patch_yavg(path, t=0.0):
-    """Average luma of a 40x40 patch at the frame's left edge. Stable to ~1 level
-    under encode noise, so a >15-level move proves real pixel motion (framemd5 alone
-    differs trivially after any re-encode)."""
+def _patch_yavg(path, t=0.0, crop="40:40:0:60"):
+    """Average luma of a patch (default: 40x40 at the frame's left edge). Stable to
+    ~1 level under encode noise, so a >15-level move proves real pixel motion
+    (framemd5 alone differs trivially after any re-encode)."""
     proc = subprocess.run(
         ["ffmpeg", "-v", "error", "-ss", str(t), "-i", str(path), "-frames:v", "1",
-         "-vf", "crop=40:40:0:60,signalstats,metadata=print:file=-", "-f", "null", "-"],
+         "-vf", f"crop={crop},signalstats,metadata=print:file=-", "-f", "null", "-"],
         capture_output=True, text=True, check=True,
     )
     for line in proc.stdout.splitlines():
         if "YAVG" in line:
             return float(line.split("=")[-1])
     raise AssertionError(f"no YAVG from {path} at t={t}")
+
+
+def _mean_db(path, start, dur):
+    """volumedetect mean_volume of a window — the sine fixture reads ~-21 dB,
+    pure digital silence ~-91 dB."""
+    proc = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-nostats", "-ss", str(start), "-t", str(dur),
+         "-i", str(path), "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    m = re.search(r"mean_volume:\s*(-?[\d.]+)\s*dB", proc.stderr)
+    assert m, f"no mean_volume in volumedetect output for {path}"
+    return float(m.group(1))
+
+
+def _frame_ssim(a, b, t):
+    """SSIM between the frames of a and b at time t (same fps/timestamps assumed).
+    Plain re-encode noise stays > 0.97; a real pixel effect drops well below."""
+    proc = subprocess.run(
+        ["ffmpeg", "-v", "info", "-ss", str(t), "-i", str(a), "-ss", str(t), "-i", str(b),
+         "-frames:v", "1", "-filter_complex", "[0:v][1:v]ssim", "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    m = re.search(r"All:([\d.]+)", proc.stderr)
+    assert m, f"no SSIM score comparing {a} and {b} at t={t}"
+    return float(m.group(1))
+
+
+def _pix_fmt(path):
+    return subprocess.check_output(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=pix_fmt", "-of", "default=nw=1:nk=1", str(path)],
+        text=True,
+    ).strip()
 
 
 # --- validation / guards (no ffmpeg) --------------------------------------
@@ -146,11 +181,21 @@ def test_speed_out_of_range_rejected(tool, clip):
 # --- reverse ---------------------------------------------------------------
 
 @needs_ffmpeg
-def test_reverse_keeps_duration(tool, clip, tmp_path):
+def test_reverse_reverses_frames_and_keeps_duration(tool, clip, tmp_path):
+    """A plain copy also preserves duration — prove the frame ORDER flipped: on the
+    animated testsrc, output t~0.1 must match the source's END, not its start.
+    (testsrc's bottom strip animates: ~136.5 luma at t=0.1 vs ~123.6 at t=1.86.)"""
     out = tmp_path / "rev.mp4"
     res = tool.execute({"operation": "reverse", "input_path": str(clip), "output_path": str(out)})
     assert res.success, res.error
     assert abs(res.data["duration_seconds"] - 2.0) < 0.3
+    strip = "60:40:20:190"  # testsrc's animated bottom-left strip
+    src_start = _patch_yavg(clip, 0.1, strip)
+    src_end = _patch_yavg(clip, 1.86, strip)
+    assert abs(src_start - src_end) > 8, "fixture premise: patch must animate over the clip"
+    out_start = _patch_yavg(out, 0.1, strip)
+    assert abs(out_start - src_end) < 4, f"reversed start ({out_start}) != source end ({src_end})"
+    assert abs(out_start - src_start) > 8, "output still starts with the source's first frames"
 
 
 @needs_ffmpeg
@@ -189,13 +234,20 @@ def test_freeze_requires_duration(tool, clip):
 # --- volume ----------------------------------------------------------------
 
 @needs_ffmpeg
-def test_segment_volume(tool, clip, tmp_path):
+def test_segment_volume_dips_only_the_segment(tool, clip, tmp_path):
+    """volume=0.2 over [0,1] is a ~-14 dB windowed change; outside the segment the
+    level must stay put. A dropped -af (no-op remux) fails both deltas."""
     out = tmp_path / "sv.mp4"
     res = tool.execute({
         "operation": "segment_volume", "input_path": str(clip),
         "segments": [{"start": 0, "end": 1, "volume": 0.2}], "output_path": str(out),
     })
     assert res.success, res.error
+    inside = _mean_db(out, 0.05, 0.8)
+    outside = _mean_db(out, 1.1, 0.8)
+    src_level = _mean_db(clip, 1.1, 0.8)
+    assert outside - inside > 10, f"segment not dipped: {outside} -> {inside} dB (expected ~-14)"
+    assert abs(outside - src_level) < 2, f"audio outside the segment changed: {src_level} -> {outside} dB"
 
 
 @needs_ffmpeg
@@ -208,10 +260,14 @@ def test_segment_volume_needs_audio(tool, silent_clip):
 
 
 @needs_ffmpeg
-def test_volume_boost_ok(tool, clip, tmp_path):
+def test_volume_boost_raises_level(tool, clip, tmp_path):
+    """gain=1.4 is +2.9 dB; assert the measured lift (calibrated +3.1 dB on the sine
+    fixture) — a no-op remux reads ~+0 dB and fails."""
     out = tmp_path / "vb.mp4"
     res = tool.execute({"operation": "volume_boost", "input_path": str(clip), "gain": 1.4, "output_path": str(out)})
     assert res.success, res.error
+    lift = _mean_db(out, 0.0, 1.8) - _mean_db(clip, 0.0, 1.8)
+    assert 1.5 < lift < 4.5, f"volume_boost gain=1.4 measured {lift:+.1f} dB (expected ~+2.9)"
 
 
 @needs_ffmpeg
@@ -410,7 +466,10 @@ def test_clip_fx_strobe_brightens_flash_frames(tool, static_clip, tmp_path):
 
 
 @needs_ffmpeg
-def test_clip_fx_glitch_runs_in_window(tool, clip, tmp_path):
+def test_clip_fx_glitch_hits_only_inside_window(tool, clip, tmp_path):
+    """Pixel-level proof like its shake/zoom_pulse/strobe siblings: frames inside a
+    seeded burst diverge hard from the source (rgbashift+noise: SSIM ~0.72-0.86,
+    calibrated) while out-of-window frames stay encode-noise close (> 0.99)."""
     out = tmp_path / "gl.mp4"
     res = tool.execute({
         "operation": "clip_fx", "input_path": str(clip),
@@ -418,6 +477,18 @@ def test_clip_fx_glitch_runs_in_window(tool, clip, tmp_path):
     })
     assert res.success, res.error
     assert abs(res.data["duration_seconds"] - 2.0) < 0.3
+    # rgbashift forces an RGB pipeline; without an explicit -pix_fmt, libx264 emits
+    # yuv444p (High 4:4:4 — unplayable on iOS/QuickTime). Lock the SDR contract.
+    assert _pix_fmt(out) == "yuv420p"
+    # seeded bursts are computed in Python, so the test knows exactly where to look
+    bursts = MotionOps._glitch_bursts(0.5, 1.5, seed=7)
+    b_start, _ = bursts[0]  # min burst len 0.06s @25fps always contains a frame
+    in_burst = _frame_ssim(out, clip, b_start)
+    before = _frame_ssim(out, clip, 0.1)
+    after = _frame_ssim(out, clip, 1.9)
+    assert before > 0.97 and after > 0.97, f"glitch leaked outside window ({before}, {after})"
+    assert in_burst < 0.95, f"no glitch inside the burst window (SSIM {in_burst})"
+    assert in_burst < min(before, after) - 0.05
 
 
 # --- flip --------------------------------------------------------------------

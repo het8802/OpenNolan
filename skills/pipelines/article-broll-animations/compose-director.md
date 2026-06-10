@@ -5,6 +5,19 @@ Build the **custom vertical Remotion composition** (1080×1920), render it, and 
 `render_report` + `final_review`. This pipeline does NOT use the generic `Explainer` cut-schema
 (that's 16:9 and generic) — it authors a dedicated, props-driven vertical composition.
 
+## 0. Runtime routing — check `render_runtime` FIRST
+Compose routes by the `render_runtime` locked in `edit_decisions` at the proposal stage. This
+pipeline's composition stack (props-driven vertical scenes, source-receipt cards, leaderboard
+charts, word-timed reveals) is built on Remotion, so the proposal normally locks
+`render_runtime="remotion"`. HyperFrames parity for this composition style is deferred — see
+`skills/core/hyperframes.md` for what stays Remotion-only.
+
+- If `edit_decisions.render_runtime` is missing or anything other than `remotion`, STOP. Surface
+  the conflict to the user, route the decision back to the proposal stage to re-lock the runtime
+  (logged as a `render_runtime_selection` correction in `decision_log`), then resume.
+- Never silently rewrite `render_runtime` in `edit_decisions`, and never silently default to
+  Remotion without the locked decision — the runtime the user approved is part of the contract.
+
 ## 1. Author the composition (copy the reference)
 - Start from `remotion-composer/src/Claude500MReel.tsx`. Reuse its design-system primitives:
   `Phrase`, `Highlight`, `Pill`, `ReceiptCard`, `BrollBg`, `Stage`, palette `C`, and the

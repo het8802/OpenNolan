@@ -378,7 +378,7 @@ print('HyperFrames note:', info.get('hyperframes_note'))
 
 | Engine | Used For | Requires |
 |--------|----------|----------|
-| **FFmpeg** | Video-only cuts, concat, trim, subtitle burn | `ffmpeg` binary (always available) |
+| **FFmpeg** | Footage-led editing: cuts, concat, trim, per-cut xfade transitions (`cuts[].transition_in/out` — fade/wipe/slide/circle/zoom vocab, durations clamp 0.1–2.0s), keyframed overlays (position/scale/opacity with easing; rotation NOT rendered), static overlay `opacity`, overlay `audio_mix`, text overlays via drawtext (`overlays[].type="text"` — x/y/opacity keyframes only), PiP via `cuts[].layer="overlay"` (operation=`render` only), `cuts[].transform.crop`, output canvas via `metadata.compose_target` (e.g. 1080x1920 9:16 or 4K), subtitle burn | `ffmpeg` binary (always available) |
 | **Remotion** | React-based composition: still images → animated video, text cards, stat cards, charts, callouts, comparisons, transitions with spring physics, word-level caption burn, TalkingHead avatar | Node.js (`npx`) + `remotion-composer/` + `node_modules` |
 | **HyperFrames** | HTML/CSS/GSAP composition: kinetic typography, product promos, launch reels, website-to-video, registry-block-driven scenes, SVG character rigs | Node.js ≥ 22 + FFmpeg + `npx` (consumed via `npx hyperframes`) |
 
@@ -414,7 +414,7 @@ For these requests:
 See `remotion-composer/SCENE_TYPES.md` for the authoritative list and their cut schemas. Current scene types usable via `cut.type`:
 `text_card`, `stat_card`, `callout`, `comparison`, `hero_title`, `terminal_scene`, `anime_scene`, `bar_chart`, `line_chart`, `pie_chart`, `kpi_grid`, `progress_bar`. Overlay types include `section_title`, `stat_reveal`, `hero_title`, `provider_chip`.
 
-**When Remotion is NOT available** and `render_runtime="remotion"` was NOT locked, `video_compose` may use FFmpeg Ken Burns motion on still images. This still works but produces less engaging visuals. Mention this tradeoff in the proposal. When `render_runtime="remotion"` IS locked and Remotion is unavailable, that's a blocker — escalate, don't silently swap.
+**When Remotion is NOT available** and `render_runtime="remotion"` was NOT locked, the FFmpeg path can still deliver a real footage-led edit — xfade transitions, keyframed/text overlays, PiP, crop, custom canvas (see the runtime table above) — and `motion_ops` `pan_zoom` bakes anti-jitter punch-ins/pans/Ken Burns moves into real footage (zoompan with a ~4x pre-upscale, so slow zooms don't stair-step). But the FFmpeg compose path handles **video sources only**: a still image in `cuts[]` is rejected with an error directing to Remotion (stills can appear as `overlays[]` graphics, not cuts). For still-image-led concepts FFmpeg remains the degraded path — mention this tradeoff in the proposal. When `render_runtime="remotion"` IS locked and Remotion is unavailable, that's a blocker — escalate, don't silently swap.
 
 When `render_runtime="hyperframes"` is locked and HyperFrames is unavailable (Node < 22, missing `ffmpeg`/`npx`, or `hyperframes doctor` reports issues), that's also a blocker. Do not substitute Remotion or FFmpeg without user approval + a logged `render_runtime_selection` decision.
 

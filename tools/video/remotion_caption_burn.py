@@ -13,6 +13,36 @@ The tool:
 Fallback: if Remotion is unavailable, burns subtitles at the bottom of
 the frame using FFmpeg's ``subtitles`` filter with bold styling.
 
+## Caption styling (Edits parity)
+
+``style_preset`` selects a full caption look (font family/size/weight,
+base + highlight colors, box on/off + radius, bottom offset, outline):
+
+  - ``karaoke_classic`` (default) — current behavior, unchanged: boxed dark
+    strip, white base, cyan active-word highlight. Maps to an EMPTY props
+    bundle so legacy props files stay byte-identical.
+  - ``black_pill``     — white extra-bold on a solid black rounded pill
+    (the standard reels look).
+  - ``yellow_pop``     — bold yellow active word over a white base, no box,
+    black outline for legibility.
+  - ``minimal_lower``  — small, bottom-third, no box.
+  - ``bold_outline``   — thick dark text outline, no box.
+
+Explicit inputs (``font_size``, ``highlight_color``, ``base_color``,
+``font_family``, ``emphasis_color``, ``emphasis_scale``) override the
+preset only when actually present in the inputs dict — schema defaults do
+NOT clobber preset values.
+
+``emphasis_words`` marks listed words (case-insensitive, punctuation
+stripped — same matching as ``corrections``) with ``emphasis: true`` on
+their WordCaption entries; the CaptionOverlay component renders those
+bigger (``emphasis_scale``) and in ``emphasis_color``.
+
+LIMITATION (honest): the FFmpeg fallback path IGNORES all of the above —
+it burns one fixed bold-white bottom subtitle style. When a non-default
+style was requested but the fallback ran, the result carries a
+``style_warning`` and ``data.method == "ffmpeg_fallback"``.
+
 ## Runtime scope
 
 This tool is **Remotion-specific** and deliberately has no HyperFrames
@@ -69,7 +99,74 @@ class RemotionCaptionBurn(BaseTool):
     capabilities = [
         "burn_remotion_captions",
         "burn_ffmpeg_captions_fallback",
+        "caption_style_presets",
+        "word_emphasis",
     ]
+
+    not_good_for = [
+        "styled captions without Remotion — the FFmpeg fallback IGNORES "
+        "style_preset, base_color, font_family, emphasis_words, emphasis_color, "
+        "and emphasis_scale; it burns one fixed bold-white bottom style. Check "
+        "data.method == 'remotion' to confirm the styles actually rendered",
+        "HyperFrames workspaces — the TalkingHead composition and WordCaption "
+        "prop shape are Remotion-only (Phase 1)",
+    ]
+
+    DEFAULT_STYLE_PRESET = "karaoke_classic"
+    EMPHASIS_SCALE_MIN = 1.0
+    EMPHASIS_SCALE_MAX = 2.0
+    _WORD_PUNCT = ".,!?;:"  # matches the corrections-lookup strip set
+
+    # Bundle keys are CaptionOverlay prop names (camelCase) — they pass straight
+    # through to the composition as the `captionStyle` props object. The default
+    # preset is an EMPTY bundle so legacy props files stay byte-identical and
+    # the component's own defaults (= pre-preset behavior) apply.
+    STYLE_PRESETS: dict[str, dict[str, Any]] = {
+        "karaoke_classic": {},
+        "black_pill": {
+            "fontFamily": "Inter, 'Helvetica Neue', system-ui, sans-serif",
+            "fontSize": 54,
+            "fontWeight": 800,
+            "color": "#FFFFFF",
+            "highlightColor": "#FFFFFF",
+            "backgroundColor": "#000000",
+            "boxed": True,
+            "borderRadius": 999,
+            "bottomOffset": 110,
+        },
+        "yellow_pop": {
+            "fontFamily": "Inter, system-ui, sans-serif",
+            "fontSize": 56,
+            "fontWeight": 800,
+            "color": "#FFFFFF",
+            "highlightColor": "#FFD60A",
+            "boxed": False,
+            "outlineColor": "#000000",
+            "outlineWidth": 6,
+            "bottomOffset": 100,
+            # gold emphasis would vanish into the yellow highlight — use coral
+            "emphasisColor": "#FF5C39",
+        },
+        "minimal_lower": {
+            "fontFamily": "Inter, system-ui, sans-serif",
+            "fontSize": 34,
+            "fontWeight": 600,
+            "color": "#FFFFFF",
+            "highlightColor": "#FFFFFF",
+            "boxed": False,
+            "bottomOffset": 96,
+        },
+        "bold_outline": {
+            "fontFamily": "'Arial Black', Inter, system-ui, sans-serif",
+            "fontSize": 58,
+            "fontWeight": 900,
+            "color": "#FFFFFF",
+            "boxed": False,
+            "outlineColor": "#111111",
+            "outlineWidth": 8,
+            "bottomOffset": 100,
+        },
+    }
 
     input_schema = {
         "type": "object",
@@ -112,6 +209,60 @@ class RemotionCaptionBurn(BaseTool):
                 "default": "#22D3EE",
                 "description": "Highlight color for the active word (hex).",
             },
+            "style_preset": {
+                "type": "string",
+                "enum": [
+                    "karaoke_classic", "black_pill", "yellow_pop",
+                    "minimal_lower", "bold_outline",
+                ],
+                "default": "karaoke_classic",
+                "description": (
+                    "Caption look preset (Remotion path only — the FFmpeg "
+                    "fallback ignores it). karaoke_classic = current behavior; "
+                    "black_pill = white bold on a black rounded pill; "
+                    "yellow_pop = yellow active word, white base, outlined; "
+                    "minimal_lower = small, bottom-third, no box; "
+                    "bold_outline = thick dark outline, no box. Explicit "
+                    "font_size/highlight_color/base_color/font_family inputs "
+                    "override the preset."
+                ),
+            },
+            "base_color": {
+                "type": "string",
+                "description": (
+                    "Base (non-active) word color (hex). Maps to the "
+                    "CaptionOverlay `color` prop. Overrides the preset."
+                ),
+            },
+            "font_family": {
+                "type": "string",
+                "description": (
+                    "CSS font-family for captions. Maps to the CaptionOverlay "
+                    "`fontFamily` prop. Overrides the preset."
+                ),
+            },
+            "emphasis_words": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Words to render with the emphasis style (bigger + "
+                    "emphasis_color). Matched case-insensitively with "
+                    "surrounding punctuation stripped, same as corrections. "
+                    "Remotion path only."
+                ),
+            },
+            "emphasis_color": {
+                "type": "string",
+                "default": "#FFD60A",
+                "description": "Color for emphasized words (hex).",
+            },
+            "emphasis_scale": {
+                "type": "number",
+                "default": 1.25,
+                "minimum": 1.0,
+                "maximum": 2.0,
+                "description": "Font-size multiplier for emphasized words.",
+            },
             "corrections": {
                 "type": "object",
                 "description": (
@@ -142,7 +293,9 @@ class RemotionCaptionBurn(BaseTool):
     }
 
     resource_profile = ResourceProfile(cpu_cores=4, ram_mb=2048, vram_mb=0, disk_mb=500)
-    idempotency_key_fields = ["input_path", "segments", "srt_path"]
+    idempotency_key_fields = [
+        "input_path", "segments", "srt_path", "style_preset", "emphasis_words",
+    ]
     side_effects = ["writes captioned video to output_path"]
     user_visible_verification = [
         "Play the output video and verify captions appear at the bottom of the frame",
@@ -261,6 +414,80 @@ class RemotionCaptionBurn(BaseTool):
         return captions
 
     # ------------------------------------------------------------------ #
+    #  Caption styling (presets + word emphasis)
+    # ------------------------------------------------------------------ #
+
+    def _build_caption_style(self, inputs: dict[str, Any]) -> dict[str, Any]:
+        """Resolve style_preset + explicit overrides into CaptionOverlay props.
+
+        Returns {} for the default preset with no overrides so the props file
+        stays byte-identical to pre-preset versions (back-compat). Overrides
+        apply only when the key is PRESENT in inputs — schema defaults must
+        not clobber preset values.
+        """
+        preset = inputs.get("style_preset", self.DEFAULT_STYLE_PRESET)
+        style = dict(self.STYLE_PRESETS[preset])
+        if "font_size" in inputs:
+            style["fontSize"] = int(inputs["font_size"])
+        if "highlight_color" in inputs:
+            style["highlightColor"] = inputs["highlight_color"]
+        if "base_color" in inputs:
+            style["color"] = inputs["base_color"]
+        if "font_family" in inputs:
+            style["fontFamily"] = inputs["font_family"]
+        if "emphasis_color" in inputs:
+            style["emphasisColor"] = inputs["emphasis_color"]
+        if "emphasis_scale" in inputs:
+            style["emphasisScale"] = float(inputs["emphasis_scale"])
+        return style
+
+    def _apply_emphasis(
+        self, captions: list[dict], emphasis_words: list[str]
+    ) -> int:
+        """Set emphasis=True on captions matching emphasis_words (in place).
+
+        Matching mirrors the corrections lookup: case-insensitive with
+        surrounding punctuation stripped. Non-matching entries are left
+        untouched (no emphasis key) so the WordCaption shape is unchanged
+        when the feature is unused. Returns the number of words flagged.
+        """
+        targets = {
+            w.lower().strip(self._WORD_PUNCT) for w in emphasis_words if w.strip()
+        }
+        if not targets:
+            return 0
+        count = 0
+        for cap in captions:
+            if cap["word"].lower().strip(self._WORD_PUNCT) in targets:
+                cap["emphasis"] = True
+                count += 1
+        return count
+
+    @staticmethod
+    def _build_props(
+        video_filename: str,
+        captions: list[dict],
+        overlays: list[dict] | None,
+        words_per_page: int,
+        font_size: int,
+        highlight_color: str,
+        caption_style: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Props JSON for the TalkingHead composition. captionStyle is only
+        emitted when non-empty (back-compat: default look = legacy props)."""
+        props: dict[str, Any] = {
+            "videoSrc": f"public/talking-head/{video_filename}",
+            "captions": captions,
+            "overlays": overlays or [],
+            "wordsPerPage": words_per_page,
+            "fontSize": font_size,
+            "highlightColor": highlight_color,
+        }
+        if caption_style:
+            props["captionStyle"] = caption_style
+        return props
+
+    # ------------------------------------------------------------------ #
     #  Remotion render
     # ------------------------------------------------------------------ #
 
@@ -273,6 +500,7 @@ class RemotionCaptionBurn(BaseTool):
         font_size: int,
         highlight_color: str,
         overlays: list[dict] | None = None,
+        caption_style: dict[str, Any] | None = None,
     ) -> ToolResult:
         root = self._find_remotion_root()
         if root is None:
@@ -311,14 +539,10 @@ class RemotionCaptionBurn(BaseTool):
         shutil.copy2(input_path, dest_video)
 
         # Build props JSON
-        props = {
-            "videoSrc": f"public/talking-head/{video_filename}",
-            "captions": captions,
-            "overlays": overlays or [],
-            "wordsPerPage": words_per_page,
-            "fontSize": font_size,
-            "highlightColor": highlight_color,
-        }
+        props = self._build_props(
+            video_filename, captions, overlays,
+            words_per_page, font_size, highlight_color, caption_style,
+        )
         props_dir = root / "public" / "demo-props"
         props_dir.mkdir(parents=True, exist_ok=True)
         props_file = props_dir / f"caption-burn-{Path(input_path).stem}.json"
@@ -448,6 +672,43 @@ class RemotionCaptionBurn(BaseTool):
         words_per_page = inputs.get("words_per_page", 4)
         font_size = inputs.get("font_size", 52)
         highlight_color = inputs.get("highlight_color", "#22D3EE")
+        style_preset = inputs.get("style_preset", self.DEFAULT_STYLE_PRESET)
+        emphasis_words = inputs.get("emphasis_words") or []
+
+        # Validate styling inputs before any filesystem work
+        if style_preset not in self.STYLE_PRESETS:
+            return ToolResult(
+                success=False,
+                error=(
+                    f"style_preset must be one of {sorted(self.STYLE_PRESETS)}; "
+                    f"got '{style_preset}'."
+                ),
+            )
+        if not isinstance(emphasis_words, list) or any(
+            not isinstance(w, str) or not w.strip() for w in emphasis_words
+        ):
+            return ToolResult(
+                success=False,
+                error="emphasis_words must be a list of non-empty strings.",
+            )
+        for key in ("base_color", "font_family", "emphasis_color"):
+            if key in inputs and not isinstance(inputs[key], str):
+                return ToolResult(success=False, error=f"{key} must be a string.")
+        if "emphasis_scale" in inputs:
+            try:
+                scale = float(inputs["emphasis_scale"])
+            except (TypeError, ValueError):
+                scale = float("nan")
+            if not (self.EMPHASIS_SCALE_MIN <= scale <= self.EMPHASIS_SCALE_MAX):
+                return ToolResult(
+                    success=False,
+                    error=(
+                        f"emphasis_scale must be a number between "
+                        f"{self.EMPHASIS_SCALE_MIN} and {self.EMPHASIS_SCALE_MAX}."
+                    ),
+                )
+
+        caption_style = self._build_caption_style(inputs)
 
         if not Path(input_path).exists():
             return ToolResult(success=False, error=f"Input video not found: {input_path}")
@@ -472,6 +733,8 @@ class RemotionCaptionBurn(BaseTool):
         if not captions:
             return ToolResult(success=False, error="No caption words extracted.")
 
+        emphasis_count = self._apply_emphasis(captions, emphasis_words)
+
         overlays = inputs.get("overlays")
 
         # Choose render method
@@ -480,9 +743,31 @@ class RemotionCaptionBurn(BaseTool):
                 input_path, output_path, captions,
                 words_per_page, font_size, highlight_color,
                 overlays=overlays,
+                caption_style=caption_style,
             )
+            if result.success:
+                result.data["style_preset"] = style_preset
+                result.data["emphasis_word_count"] = emphasis_count
         else:
             result = self._render_ffmpeg(input_path, output_path, captions)
+            styles_requested = (
+                style_preset != self.DEFAULT_STYLE_PRESET
+                or bool(emphasis_words)
+                or any(
+                    k in inputs
+                    for k in (
+                        "base_color", "font_family",
+                        "emphasis_color", "emphasis_scale",
+                    )
+                )
+            )
+            if result.success and styles_requested:
+                result.data["style_warning"] = (
+                    "FFmpeg fallback ignores style_preset/base_color/"
+                    "font_family/emphasis_words — captions were burned with "
+                    "the fixed bold-white bottom style. Install Remotion "
+                    "(npm install in remotion-composer/) for styled captions."
+                )
 
         result.duration_seconds = round(time.time() - start, 2)
         return result
