@@ -12,18 +12,40 @@ export interface WordCaption {
   word: string;
   startMs: number;
   endMs: number;
+  // Marked words render bigger + in emphasisColor (remotion_caption_burn
+  // sets this from its emphasis_words input). Absent = normal word.
+  emphasis?: boolean;
 }
 
-interface CaptionOverlayProps {
-  words: WordCaption[];
-  // How many words to show at once in a "page"
-  wordsPerPage?: number;
+// Style bundle for caption presets. Passed through verbatim from
+// remotion_caption_burn's style_preset/override inputs as `captionStyle`.
+// Every field is optional — the defaults reproduce the original look exactly.
+export interface CaptionStyle {
   fontSize?: number;
   color?: string;
   highlightColor?: string;
   backgroundColor?: string;
   fontFamily?: string;
+  fontWeight?: number;
+  // false removes the rounded background box (minimal_lower, bold_outline)
+  boxed?: boolean;
+  borderRadius?: number;
+  // distance in px from the bottom edge of the frame to the caption block
+  bottomOffset?: number;
+  outlineColor?: string;
+  // 0 disables; >0 draws a text outline of roughly this px width
+  outlineWidth?: number;
+  emphasisColor?: string;
+  emphasisScale?: number;
 }
+
+interface CaptionOverlayProps extends CaptionStyle {
+  words: WordCaption[];
+  // How many words to show at once in a "page"
+  wordsPerPage?: number;
+}
+
+type ResolvedStyle = Required<CaptionStyle>;
 
 interface CaptionPage {
   words: WordCaption[];
@@ -45,14 +67,27 @@ function buildPages(words: WordCaption[], wordsPerPage: number): CaptionPage[] {
   return pages;
 }
 
+// Text outline via stacked hard shadows. WebkitTextStroke needs paint-order
+// support to not eat the glyph fill, which is inconsistent in headless
+// renderers — shadow stacking works everywhere Remotion renders.
+function outlineShadow(width: number, color: string): string {
+  const shadows: string[] = [];
+  const radii = width > 2 ? [width, Math.ceil(width / 2)] : [width];
+  for (const r of radii) {
+    for (let i = 0; i < 16; i++) {
+      const angle = (Math.PI * 2 * i) / 16;
+      const dx = (Math.cos(angle) * r).toFixed(2);
+      const dy = (Math.sin(angle) * r).toFixed(2);
+      shadows.push(`${dx}px ${dy}px 0 ${color}`);
+    }
+  }
+  return shadows.join(", ");
+}
+
 const PageRenderer: React.FC<{
   page: CaptionPage;
-  fontSize: number;
-  color: string;
-  highlightColor: string;
-  backgroundColor: string;
-  fontFamily: string;
-}> = ({ page, fontSize, color, highlightColor, backgroundColor, fontFamily }) => {
+  style: ResolvedStyle;
+}> = ({ page, style }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -65,30 +100,36 @@ const PageRenderer: React.FC<{
     config: { damping: 18, stiffness: 120 },
   });
 
+  const dropShadow = "0 2px 4px rgba(0,0,0,0.5)";
+  const outline =
+    style.outlineWidth > 0
+      ? outlineShadow(style.outlineWidth, style.outlineColor)
+      : "";
+
   return (
     <AbsoluteFill
       style={{
         justifyContent: "flex-end",
         alignItems: "center",
-        paddingBottom: 80,
+        paddingBottom: style.bottomOffset,
       }}
     >
       <div
         style={{
           opacity: entrance,
           transform: `translateY(${interpolate(entrance, [0, 1], [20, 0])}px)`,
-          backgroundColor,
-          borderRadius: 12,
-          padding: "14px 28px",
+          backgroundColor: style.boxed ? style.backgroundColor : "transparent",
+          borderRadius: style.borderRadius,
+          padding: style.boxed ? "14px 28px" : "0px 28px",
           maxWidth: "80%",
           textAlign: "center",
         }}
       >
         <span
           style={{
-            fontSize,
-            fontWeight: 700,
-            fontFamily,
+            fontSize: style.fontSize,
+            fontWeight: style.fontWeight,
+            fontFamily: style.fontFamily,
             lineHeight: 1.4,
             whiteSpace: "pre-wrap",
           }}
@@ -96,15 +137,32 @@ const PageRenderer: React.FC<{
           {page.words.map((w, i) => {
             const isActive = w.startMs <= currentMs && w.endMs > currentMs;
             const isPast = w.endMs <= currentMs;
+            // Emphasized words keep their accent color through the karaoke
+            // sweep (dimmed-with-alpha until reached, like normal words).
+            const wordColor = w.emphasis
+              ? isActive || isPast
+                ? style.emphasisColor
+                : `${style.emphasisColor}99`
+              : isActive
+                ? style.highlightColor
+                : isPast
+                  ? style.color
+                  : `${style.color}99`;
+            const glow = isActive
+              ? `0 0 20px ${style.highlightColor}66`
+              : "";
             return (
               <span
                 key={`${w.startMs}-${i}`}
                 style={{
-                  color: isActive ? highlightColor : isPast ? color : `${color}99`,
+                  color: wordColor,
+                  fontSize: w.emphasis
+                    ? Math.round(style.fontSize * style.emphasisScale)
+                    : undefined,
                   transition: "none", // CSS transitions forbidden in Remotion
-                  textShadow: isActive
-                    ? `0 0 20px ${highlightColor}66, 0 2px 4px rgba(0,0,0,0.5)`
-                    : "0 2px 4px rgba(0,0,0,0.5)",
+                  textShadow: [glow, outline, dropShadow]
+                    .filter(Boolean)
+                    .join(", "),
                 }}
               >
                 {w.word}{i < page.words.length - 1 ? " " : ""}
@@ -125,9 +183,33 @@ export const CaptionOverlay: React.FC<CaptionOverlayProps> = ({
   highlightColor = "#22D3EE",
   backgroundColor = "rgba(15, 23, 42, 0.75)",
   fontFamily = "Space Grotesk, Inter, system-ui, sans-serif",
+  fontWeight = 700,
+  boxed = true,
+  borderRadius = 12,
+  bottomOffset = 80,
+  outlineColor = "#000000",
+  outlineWidth = 0,
+  emphasisColor = "#FFD60A",
+  emphasisScale = 1.25,
 }) => {
   const { fps } = useVideoConfig();
   const pages = buildPages(words, wordsPerPage);
+
+  const style: ResolvedStyle = {
+    fontSize,
+    color,
+    highlightColor,
+    backgroundColor,
+    fontFamily,
+    fontWeight,
+    boxed,
+    borderRadius,
+    bottomOffset,
+    outlineColor,
+    outlineWidth,
+    emphasisColor,
+    emphasisScale,
+  };
 
   return (
     <AbsoluteFill>
@@ -141,14 +223,7 @@ export const CaptionOverlay: React.FC<CaptionOverlayProps> = ({
 
         return (
           <Sequence key={i} from={fromFrame} durationInFrames={duration}>
-            <PageRenderer
-              page={page}
-              fontSize={fontSize}
-              color={color}
-              highlightColor={highlightColor}
-              backgroundColor={backgroundColor}
-              fontFamily={fontFamily}
-            />
+            <PageRenderer page={page} style={style} />
           </Sequence>
         );
       })}

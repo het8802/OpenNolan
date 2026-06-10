@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -151,13 +153,87 @@ class VideoCompose(BaseTool):
                     "type": "object",
                     "properties": {
                         "asset_path": {"type": "string"},
+                        "type": {
+                            "type": "string",
+                            "enum": ["image", "video", "text"],
+                            "description": (
+                                "Overlay kind. 'text' renders via drawtext (no asset needed; "
+                                "requires `text`). Absent → inferred: asset_path present = "
+                                "image/video, `text` present = text."
+                            ),
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": (
+                                "Text content for text overlays. Special characters (colons, "
+                                "quotes, commas, %) are escaped automatically; %{...} expansion "
+                                "is disabled."
+                            ),
+                        },
+                        "font_path": {
+                            "type": "string",
+                            "description": (
+                                "Optional .ttf/.ttc for text overlays; default resolves a bold "
+                                "sans from system font dirs (same candidates as text_card_gen)."
+                            ),
+                        },
+                        "font_size": {"type": "integer", "minimum": 1, "default": 48},
+                        "color": {
+                            "type": "string", "default": "white",
+                            "description": "Text color (ffmpeg color: name, #RRGGBB, 0xRRGGBB[AA]).",
+                        },
+                        "box": {
+                            "type": "object",
+                            "description": "Background box behind text overlays.",
+                            "properties": {
+                                "color": {"type": "string", "default": "black"},
+                                "opacity": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5},
+                                "padding": {"type": "integer", "minimum": 0, "default": 10},
+                            },
+                        },
+                        "position": {
+                            "description": (
+                                "Named anchor string (text overlays, e.g. 'bottom-center') or "
+                                "{x, y} object; flat x/y below also accepted."
+                            ),
+                        },
+                        "pts_offset_seconds": {
+                            "type": "number", "minimum": 0,
+                            "description": (
+                                "Shift a VIDEO overlay's stream so its first frame lands at this "
+                                "project time (pair with start_seconds=pts_offset_seconds for "
+                                "delayed video overlays; used internally by cuts[].layer='overlay')."
+                            ),
+                        },
                         "x": {"type": "number"},
                         "y": {"type": "number"},
-                        "width": {"type": "number"},
-                        "height": {"type": "number"},
+                        "width": {
+                            "type": "number",
+                            "description": "Overlay width in px. May be given without height — the other dimension is derived aspect-preserving.",
+                        },
+                        "height": {
+                            "type": "number",
+                            "description": "Overlay height in px. May be given without width — the other dimension is derived aspect-preserving.",
+                        },
                         "start_seconds": {"type": "number"},
                         "end_seconds": {"type": "number"},
-                        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+                        "opacity": {
+                            "type": "number", "minimum": 0, "maximum": 1,
+                            "description": "Static overlay opacity (1.0 = opaque). Applied exactly; combines multiplicatively with keyframed opacity.",
+                        },
+                        "audio_mix": {
+                            "type": "object",
+                            "description": (
+                                "Mix the overlay source's own audio into the base track: "
+                                "delayed to start_seconds, trimmed to the overlay window, "
+                                "amix duration=first (base length wins). Skipped with a "
+                                "warning when the source has no audio stream."
+                            ),
+                            "properties": {
+                                "enabled": {"type": "boolean", "default": False},
+                                "volume": {"type": "number", "minimum": 0, "maximum": 2, "default": 1.0},
+                            },
+                        },
                     },
                 },
             },
@@ -605,6 +681,51 @@ class VideoCompose(BaseTool):
             return "ffmpeg xfade chain timed out", filtergraph
         return None, filtergraph
 
+    @staticmethod
+    def _resolve_canvas(
+        edit_decisions: dict[str, Any],
+        profile_name: Optional[str],
+    ) -> tuple[Optional[str], int, int, float]:
+        """(error, width, height, fps) — metadata.compose_target > profile > 1920x1080@30.
+
+        Shared by _compose (segment normalization) and the layer='overlay' PiP
+        builder so PiP sizing always matches the canvas the base render uses.
+        """
+        target_w, target_h, target_fps = 1920, 1080, 30.0
+        if profile_name:
+            try:
+                from lib.media_profiles import get_profile
+                p = get_profile(profile_name)
+                target_w, target_h, target_fps = p.width, p.height, float(p.fps)
+            except (ImportError, ValueError):
+                pass
+        compose_target = (edit_decisions.get("metadata") or {}).get("compose_target") or {}
+        if compose_target:
+            try:
+                ct_w = int(compose_target.get("width", target_w))
+                ct_h = int(compose_target.get("height", target_h))
+                ct_fps = float(compose_target.get("fps", target_fps))
+            except (TypeError, ValueError):
+                return (
+                    f"invalid metadata.compose_target {compose_target!r}: "
+                    "width/height/fps must be numeric",
+                    target_w, target_h, target_fps,
+                )
+            if ct_w <= 0 or ct_h <= 0 or ct_fps <= 0:
+                return (
+                    f"invalid metadata.compose_target {compose_target!r}: "
+                    "width/height/fps must be positive",
+                    target_w, target_h, target_fps,
+                )
+            if ct_w % 2 or ct_h % 2:
+                return (
+                    f"metadata.compose_target {ct_w}x{ct_h} must use even "
+                    "dimensions (yuv420p 4:2:0 requirement)",
+                    target_w, target_h, target_fps,
+                )
+            target_w, target_h, target_fps = ct_w, ct_h, ct_fps
+        return None, target_w, target_h, target_fps
+
     def _compose(self, inputs: dict[str, Any]) -> ToolResult:
         """FFmpeg composition: cut segments, transitions, audio, subtitles.
 
@@ -632,7 +753,9 @@ class VideoCompose(BaseTool):
 
         Limitations: output is 8-bit SDR yuv420p (HDR sources must be
         handled per AGENT_GUIDE before composing); each crossfade shortens
-        the timeline by its duration (standard xfade semantics).
+        the timeline by its duration (standard xfade semantics); cuts[].layer
+        is NOT routed here — all cuts concatenate sequentially (with a
+        warning). Multi-track layer routing lives in _render_via_ffmpeg.
         """
         edit_decisions = inputs.get("edit_decisions")
         if not edit_decisions:
@@ -652,44 +775,25 @@ class VideoCompose(BaseTool):
             return ToolResult(success=False, error="No cuts in edit_decisions")
 
         # Canvas precedence: metadata.compose_target > profile > 1920x1080@30.
-        target_w, target_h, target_fps = 1920, 1080, 30.0
-        if profile_name:
-            try:
-                from lib.media_profiles import get_profile
-                p = get_profile(profile_name)
-                target_w, target_h, target_fps = p.width, p.height, float(p.fps)
-            except (ImportError, ValueError):
-                pass
-        compose_target = (edit_decisions.get("metadata") or {}).get("compose_target") or {}
-        if compose_target:
-            try:
-                ct_w = int(compose_target.get("width", target_w))
-                ct_h = int(compose_target.get("height", target_h))
-                ct_fps = float(compose_target.get("fps", target_fps))
-            except (TypeError, ValueError):
-                return ToolResult(
-                    success=False,
-                    error=f"invalid metadata.compose_target {compose_target!r}: "
-                          "width/height/fps must be numeric",
-                )
-            if ct_w <= 0 or ct_h <= 0 or ct_fps <= 0:
-                return ToolResult(
-                    success=False,
-                    error=f"invalid metadata.compose_target {compose_target!r}: "
-                          "width/height/fps must be positive",
-                )
-            if ct_w % 2 or ct_h % 2:
-                return ToolResult(
-                    success=False,
-                    error=f"metadata.compose_target {ct_w}x{ct_h} must use even "
-                          "dimensions (yuv420p 4:2:0 requirement)",
-                )
-            target_w, target_h, target_fps = ct_w, ct_h, ct_fps
+        canvas_err, target_w, target_h, target_fps = self._resolve_canvas(
+            edit_decisions, profile_name
+        )
+        if canvas_err:
+            return ToolResult(success=False, error=canvas_err)
         fps_str = f"{target_fps:g}"
 
         # Per-join transition resolution (B.transition_in wins over A.transition_out).
         joins, transition_warnings = self._resolve_joins(cuts, edit_decisions.get("metadata"))
         has_transitions = any(j is not None for j in joins)
+
+        # Direct compose calls do NOT route layers — only operation='render'
+        # (render_runtime='ffmpeg') lifts overlay-layer cuts into the PiP pass.
+        if any((c.get("layer") or "primary") == "overlay" for c in cuts):
+            transition_warnings.append(
+                "cuts[].layer='overlay' is only routed to the PiP overlay pass by "
+                "operation='render' (render_runtime='ffmpeg'); operation='compose' "
+                "concatenates ALL cuts sequentially."
+            )
 
         # Resolve subtitle style using the layered priority resolver
         # (explicit > edit_decisions > playbook > defaults)
@@ -1579,6 +1683,26 @@ class VideoCompose(BaseTool):
         Applying overlays here fixes that for the agent pipeline AND the manual
         editor. When there are no overlays this collapses to the original
         single _compose call (no behavior change, no extra encode).
+
+        Multi-track (first real step — the Mission Control editor's layer
+        dropdown feeds this): cuts with layer='overlay' are lifted OUT of the
+        base concat and composited in the overlay pass as timed PiP video
+        overlays. Timeline placement comes from cuts[] order: an overlay-layer
+        cut starts at the accumulated (xfade-shortened) duration of the
+        primary/background cuts listed BEFORE it, and runs (out-in)/speed.
+        Sizing/placement come from cuts[].transform — `scale` is a fraction of
+        canvas width in (0, 1] (default 0.30), `position` a named anchor
+        (default top-right). transform.crop applies in source pixels before
+        scaling. PiP cuts composite UNDER edit_decisions.overlays[] graphics.
+
+        Text overlays: overlays[] items with type='text' render via drawtext
+        in the same overlay pass (no asset_manifest entry needed).
+
+        Limitations: overlay-layer cut audio is NOT mixed (PiP is visual —
+        use overlays[].audio_mix for source audio); overlay-cut timing uses
+        the nominal in/out math, so xfade-induced drift on the base timeline
+        (probed vs requested durations) can offset PiP windows by frames;
+        still images cannot be overlay-layer cuts (use overlays[] instead).
         """
         options = inputs.get("options", {})
         subtitle_burn = options.get("subtitle_burn", True)
@@ -1597,6 +1721,10 @@ class VideoCompose(BaseTool):
         if overlays:
             asset_lookup = {a["id"]: a for a in (asset_manifest or {}).get("assets", [])}
             for ov in overlays:
+                if self._is_text_overlay(ov):
+                    # Text overlays carry their content inline — no asset to resolve.
+                    resolved_overlays.append(dict(ov))
+                    continue
                 resolved = dict(ov)
                 aid = ov.get("asset_id", "")
                 resolved["asset_path"] = (
@@ -1612,6 +1740,35 @@ class VideoCompose(BaseTool):
                     resolved["height"] = pos["height"]
                 resolved_overlays.append(resolved)
 
+        # --- cuts[].layer routing: overlay-layer cuts leave the base concat
+        # and become timed PiP video overlays (composited UNDER overlays[]).
+        base_cuts = [
+            c for c in resolved_cuts if (c.get("layer") or "primary") != "overlay"
+        ]
+        layer_overlay_count = len(resolved_cuts) - len(base_cuts)
+        pip_temp_dir: Optional[Path] = None
+        if layer_overlay_count:
+            if not base_cuts:
+                return ToolResult(
+                    success=False,
+                    error=(
+                        "all cuts have layer='overlay' — at least one "
+                        "primary/background cut is required to form the base timeline"
+                    ),
+                )
+            pip_temp_dir = output_path.parent / ".pip_tmp"
+            pip_temp_dir.mkdir(parents=True, exist_ok=True)
+            pip_err, pip_entries = self._build_layer_overlay_entries(
+                resolved_cuts, base_cuts, edit_decisions, profile, pip_temp_dir,
+                inputs.get("codec", "libx264"),
+                inputs.get("crf", 23),
+                inputs.get("preset", "medium"),
+            )
+            if pip_err:
+                self._cleanup_dir(pip_temp_dir)
+                return ToolResult(success=False, error=pip_err)
+            resolved_overlays = pip_entries + resolved_overlays
+
         # When overlays exist, _compose writes a base file and _overlay composites
         # onto it to produce output_path. Otherwise _compose writes output_path
         # directly (unchanged single-pass behavior).
@@ -1622,45 +1779,51 @@ class VideoCompose(BaseTool):
         )
 
         compose_inputs = dict(inputs)
-        compose_inputs["edit_decisions"] = dict(edit_decisions, cuts=resolved_cuts)
+        compose_inputs["edit_decisions"] = dict(edit_decisions, cuts=base_cuts)
         compose_inputs["output_path"] = str(compose_target)
         if subtitle_path:
             compose_inputs["subtitle_path"] = subtitle_path
         if profile:
             compose_inputs["profile"] = profile
 
-        render_result = self._compose(compose_inputs)
+        try:
+            render_result = self._compose(compose_inputs)
 
-        # Second pass: composite overlays (incl. keyframed motion) onto the base.
-        if render_result.success and resolved_overlays:
-            if not compose_target.exists():
-                return ToolResult(
-                    success=False,
-                    error=f"FFmpeg compose reported success but base file is missing: {compose_target}",
-                    data=render_result.data,
-                )
-            overlay_result = self._overlay({
-                "input_path": str(compose_target),
-                "overlays": resolved_overlays,
-                "output_path": str(output_path),
-            })
-            try:
-                compose_target.unlink()  # drop the intermediate base
-            except OSError:
-                pass
-            if not overlay_result.success:
-                return ToolResult(
-                    success=False,
-                    error=f"Overlay pass failed: {overlay_result.error}",
-                    data=render_result.data,
-                )
-            # Carry overlay warnings (e.g. scale/rotation not supported in FFmpeg).
-            if render_result.data is None:
-                render_result.data = {}
-            ov_warn = (overlay_result.data or {}).get("warnings")
-            if ov_warn:
-                render_result.data.setdefault("warnings", []).extend(ov_warn)
-            render_result.artifacts = [str(output_path)]
+            # Second pass: composite overlays (incl. keyframed motion) onto the base.
+            if render_result.success and resolved_overlays:
+                if not compose_target.exists():
+                    return ToolResult(
+                        success=False,
+                        error=f"FFmpeg compose reported success but base file is missing: {compose_target}",
+                        data=render_result.data,
+                    )
+                overlay_result = self._overlay({
+                    "input_path": str(compose_target),
+                    "overlays": resolved_overlays,
+                    "output_path": str(output_path),
+                })
+                try:
+                    compose_target.unlink()  # drop the intermediate base
+                except OSError:
+                    pass
+                if not overlay_result.success:
+                    return ToolResult(
+                        success=False,
+                        error=f"Overlay pass failed: {overlay_result.error}",
+                        data=render_result.data,
+                    )
+                # Carry overlay warnings (e.g. rotation not supported in FFmpeg).
+                if render_result.data is None:
+                    render_result.data = {}
+                ov_warn = (overlay_result.data or {}).get("warnings")
+                if ov_warn:
+                    render_result.data.setdefault("warnings", []).extend(ov_warn)
+                if layer_overlay_count:
+                    render_result.data["layer_overlay_cuts"] = layer_overlay_count
+                render_result.artifacts = [str(output_path)]
+        finally:
+            if pip_temp_dir is not None:
+                self._cleanup_dir(pip_temp_dir)
 
         if render_result.success and output_path.exists():
             final_review = self._run_final_review(
@@ -1687,6 +1850,238 @@ class VideoCompose(BaseTool):
                 )
 
         return render_result
+
+    # ---- cuts[].layer routing (multi-track step 1: overlay-layer PiP cuts) ----
+
+    PIP_DEFAULT_SCALE = 0.30   # default PiP width as a fraction of canvas width
+    PIP_MARGIN_FRAC = 0.03     # anchor margin as a fraction of canvas width
+
+    @staticmethod
+    def _cleanup_dir(d: Path) -> None:
+        """Best-effort removal of a flat temp dir and its files."""
+        try:
+            for f in d.iterdir():
+                f.unlink()
+            d.rmdir()
+        except OSError:
+            pass
+
+    _ANCHOR_NAMES = (
+        "top-left", "top-center", "top-right",
+        "center-left", "center", "center-right",
+        "bottom-left", "bottom-center", "bottom-right",
+    )
+
+    @classmethod
+    def _split_anchor(cls, anchor: Any) -> Optional[tuple[str, str]]:
+        """Named anchor → (vertical, horizontal) parts, or None if unrecognized."""
+        if not isinstance(anchor, str):
+            return None
+        if anchor == "center":
+            return ("center", "center")
+        if anchor not in cls._ANCHOR_NAMES:
+            return None
+        v, h = anchor.split("-", 1)
+        return (v, h)
+
+    @staticmethod
+    def _anchor_xy(
+        parts: tuple[str, str],
+        canvas_w: int, canvas_h: int,
+        w: int, h: int,
+        margin: int,
+    ) -> tuple[int, int]:
+        """Pixel x/y of a w×h box placed at a named anchor on the canvas."""
+        v, hz = parts
+        x = (
+            margin if hz == "left"
+            else (canvas_w - w) // 2 if hz == "center"
+            else canvas_w - w - margin
+        )
+        y = (
+            margin if v == "top"
+            else (canvas_h - h) // 2 if v == "center"
+            else canvas_h - h - margin
+        )
+        return x, y
+
+    def _build_layer_overlay_entries(
+        self,
+        all_cuts: list[dict],
+        base_cuts: list[dict],
+        edit_decisions: dict[str, Any],
+        profile_name: Optional[str],
+        temp_dir: Path,
+        codec: str,
+        crf: int,
+        preset: str,
+    ) -> tuple[Optional[str], list[dict]]:
+        """Trim layer='overlay' cuts into temp segments and synthesize _overlay entries.
+
+        Timeline placement: walking cuts[] in order, an overlay-layer cut starts
+        at the visible end-time of the base (primary/background) cuts listed
+        before it — accounting for xfade shortening via the same join resolution
+        the base concat uses — and spans (out-in)/speed. To PiP over the FIRST
+        base cut, list the overlay cut BEFORE it.
+
+        Each entry is a video overlay dict for _overlay: trimmed segment path,
+        width = transform.scale (default 0.30) × canvas width (aspect preserved),
+        x/y from the transform.position named anchor (default top-right), and
+        pts_offset_seconds so the segment's first frame lands exactly at its
+        start_seconds. Audio is stripped (-an) — PiP cuts are visual only.
+
+        Validates every overlay cut BEFORE trimming anything. Returns
+        (error, entries); temp segments live in temp_dir (caller cleans up).
+        """
+        canvas_err, target_w, target_h, _fps = self._resolve_canvas(
+            edit_decisions, profile_name
+        )
+        if canvas_err:
+            return canvas_err, []
+        joins, _ = self._resolve_joins(base_cuts, edit_decisions.get("metadata"))
+        margin = int(round(self.PIP_MARGIN_FRAC * target_w))
+
+        # --- pass 1: validate all overlay cuts + compute timeline placement ---
+        plans: list[dict] = []  # one per overlay-layer cut
+        pos = 0.0               # visible end-time of base cuts walked so far
+        base_index = 0
+        for idx, cut in enumerate(all_cuts):
+            speed = cut.get("speed", 1.0)
+            if isinstance(speed, bool) or not isinstance(speed, (int, float)) or speed <= 0:
+                return f"cuts[{idx}].speed must be a positive number; got {speed!r}", []
+            try:
+                in_s = float(cut["in_seconds"])
+                out_s = float(cut["out_seconds"])
+            except (KeyError, TypeError, ValueError):
+                return f"cuts[{idx}] needs numeric in_seconds/out_seconds", []
+            span = out_s - in_s
+            if span <= 0:
+                return f"cuts[{idx}]: out_seconds must exceed in_seconds", []
+            dur = span / float(speed)
+
+            if (cut.get("layer") or "primary") != "overlay":
+                if base_index == 0:
+                    pos = dur
+                else:
+                    join = joins[base_index - 1]
+                    pos += dur - (join["duration"] if join else 0.0)
+                base_index += 1
+                continue
+
+            source = Path(cut["source"]) if cut.get("source") else None
+            if source is None or not source.exists():
+                return f"cuts[{idx}] (layer='overlay') source not found: {cut.get('source')!r}", []
+            if self._is_image(source):
+                return (
+                    f"cuts[{idx}]: still image '{source.name}' cannot be a "
+                    "layer='overlay' cut — use edit_decisions.overlays[] for "
+                    "image overlays",
+                    [],
+                )
+
+            transform = cut.get("transform") or {}
+            pip_scale = transform.get("scale")
+            if pip_scale is None:
+                pip_scale = self.PIP_DEFAULT_SCALE
+            if (
+                isinstance(pip_scale, bool)
+                or not isinstance(pip_scale, (int, float))
+                or not (0 < pip_scale <= 1)
+            ):
+                return (
+                    f"cuts[{idx}].transform.scale for layer='overlay' must be in "
+                    f"(0, 1] (fraction of canvas width); got {pip_scale!r}",
+                    [],
+                )
+            anchor = transform.get("position") or "top-right"
+            anchor_parts = self._split_anchor(anchor)
+            if anchor_parts is None:
+                return (
+                    f"cuts[{idx}].transform.position {anchor!r} is not a named "
+                    f"anchor; expected one of: {', '.join(self._ANCHOR_NAMES)}",
+                    [],
+                )
+            crop = transform.get("crop") or {}
+            if crop:
+                crop_w, crop_h = crop.get("width"), crop.get("height")
+                if (
+                    not isinstance(crop_w, (int, float))
+                    or not isinstance(crop_h, (int, float))
+                    or crop_w <= 0 or crop_h <= 0
+                ):
+                    return (
+                        f"cuts[{idx}].transform.crop requires positive numeric "
+                        f"width and height; got {crop!r}",
+                        [],
+                    )
+
+            plans.append({
+                "idx": idx, "source": source, "in_s": in_s, "span": span,
+                "speed": float(speed), "start_t": pos, "dur": dur,
+                "pip_scale": float(pip_scale), "anchor_parts": anchor_parts,
+                "crop": crop,
+            })
+
+        # --- pass 2: trim segments + build overlay entries ---
+        entries: list[dict] = []
+        for plan in plans:
+            idx = plan["idx"]
+            seg = temp_dir / f"pip_{idx:04d}.mp4"
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(plan["in_s"]),
+                "-t", str(plan["span"]),
+                "-i", str(plan["source"]),
+            ]
+            vf_parts: list[str] = []
+            crop = plan["crop"]
+            if crop:
+                crop_x = int(round(crop.get("x", 0) or 0))
+                crop_y = int(round(crop.get("y", 0) or 0))
+                vf_parts.append(
+                    f"crop={int(round(crop['width']))}:{int(round(crop['height']))}:"
+                    f"{crop_x}:{crop_y}"
+                )
+            if plan["speed"] != 1.0:
+                vf_parts.append(f"setpts={1.0 / plan['speed']}*PTS")
+            if vf_parts:
+                cmd.extend(["-filter:v", ",".join(vf_parts)])
+            cmd.extend([
+                "-an",  # PiP audio is dropped by design (see docstring)
+                "-c:v", codec, "-crf", str(crf), "-preset", preset,
+                "-pix_fmt", "yuv420p",
+                str(seg),
+            ])
+            try:
+                self.run_command(cmd, timeout=600)
+            except subprocess.CalledProcessError as e:
+                stderr = ((e.stderr or "") or "ffmpeg failed").strip()[-300:]
+                return f"layer='overlay' cut {idx} trim failed: {stderr}", []
+            except subprocess.TimeoutExpired:
+                return f"layer='overlay' cut {idx} trim timed out", []
+
+            dims = self._probe_dimensions(seg)
+            if not dims:
+                return (
+                    f"could not probe dimensions of layer='overlay' segment "
+                    f"for cuts[{idx}]",
+                    [],
+                )
+            sw, sh = dims
+            pip_w = max(2, int(round(target_w * plan["pip_scale"] / 2)) * 2)
+            pip_h = max(2, int(round(pip_w * sh / sw / 2)) * 2)
+            x, y = self._anchor_xy(
+                plan["anchor_parts"], target_w, target_h, pip_w, pip_h, margin
+            )
+            start_t = round(plan["start_t"], 4)
+            entries.append({
+                "asset_path": str(seg),
+                "x": x, "y": y, "width": pip_w,
+                "start_seconds": start_t,
+                "end_seconds": round(plan["start_t"] + plan["dur"], 4),
+                "pts_offset_seconds": start_t,
+            })
+        return None, entries
 
     def _remotion_render(self, inputs: dict[str, Any]) -> ToolResult:
         """Render via Remotion (requires Node.js + npx).
@@ -2413,8 +2808,53 @@ class VideoCompose(BaseTool):
             artifacts=[str(output_path)],
         )
 
+    # Still-image overlay formats. .gif is deliberately ABSENT: GIFs go through the
+    # gif demuxer (video-like timeline) — image2's `-loop 1` is invalid for it and
+    # classifying GIFs as stills froze them after one play.
+    _STILL_OVERLAY_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+
     def _overlay(self, inputs: dict[str, Any]) -> ToolResult:
-        """Composite overlay images/videos on top of base video."""
+        """Composite overlay images/videos/GIFs/TEXT on top of a base video.
+
+        Text overlays (type='text' or a `text` field with no asset): rendered
+        via drawtext in the same pass — `text`, `font_size`, `color`, optional
+        `box` {color, opacity, padding}, `font_path` (default: bold sans from
+        the text_card_gen system candidates), position as {x,y}/flat x/y or a
+        named anchor (e.g. 'bottom-center'; default bottom-center), and
+        keyframes for x/y/opacity (scale/rotation keyframes are warned and
+        ignored — drawtext has no per-frame scale). Special characters in the
+        text (colons, quotes, commas, %) are escaped for both filtergraph
+        parser layers; %{...} expansion is disabled (expansion=none).
+
+        Per-overlay support on the FFmpeg path:
+          - position: static x/y, or keyframed via time-varying overlay expressions
+          - scale: static width/height — either may be omitted and the other
+            dimension is derived aspect-preserving (-2); scale keyframes render
+            center-anchored via scale=eval=frame expressions
+          - opacity: static overlays[].opacity via colorchannelmixer (exact);
+            keyframed 0→1/1→0 fades stay on the exact fade-filter fast path; any
+            other piecewise/non-monotonic curve renders via a geq alpha expression
+            (per-pixel eval — correct but slower, fine for overlay-sized assets)
+          - easing: non-linear easings (ease-in/out/in-out, spring, step) are
+            approximated by subdividing each keyframe interval into
+            EASING_SUBDIVISIONS piecewise-linear sub-segments sampled from the
+            easing curve; linear stays exact
+          - audio_mix: overlays[].audio_mix {enabled, volume 0..2} mixes the
+            overlay source's audio into the base track (trimmed to the overlay
+            window, adelay to start_seconds, amix duration=first so the base
+            length wins; normalize=0 so volume math is predictable)
+          - GIFs: rendered with the gif demuxer's -ignore_loop 0 so they animate
+            and loop for the whole window, bounded by -t end_seconds
+
+        Limitations: rotation keyframes are NOT rendered (warned + dropped) — use
+        Remotion/HyperFrames for rotation. Overlay-stream time is assumed to equal
+        project time (exact for looped stills/GIFs and overlays starting at t=0);
+        a video overlay with start_seconds>0 is sampled at `start` seconds into
+        the source UNLESS pts_offset_seconds shifts it — set
+        pts_offset_seconds=start_seconds to play a video overlay from its first
+        frame inside the window (this is how layer='overlay' PiP cuts render).
+        Mixed audio still plays from the source's beginning.
+        """
         input_path = Path(inputs["input_path"])
         overlays = inputs.get("overlays", [])
         output_path = Path(inputs.get("output_path", str(input_path.with_stem(f"{input_path.stem}_overlay"))))
@@ -2431,75 +2871,553 @@ class VideoCompose(BaseTool):
         filter_parts = []
         prev_label = "0:v"
         warnings: list[str] = []
+        n_inputs = 1  # running ffmpeg input index (base is 0)
+        mix_requests: list[tuple[int, float, float, Optional[float]]] = []
 
-        _IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
         for i, ov in enumerate(overlays):
+            out_label = f"v{i}"
+
+            if self._is_text_overlay(ov):
+                dt_err, dt_filter, dt_warnings = self._build_drawtext_filter(
+                    ov, i, prev_label, out_label
+                )
+                if dt_err:
+                    return ToolResult(success=False, error=dt_err)
+                filter_parts.append(dt_filter)
+                warnings.extend(dt_warnings)
+                prev_label = out_label
+                continue
+
             asset_path = Path(ov["asset_path"])
             if not asset_path.exists():
                 return ToolResult(success=False, error=f"Overlay asset not found: {asset_path}")
 
             # base position supports both the flat (x/y) and edit_decisions (position{}) shapes
             pos = ov.get("position") or {}
+            if isinstance(pos, str):
+                return ToolResult(
+                    success=False,
+                    error=(
+                        f"overlays[{i}]: named-anchor position {pos!r} is only "
+                        "supported for text overlays; image/video overlays need "
+                        "{x, y} (or flat x/y)"
+                    ),
+                )
             base_x = int(ov.get("x", pos.get("x", 0)))
             base_y = int(ov.get("y", pos.get("y", 0)))
-            start = ov.get("start_seconds", 0)
+            start = float(ov.get("start_seconds", 0) or 0)
             end = ov.get("end_seconds")
+            keyframes = ov.get("keyframes")
 
-            # A keyframed STILL image needs a timeline for the opacity `fade` to ramp across —
-            # a single frame would be captured at the fade start (alpha ~0) and held transparent.
-            # Loop the still to its on-screen window so fade/position evaluate per frame.
-            is_still = asset_path.suffix.lower() in _IMG_EXT
-            if ov.get("keyframes") and is_still and end:
+            # --- validate per-overlay fields before any work ---
+            w_in, h_in = ov.get("width"), ov.get("height")
+            for dim_name, dim_val in (("width", w_in), ("height", h_in)):
+                if dim_val is not None and (
+                    not isinstance(dim_val, (int, float)) or dim_val <= 0
+                ):
+                    return ToolResult(
+                        success=False,
+                        error=f"overlays[{i}].{dim_name} must be a positive number; got {dim_val!r}",
+                    )
+            static_opacity = ov.get("opacity")
+            if static_opacity is not None:
+                if not isinstance(static_opacity, (int, float)) or not (0.0 <= static_opacity <= 1.0):
+                    return ToolResult(
+                        success=False,
+                        error=f"overlays[{i}].opacity must be a number in [0, 1]; got {static_opacity!r}",
+                    )
+                static_opacity = float(static_opacity)
+            audio_mix = ov.get("audio_mix") or {}
+            if audio_mix.get("enabled"):
+                mix_volume = audio_mix.get("volume", 1.0)
+                if not isinstance(mix_volume, (int, float)) or not (0.0 <= mix_volume <= 2.0):
+                    return ToolResult(
+                        success=False,
+                        error=f"overlays[{i}].audio_mix.volume must be a number in [0, 2]; got {mix_volume!r}",
+                    )
+            pts_offset = ov.get("pts_offset_seconds")
+            if pts_offset is not None:
+                if (
+                    isinstance(pts_offset, bool)
+                    or not isinstance(pts_offset, (int, float))
+                    or pts_offset < 0
+                ):
+                    return ToolResult(
+                        success=False,
+                        error=f"overlays[{i}].pts_offset_seconds must be a non-negative number; got {pts_offset!r}",
+                    )
+
+            suffix = asset_path.suffix.lower()
+            is_gif = suffix == ".gif"
+            is_still = suffix in self._STILL_OVERLAY_EXTENSIONS
+
+            if is_gif:
+                # gif demuxer: image2's `-loop 1` is invalid here; -ignore_loop 0
+                # honors the GIF's own loop count (usually infinite) so it keeps
+                # animating across the window. The input MUST be bounded with -t:
+                # framesync repeats the ended base against an infinite secondary,
+                # so an unbounded looping GIF makes ffmpeg encode forever
+                # (live-verified). Fall back to the probed base duration.
+                gif_bound = end if end else self._probe_duration_seconds(input_path)
+                if not gif_bound:
+                    return ToolResult(
+                        success=False,
+                        error=f"overlays[{i}]: GIF overlay needs end_seconds (or a "
+                              "probeable base duration) to bound its looping input",
+                    )
+                input_args.extend(
+                    ["-ignore_loop", "0", "-t", str(gif_bound), "-i", str(asset_path)]
+                )
+            elif keyframes and is_still and end:
+                # A keyframed STILL image needs a timeline for fade/scale expressions
+                # to ramp across — a single frame would be captured at the first
+                # evaluation and held. Loop the still to its on-screen window.
                 input_args.extend(["-loop", "1", "-t", str(end), "-i", str(asset_path)])
             else:
+                if keyframes and is_still and not end:
+                    warnings.append(
+                        f"overlays[{i}]: keyframed still image has no end_seconds — "
+                        "the single frame is evaluated once, so motion/fade/scale "
+                        "keyframes will not animate. Set end_seconds."
+                    )
                 input_args.extend(["-i", str(asset_path)])
+            ov_idx = n_inputs
+            n_inputs += 1
+            overlay_input = f"{ov_idx}:v"
 
-            overlay_input = f"{i + 1}:v"
+            if audio_mix.get("enabled"):
+                if not is_still and self._has_audio_stream(asset_path):
+                    mix_requests.append((
+                        ov_idx,
+                        float(audio_mix.get("volume", 1.0)),
+                        start,
+                        float(end) if isinstance(end, (int, float)) else None,
+                    ))
+                else:
+                    warnings.append(
+                        f"overlays[{i}].audio_mix enabled but '{asset_path.name}' "
+                        "has no audio stream — skipped."
+                    )
 
-            # Scale overlay if dimensions specified
-            if "width" in ov and "height" in ov:
-                w = int(ov["width"])
-                h = int(ov["height"])
-                filter_parts.append(f"[{overlay_input}]scale={w}:{h}[ov_scaled_{i}]")
-                overlay_input = f"ov_scaled_{i}"
+            # --- static sizing (aspect-preserving when one dimension is omitted) ---
+            pre_chain: list[str] = []
+            if pts_offset:
+                # Shift the overlay stream so its first frame lands at
+                # pts_offset_seconds on the project timeline (delayed video
+                # overlays / layer='overlay' PiP cuts). Must precede scaling.
+                pre_chain.append(f"setpts=PTS-STARTPTS+{pts_offset}/TB")
+            nat_w: Optional[int] = None
+            nat_h: Optional[int] = None
+            has_scale_kf = bool(keyframes) and bool(self._kf_points(keyframes, "scale"))
+            if w_in is not None and h_in is not None:
+                nat_w, nat_h = int(w_in), int(h_in)
+                pre_chain.append(f"scale={nat_w}:{nat_h}")
+            elif w_in is not None or h_in is not None:
+                if w_in is not None:
+                    pre_chain.append(f"scale={int(w_in)}:-2")
+                else:
+                    pre_chain.append(f"scale=-2:{int(h_in)}")
+                if has_scale_kf:
+                    src_dims = self._probe_dimensions(asset_path)
+                    if src_dims:
+                        sw, sh = src_dims
+                        if w_in is not None:
+                            nat_w = int(w_in)
+                            nat_h = max(2, int(round(nat_w * sh / sw / 2)) * 2)
+                        else:
+                            nat_h = int(h_in)
+                            nat_w = max(2, int(round(nat_h * sw / sh / 2)) * 2)
+            elif has_scale_kf:
+                src_dims = self._probe_dimensions(asset_path)
+                if src_dims:
+                    nat_w, nat_h = src_dims
 
             enable = f"between(t,{start},{end})" if end else f"gte(t,{start})"
-            out_label = f"v{i}"
-            keyframes = ov.get("keyframes")
 
             if keyframes:
                 # --- keyframed (Edits-style) motion via time-varying expressions ---
                 kfw = self._keyframe_overlay(
-                    keyframes, base_x, base_y, start, i, overlay_input, prev_label, out_label, enable
+                    keyframes, base_x, base_y, start, i, overlay_input, prev_label,
+                    out_label, enable,
+                    pre_chain=pre_chain, nat_w=nat_w, nat_h=nat_h,
+                    static_opacity=static_opacity,
                 )
                 filter_parts.extend(kfw["filters"])
                 warnings.extend(kfw["warnings"])
             else:
-                # --- static overlay (original behavior) ---
+                # --- static overlay ---
+                if static_opacity is not None and static_opacity < 1.0:
+                    pre_chain.append(f"format=rgba,colorchannelmixer=aa={static_opacity}")
+                if pre_chain:
+                    lbl = f"ovp_{i}"
+                    filter_parts.append(f"[{overlay_input}]{','.join(pre_chain)}[{lbl}]")
+                    overlay_input = lbl
                 filter_parts.append(
                     f"[{prev_label}][{overlay_input}]overlay={base_x}:{base_y}:enable='{enable}'[{out_label}]"
                 )
             prev_label = out_label
+
+        # --- overlay audio mixing (overlays[].audio_mix) ---
+        audio_out_label: Optional[str] = None
+        if mix_requests:
+            anchor = "0:a"
+            if not self._has_audio_stream(input_path):
+                # No base audio: anchor the mix with silence the length of the base
+                # so amix duration=first still pins the output to the base duration.
+                base_dur = self._probe_duration_seconds(input_path)
+                if base_dur is None:
+                    return ToolResult(
+                        success=False,
+                        error="audio_mix requested but the base has no audio stream "
+                              "and its duration could not be probed for a silent anchor track",
+                    )
+                input_args.extend([
+                    "-f", "lavfi", "-t", str(base_dur),
+                    "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                ])
+                anchor = f"{n_inputs}:a"
+                n_inputs += 1
+            mix_labels = [anchor]
+            for j, (idx, vol, m_start, m_end) in enumerate(mix_requests):
+                parts: list[str] = []
+                if m_end is not None and m_end > m_start:
+                    parts.append(f"atrim=duration={round(m_end - m_start, 4)}")
+                parts.append(f"volume={vol}")
+                if m_start > 0:
+                    parts.append(f"adelay={int(round(m_start * 1000))}:all=1")
+                lbl = f"aov{j}"
+                filter_parts.append(f"[{idx}:a]{','.join(parts)}[{lbl}]")
+                mix_labels.append(lbl)
+            audio_out_label = "aout"
+            filter_parts.append(
+                "".join(f"[{lbl}]" for lbl in mix_labels)
+                + f"amix=inputs={len(mix_labels)}:duration=first:normalize=0[{audio_out_label}]"
+            )
 
         filter_complex = ";".join(filter_parts)
 
         cmd = ["ffmpeg", "-y"]
         cmd.extend(input_args)
         cmd.extend(["-filter_complex", filter_complex])
-        cmd.extend(["-map", f"[{prev_label}]", "-map", "0:a?"])
-        cmd.extend(["-c:v", codec, "-crf", str(crf), "-c:a", "copy"])
+        if audio_out_label:
+            cmd.extend(["-map", f"[{prev_label}]", "-map", f"[{audio_out_label}]"])
+            cmd.extend(["-c:v", codec, "-crf", str(crf), "-c:a", "aac", "-b:a", "192k"])
+        else:
+            cmd.extend(["-map", f"[{prev_label}]", "-map", "0:a?"])
+            cmd.extend(["-c:v", codec, "-crf", str(crf), "-c:a", "copy"])
         cmd.append(str(output_path))
 
-        self.run_command(cmd)
+        try:
+            self.run_command(cmd, timeout=1800)
+        except subprocess.CalledProcessError as e:
+            stderr = ((e.stderr or "") or "ffmpeg overlay failed").strip()[-500:]
+            return ToolResult(success=False, error=f"ffmpeg overlay failed: {stderr}")
+        except subprocess.TimeoutExpired:
+            return ToolResult(success=False, error="ffmpeg overlay timed out")
 
         data = {
             "operation": "overlay",
             "overlay_count": len(overlays),
+            "audio_mixed_count": len(mix_requests),
             "output": str(output_path),
         }
         if warnings:
             data["warnings"] = warnings
         return ToolResult(success=True, data=data, artifacts=[str(output_path)])
+
+    # ---- text overlays (FFmpeg drawtext; Edits-parity stage 3) ----
+
+    TEXT_FONT_SIZE_DEFAULT = 48
+    TEXT_COLOR_DEFAULT = "white"
+    TEXT_ANCHOR_DEFAULT = "bottom-center"
+    TEXT_BOX_COLOR_DEFAULT = "black"
+    TEXT_BOX_OPACITY_DEFAULT = 0.5
+    TEXT_BOX_PADDING_DEFAULT = 10
+    # 5% canvas margin for named anchors; expressions use drawtext variables
+    # (w/h = canvas, text_w/text_h = rendered text box) so they hold on any canvas.
+    _TEXT_ANCHOR_X = {
+        "left": "w*0.05",
+        "center": "(w-text_w)/2",
+        "right": "w*0.95-text_w",
+    }
+    _TEXT_ANCHOR_Y = {
+        "top": "h*0.05",
+        "center": "(h-text_h)/2",
+        "bottom": "h*0.95-text_h",
+    }
+
+    # ffmpeg colors are names, #RRGGBB, or 0xRRGGBB[AA], optionally with @alpha.
+    # Restricting the charset also blocks filtergraph option injection
+    # (e.g. color="red:box=1").
+    _FF_COLOR_RE = re.compile(r"^[A-Za-z0-9#@.]+$")
+
+    # Mirrors tools/graphics/text_card_gen._FONT_CANDIDATES (paths only) for
+    # when that module isn't importable; keep the two lists in sync so drawtext
+    # and Pillow text cards resolve the same faces.
+    _FALLBACK_FONT_CANDIDATES = (
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/Library/Fonts/Arial Bold.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/HelveticaNeue.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+        "C:/Windows/Fonts/arialbd.ttf",
+        "C:/Windows/Fonts/segoeuib.ttf",
+    )
+
+    @staticmethod
+    def _is_text_overlay(ov: Any) -> bool:
+        """True when an overlays[] item should render via drawtext."""
+        if not isinstance(ov, dict):
+            return False
+        if ov.get("type") == "text":
+            return True
+        return (
+            isinstance(ov.get("text"), str)
+            and not ov.get("asset_path")
+            and not ov.get("asset_id")
+        )
+
+    @staticmethod
+    def _escape_drawtext_value(value: str) -> str:
+        """Escape a drawtext option value for BOTH filtergraph parser layers.
+
+        The filter_complex string is parsed twice: the graph parser (special:
+        ``\\ ' [ ] , ;``) runs first and consumes one escape level, then the
+        filter-option parser (special: ``\\ ' :``) consumes another. Characters
+        special to both layers therefore need two escape levels. ``%`` is NOT
+        escaped here — text overlays always set expansion=none, so drawtext
+        never interprets %{...} sequences.
+        """
+        out: list[str] = []
+        for ch in value:
+            if ch == "\\":
+                out.append("\\\\\\\\")   # both layers: \ -> \\ -> \\\\
+            elif ch == "'":
+                out.append("\\\\\\'")    # both layers: ' -> \' -> \\\'
+            elif ch == ":":
+                out.append("\\\\:")      # option layer only (graph passes \: through \\:)
+            elif ch in ",;[]":
+                out.append("\\" + ch)    # graph layer only
+            else:
+                out.append(ch)
+        return "".join(out)
+
+    def _resolve_drawtext_font(
+        self, font_path: Any, idx: int
+    ) -> tuple[Optional[str], Optional[str]]:
+        """(font_file, error): explicit font_path > text_card_gen candidates > error.
+
+        Reuses the system-font candidate list from text_card_gen so drawtext and
+        Pillow cards pick the same face. For .ttc collections drawtext loads
+        face 0 (no bold-face scan — pass font_path for exact typography).
+        """
+        if font_path is not None:
+            if not isinstance(font_path, str) or not Path(font_path).is_file():
+                return None, f"overlays[{idx}].font_path not found: {font_path!r}"
+            return font_path, None
+        try:
+            from tools.graphics.text_card_gen import _FONT_CANDIDATES
+            candidates = [p for p, _ in _FONT_CANDIDATES]
+        except Exception:
+            candidates = list(self._FALLBACK_FONT_CANDIDATES)
+        for cand in candidates:
+            if Path(cand).is_file():
+                return cand, None
+        return None, (
+            f"overlays[{idx}]: no usable font found in system font dirs — "
+            "pass font_path (.ttf/.ttc) explicitly"
+        )
+
+    @classmethod
+    def _validate_ff_color(cls, value: Any, label: str) -> Optional[str]:
+        """Error string unless `value` looks like a safe ffmpeg color token."""
+        if not isinstance(value, str) or not value or not cls._FF_COLOR_RE.match(value):
+            return (
+                f"{label} must be an ffmpeg color (name, #RRGGBB, or "
+                f"0xRRGGBB[AA]); got {value!r}"
+            )
+        return None
+
+    def _build_drawtext_filter(
+        self, ov: dict, i: int, prev_label: str, out_label: str
+    ) -> tuple[Optional[str], Optional[str], list[str]]:
+        """Build one drawtext filter for a text overlay.
+
+        Returns (error, filter, warnings); error is None on success. Position
+        precedence: keyframed x/y > position {x,y} > flat x/y > named anchor
+        (default bottom-center). Opacity: keyframed opacity renders via a
+        time-varying alpha expression (multiplied under any static
+        overlays[].opacity); drawtext evaluates x/y/alpha per frame, so the
+        same piecewise-linear + eased-points machinery as image overlays
+        applies. Scale/rotation keyframes are warned and ignored (drawtext
+        cannot animate fontsize per frame portably).
+        """
+        warnings: list[str] = []
+
+        text = ov.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return (
+                f"overlays[{i}]: text overlay requires a non-empty 'text' string",
+                None, [],
+            )
+
+        font_size = ov.get("font_size", self.TEXT_FONT_SIZE_DEFAULT)
+        if isinstance(font_size, bool) or not isinstance(font_size, int) or font_size <= 0:
+            return (
+                f"overlays[{i}].font_size must be a positive integer; got {font_size!r}",
+                None, [],
+            )
+
+        color = ov.get("color", self.TEXT_COLOR_DEFAULT)
+        color_err = self._validate_ff_color(color, f"overlays[{i}].color")
+        if color_err:
+            return color_err, None, []
+
+        static_opacity = ov.get("opacity")
+        if static_opacity is not None:
+            if (
+                isinstance(static_opacity, bool)
+                or not isinstance(static_opacity, (int, float))
+                or not (0.0 <= static_opacity <= 1.0)
+            ):
+                return (
+                    f"overlays[{i}].opacity must be a number in [0, 1]; got {static_opacity!r}",
+                    None, [],
+                )
+            static_opacity = float(static_opacity)
+
+        font_file, font_err = self._resolve_drawtext_font(ov.get("font_path"), i)
+        if font_err:
+            return font_err, None, []
+
+        # --- box (optional) ---
+        box_parts: list[str] = []
+        box = ov.get("box")
+        if box is not None:
+            if not isinstance(box, dict):
+                return f"overlays[{i}].box must be an object; got {box!r}", None, []
+            box_color = box.get("color", self.TEXT_BOX_COLOR_DEFAULT)
+            box_color_err = self._validate_ff_color(box_color, f"overlays[{i}].box.color")
+            if box_color_err:
+                return box_color_err, None, []
+            box_opacity = box.get("opacity", self.TEXT_BOX_OPACITY_DEFAULT)
+            if (
+                isinstance(box_opacity, bool)
+                or not isinstance(box_opacity, (int, float))
+                or not (0.0 <= box_opacity <= 1.0)
+            ):
+                return (
+                    f"overlays[{i}].box.opacity must be a number in [0, 1]; got {box_opacity!r}",
+                    None, [],
+                )
+            padding = box.get("padding", self.TEXT_BOX_PADDING_DEFAULT)
+            if isinstance(padding, bool) or not isinstance(padding, int) or padding < 0:
+                return (
+                    f"overlays[{i}].box.padding must be a non-negative integer; got {padding!r}",
+                    None, [],
+                )
+            box_parts = [
+                "box=1",
+                f"boxcolor={box_color}@{float(box_opacity):g}",
+                f"boxborderw={padding}",
+            ]
+
+        # --- timing ---
+        start = float(ov.get("start_seconds", 0) or 0)
+        end = ov.get("end_seconds")
+        if end is not None and (
+            isinstance(end, bool) or not isinstance(end, (int, float))
+        ):
+            return f"overlays[{i}].end_seconds must be a number; got {end!r}", None, []
+        enable = f"between(t,{start},{end})" if end else f"gte(t,{start})"
+
+        # --- position: keyframes > {x,y} > flat x/y > named anchor ---
+        keyframes = ov.get("keyframes")
+        if keyframes:
+            for dim in ("scale", "rotation"):
+                if any(isinstance(k, dict) and dim in k for k in keyframes):
+                    warnings.append(
+                        f"overlays[{i}]: {dim} keyframes are not rendered for text "
+                        "overlays (drawtext animates position/opacity only); ignored."
+                    )
+        pos = ov.get("position")
+        anchor = None
+        pos_x = ov.get("x")
+        pos_y = ov.get("y")
+        if isinstance(pos, str):
+            anchor = pos
+        elif isinstance(pos, dict):
+            pos_x = pos.get("x", pos_x)
+            pos_y = pos.get("y", pos_y)
+        elif pos is not None:
+            return (
+                f"overlays[{i}].position must be a named anchor or an object "
+                f"with x/y; got {pos!r}",
+                None, [],
+            )
+        for label, v in ((f"overlays[{i}].x", pos_x), (f"overlays[{i}].y", pos_y)):
+            if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))):
+                return f"{label} must be a number; got {v!r}", None, []
+        if anchor is None and pos_x is None and pos_y is None:
+            anchor = self.TEXT_ANCHOR_DEFAULT
+        anchor_x_expr = anchor_y_expr = None
+        if anchor is not None:
+            parts_split = self._split_anchor(anchor)
+            if parts_split is None:
+                return (
+                    f"overlays[{i}].position {anchor!r} is not a named anchor; "
+                    f"expected one of: {', '.join(self._ANCHOR_NAMES)}",
+                    None, [],
+                )
+            v_part, h_part = parts_split
+            anchor_x_expr = self._TEXT_ANCHOR_X[h_part]
+            anchor_y_expr = self._TEXT_ANCHOR_Y[v_part]
+
+        kf_x = self._eased_points(keyframes, "x") if keyframes else []
+        kf_y = self._eased_points(keyframes, "y") if keyframes else []
+        if kf_x:
+            x_expr = self._piecewise_linear_expr(kf_x)
+        elif pos_x is not None:
+            x_expr = f"{pos_x:g}"
+        else:
+            x_expr = anchor_x_expr or self._TEXT_ANCHOR_X["center"]
+        if kf_y:
+            y_expr = self._piecewise_linear_expr(kf_y)
+        elif pos_y is not None:
+            y_expr = f"{pos_y:g}"
+        else:
+            y_expr = anchor_y_expr or self._TEXT_ANCHOR_Y["bottom"]
+
+        # --- opacity → alpha (drawtext evaluates alpha per frame) ---
+        alpha_expr = None
+        kf_opacity = self._eased_points(keyframes, "opacity") if keyframes else []
+        if kf_opacity:
+            alpha_expr = f"clip({self._piecewise_linear_expr(kf_opacity)},0,1)"
+            if static_opacity is not None and static_opacity < 1.0:
+                alpha_expr = f"{static_opacity:g}*{alpha_expr}"
+        elif static_opacity is not None and static_opacity < 1.0:
+            alpha_expr = f"{static_opacity:g}"
+
+        parts = [
+            f"fontfile={self._escape_drawtext_value(font_file)}",
+            f"text={self._escape_drawtext_value(text)}",
+            "expansion=none",
+            f"fontsize={font_size}",
+            f"fontcolor={color}",
+            f"x='{x_expr}'",
+            f"y='{y_expr}'",
+        ]
+        if alpha_expr:
+            parts.append(f"alpha='{alpha_expr}'")
+        parts.extend(box_parts)
+        parts.append(f"enable='{enable}'")
+        return (
+            None,
+            f"[{prev_label}]drawtext={':'.join(parts)}[{out_label}]",
+            warnings,
+        )
 
     # ---- keyframe rendering (FFmpeg path; Edits-parity Wave 2 renderer) ----
 
@@ -2514,8 +3432,12 @@ class VideoCompose(BaseTool):
         return sorted(pts, key=lambda p: p[0])
 
     @staticmethod
-    def _piecewise_linear_expr(pts: list) -> str:
-        """FFmpeg expr: linear interpolation between keyframes, constant-held outside the ends."""
+    def _piecewise_linear_expr(pts: list, var: str = "t") -> str:
+        """FFmpeg expr: linear interpolation between keyframes, constant-held outside the ends.
+
+        `var` is the time variable name — "t" for overlay/scale expressions,
+        "T" for geq (which exposes frame time as T).
+        """
         if len(pts) == 1:
             return f"{pts[0][1]}"
         expr = f"{pts[-1][1]}"  # after the last keyframe: hold the final value
@@ -2525,57 +3447,213 @@ class VideoCompose(BaseTool):
             if t1 == t0:
                 seg = f"{v1}"
             else:
-                seg = f"({v0}+({v1}-{v0})*(t-{t0})/({t1}-{t0}))"
-            expr = f"if(lt(t,{t1}),{seg},{expr})"
+                seg = f"({v0}+({v1}-{v0})*({var}-{t0})/({t1}-{t0}))"
+            expr = f"if(lt({var},{t1}),{seg},{expr})"
         t0, v0 = pts[0]
-        return f"if(lt(t,{t0}),{v0},{expr})"  # before the first keyframe: hold the initial value
+        return f"if(lt({var},{t0}),{v0},{expr})"  # before the first keyframe: hold the initial value
+
+    # Non-linear easings are approximated as piecewise-linear: each eased keyframe
+    # interval is subdivided into this many sub-segments sampled from the easing
+    # curve before _piecewise_linear_expr. Linear intervals stay endpoint-exact.
+    EASING_SUBDIVISIONS = 8
+
+    @staticmethod
+    def _ease_progress(name: str, u: float) -> float:
+        """Eased progress e(u) for u in [0,1]; e(0)=0 and e(1)=1 are exact by construction."""
+        if name == "ease-in":
+            return u * u
+        if name == "ease-out":
+            return 1.0 - (1.0 - u) ** 2
+        if name == "ease-in-out":
+            return u * u * (3.0 - 2.0 * u)  # smoothstep
+        if name == "spring":
+            # damped sine: ~9% overshoot around u≈0.25, settled by u=1
+            return 1.0 - math.exp(-6.0 * u) * math.cos(8.0 * u)
+        return u  # linear
+
+    @classmethod
+    def _eased_points(cls, keyframes: list, dim: str) -> list:
+        """(t, value) pairs for one dimension with per-interval easing baked in.
+
+        The easing of the EARLIER keyframe owns the interval toward the next one
+        (schema contract). 'step' holds the previous value until just before the
+        next keyframe. The final sub-point of every interval is the exact keyframe
+        value, so endpoints never drift.
+        """
+        pts = sorted(
+            (
+                (float(k["t"]), float(k[dim]), str(k.get("easing") or "linear"))
+                for k in keyframes
+                if isinstance(k, dict) and "t" in k and dim in k and k[dim] is not None
+            ),
+            key=lambda p: p[0],
+        )
+        if not pts:
+            return []
+        out: list = [(pts[0][0], pts[0][1])]
+        for (t0, v0, easing), (t1, v1, _) in zip(pts, pts[1:]):
+            if t1 <= t0 or v1 == v0 or easing == "linear":
+                out.append((t1, v1))
+                continue
+            if easing == "step":
+                out.append((round(max(t0, t1 - 1e-3), 4), v0))
+                out.append((t1, v1))
+                continue
+            n = cls.EASING_SUBDIVISIONS
+            for j in range(1, n):
+                u = j / n
+                out.append((
+                    round(t0 + u * (t1 - t0), 4),
+                    round(v0 + cls._ease_progress(easing, u) * (v1 - v0), 4),
+                ))
+            out.append((t1, v1))
+        return out
+
+    @staticmethod
+    def _simple_fade_plan(opac: list) -> Optional[list[str]]:
+        """Exact fade filters for plain fade-in/out opacity curves, else None.
+
+        Returns [] when the curve is constant ~1 (nothing to render) and a list of
+        fade filters for 0→1 entrances / 1→0 exits. Any other curve — partial
+        opacities, mid-timeline dips, delayed rises — returns None and takes the
+        geq alpha-expression path. ffmpeg's fade is linear, so easing on a fade
+        interval is approximated as linear here (the fast path wins; route through
+        a non-fade-shaped curve if eased opacity matters).
+        """
+        vals = [v for _, v in opac]
+        if all(v >= 0.95 for v in vals):
+            return []
+        if len(opac) < 2:
+            return None
+        if not all(v <= 0.05 or v >= 0.95 for v in vals):
+            return None
+        if any(v <= 0.05 for v in vals[1:-1]):
+            return None
+        fades: list[str] = []
+        if vals[0] <= 0.05:
+            t0, t1 = opac[0][0], opac[1][0]
+            fades.append(f"fade=t=in:st={t0}:d={max(0.05, t1 - t0)}:alpha=1")
+        if vals[-1] <= 0.05:
+            t0, t1 = opac[-2][0], opac[-1][0]
+            fades.append(f"fade=t=out:st={t0}:d={max(0.05, t1 - t0)}:alpha=1")
+        return fades or None
+
+    @staticmethod
+    def _probe_dimensions(path: Path) -> Optional[tuple[int, int]]:
+        """(width, height) of the first video/image stream, or None if unprobeable."""
+        try:
+            out = subprocess.check_output(
+                [
+                    "ffprobe", "-v", "error",
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=width,height",
+                    "-of", "csv=p=0",
+                    str(path),
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            w, h = out.strip().split("\n")[0].split(",")[:2]
+            return int(w), int(h)
+        except Exception:
+            return None
 
     def _keyframe_overlay(
-        self, keyframes, base_x, base_y, start, i, overlay_input, prev_label, out_label, enable
+        self, keyframes, base_x, base_y, start, i, overlay_input, prev_label, out_label, enable,
+        *,
+        pre_chain: Optional[list[str]] = None,
+        nat_w: Optional[int] = None,
+        nat_h: Optional[int] = None,
+        static_opacity: Optional[float] = None,
     ) -> dict:
         """Build the filtergraph parts for one keyframed overlay.
 
-        Supports POSITION (x/y) via time-varying overlay expressions and OPACITY via a fade
-        in/out on the overlay's alpha. scale/rotation are NOT supported by the FFmpeg path
-        (documented limitation) — warn so the agent can switch to a richer renderer if needed.
+        Renders POSITION (x/y) via time-varying overlay expressions, SCALE via
+        scale=eval=frame width/height expressions (center-anchored: x/y are
+        compensated with the natural dims `nat_w`/`nat_h` so growth is symmetric),
+        and OPACITY — exact fade filters for plain fade in/out, a geq alpha
+        expression for any other piecewise curve, colorchannelmixer for a constant.
+        Non-linear easings are piecewise-linear approximations (_eased_points).
+
+        ROTATION is NOT supported by the FFmpeg path (documented limitation) —
+        warn so the agent can switch to a richer renderer if needed.
+
+        `pre_chain` carries static sizing filters from _overlay; `static_opacity`
+        (overlays[].opacity) multiplies under any keyframed opacity curve.
         """
         filters: list[str] = []
         warnings: list[str] = []
+        chain: list[str] = list(pre_chain or [])
 
-        if any(isinstance(k, dict) and ("scale" in k or "rotation" in k) for k in keyframes):
+        if any(isinstance(k, dict) and "rotation" in k for k in keyframes):
             warnings.append(
-                "keyframe scale/rotation are not rendered by the FFmpeg overlay path "
-                "(position + opacity only); those dimensions were ignored."
+                "keyframe rotation is not rendered by the FFmpeg overlay path "
+                "(position/scale/opacity only); rotation was ignored."
             )
 
-        xpts = self._kf_points(keyframes, "x") or [(start, base_x)]
-        ypts = self._kf_points(keyframes, "y") or [(start, base_y)]
-        x_expr = self._piecewise_linear_expr(xpts)
-        y_expr = self._piecewise_linear_expr(ypts)
-
-        # opacity -> fade in/out on alpha (covers slide_in/fade_in/fade_out presets)
+        # --- opacity (MUST precede the time-varying scale) ---
+        # Opacity is pointwise, so it commutes with scaling — but the reverse
+        # order breaks: colorchannelmixer locks its frame size at config time and
+        # silently freezes an eval=frame scale animation downstream (live-tested).
+        if static_opacity is not None and static_opacity < 1.0:
+            chain.append(f"format=rgba,colorchannelmixer=aa={static_opacity}")
         opac = self._kf_points(keyframes, "opacity")
-        src = overlay_input
         if opac:
-            fades = []
-            first_t, first_v = opac[0]
-            last_t, last_v = opac[-1]
-            if first_v <= 0.05 and len(opac) > 1:
-                rise_to = opac[1][0]
-                fades.append(f"fade=t=in:st={first_t}:d={max(0.05, rise_to - first_t)}:alpha=1")
-            if last_v <= 0.05 and len(opac) > 1:
-                fall_from = opac[-2][0]
-                fades.append(f"fade=t=out:st={fall_from}:d={max(0.05, last_t - fall_from)}:alpha=1")
-            if fades:
-                pre = f"ovk_{i}"
-                filters.append(f"[{src}]format=yuva420p,{','.join(fades)}[{pre}]")
-                src = pre
+            distinct_vals = {round(v, 4) for _, v in opac}
+            fade_plan = self._simple_fade_plan(opac)
+            if len(distinct_vals) == 1 and distinct_vals != {1.0}:
+                # constant partial opacity — exact, no per-pixel eval needed
+                chain.append(f"format=rgba,colorchannelmixer=aa={opac[0][1]}")
+            elif fade_plan is not None:
+                if fade_plan:
+                    chain.append("format=yuva420p")
+                    chain.extend(fade_plan)
             else:
-                warnings.append(
-                    "keyframe opacity was not a simple fade in/out; the FFmpeg path only "
-                    "renders monotonic fades, so opacity was left at full."
+                # piecewise / non-monotonic curve → per-pixel alpha expression.
+                # geq exposes frame time as T (not t).
+                a_expr = self._piecewise_linear_expr(
+                    self._eased_points(keyframes, "opacity"), var="T"
+                )
+                chain.append("format=yuva420p")
+                chain.append(
+                    f"geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':"
+                    f"a='alpha(X,Y)*clip({a_expr},0,1)'"
                 )
 
+        # --- time-varying scale (center-anchored) ---
+        scale_pts = self._eased_points(keyframes, "scale")
+        anchored = False
+        if scale_pts and not (len(scale_pts) == 1 and scale_pts[0][1] == 1.0):
+            s_expr = self._piecewise_linear_expr(scale_pts)
+            # trunc-to-even keeps yuva420p happy; max(2,...) guards scale→0 frames.
+            chain.append(
+                f"scale=w='max(2,trunc(iw*({s_expr})/2)*2)':"
+                f"h='max(2,trunc(ih*({s_expr})/2)*2)':eval=frame"
+            )
+            if nat_w is not None and nat_h is not None:
+                anchored = True
+            else:
+                warnings.append(
+                    "scale keyframes rendered without probeable natural dimensions — "
+                    "overlay scales from its top-left corner instead of its center."
+                )
+
+        # --- position (with center compensation when scale animates) ---
+        xpts = self._eased_points(keyframes, "x") or [(start, float(base_x))]
+        ypts = self._eased_points(keyframes, "y") or [(start, float(base_y))]
+        x_expr = self._piecewise_linear_expr(xpts)
+        y_expr = self._piecewise_linear_expr(ypts)
+        if anchored:
+            # Keyframe x/y describe the top-left at natural size; keep the CENTER
+            # fixed while the frame size changes (overlay_w/h track the per-frame size).
+            x_expr = f"({x_expr})+{nat_w / 2:g}-overlay_w/2"
+            y_expr = f"({y_expr})+{nat_h / 2:g}-overlay_h/2"
+
+        src = overlay_input
+        if chain:
+            pre = f"ovk_{i}"
+            filters.append(f"[{src}]{','.join(chain)}[{pre}]")
+            src = pre
         filters.append(
             f"[{prev_label}][{src}]overlay=x='{x_expr}':y='{y_expr}':enable='{enable}'[{out_label}]"
         )

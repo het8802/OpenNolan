@@ -9,8 +9,10 @@ Lock the production decisions and get explicit human approval before any asset s
    (`video_compose.get_info()["render_runtimes"]`), present BOTH with a one-line strength + one-line
    tradeoff each, then recommend. For this pipeline, **recommend Remotion** — it owns the custom
    vertical scene stack, the source-receipt cards, charts (leaderboard), and word-timed reveals.
+   HyperFrames parity for this composition style is tracked in `skills/core/hyperframes.md`.
    Record the choice in `decision_log` as `render_runtime_selection` with both runtimes in
-   `options_considered`. Never pick silently.
+   `options_considered`. Never pick silently — the locked `render_runtime` is what the compose
+   stage routes on.
 2. **Aesthetic.** Default **warm editorial base + restrained dark-drama HITS** on the
    cost/burn/danger beats (invoice slam, token burn, budget burn). Confirm — do NOT go full
    dark/neon unless the user explicitly asks (see saved reel-aesthetic preference).

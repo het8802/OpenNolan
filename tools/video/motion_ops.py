@@ -651,8 +651,12 @@ class MotionOps(BaseTool):
 
     @staticmethod
     def _vf_cmd(src: Path, out: Path, vf: str, has_audio: bool) -> list[str]:
-        """Video-only filter command; audio passes through untouched (-c:a copy)."""
-        cmd = ["ffmpeg", "-y", "-i", str(src), "-vf", vf]
+        """Video-only filter command; audio passes through untouched (-c:a copy).
+
+        -pix_fmt yuv420p is mandatory: glitch's rgbashift forces an RGB pipeline
+        and without it libx264 picks yuv444p (High 4:4:4 — QuickTime/iOS/social
+        ingests won't play it). Keeps the module's documented 8-bit SDR contract."""
+        cmd = ["ffmpeg", "-y", "-i", str(src), "-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p"]
         cmd += ["-c:a", "copy"] if has_audio else ["-an"]
         cmd.append(str(out))
         return cmd

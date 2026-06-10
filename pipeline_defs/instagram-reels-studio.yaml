@@ -3,9 +3,11 @@ version: "1.0"
 description: >
   Instagram-Edits-style creator workflow. Turns a brief (or source clips) into a vertical
   short-form reel using OpenNolan's Edits-parity toolset: SAM2 cutouts, keyframe overlay
-  motion, beat-synced cutting, freeze/reverse/speed/volume motion ops, AI restyle, and
-  reusable templates. The edit stage is the heart — it orchestrates those tools onto the
-  edit_decisions artifact (overlays[].keyframes, beat-aligned cuts, social-reel grammar).
+  motion, beat-synced cutting, freeze/reverse/speed/volume/pan-zoom motion ops, AI restyle,
+  voiceover recording + voice effects, SFX library, GIPHY/Tenor stickers, styled text cards,
+  region masks, and reusable templates. The edit stage is the heart — it orchestrates those
+  tools onto the edit_decisions artifact (overlays[].keyframes, beat-aligned cuts,
+  per-cut xfade transitions, social-reel grammar).
 category: custom
 stability: beta
 default_checkpoint_policy: guided
@@ -100,6 +102,10 @@ stages:
       - subtitle_gen
       - music_gen
       - audio_enhance
+      - voice_ops
+      - sfx_kit
+      - sticker_search
+      - text_card_gen
     tools_available:
       - object_cutout
       - restyle_video
@@ -107,6 +113,10 @@ stages:
       - music_gen
       - freesound_music
       - audio_enhance
+      - voice_ops
+      - sfx_kit
+      - sticker_search
+      - text_card_gen
     checkpoint_required: true
     human_approval_default: false
     review_focus:
@@ -128,12 +138,17 @@ stages:
       - motion_ops
       - keyframe_animate
       - template_apply
+      - mask_ops
+      - text_card_gen
+      - sticker_search
+      - sfx_kit
+      - voice_ops
     checkpoint_required: true
     human_approval_default: false
     review_focus:
       - Cuts land on the beat where the brief is music-led (beat_cutter, speech_safe otherwise)
       - Overlays (cutouts/text) animate via overlays[].keyframes where motion was planned
-      - Freeze/reverse/speed/volume applied via motion_ops as derived clips
+      - Freeze/reverse/speed/volume/pan-zoom/clip-fx applied via motion_ops (and region masks via mask_ops) as derived clips
       - renderer_family carried forward (social-reel) and render_runtime unchanged
     success_criteria:
       - Schema-valid edit_decisions artifact

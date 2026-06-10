@@ -16,10 +16,13 @@ Design (Edits-parity Wave 2, /plan-eng-review):
     edit_decisions schema (overlays[].keyframes).
   - Can attach the keyframes to an overlay in an existing edit_decisions artifact and write
     it back (validate-before-write).
-  - NOTE: which renderer consumes overlays[].keyframes is a separate decision — the spike
-    found edit_decisions.overlays is consumed by the FFmpeg overlay path (start/end_seconds),
-    while the Remotion path has an in/out_seconds field-name mismatch. This tool emits the
-    spec regardless of which renderer is wired up.
+  - NOTE: renderer support. The FFmpeg overlay path (video_compose._overlay /
+    _keyframe_overlay) renders POSITION, SCALE (center-anchored, time-varying scale
+    expressions), and OPACITY keyframes — including piecewise/non-monotonic opacity —
+    with non-linear easings approximated by curve-sampled piecewise-linear subdivision.
+    ROTATION keyframes are NOT rendered on the FFmpeg path (dropped with a warning);
+    route rotation to Remotion/HyperFrames. This tool emits the spec regardless of
+    which renderer is wired up.
 """
 
 from __future__ import annotations
@@ -72,6 +75,8 @@ class KeyframeAnimate(BaseTool):
     not_good_for = [
         "rendering — this only emits the spec; compose renders it",
         "animating the main video track (overlays only)",
+        "rotation keyframes on render_runtime='ffmpeg' — video_compose drops rotation "
+        "with a warning (position/scale/opacity render); use Remotion/HyperFrames for rotation",
     ]
     fallback_tools: list[str] = []
 

@@ -54,6 +54,33 @@ Execution pipeline:
        │
        ▼
    write outputs + cache
+
+Op "effect" (LOCAL, FREE — pure FFmpeg, no Replicate call ever):
+
+Selective object effects, the Edits "apply an effect to just the cutout" move in one call.
+Takes the source video plus an EXISTING output from a prior op="cutout" run — either
+mask_path (the white-on-black mask .mp4) or cutout_path (the RGBA qtrle .mov; its alpha
+is extracted with `alphaextract`). Segmentation is NEVER re-run here. The mask is scaled
+to the source dims with scale2ref, the effect is applied, and the result is recomposited
+over the original via alphamerge + overlay.
+
+Filter chains ([m] = gray mask scaled to source; [src] = source video):
+
+  blur           [src]gblur=sigma=S -> [fx][m]alphamerge -> overlay on [src]
+                 (object blurred, background untouched)
+  pixelate       [src]scale=W/P:H/P:flags=area, scale=W:H:flags=neighbor ->
+                 alphamerge([m]) -> overlay (mosaic blocks over the object only)
+  glow           obj=[src]+[m]alphamerge; halo=gblur(obj) flattened onto black;
+                 [src][halo]blend=all_mode=screen -> overlay the sharp obj back on top
+                 (screen-blend halo radiating from the object's own colors)
+  outline        ring=blend=all_mode=difference(dilation^N([m]), [m]);
+                 alphamerge(color, ring) -> overlay on [src]
+                 (morphological edge: dilate the mask N px, diff = colored contour)
+  bw_background  [m]negate -> inverted mask; [src]hue=s=0 alphamerged with it ->
+                 overlay (background desaturated, object keeps color — the one
+                 effect that INVERTS the mask)
+
+Effect outputs are baked 8-bit SDR (libx264/yuv420p) — see not_good_for for the HDR rule.
 """
 
 from __future__ import annotations
@@ -94,6 +121,10 @@ class _PredictionError(Exception):
         self.terminal = terminal
 
 
+class _EffectInputError(Exception):
+    """Bad parameters for op='effect' (validated before any ffmpeg work)."""
+
+
 class ObjectCutout(BaseTool):
     name = "object_cutout"
     version = "0.1.0"
@@ -115,6 +146,19 @@ class ObjectCutout(BaseTool):
         ".mkv": "video/x-matroska",
     }
     MAX_DIM = 1080  # downscale longest side to this before upload (>1080p stalls the model)
+    OPS = ("cutout", "effect")
+    EFFECTS = ("blur", "pixelate", "glow", "outline", "bw_background")
+    BLUR_SIGMA_DEFAULT = 12.0
+    GLOW_SIGMA_DEFAULT = 18.0
+    STRENGTH_MAX = 100.0
+    PIXEL_SIZE_DEFAULT = 16
+    PIXEL_SIZE_MIN = 2
+    PIXEL_SIZE_MAX = 128
+    OUTLINE_THICKNESS_DEFAULT = 3
+    OUTLINE_THICKNESS_MAX = 16
+    OUTLINE_COLOR_DEFAULT = "white"
+    # named color or #/0x hex — anything else could smuggle filtergraph syntax
+    _COLOR_RE = re.compile(r"^([A-Za-z]+|(?:#|0x)[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$")
     AUTOCONFIRM_ENV = "OBJECT_CUTOUT_AUTOCONFIRM"
     USD_PER_SEC_ENV = "OBJECT_CUTOUT_USD_PER_SEC"
     # Rough per-second hardware rate (override per Replicate model page). SAM 2 video is
@@ -130,30 +174,49 @@ class ObjectCutout(BaseTool):
     )
     agent_skills = ["sam2-cutouts", "ffmpeg"]
 
-    capabilities = ["object_segmentation", "object_tracking", "alpha_cutout"]
+    capabilities = [
+        "object_segmentation", "object_tracking", "alpha_cutout", "selective_object_effects",
+    ]
     supports = {
         "video_tracking": True,
         "multi_object": True,
         "positive_negative_clicks": True,
         "alpha_output": True,
         "deterministic": True,
+        "selective_effects": True,  # op="effect": local, free, reuses a prior cutout/mask
     }
     best_for = [
         "isolating a tracked subject/object across a clip into a transparent cutout",
         "Instagram-Edits-style cutouts to overlay, keyframe, or restyle separately",
+        "op='effect': blur/pixelate/glow/outline/bw_background on a segmented object in "
+        "one call, reusing a prior cutout/mask (local FFmpeg, no API spend)",
     ]
     not_good_for = [
         "auto subject pick with no clicks (meta/sam-2-video needs explicit point prompts)",
         "stills (use bg_remove for a single image)",
-        "tight feedback loops — an API run takes ~30s+ and costs money",
+        "tight feedback loops — an API run takes ~30s+ and costs money (op='cutout' only; "
+        "op='effect' is local and free)",
+        "HDR sources — output is 8-bit SDR; detect with is_hdr_source() and handle HDR "
+        "per AGENT_GUIDE before using this tool",
     ]
     fallback_tools = ["bg_remove"]  # person-only, no tracking; agent must opt in explicitly
     latency_p50_seconds = 45.0
 
     input_schema = {
         "type": "object",
-        "required": ["video_path", "points"],
+        "required": ["video_path"],
         "properties": {
+            "op": {
+                "type": "string",
+                "enum": list(OPS),
+                "default": "cutout",
+                "description": (
+                    "'cutout' (default): SAM 2 segmentation -> RGBA cutout (paid, needs "
+                    "points). 'effect': apply a selective effect to an EXISTING cutout/mask "
+                    "from a prior run and recomposite (local FFmpeg, free; needs "
+                    "mask_path or cutout_path, never re-runs segmentation)."
+                ),
+            },
             "video_path": {
                 "type": "string",
                 "description": "Path to the source video (mp4/mov/webm/mkv).",
@@ -161,9 +224,10 @@ class ObjectCutout(BaseTool):
             "points": {
                 "type": "array",
                 "description": (
-                    "Click prompts that tell SAM 2 what to cut out. At least one positive "
-                    "(label=1) click is required — there is no auto mode. Same object_id = "
-                    "same object; different ids = separate tracked objects."
+                    "op='cutout' (required there): click prompts that tell SAM 2 what to cut "
+                    "out. At least one positive (label=1) click is required — there is no "
+                    "auto mode. Same object_id = same object; different ids = separate "
+                    "tracked objects."
                 ),
                 "items": {
                     "type": "object",
@@ -192,7 +256,59 @@ class ObjectCutout(BaseTool):
             },
             "output_path": {
                 "type": "string",
-                "description": "Where to write the RGBA cutout (.mov). Defaults to {stem}_cutout.mov.",
+                "description": (
+                    "op='cutout': where to write the RGBA cutout (.mov), default "
+                    "{stem}_cutout.mov. op='effect': the recomposited video, default "
+                    "{stem}_fx_{effect}.mp4."
+                ),
+            },
+            # ---- op="effect" inputs ----
+            "effect": {
+                "type": "string",
+                "enum": list(EFFECTS),
+                "description": "op='effect': which selective effect to apply (required there).",
+            },
+            "mask_path": {
+                "type": "string",
+                "description": (
+                    "op='effect': the white-on-black mask video from a prior cutout run "
+                    "(mask_path in that result). Takes precedence over cutout_path."
+                ),
+            },
+            "cutout_path": {
+                "type": "string",
+                "description": (
+                    "op='effect': the RGBA cutout (.mov) from a prior cutout run; its alpha "
+                    "channel is extracted as the mask. Alternative to mask_path."
+                ),
+            },
+            "strength": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": STRENGTH_MAX,
+                "description": (
+                    f"op='effect' blur/glow: gblur sigma (defaults: blur {BLUR_SIGMA_DEFAULT:g}, "
+                    f"glow {GLOW_SIGMA_DEFAULT:g})."
+                ),
+            },
+            "pixel_size": {
+                "type": "integer",
+                "minimum": PIXEL_SIZE_MIN,
+                "maximum": PIXEL_SIZE_MAX,
+                "default": PIXEL_SIZE_DEFAULT,
+                "description": "op='effect' pixelate: mosaic block size in source px.",
+            },
+            "color": {
+                "type": "string",
+                "default": OUTLINE_COLOR_DEFAULT,
+                "description": "op='effect' outline: ring color (ffmpeg color name or #/0x hex).",
+            },
+            "thickness": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": OUTLINE_THICKNESS_MAX,
+                "default": OUTLINE_THICKNESS_DEFAULT,
+                "description": "op='effect' outline: ring thickness in px (mask dilation passes).",
             },
             "mask_type": {
                 "type": "string",
@@ -227,9 +343,10 @@ class ObjectCutout(BaseTool):
     retry_policy = RetryPolicy(max_retries=2, retryable_errors=["rate_limit", "timeout"])
     idempotency_key_fields = ["video_path", "points", "mask_type"]
     side_effects = [
-        "uploads the source video to Replicate file storage",
-        "calls the Replicate API (paid)",
-        "writes an RGBA cutout .mov and the raw mask video",
+        "op='cutout': uploads the source video to Replicate file storage",
+        "op='cutout': calls the Replicate API (paid)",
+        "op='cutout': writes an RGBA cutout .mov and the raw mask video",
+        "op='effect': writes a recomposited effect video (local FFmpeg, free)",
     ]
     user_visible_verification = [
         "Scrub the cutout clip — the subject edge should stay clean across the whole shot",
@@ -250,14 +367,26 @@ class ObjectCutout(BaseTool):
         return self._DEFAULT_USD_PER_S
 
     def estimate_runtime(self, inputs: dict[str, Any]) -> float:
+        if inputs.get("op") == "effect":
+            return 10.0  # local ffmpeg re-encode
         return 45.0
 
     def estimate_cost(self, inputs: dict[str, Any]) -> float:
+        if inputs.get("op") == "effect":
+            return 0.0  # pure local ffmpeg — never touches Replicate
         return round(self._usd_per_sec() * self.estimate_runtime(inputs), 2)
 
     # ---- execution ----
 
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
+        op = inputs.get("op", "cutout")
+        if op not in self.OPS:
+            return ToolResult(success=False, error=f"op must be one of {self.OPS}; got {op!r}.")
+        if op == "effect":
+            # Local-only path: branch BEFORE any token/network guard so a missing
+            # Replicate token can never block a free ffmpeg composite.
+            return self._execute_effect(inputs)
+
         token = self._token()
         ok, reason = self._validate_token(token)
         if not ok:
@@ -487,6 +616,288 @@ class ObjectCutout(BaseTool):
             duration_seconds=round(time.time() - start, 2),
             model=self.MODEL_SLUG,
         )
+
+    # ---- op="effect": selective object effects (local, free) ----
+
+    def _execute_effect(self, inputs: dict[str, Any]) -> ToolResult:
+        """Apply one selective effect to a previously segmented object and recomposite.
+
+        Pure local FFmpeg. Validation (pure, no subprocess) runs first so bad params fail
+        identically with or without ffmpeg installed; the filter chains themselves are
+        documented per effect in the module docstring and built in _build_effect_graph.
+        """
+        import shutil as _shutil
+
+        start = time.time()
+        try:
+            spec = self._validate_effect_inputs(inputs)
+        except _EffectInputError as e:
+            return ToolResult(success=False, error=str(e))
+
+        if _shutil.which("ffmpeg") is None or _shutil.which("ffprobe") is None:
+            return ToolResult(
+                success=False,
+                error="ffmpeg/ffprobe not found on PATH — op='effect' is a local FFmpeg composite.",
+            )
+
+        video: Path = spec["video"]
+        mask_src: Path = spec["mask_src"]
+        mask_kind: str = spec["mask_kind"]
+        effect: str = spec["effect"]
+
+        probed = self._probe_video(video)
+        w, h = probed.get("width"), probed.get("height")
+        fps = probed.get("fps") or 30
+        if effect in ("pixelate", "glow", "outline") and (not w or not h):
+            return ToolResult(
+                success=False,
+                error=f"effect '{effect}': could not probe the source resolution of {video}.",
+            )
+
+        if mask_kind == "cutout":
+            fmt = self._probe_video(mask_src).get("pix_fmt") or ""
+            if not self._pix_fmt_has_alpha(fmt):
+                return ToolResult(
+                    success=False,
+                    error=(
+                        f"cutout_path has no alpha channel (pix_fmt={fmt or 'unknown'}) — pass "
+                        f"the RGBA .mov produced by a prior op='cutout' run, or pass the "
+                        f"mask video as mask_path instead."
+                    ),
+                )
+
+        out_path: Path = spec["out_path"]
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        graph = self._build_effect_graph(effect, mask_kind, spec["params"], w, h, fps)
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(video),
+            "-i", str(mask_src),
+            "-filter_complex", graph,
+            "-map", "[out]",
+            "-map", "0:a?", "-c:a", "copy",  # audio passes through from the source untouched
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            str(out_path),
+        ]
+        err = self._run_ffmpeg(cmd)
+        if err:
+            return ToolResult(success=False, error=f"effect '{effect}' failed: {err}")
+        if not out_path.exists() or out_path.stat().st_size == 0:
+            return ToolResult(success=False, error=f"effect '{effect}' produced no output.")
+
+        out_probe = self._probe_video(out_path)
+        data: dict[str, Any] = {
+            "op": "effect",
+            "effect": effect,
+            "source": str(video),
+            "mask_source": str(mask_src),
+            "mask_kind": mask_kind,  # "mask" (used directly) | "cutout" (alpha extracted)
+            "output_path": str(out_path),
+            "duration_seconds": out_probe.get("duration_seconds"),
+            "resolution": out_probe.get("resolution"),
+            "filtergraph": graph,
+        }
+        return ToolResult(
+            success=True,
+            data=data,
+            artifacts=[str(out_path)],
+            cost_usd=0.0,
+            duration_seconds=round(time.time() - start, 2),
+        )
+
+    def _validate_effect_inputs(self, inputs: dict[str, Any]) -> dict[str, Any]:
+        """Pure validation (no subprocess): raise _EffectInputError on the first problem."""
+        effect = inputs.get("effect")
+        if effect not in self.EFFECTS:
+            raise _EffectInputError(
+                f"op='effect' requires effect in {self.EFFECTS}; got {effect!r}."
+            )
+
+        video_path = inputs.get("video_path")
+        if not video_path:
+            raise _EffectInputError("video_path is required.")
+        video = Path(video_path)
+        if not video.exists():
+            raise _EffectInputError(f"Video not found: {video_path}")
+        if video.suffix.lower() not in self.SUPPORTED_FORMATS:
+            raise _EffectInputError(
+                f"Unsupported format {video.suffix or '(none)'}. "
+                f"object_cutout accepts {sorted(self.SUPPORTED_FORMATS)}."
+            )
+
+        mask_path = inputs.get("mask_path")
+        cutout_path = inputs.get("cutout_path")
+        if not mask_path and not cutout_path:
+            raise _EffectInputError(
+                "op='effect' needs the output of a prior op='cutout' run: pass mask_path "
+                "(white-on-black mask video) or cutout_path (RGBA .mov). Segmentation is "
+                "never re-run by this op."
+            )
+        # mask_path wins when both are given — it is the direct primitive (no alphaextract)
+        mask_kind = "mask" if mask_path else "cutout"
+        mask_src = Path(mask_path or cutout_path)
+        if not mask_src.exists():
+            raise _EffectInputError(f"{mask_kind}_path not found: {mask_src}")
+
+        params: dict[str, Any] = {}
+        if effect in ("blur", "glow"):
+            default = self.BLUR_SIGMA_DEFAULT if effect == "blur" else self.GLOW_SIGMA_DEFAULT
+            sigma = inputs.get("strength", default)
+            if not isinstance(sigma, (int, float)) or isinstance(sigma, bool) or \
+                    not (0 < sigma <= self.STRENGTH_MAX):
+                raise _EffectInputError(
+                    f"strength must be in (0, {self.STRENGTH_MAX:g}]; got {sigma!r}."
+                )
+            params["sigma"] = float(sigma)
+        elif effect == "pixelate":
+            ps = inputs.get("pixel_size", self.PIXEL_SIZE_DEFAULT)
+            if not isinstance(ps, int) or isinstance(ps, bool) or \
+                    not (self.PIXEL_SIZE_MIN <= ps <= self.PIXEL_SIZE_MAX):
+                raise _EffectInputError(
+                    f"pixel_size must be an integer in "
+                    f"[{self.PIXEL_SIZE_MIN}, {self.PIXEL_SIZE_MAX}]; got {ps!r}."
+                )
+            params["pixel_size"] = ps
+        elif effect == "outline":
+            color = inputs.get("color", self.OUTLINE_COLOR_DEFAULT)
+            if not isinstance(color, str) or not self._COLOR_RE.match(color):
+                raise _EffectInputError(
+                    f"color must be an ffmpeg color name or #/0x hex (e.g. 'white', "
+                    f"'#FF6B4A'); got {color!r}."
+                )
+            thickness = inputs.get("thickness", self.OUTLINE_THICKNESS_DEFAULT)
+            if not isinstance(thickness, int) or isinstance(thickness, bool) or \
+                    not (1 <= thickness <= self.OUTLINE_THICKNESS_MAX):
+                raise _EffectInputError(
+                    f"thickness must be an integer in [1, {self.OUTLINE_THICKNESS_MAX}]; "
+                    f"got {thickness!r}."
+                )
+            params["color"] = color
+            params["thickness"] = thickness
+        # bw_background takes no params
+
+        op_out = inputs.get("output_path")
+        out_path = Path(op_out) if op_out else video.with_name(f"{video.stem}_fx_{effect}.mp4")
+        return {
+            "effect": effect,
+            "video": video,
+            "mask_src": mask_src,
+            "mask_kind": mask_kind,
+            "params": params,
+            "out_path": out_path,
+        }
+
+    def _build_effect_graph(
+        self, effect: str, mask_kind: str, params: dict[str, Any],
+        w: Optional[int], h: Optional[int], fps: float,
+    ) -> str:
+        """Assemble the -filter_complex graph (chains documented in the module docstring).
+
+        Input 0 = source video, input 1 = mask source. scale2ref resizes the mask to the
+        SOURCE's exact dims (same trick as _composite_alpha) so a mask produced from a
+        downscaled upload still composites against the full-res original.
+        """
+        if mask_kind == "cutout":
+            prelude = "[1:v]alphaextract[mraw]"  # RGBA cutout -> gray alpha plane
+        else:
+            prelude = "[1:v]format=gray[mraw]"
+        common = f"{prelude};[mraw][0:v]scale2ref=w=iw:h=ih[m][src]"
+
+        # GOTCHA: overlay's framesync runs to the LONGEST input (repeating ended streams),
+        # so any graph touching an infinite color source — or a mask a hair longer than the
+        # source — would never terminate. Every final overlay therefore sets shortest=1,
+        # pinning the output duration to the source clip.
+        if effect == "blur":
+            return (
+                f"{common};[src]split=2[base][fxs];"
+                f"[fxs]gblur=sigma={params['sigma']:g}[fx];"
+                f"[fx][m]alphamerge[fxa];[base][fxa]overlay=shortest=1:format=auto[out]"
+            )
+        if effect == "pixelate":
+            ps = params["pixel_size"]
+            tw, th = max(4, int(w) // ps), max(4, int(h) // ps)
+            return (
+                f"{common};[src]split=2[base][fxs];"
+                f"[fxs]scale={tw}:{th}:flags=area,scale={w}:{h}:flags=neighbor[fx];"
+                f"[fx][m]alphamerge[fxa];[base][fxa]overlay=shortest=1:format=auto[out]"
+            )
+        if effect == "glow":
+            return (
+                f"{common};[src]format=rgba,split=2[base][s1];"
+                f"[s1][m]alphamerge,split=2[obj][objh];"
+                f"[objh]gblur=sigma={params['sigma']:g}[halo];"
+                f"color=c=black:s={w}x{h}:r={fps:g},format=rgba[blk];"
+                f"[blk][halo]overlay=shortest=1:format=auto[haloflat];"
+                f"[base][haloflat]blend=all_mode=screen[glowed];"
+                f"[glowed][obj]overlay=shortest=1:format=auto[out]"
+            )
+        if effect == "outline":
+            dilate = ",".join(["dilation"] * params["thickness"])  # ~1px growth per pass
+            return (
+                f"{common};[m]split=2[ma][mb];"
+                f"[ma]{dilate}[md];"
+                f"[md][mb]blend=all_mode=difference[ring];"
+                f"color=c={params['color']}:s={w}x{h}:r={fps:g}[col];"
+                f"[col][ring]alphamerge[ringa];"
+                f"[src][ringa]overlay=shortest=1:format=auto[out]"
+            )
+        # bw_background — the inverted-mask effect: desaturate where the object is NOT
+        return (
+            f"{common};[m]negate[mi];[src]split=2[base][fxs];"
+            f"[fxs]hue=s=0[fx];[fx][mi]alphamerge[fxa];"
+            f"[base][fxa]overlay=shortest=1:format=auto[out]"
+        )
+
+    @staticmethod
+    def _pix_fmt_has_alpha(fmt: str) -> bool:
+        # NOTE: a plain "'a' in fmt" check would false-positive on "gray"
+        return bool(re.search(r"(rgba|argb|bgra|abgr|yuva|gbrap|^ya)", fmt or ""))
+
+    def _run_ffmpeg(self, cmd: list[str]) -> Optional[str]:
+        """Run ffmpeg; None on success, trimmed stderr on failure.
+
+        BaseTool.run_command uses check=True, so a non-zero exit raises CalledProcessError
+        rather than returning a code — catch it and surface the stderr."""
+        import subprocess
+
+        try:
+            self.run_command(cmd, timeout=900)
+            return None
+        except subprocess.CalledProcessError as e:
+            return ((e.stderr or "") or "ffmpeg failed").strip()[-500:]
+        except subprocess.TimeoutExpired:
+            return "ffmpeg timed out."
+
+    def _probe_video(self, path: Path) -> dict[str, Any]:
+        """Normalize to {duration_seconds, width, height, fps, pix_fmt, resolution}."""
+        out: dict[str, Any] = {}
+        try:
+            from tools.video._shared import probe_output
+
+            info = probe_output(path)
+            out["duration_seconds"] = info.get("duration_seconds")
+            out["width"] = info.get("video_width") or info.get("width")
+            out["height"] = info.get("video_height") or info.get("height")
+            out["pix_fmt"] = info.get("pix_fmt")
+        except Exception:
+            pass
+        try:
+            proc = self.run_command(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                 "stream=r_frame_rate", "-of", "default=nw=1:nk=1", str(path)],
+                timeout=30,
+            )
+            raw = (proc.stdout or "").strip()
+            if "/" in raw:
+                num, den = raw.split("/", 1)
+                out["fps"] = round(float(num) / float(den), 3) if float(den) else None
+            elif raw:
+                out["fps"] = float(raw)
+        except Exception:
+            pass
+        if out.get("width") and out.get("height"):
+            out["resolution"] = f"{out['width']}x{out['height']}"
+        return out
 
     # ---- prompt handling ----
 

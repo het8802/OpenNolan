@@ -3,12 +3,16 @@
 list_devices/record are validation-only (live mic capture cannot run headless): guard tests
 assert input validation, device-listing parsers, and command construction via the pure
 _record_cmd()/_pitch_chain() helpers. effect + insert run real ffmpeg on lavfi sine clips
-and assert measurable outcomes (duration preservation, base-duration match).
+and assert measurable outcomes — spectral shift for pitch effects (the fixture is a 300 Hz
+sine, so a band-passed volumedetect proves the new pitch), decoded-PCM change for waveform
+effects, and windowed loudness for insert placement/ducking. Duration alone is NOT proof:
+a straight remux preserves duration, so every live test here must fail on a no-op.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -19,6 +23,39 @@ from tools.audio.voice_ops import VoiceOps, _OpInputError
 
 HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 needs_ffmpeg = pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg/ffprobe not on PATH")
+
+
+def _mean_db(path, pre=None, start=None, dur=None):
+    """volumedetect mean_volume, optionally windowed and behind a pre-filter.
+    Pure digital silence reads ~-91 dB; the lavfi sine fixtures read ~-21 dB."""
+    cmd = ["ffmpeg", "-hide_banner", "-nostats"]
+    if start is not None:
+        cmd += ["-ss", str(start)]
+    if dur is not None:
+        cmd += ["-t", str(dur)]
+    af = (f"{pre}," if pre else "") + "volumedetect"
+    proc = subprocess.run(cmd + ["-i", str(path), "-af", af, "-f", "null", "-"],
+                          capture_output=True, text=True)
+    m = re.search(r"mean_volume:\s*(-?[\d.]+)\s*dB", proc.stderr)
+    assert m, f"no mean_volume in volumedetect output for {path}"
+    return float(m.group(1))
+
+
+def _band_db(path, freq):
+    """Loudness inside a narrow band at `freq` (double bandpass ~24 dB/oct skirts).
+    A 300 Hz sine reads < -50 dB through a 600 Hz band, so this cleanly separates
+    'pitch really shifted' from 'file was copied through'."""
+    return _mean_db(path, pre=f"bandpass=f={freq}:w=60,bandpass=f={freq}:w=60")
+
+
+def _audio_md5(path):
+    """md5 of the DECODED audio samples. A dropped -af chain on a wav->wav run
+    re-encodes pcm_s16le bit-exactly (verified), so md5 equality == no-op."""
+    proc = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:a:0", "-f", "md5", "-"],
+        capture_output=True, text=True, check=True,
+    )
+    return proc.stdout.strip()
 
 
 @pytest.fixture
@@ -236,31 +273,40 @@ def _dur(tool, path):
 
 
 @needs_ffmpeg
-def test_effect_helium_preserves_duration(tool, voice_wav, tmp_path):
+def test_effect_helium_shifts_pitch_and_preserves_duration(tool, voice_wav, tmp_path):
     out = tmp_path / "helium.wav"
     res = tool.execute({"operation": "effect", "input_path": str(voice_wav),
                         "preset": "helium", "output_path": str(out)})
     assert res.success, res.error
     assert abs(res.data["duration_seconds"] - 2.0) <= 0.1  # +-5%
+    # helium = 1.35x rate: 300 Hz fixture -> ~405 Hz. The 405 band is silent on
+    # the input and loud on the output (calibrated: -74.5 -> -21.4 dB).
+    assert _band_db(voice_wav, 405) < -50, "fixture unexpectedly has 405 Hz energy"
+    assert _band_db(out, 405) > -32, "helium output has no energy at the shifted pitch"
 
 
 @needs_ffmpeg
-def test_effect_pitch_plus_12_runs_and_preserves_duration(tool, voice_wav, tmp_path):
+def test_effect_pitch_plus_12_doubles_frequency_and_preserves_duration(tool, voice_wav, tmp_path):
     out = tmp_path / "p12.wav"
     res = tool.execute({"operation": "effect", "input_path": str(voice_wav),
                         "pitch_semitones": 12, "output_path": str(out)})
     assert res.success, res.error
     assert abs(res.data["duration_seconds"] - 2.0) <= 0.1
+    # +12 semitones doubles 300 Hz -> 600 Hz (calibrated: -84.3 -> -21.3 dB in band)
+    assert _band_db(voice_wav, 600) < -50, "fixture unexpectedly has 600 Hz energy"
+    assert _band_db(out, 600) > -32, "pitch +12 output has no energy at 600 Hz"
 
 
 @needs_ffmpeg
 @pytest.mark.parametrize("preset", ["robot", "echo"])
-def test_effect_robot_and_echo_succeed(tool, voice_wav, tmp_path, preset):
+def test_effect_robot_and_echo_change_the_waveform(tool, voice_wav, tmp_path, preset):
     out = tmp_path / f"{preset}.wav"
     res = tool.execute({"operation": "effect", "input_path": str(voice_wav),
                         "preset": preset, "output_path": str(out)})
     assert res.success, res.error
     assert out.exists() and out.stat().st_size > 0
+    # a wav->wav run with the -af chain dropped is PCM-bit-exact to the input
+    assert _audio_md5(out) != _audio_md5(voice_wav), f"{preset} output is a straight copy"
 
 
 @needs_ffmpeg
@@ -283,6 +329,9 @@ def test_effect_needs_audio(tool, silent_clip):
 
 @needs_ffmpeg
 def test_insert_keeps_base_duration_with_duck(tool, video_clip, voice_wav, tmp_path):
+    """Voice (300 Hz) onto a 440 Hz base at t=1 for 2s: the voice band must be loud
+    only inside [1,3], and the 440 Hz bed must dip there (duck). Band-passed
+    volumedetect separates the two sines, so a base-file copy fails every assert."""
     out = tmp_path / "voiced.mp4"
     res = tool.execute({
         "operation": "insert", "base_path": str(video_clip),
@@ -292,6 +341,45 @@ def test_insert_keeps_base_duration_with_duck(tool, video_clip, voice_wav, tmp_p
     assert abs(res.data["duration_seconds"] - 4.0) <= 0.2  # output == base duration
     assert tool._has_video(out) and tool._has_audio(out)
     assert res.data["duck_music"] is True
+    # the voice is audible exactly in its window (calibrated: -72.5 / -21.6 dB)
+    voice_in = _mean_db(out, pre="bandpass=f=300:w=60,bandpass=f=300:w=60", start=1.1, dur=1.6)
+    voice_out = _mean_db(out, pre="bandpass=f=300:w=60,bandpass=f=300:w=60", start=0.0, dur=0.9)
+    assert voice_in > -32, f"voice not audible in its window: {voice_in} dB"
+    assert voice_out < -50, f"voice leaked outside its window: {voice_out} dB"
+    # the bed ducks while the voice plays (DUCK_LEVEL=0.3 ~= -10.5 dB; calibrated -21.8 -> -31.9)
+    bed_in = _mean_db(out, pre="bandpass=f=440:w=60,bandpass=f=440:w=60", start=1.1, dur=1.6)
+    bed_out = _mean_db(out, pre="bandpass=f=440:w=60,bandpass=f=440:w=60", start=0.0, dur=0.9)
+    assert bed_in < bed_out - 6, f"bed did not duck: {bed_out} -> {bed_in} dB"
+
+
+@needs_ffmpeg
+def test_insert_duck_level_drops_bed_about_10db(tool, tmp_path):
+    """Pin DUCK_LEVEL=0.3 (~-10.5 dB) numerically: a SILENT voice track isolates the
+    bed, so the windowed level change is exactly the duck (calibrated -21.1 -> -31.5),
+    and the bed must recover after the voice window ends."""
+    base = tmp_path / "bed.wav"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+         "-ac", "1", "-ar", "48000", str(base)],
+        capture_output=True, check=True,
+    )
+    silent_voice = tmp_path / "silent_voice.wav"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i",
+         "anullsrc=channel_layout=mono:sample_rate=48000", "-t", "1", str(silent_voice)],
+        capture_output=True, check=True,
+    )
+    out = tmp_path / "ducked.wav"
+    res = tool.execute({
+        "operation": "insert", "base_path": str(base), "voice_path": str(silent_voice),
+        "at_seconds": 1.0, "output_path": str(out),
+    })
+    assert res.success, res.error
+    pre = _mean_db(out, start=0.0, dur=0.9)
+    inside = _mean_db(out, start=1.05, dur=0.9)
+    post = _mean_db(out, start=2.1, dur=0.9)
+    assert 8 < pre - inside < 13, f"duck depth off: {pre} -> {inside} dB (expected ~10.5)"
+    assert abs(post - pre) < 1.5, f"bed did not recover after the voice window: {post} dB"
 
 
 @needs_ffmpeg
@@ -313,14 +401,21 @@ def test_insert_audio_base_no_duck(tool, voice_wav, tmp_path):
 
 @needs_ffmpeg
 def test_insert_silent_video_base_gets_voice_audio(tool, silent_clip, voice_wav, tmp_path):
+    """The anullsrc silence bed alone would satisfy a bare has_audio check — assert
+    the voice is actually AUDIBLE in its window and absent before it (the insert is
+    at t=0.5, so [0, 0.4] must still be the silent bed)."""
     out = tmp_path / "narrated.mp4"
     res = tool.execute({
         "operation": "insert", "base_path": str(silent_clip),
-        "voice_path": str(voice_wav), "at_seconds": 0, "output_path": str(out),
+        "voice_path": str(voice_wav), "at_seconds": 0.5, "output_path": str(out),
     })
     assert res.success, res.error
     assert tool._has_audio(out)  # silence bed + voice mixed in
     assert abs(res.data["duration_seconds"] - 2.0) <= 0.2
+    before = _mean_db(out, start=0.0, dur=0.4)
+    inside = _mean_db(out, start=0.6, dur=1.2)
+    assert inside > -35, f"voice not audible on the silent base: {inside} dB"
+    assert before < -70, f"audio before the insert point should be silence: {before} dB"
 
 
 @needs_ffmpeg
