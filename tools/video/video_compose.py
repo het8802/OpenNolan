@@ -199,7 +199,11 @@ class VideoCompose(BaseTool):
         "Image-to-video with spring animations (Remotion)",
         "Animated text cards, stat cards, charts (Remotion)",
         "Complex transitions between scenes (Remotion)",
-        "Pure video concat and trim (FFmpeg)",
+        "Pure video concat, trim, and xfade cross-transitions (FFmpeg)",
+    ]
+    not_good_for = [
+        "HDR sources — output is 8-bit SDR; detect with is_hdr_source() and "
+        "handle HDR per AGENT_GUIDE before using this tool",
     ]
     retry_policy = RetryPolicy(max_retries=1, retryable_errors=["Conversion failed"])
     resume_support = ResumeSupport.FROM_START
@@ -405,12 +409,230 @@ class VideoCompose(BaseTool):
         except Exception:
             return False
 
+    # ---- per-cut transitions (FFmpeg xfade path) ----
+
+    # transition name → ffmpeg xfade transition. dissolve/crossfade collapse to
+    # fade so beat_cutter/template_apply output renders on the FFmpeg runtime
+    # instead of acting as a route-to-Remotion signal. Snake_case aliases match
+    # how skills/templates spell them.
+    _XFADE_MAP = {
+        "fade": "fade",
+        "dissolve": "fade",
+        "crossfade": "fade",
+        "fadeblack": "fadeblack",
+        "fade_black": "fadeblack",
+        "fadewhite": "fadewhite",
+        "fade_white": "fadewhite",
+        "wipe": "wipeleft",
+        "wipeleft": "wipeleft", "wipe_left": "wipeleft",
+        "wiperight": "wiperight", "wipe_right": "wiperight",
+        "wipeup": "wipeup", "wipe_up": "wipeup",
+        "wipedown": "wipedown", "wipe_down": "wipedown",
+        "slideleft": "slideleft", "slide_left": "slideleft",
+        "slideright": "slideright", "slide_right": "slideright",
+        "slideup": "slideup", "slide_up": "slideup",
+        "slidedown": "slidedown", "slide_down": "slidedown",
+        "circleopen": "circleopen", "circle_open": "circleopen",
+        "circleclose": "circleclose", "circle_close": "circleclose",
+        "zoom": "zoomin", "zoomin": "zoomin", "zoom_in": "zoomin",
+    }
+    _HARD_CUT_NAMES = {"", "cut", "none", "hard", "hard_cut"}
+    TRANSITION_DUR_MIN = 0.1
+    TRANSITION_DUR_MAX = 2.0
+    TRANSITION_DUR_DEFAULT = 0.5
+
+    @classmethod
+    def _clamp_transition_duration(cls, value: Any, fallback: float) -> float:
+        try:
+            d = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        return min(max(d, cls.TRANSITION_DUR_MIN), cls.TRANSITION_DUR_MAX)
+
+    @classmethod
+    def _resolve_joins(
+        cls,
+        cuts: list[dict],
+        metadata: dict[str, Any] | None,
+    ) -> tuple[list[Optional[dict[str, Any]]], list[str]]:
+        """Resolve the transition at each A→B join for the FFmpeg xfade path.
+
+        joins[i-1] describes the join between cuts[i-1] (A) and cuts[i] (B):
+        None for a hard cut, else {"type": <xfade transition>, "duration": s}.
+
+        Precedence per join: B.transition_in wins over A.transition_out when
+        both are set (B owns its own entrance). The transition_duration is
+        read from whichever cut supplied the winning transition name, falling
+        back to metadata.default_transition_duration, then 0.5s — always
+        clamped to [0.1, 2.0]. Unknown transition names degrade to 'fade'
+        with a warning rather than failing the render.
+        """
+        default_dur = cls._clamp_transition_duration(
+            (metadata or {}).get("default_transition_duration"),
+            cls.TRANSITION_DUR_DEFAULT,
+        )
+        joins: list[Optional[dict[str, Any]]] = []
+        warnings: list[str] = []
+        for i in range(1, len(cuts)):
+            a, b = cuts[i - 1], cuts[i]
+            name = b.get("transition_in")
+            owner = b
+            if not name:
+                name = a.get("transition_out")
+                owner = a
+            norm = str(name or "").strip().lower()
+            if norm in cls._HARD_CUT_NAMES:
+                joins.append(None)
+                continue
+            xfade = cls._XFADE_MAP.get(norm)
+            if xfade is None:
+                warnings.append(
+                    f"unknown transition {name!r} between cuts {i - 1} and {i} "
+                    f"— rendered as 'fade'"
+                )
+                xfade = "fade"
+            duration = cls._clamp_transition_duration(
+                owner.get("transition_duration"), default_dur
+            )
+            joins.append({"type": xfade, "duration": duration})
+        return joins, warnings
+
+    @staticmethod
+    def _probe_duration_seconds(path: Path) -> Optional[float]:
+        """Container duration of a clip in seconds, or None if unprobeable."""
+        try:
+            out = subprocess.check_output(
+                [
+                    "ffprobe", "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=nw=1:nk=1",
+                    str(path),
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            return float(out.strip())
+        except Exception:
+            return None
+
+    def _transitions_concat(
+        self,
+        temp_segments: list[Path],
+        joins: list[Optional[dict[str, Any]]],
+        fps_str: str,
+        codec: str,
+        crf: int,
+        preset: str,
+        concat_out: Path,
+    ) -> tuple[Optional[str], str]:
+        """Join normalized segments with xfade/acrossfade, encoding `concat_out`.
+
+        Transition joins use xfade (video) + acrossfade (audio); hard-cut joins
+        inside the same timeline use the concat filter, so mixed timelines work
+        in a single pass. xfade offsets are computed from the POST-normalization
+        probed segment durations (fps-normalized, so reliable) — the requested
+        in/out math can drift via fps rounding and AAC priming, which would
+        misplace every transition after the first.
+
+        Every normalized segment is guaranteed an audio track (silent sources
+        get anullsrc injected during segment encode), so the acrossfade chain
+        never breaks on a missing stream.
+
+        Returns (error, filtergraph); error is None on success.
+        """
+        durs: list[float] = []
+        for seg in temp_segments:
+            d = self._probe_duration_seconds(seg)
+            if not d or d <= 0:
+                return f"could not probe duration of normalized segment {seg.name}", ""
+            durs.append(d)
+
+        cmd = ["ffmpeg", "-y"]
+        for seg in temp_segments:
+            cmd.extend(["-i", str(seg)])
+
+        filters: list[str] = []
+        # xfade refuses mismatched timebases — a concat-filter output runs at
+        # 1/1000000 while demuxed mp4 video is e.g. 1/12800 — so normalize
+        # every video input to AVTB before chaining.
+        for i in range(len(temp_segments)):
+            filters.append(f"[{i}:v]settb=AVTB[vtb{i}]")
+        cur_v, cur_a = "vtb0", "0:a"
+        cum = durs[0]  # visible duration of the chain built so far
+        for i in range(1, len(temp_segments)):
+            join = joins[i - 1]
+            out_v, out_a = f"vx{i}", f"ax{i}"
+            if join is None:
+                filters.append(f"[{cur_v}][vtb{i}]concat=n=2:v=1:a=0[{out_v}]")
+                filters.append(f"[{cur_a}][{i}:a]concat=n=2:v=0:a=1[{out_a}]")
+                cum += durs[i]
+            else:
+                # Cap the fade by the material actually available on both
+                # sides — xfade/acrossfade fail outright when the requested
+                # duration exceeds either input.
+                avail = min(cum, durs[i]) - 0.05
+                if avail <= 0.05:
+                    return (
+                        f"transition into segment {i} needs ≥ ~0.1s of material on "
+                        f"both sides (have {min(cum, durs[i]):.2f}s); shorten "
+                        f"transition_duration or lengthen the adjacent cuts",
+                        "",
+                    )
+                d = round(min(join["duration"], avail), 4)
+                offset = round(cum - d, 4)
+                filters.append(
+                    f"[{cur_v}][vtb{i}]xfade=transition={join['type']}:"
+                    f"duration={d}:offset={offset}[{out_v}]"
+                )
+                filters.append(f"[{cur_a}][{i}:a]acrossfade=d={d}[{out_a}]")
+                cum = cum + durs[i] - d
+            cur_v, cur_a = out_v, out_a
+
+        filtergraph = ";".join(filters)
+        cmd.extend([
+            "-filter_complex", filtergraph,
+            "-map", f"[{cur_v}]", "-map", f"[{cur_a}]",
+            "-c:v", codec, "-crf", str(crf), "-preset", preset,
+            "-pix_fmt", "yuv420p", "-r", fps_str,
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+            str(concat_out),
+        ])
+        try:
+            self.run_command(cmd, timeout=1800)
+        except subprocess.CalledProcessError as e:
+            return ((e.stderr or "") or "ffmpeg xfade chain failed").strip()[-500:], filtergraph
+        except subprocess.TimeoutExpired:
+            return "ffmpeg xfade chain timed out", filtergraph
+        return None, filtergraph
+
     def _compose(self, inputs: dict[str, Any]) -> ToolResult:
-        """FFmpeg composition: concat video cuts, add audio, burn subtitles.
+        """FFmpeg composition: cut segments, transitions, audio, subtitles.
 
         Handles video sources only. Still images and animated scene types
         are routed to Remotion via the render operation — call compose
         directly only for pure video pipelines (e.g. talking-head).
+
+        Canvas: every segment is normalized to a single target canvas
+        (scale + letterbox pad + fps + sar=1). Precedence:
+        edit_decisions.metadata.compose_target {width,height,fps} >
+        profile-resolved resolution > 1920x1080@30.
+
+        Transitions: cuts[].transition_in/transition_out render via xfade /
+        acrossfade. The join A→B is owned by B's transition_in; if both
+        A.transition_out and B.transition_in are set, B.transition_in wins
+        (B owns its own entrance). Durations clamp to [0.1, 2.0]s (default
+        0.5, overridable globally via metadata.default_transition_duration).
+        xfade offsets are computed from the POST-normalization probed
+        segment durations — never from the requested in/out math. A
+        timeline with no transitions takes the original concat-demuxer
+        copy path, byte-for-byte unchanged behavior.
+
+        Crop: cuts[].transform.crop {x,y,width,height} is applied to the
+        source BEFORE scale/pad.
+
+        Limitations: output is 8-bit SDR yuv420p (HDR sources must be
+        handled per AGENT_GUIDE before composing); each crossfade shortens
+        the timeline by its duration (standard xfade semantics).
         """
         edit_decisions = inputs.get("edit_decisions")
         if not edit_decisions:
@@ -425,19 +647,49 @@ class VideoCompose(BaseTool):
         preset = inputs.get("preset", "medium")
         profile_name = inputs.get("profile")
 
-        # Resolve target resolution from profile or default
-        resolution = "1920x1080"
+        cuts = edit_decisions.get("cuts", [])
+        if not cuts:
+            return ToolResult(success=False, error="No cuts in edit_decisions")
+
+        # Canvas precedence: metadata.compose_target > profile > 1920x1080@30.
+        target_w, target_h, target_fps = 1920, 1080, 30.0
         if profile_name:
             try:
                 from lib.media_profiles import get_profile
                 p = get_profile(profile_name)
-                resolution = f"{p.width}x{p.height}"
+                target_w, target_h, target_fps = p.width, p.height, float(p.fps)
             except (ImportError, ValueError):
                 pass
+        compose_target = (edit_decisions.get("metadata") or {}).get("compose_target") or {}
+        if compose_target:
+            try:
+                ct_w = int(compose_target.get("width", target_w))
+                ct_h = int(compose_target.get("height", target_h))
+                ct_fps = float(compose_target.get("fps", target_fps))
+            except (TypeError, ValueError):
+                return ToolResult(
+                    success=False,
+                    error=f"invalid metadata.compose_target {compose_target!r}: "
+                          "width/height/fps must be numeric",
+                )
+            if ct_w <= 0 or ct_h <= 0 or ct_fps <= 0:
+                return ToolResult(
+                    success=False,
+                    error=f"invalid metadata.compose_target {compose_target!r}: "
+                          "width/height/fps must be positive",
+                )
+            if ct_w % 2 or ct_h % 2:
+                return ToolResult(
+                    success=False,
+                    error=f"metadata.compose_target {ct_w}x{ct_h} must use even "
+                          "dimensions (yuv420p 4:2:0 requirement)",
+                )
+            target_w, target_h, target_fps = ct_w, ct_h, ct_fps
+        fps_str = f"{target_fps:g}"
 
-        cuts = edit_decisions.get("cuts", [])
-        if not cuts:
-            return ToolResult(success=False, error="No cuts in edit_decisions")
+        # Per-join transition resolution (B.transition_in wins over A.transition_out).
+        joins, transition_warnings = self._resolve_joins(cuts, edit_decisions.get("metadata"))
+        has_transitions = any(j is not None for j in joins)
 
         # Resolve subtitle style using the layered priority resolver
         # (explicit > edit_decisions > playbook > defaults)
@@ -505,21 +757,42 @@ class VideoCompose(BaseTool):
                     ]
 
                     # Normalize every segment to a consistent container so the
-                    # concat-copy step is always safe. The concat demuxer with
-                    # `-c copy` requires identical codec / resolution / fps /
-                    # pix_fmt / sar across ALL segments — otherwise it throws
-                    # "Non-monotonous DTS" or silently produces corrupt output.
+                    # concat-copy step is always safe (and xfade inputs match).
+                    # The concat demuxer with `-c copy` requires identical codec /
+                    # resolution / fps / pix_fmt / sar across ALL segments —
+                    # otherwise it throws "Non-monotonous DTS" or silently
+                    # produces corrupt output. xfade likewise requires matching
+                    # resolution/fps/pix_fmt on both inputs.
                     #
-                    # Default target is 1920x1080 @ 30fps, yuv420p, sar=1. If the
-                    # source is smaller it letterboxes; if larger it downscales.
-                    # Callers can override via edit_decisions.metadata.compose_target
-                    # (future extension) but the defaults match the most common
-                    # delivery profile (YouTube landscape).
-                    vf_parts: list[str] = [
-                        "scale=1920:1080:force_original_aspect_ratio=decrease",
-                        "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black",
+                    # Target canvas comes from compose_target > profile >
+                    # 1920x1080@30 (resolved above). Smaller sources letterbox;
+                    # larger ones downscale.
+                    vf_parts: list[str] = []
+                    crop = (cut.get("transform") or {}).get("crop") or {}
+                    if crop:
+                        crop_w, crop_h = crop.get("width"), crop.get("height")
+                        if (
+                            not isinstance(crop_w, (int, float))
+                            or not isinstance(crop_h, (int, float))
+                            or crop_w <= 0 or crop_h <= 0
+                        ):
+                            return ToolResult(
+                                success=False,
+                                error=f"cuts[{i}].transform.crop requires positive "
+                                      f"numeric width and height; got {crop!r}",
+                            )
+                        crop_x = int(round(crop.get("x", 0) or 0))
+                        crop_y = int(round(crop.get("y", 0) or 0))
+                        # Crop runs BEFORE scale/pad so coordinates are in
+                        # source pixels, matching the schema's intent.
+                        vf_parts.append(
+                            f"crop={int(round(crop_w))}:{int(round(crop_h))}:{crop_x}:{crop_y}"
+                        )
+                    vf_parts += [
+                        f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease",
+                        f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black",
                         "setsar=1",
-                        "fps=30",
+                        f"fps={fps_str}",
                     ]
                     af_parts: list[str] = []
                     if speed != 1.0:
@@ -535,7 +808,7 @@ class VideoCompose(BaseTool):
                         "-crf", str(crf),
                         "-preset", preset,
                         "-pix_fmt", "yuv420p",
-                        "-r", "30",
+                        "-r", fps_str,
                     ])
 
                     # Audio handling: some source clips have no audio stream
@@ -570,7 +843,7 @@ class VideoCompose(BaseTool):
                             "-crf", str(crf),
                             "-preset", preset,
                             "-pix_fmt", "yuv420p",
-                            "-r", "30",
+                            "-r", fps_str,
                             "-c:a", "aac",
                             "-b:a", "192k",
                             "-ar", "48000",
@@ -582,22 +855,34 @@ class VideoCompose(BaseTool):
 
                 temp_segments.append(seg_path)
 
-            # Step 2: Concat segments
-            concat_path = temp_dir / "concat_list.txt"
-            with open(concat_path, "w", encoding="utf-8") as f:
-                for seg in temp_segments:
-                    safe = str(seg.resolve()).replace("\\", "/")
-                    f.write(f"file '{safe}'\n")
-
+            # Step 2: Join segments. Transition-free timelines keep the original
+            # concat-demuxer copy path (back-compat contract: zero behavior
+            # change). Any declared transition switches to a filter_complex
+            # chain of xfade/acrossfade (+ concat filter for hard-cut joins).
             concat_out = temp_dir / "concat.mp4"
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "concat", "-safe", "0",
-                "-i", str(concat_path),
-                "-c", "copy",
-                str(concat_out),
-            ]
-            self.run_command(cmd)
+            used_xfade = has_transitions and len(temp_segments) > 1
+            xfade_filtergraph = ""
+            if used_xfade:
+                err, xfade_filtergraph = self._transitions_concat(
+                    temp_segments, joins, fps_str, codec, crf, preset, concat_out,
+                )
+                if err:
+                    return ToolResult(success=False, error=f"transition render failed: {err}")
+            else:
+                concat_path = temp_dir / "concat_list.txt"
+                with open(concat_path, "w", encoding="utf-8") as f:
+                    for seg in temp_segments:
+                        safe = str(seg.resolve()).replace("\\", "/")
+                        f.write(f"file '{safe}'\n")
+
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-f", "concat", "-safe", "0",
+                    "-i", str(concat_path),
+                    "-c", "copy",
+                    str(concat_out),
+                ]
+                self.run_command(cmd)
 
             # Step 3: Apply subtitles and/or replace audio
             final_input = concat_out
@@ -614,25 +899,14 @@ class VideoCompose(BaseTool):
             if audio_path and Path(audio_path).exists():
                 cmd.extend(["-i", audio_path])
 
-            # Determine if profile requires re-encoding (resize/fps change)
-            # This must be checked BEFORE choosing copy vs encode, because
-            # -s and -r are incompatible with -c:v copy.
-            profile_flags: list[str] = []
-            if profile_name:
-                try:
-                    from lib.media_profiles import get_profile
-                    p = get_profile(profile_name)
-                    profile_flags = ["-s", f"{p.width}x{p.height}", "-r", str(p.fps)]
-                except (ImportError, ValueError):
-                    pass
-
-            needs_reencode = bool(vfilters) or bool(profile_flags)
+            # The canvas (resolution + fps, including any profile) was already
+            # applied per segment, so no output-level -s/-r is needed here —
+            # a late -s on the letterboxed canvas would only distort it.
+            needs_reencode = bool(vfilters)
 
             if needs_reencode:
-                if vfilters:
-                    cmd.extend(["-vf", ",".join(vfilters)])
+                cmd.extend(["-vf", ",".join(vfilters)])
                 cmd.extend(["-c:v", codec, "-crf", str(crf), "-preset", preset])
-                cmd.extend(profile_flags)
             else:
                 cmd.extend(["-c:v", "copy"])
 
@@ -647,16 +921,25 @@ class VideoCompose(BaseTool):
             cmd.append(str(output_path))
             self.run_command(cmd)
 
+            data: dict[str, Any] = {
+                "operation": "compose",
+                "cut_count": len(cuts),
+                "has_subtitles": subtitle_path is not None,
+                "has_mixed_audio": audio_path is not None,
+                "profile": profile_name,
+                "canvas": {"width": target_w, "height": target_h, "fps": target_fps},
+                "used_xfade": used_xfade,
+                "transitions_applied": (
+                    sum(1 for j in joins if j is not None) if used_xfade else 0
+                ),
+                "xfade_filtergraph": xfade_filtergraph or None,
+                "output": str(output_path),
+            }
+            if transition_warnings:
+                data["warnings"] = transition_warnings
             return ToolResult(
                 success=True,
-                data={
-                    "operation": "compose",
-                    "cut_count": len(cuts),
-                    "has_subtitles": subtitle_path is not None,
-                    "has_mixed_audio": audio_path is not None,
-                    "profile": profile_name,
-                    "output": str(output_path),
-                },
+                data=data,
                 artifacts=[str(output_path)],
             )
         finally:
@@ -839,14 +1122,19 @@ class VideoCompose(BaseTool):
         if not self._remotion_available():
             return False
 
-        # Any rich content → Remotion (fast path, catches the obvious cases)
+        # Any rich content → Remotion (fast path, catches the obvious cases).
+        # NOTE: cuts[].transition_in/out is deliberately NOT checked here —
+        # the FFmpeg path renders transitions natively via xfade (_compose),
+        # so a transition is no longer a Remotion-only feature. When
+        # render_runtime='ffmpeg' this function is never consulted; the
+        # locked runtime routes straight to _render_via_ffmpeg.
         for cut in cuts:
             source = cut.get("source", "")
             if source and Path(source).suffix.lower() in self._IMAGE_EXTENSIONS:
                 return True
             if cut.get("type") in self._REMOTION_SCENE_TYPES:
                 return True
-            if cut.get("animation") or cut.get("transition_in") or cut.get("transition_out"):
+            if cut.get("animation"):
                 return True
             transform = cut.get("transform", {})
             if transform and transform.get("animation"):
