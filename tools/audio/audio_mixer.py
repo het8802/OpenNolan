@@ -1,15 +1,34 @@
 """Audio mixer tool wrapping FFmpeg and pydub.
 
 Mixes speech, music, and SFX tracks with support for ducking, fades,
-and volume normalization. Falls back to FFmpeg-only mode if pydub is
-not installed.
+volume normalization, loudness auto-balancing, and audio extraction.
+Falls back to FFmpeg-only mode if pydub is not installed.
+
+Design notes / documented limitations:
+  - Per-track fades are applied to the SOURCE audio BEFORE any start_seconds
+    delay, so fade_in ramps the actual audio start and fade_out lands on the
+    actual audio end. fade_out emits an explicit afade st= computed from the
+    probed track duration (FFmpeg defaults st=0, which fades the track to
+    silence over its FIRST N seconds and keeps it muted — a live-verified bug
+    this tool previously had in both mix and full_mix).
+  - auto_balance measures integrated LUFS per track (ffmpeg ebur128) and
+    computes per-role gains toward a voice-anchored target. In apply mode it
+    delegates to the mix pathway; amix scales each input by 1/n, so the
+    output preserves the computed RELATIVE balance but the absolute level may
+    sit below target — run a loudnorm pass (normalize=true) for delivery
+    loudness. Gains are capped at +/-30 dB (near-silent tracks would
+    otherwise explode).
+  - extract defaults are UNCHANGED (pcm_s16le 16kHz mono, transcription
+    grade); pass codec for full-fidelity detach (copy/aac/wav/mp3).
 """
 
 from __future__ import annotations
 
+import math
+import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from tools.base_tool import (
     BaseTool,
@@ -25,7 +44,7 @@ from tools.base_tool import (
 
 class AudioMixer(BaseTool):
     name = "audio_mixer"
-    version = "0.1.0"
+    version = "0.2.0"
     tier = ToolTier.CORE
     capability = "audio_processing"
     provider = "ffmpeg"
@@ -40,7 +59,35 @@ class AudioMixer(BaseTool):
     )
     agent_skills = ["ffmpeg", "video_toolkit"]
 
-    capabilities = ["mix", "duck", "fade", "normalize", "extract_audio", "segmented_music"]
+    capabilities = [
+        "mix", "duck", "fade", "normalize", "extract_audio", "segmented_music",
+        "auto_balance",
+    ]
+    not_good_for = [
+        "HDR sources — output is 8-bit SDR; detect with is_hdr_source() and "
+        "handle HDR per AGENT_GUIDE before using this tool",
+    ]
+
+    # auto_balance role normalization + gain safety cap
+    ROLE_ALIASES = {
+        "voice": "voice", "speech": "voice", "primary": "voice",
+        "music": "music", "secondary": "music",
+        "sfx": "sfx",
+    }
+    MAX_BALANCE_GAIN_DB = 30.0
+
+    # extract: codec -> (ffmpeg encoder, default extension); copy is resolved at runtime
+    EXTRACT_CODECS = {
+        "copy": (None, None),
+        "aac": ("aac", ".m4a"),
+        "wav": ("pcm_s16le", ".wav"),
+        "pcm_s16le": ("pcm_s16le", ".wav"),
+        "mp3": ("libmp3lame", ".mp3"),
+    }
+    COPY_EXT_BY_CODEC = {
+        "aac": ".m4a", "mp3": ".mp3", "opus": ".ogg", "vorbis": ".ogg",
+        "flac": ".flac", "ac3": ".ac3", "eac3": ".eac3",
+    }
 
     input_schema = {
         "type": "object",
@@ -48,7 +95,7 @@ class AudioMixer(BaseTool):
         "properties": {
             "operation": {
                 "type": "string",
-                "enum": ["mix", "duck", "extract", "full_mix", "segmented_music"],
+                "enum": ["mix", "duck", "extract", "full_mix", "segmented_music", "auto_balance"],
                 "description": (
                     "mix: layer multiple tracks with volume/delay/fades. "
                     "duck: lower music volume when speech is present. "
@@ -57,7 +104,9 @@ class AudioMixer(BaseTool):
                     "in a single call (preferred for compose-director). "
                     "segmented_music: mix music into a video only during specified "
                     "time segments (e.g. music during talking head, silence during "
-                    "showcase clips)."
+                    "showcase clips). "
+                    "auto_balance: measure each track's integrated LUFS and gain-match "
+                    "voice/music/sfx toward targets (dry-run with apply=false, or mix)."
                 ),
             },
             "tracks": {
@@ -74,7 +123,7 @@ class AudioMixer(BaseTool):
                         "path": {"type": "string"},
                         "role": {
                             "type": "string",
-                            "enum": ["speech", "music", "sfx", "primary", "secondary"],
+                            "enum": ["speech", "music", "sfx", "primary", "secondary", "voice"],
                         },
                         "volume": {
                             "type": "number",
@@ -115,6 +164,54 @@ class AudioMixer(BaseTool):
             },
             "input_path": {"type": "string", "description": "Input for extract operation"},
             "output_path": {"type": "string"},
+            "codec": {
+                "type": "string",
+                "enum": ["copy", "aac", "wav", "pcm_s16le", "mp3"],
+                "description": (
+                    "extract: output codec. Omit for the legacy transcription-grade "
+                    "default (pcm_s16le 16kHz mono). copy = stream-copy the source "
+                    "audio untouched (full fidelity; incompatible with "
+                    "sample_rate/channels)."
+                ),
+            },
+            "sample_rate": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "extract: output sample rate in Hz (not valid with codec=copy).",
+            },
+            "channels": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "extract: output channel count (not valid with codec=copy).",
+            },
+            "stream_index": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "extract: which audio stream to take (0-based among audio streams).",
+            },
+            "target_lufs_voice": {
+                "type": "number",
+                "default": -16,
+                "description": "auto_balance: integrated LUFS target for voice tracks.",
+            },
+            "music_offset_db": {
+                "type": "number",
+                "default": -12,
+                "description": "auto_balance: music target in dB relative to the voice target.",
+            },
+            "sfx_offset_db": {
+                "type": "number",
+                "default": -8,
+                "description": "auto_balance: sfx target in dB relative to the voice target.",
+            },
+            "apply": {
+                "type": "boolean",
+                "default": True,
+                "description": (
+                    "auto_balance: false = dry run; return measured LUFS + computed "
+                    "gains in data without writing any file."
+                ),
+            },
             "ducking": {
                 "type": "object",
                 "description": (
@@ -195,8 +292,12 @@ class AudioMixer(BaseTool):
                 result = self._full_mix(inputs)
             elif operation == "segmented_music":
                 result = self._segmented_music(inputs)
+            elif operation == "auto_balance":
+                result = self._auto_balance(inputs)
             else:
                 return ToolResult(success=False, error=f"Unknown operation: {operation}")
+        except _MixInputError as e:
+            return ToolResult(success=False, error=str(e))
         except Exception as e:
             return ToolResult(success=False, error=str(e))
 
@@ -210,6 +311,7 @@ class AudioMixer(BaseTool):
             return ToolResult(success=False, error="No tracks provided")
 
         output_path = Path(inputs.get("output_path", "mixed_audio.wav"))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         normalize = inputs.get("normalize", True)
 
         # Validate all inputs exist
@@ -223,26 +325,7 @@ class AudioMixer(BaseTool):
 
         for i, track in enumerate(tracks):
             input_args.extend(["-i", track["path"]])
-            volume = track.get("volume", 1.0)
-            delay_ms = int(track.get("start_seconds", 0) * 1000)
-            fade_in = track.get("fade_in_seconds", 0)
-            fade_out = track.get("fade_out_seconds", 0)
-
-            filters = []
-            if volume != 1.0:
-                filters.append(f"volume={volume}")
-            if delay_ms > 0:
-                filters.append(f"adelay={delay_ms}|{delay_ms}")
-            if fade_in > 0:
-                filters.append(f"afade=t=in:d={fade_in}")
-            if fade_out > 0:
-                filters.append(f"afade=t=out:d={fade_out}")
-
-            if filters:
-                filter_chain = ",".join(filters)
-                filter_parts.append(f"[{i}:a]{filter_chain}[a{i}]")
-            else:
-                filter_parts.append(f"[{i}:a]acopy[a{i}]")
+            filter_parts.append(self._per_track_chain(i, track))
 
         # Amix all processed streams
         mix_inputs = "".join(f"[a{i}]" for i in range(len(tracks)))
@@ -263,7 +346,9 @@ class AudioMixer(BaseTool):
         cmd.extend(["-filter_complex", filter_complex])
         cmd.extend(["-map", out_label, str(output_path)])
 
-        self.run_command(cmd)
+        err = self._run(cmd)
+        if err:
+            return ToolResult(success=False, error=f"mix failed: {err}")
 
         return ToolResult(
             success=True,
@@ -384,36 +469,190 @@ class AudioMixer(BaseTool):
         )
 
     def _extract(self, inputs: dict[str, Any]) -> ToolResult:
-        """Extract audio from a video file."""
-        input_path = Path(inputs["input_path"])
-        if not input_path.exists():
+        """Extract audio from a video file.
+
+        Default behavior (no codec given) is UNCHANGED for back-compat:
+        pcm_s16le 16kHz mono — transcription grade, existing callers rely on it.
+        Pass codec (copy/aac/wav/pcm_s16le/mp3) for a full-fidelity detach;
+        sample_rate/channels/stream_index are honored when given.
+        """
+        codec = inputs.get("codec")
+        sample_rate = inputs.get("sample_rate")
+        channels = inputs.get("channels")
+        stream_index = inputs.get("stream_index")
+
+        if codec is not None and codec not in self.EXTRACT_CODECS:
+            return ToolResult(
+                success=False,
+                error=f"extract: codec must be one of {sorted(self.EXTRACT_CODECS)}; got {codec!r}",
+            )
+        for label, val in (("sample_rate", sample_rate), ("channels", channels)):
+            if val is not None and (not isinstance(val, int) or isinstance(val, bool) or val <= 0):
+                return ToolResult(success=False, error=f"extract: {label} must be a positive integer.")
+        if stream_index is not None and (
+            not isinstance(stream_index, int) or isinstance(stream_index, bool) or stream_index < 0
+        ):
+            return ToolResult(success=False, error="extract: stream_index must be a non-negative integer.")
+        if codec == "copy" and (sample_rate is not None or channels is not None):
+            return ToolResult(
+                success=False,
+                error=(
+                    "extract: codec=copy stream-copies the source audio; "
+                    "sample_rate/channels would require re-encoding. Drop them or "
+                    "pick an encoding codec (aac/wav/mp3)."
+                ),
+            )
+
+        input_path = Path(inputs.get("input_path", ""))
+        if not str(input_path) or not input_path.exists():
             return ToolResult(success=False, error=f"Input not found: {input_path}")
 
-        output_path = Path(
-            inputs.get("output_path", str(input_path.with_suffix(".wav")))
-        )
+        source_codec = None
+        if codec is None:
+            # Legacy default (back-compat): transcription-grade wav
+            acodec, ext = "pcm_s16le", ".wav"
+            sample_rate = sample_rate if sample_rate is not None else 16000
+            channels = channels if channels is not None else 1
+        elif codec == "copy":
+            source_codec = self._probe_audio_codec(input_path, stream_index)
+            if not source_codec:
+                return ToolResult(success=False, error="extract: no audio stream found to copy.")
+            acodec = "copy"
+            ext = self.COPY_EXT_BY_CODEC.get(
+                source_codec, ".wav" if source_codec.startswith("pcm_") else ".mka"
+            )
+        else:
+            acodec, ext = self.EXTRACT_CODECS[codec]
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(input_path),
-            "-vn",
-            "-acodec", "pcm_s16le",
-            "-ar", "16000",
-            "-ac", "1",
-            str(output_path),
-        ]
+        output_path = Path(inputs.get("output_path", str(input_path.with_suffix(ext))))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        self.run_command(cmd)
+        cmd = ["ffmpeg", "-y", "-i", str(input_path), "-vn"]
+        if stream_index is not None:
+            cmd.extend(["-map", f"0:a:{stream_index}"])
+        cmd.extend(["-acodec", acodec])
+        if acodec != "copy":
+            if sample_rate is not None:
+                cmd.extend(["-ar", str(sample_rate)])
+            if channels is not None:
+                cmd.extend(["-ac", str(channels)])
+        cmd.append(str(output_path))
 
-        return ToolResult(
-            success=True,
-            data={
-                "operation": "extract",
-                "input": str(input_path),
-                "output": str(output_path),
-            },
-            artifacts=[str(output_path)],
-        )
+        err = self._run(cmd)
+        if err:
+            return ToolResult(success=False, error=f"extract failed: {err}")
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            return ToolResult(success=False, error="extract produced no output.")
+
+        data: dict[str, Any] = {
+            "operation": "extract",
+            "input": str(input_path),
+            "output": str(output_path),
+            "codec": source_codec if codec == "copy" else acodec,
+        }
+        if codec == "copy":
+            data["stream_copied"] = True
+        if sample_rate is not None:
+            data["sample_rate"] = sample_rate
+        if channels is not None:
+            data["channels"] = channels
+        if stream_index is not None:
+            data["stream_index"] = stream_index
+
+        return ToolResult(success=True, data=data, artifacts=[str(output_path)])
+
+    def _auto_balance(self, inputs: dict[str, Any]) -> ToolResult:
+        """Per-track loudness matching toward a voice-anchored LUFS target.
+
+        Measures each track's integrated LUFS (ffmpeg ebur128 summary), then
+        computes the per-track gain that moves it to its role target:
+          voice -> target_lufs_voice (default -16)
+          music -> target_lufs_voice + music_offset_db (default -12)
+          sfx   -> target_lufs_voice + sfx_offset_db (default -8)
+
+        apply=false returns measured/computed values only (dry run). Otherwise
+        the computed volumes are handed to the existing mix pathway. normalize
+        defaults OFF here — a post-mix loudnorm would re-target the overall
+        loudness and obscure the balance just computed.
+        """
+        tracks = inputs.get("tracks", [])
+        if not tracks:
+            return ToolResult(success=False, error="No tracks provided for auto_balance")
+
+        target_voice = float(inputs.get("target_lufs_voice", -16))
+        targets = {
+            "voice": target_voice,
+            "music": target_voice + float(inputs.get("music_offset_db", -12)),
+            "sfx": target_voice + float(inputs.get("sfx_offset_db", -8)),
+        }
+        apply_mix = inputs.get("apply", True)
+
+        resolved: list[tuple[dict[str, Any], str]] = []
+        for t in tracks:
+            role = self.ROLE_ALIASES.get(t.get("role"))
+            if role is None:
+                return ToolResult(
+                    success=False,
+                    error=f"auto_balance: track role must be voice/music/sfx; got {t.get('role')!r}",
+                )
+            path = t.get("path")
+            if not path or not Path(path).exists():
+                return ToolResult(success=False, error=f"Track not found: {path}")
+            resolved.append((t, role))
+
+        report: list[dict[str, Any]] = []
+        mix_tracks: list[dict[str, Any]] = []
+        for t, role in resolved:
+            measured = self._measure_lufs(Path(t["path"]))
+            if measured is None:
+                return ToolResult(
+                    success=False,
+                    error=f"auto_balance: could not measure integrated LUFS of {t['path']}",
+                )
+            target = targets[role]
+            gain_db = target - measured
+            capped = abs(gain_db) > self.MAX_BALANCE_GAIN_DB
+            if capped:
+                gain_db = max(-self.MAX_BALANCE_GAIN_DB, min(self.MAX_BALANCE_GAIN_DB, gain_db))
+            volume = round(math.pow(10, gain_db / 20), 6)
+
+            entry: dict[str, Any] = {
+                "path": t["path"],
+                "role": role,
+                "measured_lufs": round(measured, 2),
+                "target_lufs": round(target, 2),
+                "gain_db": round(gain_db, 2),
+                "volume": volume,
+            }
+            if capped:
+                entry["gain_capped"] = True
+            report.append(entry)
+
+            mt: dict[str, Any] = {"path": t["path"], "role": role, "volume": volume}
+            for k in ("start_seconds", "fade_in_seconds", "fade_out_seconds"):
+                if k in t:
+                    mt[k] = t[k]
+            mix_tracks.append(mt)
+
+        data: dict[str, Any] = {
+            "operation": "auto_balance",
+            "targets_lufs": {k: round(v, 2) for k, v in targets.items()},
+            "tracks": report,
+            "applied": bool(apply_mix),
+        }
+        if not apply_mix:
+            return ToolResult(success=True, data=data)
+
+        mix_result = self._mix({
+            "tracks": mix_tracks,
+            "output_path": inputs.get("output_path", "auto_balanced_audio.wav"),
+            "normalize": inputs.get("normalize", False),
+        })
+        if not mix_result.success:
+            return mix_result
+        data["output"] = mix_result.data.get("output")
+        data["normalized"] = mix_result.data.get("normalized")
+        return ToolResult(success=True, data=data, artifacts=mix_result.artifacts)
 
     def _full_mix(self, inputs: dict[str, Any]) -> ToolResult:
         """One-call mix: layer narration tracks, add music with ducking, normalize.
@@ -467,26 +706,7 @@ class AudioMixer(BaseTool):
 
         for i, track in enumerate(all_tracks):
             input_args.extend(["-i", track["path"]])
-            volume = track.get("volume", 1.0)
-            delay_ms = int(track.get("start_seconds", 0) * 1000)
-            fade_in = track.get("fade_in_seconds", 0)
-            fade_out = track.get("fade_out_seconds", 0)
-
-            filters = []
-            if volume != 1.0:
-                filters.append(f"volume={volume}")
-            if delay_ms > 0:
-                filters.append(f"adelay={delay_ms}|{delay_ms}")
-            if fade_in > 0:
-                filters.append(f"afade=t=in:d={fade_in}")
-            if fade_out > 0:
-                filters.append(f"afade=t=out:d={fade_out}")
-
-            if filters:
-                filter_chain = ",".join(filters)
-                filter_parts.append(f"[{i}:a]{filter_chain}[a{i}]")
-            else:
-                filter_parts.append(f"[{i}:a]acopy[a{i}]")
+            filter_parts.append(self._per_track_chain(i, track))
 
         # If ducking is enabled and we have both speech and music, apply sidechain
         duck_enabled = ducking.get("enabled", True) if isinstance(ducking, dict) else bool(ducking)
@@ -587,7 +807,9 @@ class AudioMixer(BaseTool):
         cmd.extend(["-filter_complex", filter_complex])
         cmd.extend(["-map", out_label, str(output_path)])
 
-        self.run_command(cmd)
+        err = self._run(cmd)
+        if err:
+            return ToolResult(success=False, error=f"full_mix failed: {err}")
 
         return ToolResult(
             success=True,
@@ -704,3 +926,109 @@ class AudioMixer(BaseTool):
             },
             artifacts=[str(output_path)],
         )
+
+    # ---- helpers ----
+
+    def _per_track_chain(self, index: int, track: dict[str, Any]) -> str:
+        """Build the per-track filter chain '[i:a]...[ai]' for mix/full_mix.
+
+        Fades are applied BEFORE adelay so they act on the actual audio (not
+        the silence pad), and afade t=out gets an explicit st= computed from
+        the probed track duration — FFmpeg defaults st=0, which fades the
+        track to silence over its FIRST N seconds and keeps it muted.
+        """
+        volume = track.get("volume", 1.0)
+        delay_ms = int(track.get("start_seconds", 0) * 1000)
+        fade_in = track.get("fade_in_seconds", 0)
+        fade_out = track.get("fade_out_seconds", 0)
+
+        filters = []
+        if volume != 1.0:
+            filters.append(f"volume={volume}")
+        if fade_in > 0:
+            filters.append(f"afade=t=in:st=0:d={fade_in}")
+        if fade_out > 0:
+            duration = self._audio_duration(Path(track["path"]))
+            if duration is None:
+                raise _MixInputError(
+                    f"fade_out_seconds requires a probeable duration; "
+                    f"could not probe {track['path']}"
+                )
+            st = max(0.0, round(duration - fade_out, 3))
+            filters.append(f"afade=t=out:st={st}:d={fade_out}")
+        if delay_ms > 0:
+            filters.append(f"adelay={delay_ms}|{delay_ms}")
+
+        if filters:
+            return f"[{index}:a]{','.join(filters)}[a{index}]"
+        return f"[{index}:a]acopy[a{index}]"
+
+    def _audio_duration(self, path: Path) -> Optional[float]:
+        """Container duration in seconds, or None if unprobeable."""
+        import subprocess
+
+        try:
+            proc = self.run_command(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "csv=p=0", str(path)],
+                timeout=30,
+            )
+            raw = (proc.stdout or "").strip().split("\n")[0]
+            return float(raw) if raw and raw != "N/A" else None
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError):
+            return None
+
+    def _measure_lufs(self, path: Path) -> Optional[float]:
+        """Integrated loudness (LUFS) via the ebur128 summary I: line."""
+        import subprocess
+
+        try:
+            proc = self.run_command(
+                ["ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
+                 "-vn", "-af", "ebur128", "-f", "null", "-"],
+                timeout=600,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return None
+        stderr = proc.stderr or ""
+        # live per-frame lines also contain "I:"; only the final summary counts
+        idx = stderr.rfind("Summary:")
+        tail = stderr[idx:] if idx >= 0 else stderr
+        m = re.search(r"I:\s*(-?(?:\d+(?:\.\d+)?|inf))\s+LUFS", tail)
+        if not m or "inf" in m.group(1):
+            return None
+        return float(m.group(1))
+
+    def _probe_audio_codec(self, path: Path, stream_index: Optional[int] = None) -> Optional[str]:
+        import subprocess
+
+        sel = f"a:{stream_index}" if stream_index is not None else "a:0"
+        try:
+            proc = self.run_command(
+                ["ffprobe", "-v", "error", "-select_streams", sel,
+                 "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(path)],
+                timeout=30,
+            )
+            return (proc.stdout or "").strip().split("\n")[0] or None
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return None
+
+    def _run(self, cmd: list[str]) -> Optional[str]:
+        """Run ffmpeg; return None on success or a trimmed stderr string on failure.
+
+        BaseTool.run_command uses check=True, so a non-zero exit raises
+        CalledProcessError rather than returning a code — catch it and surface
+        the stderr tail."""
+        import subprocess
+
+        try:
+            self.run_command(cmd, timeout=900)
+            return None
+        except subprocess.CalledProcessError as e:
+            return ((e.stderr or "") or "ffmpeg failed").strip()[-500:]
+        except subprocess.TimeoutExpired:
+            return "ffmpeg timed out."
+
+
+class _MixInputError(Exception):
+    """Bad parameters for an audio op (validated before any ffmpeg spend)."""

@@ -229,7 +229,27 @@
         "verdict": { "type": "string", "enum": ["strong", "acceptable", "revise", "fail"] }
       }
     },
-    "metadata": { "type": "object" }
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "compose_target": {
+          "type": "object",
+          "description": "Output canvas for the FFmpeg compose path. Precedence: compose_target > profile-resolved resolution > 1920x1080@30. Width/height must be even (yuv420p).",
+          "properties": {
+            "width": { "type": "integer", "minimum": 16 },
+            "height": { "type": "integer", "minimum": 16 },
+            "fps": { "type": "number", "exclusiveMinimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "default_transition_duration": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 2.0,
+          "description": "Global default duration (seconds) for cuts[].transition_in/out when a cut omits transition_duration. FFmpeg xfade path clamps all transition durations to [0.1, 2.0]. Default 0.5."
+        }
+      }
+    }
   },
   "additionalProperties": false
 }
