@@ -241,6 +241,7 @@ To extend the library, append entries to `scripts/generate_educational_sfx.py` a
 | `animated-explainer` | Topic to fully generated explainer | production |
 | `talking-head` | Footage-led speaker videos | beta |
 | `animation-talking-head-50-50` | Split-screen animated explainer: talking head bottom 45%, Greg-style animated panels top 55%, with full-frame modes per cut. HyperFrames + FFmpeg two-pass. Talking head video untouched (no color conversion). | beta |
+| `anthropic-style-animated-talking-head` | Creator talking-head explainers intercut with Anthropic-editorial motion graphics. Smart per-beat shot selection (full face / overlay / 50-50 split / full animation), claim-triggered research (finds a credible article + highlights the claim), VO copied through untouched. HyperFrames assets + FFmpeg segment-rebuild. | beta |
 | `screen-demo` | Screen recordings and walkthroughs | production |
 | `talking-head-screen-demo-reel` | Creator-led Reels with warm talking head + real browser/product proof + large PIP | beta |
 | `clip-factory` | Many clips from one long source | beta |
@@ -644,6 +645,7 @@ Tool rules:
 | `talking-head-screen-demo-reel` | Creator-led product/workflow Reels with warm desk A-roll, real screen proof, large PIP, tactile keyboard inserts, short all-caps caption hits, and keyword CTA |
 | `pixel-rpg-product-explainer` | Game-map metaphor explainers with pixel/quest visual language |
 | `founder_clean_reel` | Talking-head founder reels with clean editorial captions and restrained overlays |
+| `anthropic-editorial-animated` | Anthropic-style warm editorial motion for talking-head explainers: ivory paper, clay/coral, slate ink, Fraunces serif + Inter; logo bumpers, kinetic boxes, counters, source-receipt proof cards |
 
 For Greg-theme productions, prefer the portable playbook and skill pair:
 `styles/greg-isenberg-product-explainer.yaml` and
