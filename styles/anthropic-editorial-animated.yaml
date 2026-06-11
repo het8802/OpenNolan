@@ -1,0 +1,117 @@
+identity:
+  name: "Anthropic Editorial Animated Talking Head"
+  category: motion-graphics
+  mood: premium, editorial, warm, calm-authoritative, founder-native
+  pace: moderate
+  best_for: "Vertical AI/tech talking-head explainers that intercut creator face with Anthropic-style editorial motion graphics — kinetic typography, drawn diagrams, racing counters, source-receipt proof cards, status pills, and logo bumpers. Built from the validated 'Anthropic split the frontier in two' (Fable 5 / Mythos 5) reel."
+
+visual_language:
+  color_palette:
+    primary: ["#1A1A18", "#CC785C"]
+    accent: ["#2F6F5E", "#C9893C", "#5B9B86", "#B5654A", "#DCD6C9"]
+    background: "#F0EDE6"
+    text: "#1A1A18"
+    muted: "#8C887F"
+  composition: "1080x1920 vertical; warm ivory paper canvas with a soft radial vignette (#F6F3EC center -> #F0EDE6 -> #E8E4D9 edge); generous negative space; one hero idea per beat; editorial serif phrases; rounded cards with soft warm shadows; oversized assets cropped by frame edges for camera motion"
+  texture: "warm paper, soft warm-gray card shadows (max 0 22px 60px rgba(26,26,24,0.18)), rounded rectangles, pills, thin charcoal/clay connectors, drawn SVG sunburst marks; NO neon, NO purple/violet/lavender, NO obsidian, NO dark cyberpunk"
+
+typography:
+  # Fraunces (editorial serif) is the SIGNATURE face — it carries titles, card/box labels,
+  # narrative phrases, and product names. (User feedback: the Inter-900 box titles read too
+  # generic; the Fraunces serif used for "Mythos" in the hook is the look to keep.)
+  headings:
+    font: "Fraunces"
+    weight: 900
+    tracking: "-0.03em"
+    line_height: 0.95
+  body:
+    font: "Inter"
+    weight: 600
+    line_height: 1.3
+  stat_card:
+    font: "Inter"
+    weight: 900
+    tracking: "-0.04em"
+    size_multiplier: 2.2
+  scale_system: "major_third"
+  weight_matrix:
+    title: 900
+    heading: 700
+    body: 600
+    caption: 700
+
+motion:
+  transitions: [logo-pop-rotate, box-stack-in, counter-roll, connector-draw, receipt-stack-in, marker-highlight-sweep, split-reveal, phrase-build, calendar-flip]
+  animation_style: "Editorial pop + settle. Cards/pills enter with back.out(1.3-1.7) scale-from-0.8 + slide; connectors draw via stroke-dashoffset (0.45-0.55s); counters roll (seek-driven, deterministic); receipts stack with -2deg->0 rotation and growing shadow; key phrases highlight with a clay marker sweep on the exact claim; subtle 2-4% camera push-in on hero holds. NO meme bounces, NO yoyo, NO random glitch, NO purple flashes, NO infinite repeats."
+  pacing_rules:
+    min_scene_hold_seconds: 0.8
+    max_scene_hold_seconds: 6
+    text_card_hold_seconds: 1.5
+    stat_card_hold_seconds: 1.5
+    transition_duration_seconds: 0.2
+  entrance: "Elements rise 14-60px with optional 2-3px blur, 0.30-0.55s, varied eases (power3.out / expo.out / back.out); emphasis words color-hit clay/amber/green or scale to 1.03-1.06; logos pop scale-0 + rotate-in."
+  exit: "Hard cuts on the beat (cutaways animate in from ivory, so cutting to them reads as a clean reset); overlays fade out before the next idea; soft fade only on the final hold."
+
+audio:
+  voice_style: "the creator's own talking-head voiceover — used UNTOUCHED (original audio copied through; never cut, re-timed, or speed-changed)"
+  music_mood: "optional low warm editorial pulse under the VO; off by default unless the creator asks — nothing should compete with their voice"
+  music_volume: 0.07
+  sfx_style: "restrained: soft card whoosh on cutaway, gentle pop on box/pill, counter tick, marker-sweep swish, lock clunk on the gated beat; reserve for reveals, never per word"
+  ducking_threshold_db: -6
+  voice_variation_allowed: false
+
+asset_generation:
+  image_prompt_prefix: "premium vertical Anthropic-style editorial AI explainer asset, warm ivory paper background (#F0EDE6), clay/terracotta coral accent (#CC785C), slate ink (#1A1A18), forest-green and amber semantic accents, editorial serif (Fraunces) headline space, rounded product UI cards with soft warm-gray shadows, calm premium startup aesthetic, "
+  image_negative_prompt: "purple, violet, lavender, neon, cyberpunk, obsidian, crystal, pixel art, dark fantasy, glossy 3D robot, cluttered dashboard, tiny unreadable text, harsh drop shadows, oversaturated colors, copied creator assets"
+  diagram_style: "warm editorial diagram: light ivory/coral-bordered nodes vs dark slate nodes, thin clay/charcoal orthogonal or curved connectors that draw on, green=public/approved, amber=gated/restricted, drawn coral sunburst for the Claude mark"
+  consistency_anchors:
+    - "Warm ivory paper canvas with soft radial vignette in every animated asset"
+    - "Fraunces serif for titles, card labels, product names, and narrative phrases; Inter only for eyebrows, sub-labels, pills, and numerals"
+    - "Semantic color roles: clay/coral = brand + emphasis, green = public/unlocked/approved, amber = gated/restricted/caution (never error-red), slate panels = the restricted/dark side"
+    - "Real logos (Claude sunburst, company marks) seated on light chips so any white halo reads as intentional"
+    - "Verified factual claims appear as faithful source-receipt cards (real masthead + headline + date + URL) with a clay marker-sweep on the exact verified phrase"
+    - "Talking-head footage is never recolored — crop & scale only"
+
+overlays:
+  stat_card:
+    bg: "#2A2926"
+    border: "#3A3833"
+    text: "#F4F1EA"
+    radius: 26
+    shadow: "0 22px 56px rgba(26,26,24,0.28)"
+  key_term:
+    bg: "#F4E2D9"
+    text: "#1A1A18"
+    radius: 999
+    shadow: "0 14px 38px rgba(204,120,92,0.18)"
+    highlight: "#CC785C"
+  code_block:
+    bg: "#1A1A18"
+    text: "#F4F1EA"
+    highlight: "#CC785C"
+    radius: 18
+    shadow: "0 22px 56px rgba(26,26,24,0.30)"
+
+quality_rules:
+  - "FONT DISCIPLINE: card/box/label titles and narrative phrases use Fraunces (editorial serif) — NOT heavy Inter. Reserve Inter for eyebrows, sub-labels, pills, and numerals/counters. (This is the corrected look the creator approved.)"
+  - "Warm editorial only: ivory paper + clay/coral + slate + green/amber semantic accents. No neon, purple, obsidian, or dark-cyberpunk leakage."
+  - "Semantic color contract: green = public/unlocked/approved; amber = gated/restricted/caution; clay = brand + emphasis; red is NOT used casually."
+  - "NARRATION SYNC (hard rule): every animated reveal lands ON the spoken trigger word (from transcript words[]), never before. Multi-part diagrams/box-stacks build progressively across the clause; one box per spoken point."
+  - "SHOT-MODE DISCIPLINE: choose talking_head_full / talking_head_overlay / split_5050 / animation_full per beat by intent (see scene-director). No talking_head_full run > ~9s without a cutaway or overlay; overlays must never cover the face."
+  - "CLAIM INTEGRITY: every verifiable factual claim the creator makes is backed by a real, credible source — shown as a source-receipt card/overlay with the exact claim phrase highlighted. Reported != verified; derived numbers shown as labeled ranges."
+  - "The talking-head VO is the spine and is used untouched; visuals are timed to it, never the reverse."
+  - "Every 0.5-1.5s something meaningful changes (phrase, box, counter, connector, highlight, crop); captions (if used) are layout-aware and never bottom-pinned into the platform UI shadow zone."
+
+chart_palette:
+  - "#CC785C"
+  - "#2F6F5E"
+  - "#C9893C"
+  - "#5B9B86"
+  - "#8C887F"
+  - "#1A1A18"
+  - "#DCD6C9"
+
+color_rules:
+  harmony_type: "analogous"
+  contrast_validation: true
+  colorblind_safe: true
