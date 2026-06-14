@@ -32,8 +32,8 @@ from typing import Any, Awaitable, Callable, Optional
 
 from server.activity import record_tool_use
 
-DEFAULT_MODEL = "claude-sonnet-4-6"          # cheaper than Opus, held the contract in the spike
-DEFAULT_MAX_BUDGET_USD = 5.0                 # SDK-native hard ceiling per session
+DEFAULT_MODEL = "claude-opus-4-8"            # most capable model; strongest at long-horizon agentic runs
+DEFAULT_MAX_BUDGET_USD = 15.0                # SDK-native hard ceiling per session
 DEFAULT_CONFIRM_TIMEOUT_S = 300
 DEFAULT_ANSWER_TIMEOUT_S = 900               # users may take a while to answer a question
 
