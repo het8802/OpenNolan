@@ -1,4 +1,4 @@
-# B-Roll Planning for OpenMontage
+# B-Roll Planning for OpenNolan
 
 > How to plan B-roll needs from a script, decide between stock and generated footage,
 > construct effective search queries, and evaluate footage quality.
@@ -17,7 +17,7 @@ For Greg-style, product-explainer, AI-news, and reference-driven reels, run this
 1. **Link screenshot extraction**
    - Parse the script/research brief for URLs, company/product names, reports, articles, repos, docs, and social proof.
    - Open/capture the relevant page state and save cropped screenshot receipts under `assets/images/source-receipts/`.
-   - Use screenshots as background proof cards; add the real readable claim as OpenMontage overlay text.
+   - Use screenshots as background proof cards; add the real readable claim as OpenNolan overlay text.
 
 2. **Footage search/extraction**
    - For each concrete beat, write 2–4 stock queries with a POV keyword (`macro`, `OTS`, `top-down`, `handheld`, `drone`, `screen close-up`, etc.).

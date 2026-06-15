@@ -1,6 +1,6 @@
-# OpenMontage - Agent Guide
+# OpenNolan - Agent Guide
 
-Start here. This is the complete operating guide and agent contract for OpenMontage.
+Start here. This is the complete operating guide and agent contract for OpenNolan.
 
 For architecture, key files, and conventions see [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md).
 
@@ -24,7 +24,7 @@ When the user provides a **video URL or local video file as inspiration** — fo
 
 — do **not** treat this as a generic web-search or prompt-writing request.
 
-This is a first-class workflow in OpenMontage.
+This is a first-class workflow in OpenNolan.
 
 ### Required behavior
 
@@ -44,7 +44,7 @@ This is a first-class workflow in OpenMontage.
 - **Reference-driven request:** "make me something like this" -> use `video-reference-analyst.md`
 - **Source-footage request:** "edit this footage" / "cut this into clips" -> use `source_media_review` and the appropriate footage-led pipeline
 
-If a model misses this distinction, it will often fall back to plain search + guesswork. That is incorrect for OpenMontage.
+If a model misses this distinction, it will often fall back to plain search + guesswork. That is incorrect for OpenNolan.
 
 ## Rule Zero — All Production Goes Through a Pipeline
 
@@ -67,9 +67,9 @@ When the user asks to make, create, produce, or generate any video content — a
 
 The intelligence is in the skills, not in improvised code. An agent that reads the director skills and Layer 3 knowledge will produce significantly better output than one that calls tools directly with generic prompts.
 
-## What OpenMontage Is
+## What OpenNolan Is
 
-OpenMontage is an instruction-driven video production system. The AI agent IS the intelligence — it reads instructions (pipeline manifests + stage director skills + meta skills) and drives the pipeline using tools.
+OpenNolan is an instruction-driven video production system. The AI agent IS the intelligence — it reads instructions (pipeline manifests + stage director skills + meta skills) and drives the pipeline using tools.
 
 ```
 Agent reads pipeline manifest (YAML) -> reads stage director skill (MD)
@@ -241,6 +241,7 @@ To extend the library, append entries to `scripts/generate_educational_sfx.py` a
 | `animated-explainer` | Topic to fully generated explainer | production |
 | `talking-head` | Footage-led speaker videos | beta |
 | `animation-talking-head-50-50` | Split-screen animated explainer: talking head bottom 45%, Greg-style animated panels top 55%, with full-frame modes per cut. HyperFrames + FFmpeg two-pass. Talking head video untouched (no color conversion). | beta |
+| `anthropic-style-animated-talking-head` | Creator talking-head explainers intercut with Anthropic-editorial motion graphics. Smart per-beat shot selection (full face / overlay / 50-50 split / full animation), claim-triggered research (finds a credible article + highlights the claim), VO copied through untouched. HyperFrames assets + FFmpeg segment-rebuild. | beta |
 | `screen-demo` | Screen recordings and walkthroughs | production |
 | `talking-head-screen-demo-reel` | Creator-led Reels with warm talking head + real browser/product proof + large PIP | beta |
 | `clip-factory` | Many clips from one long source | beta |
@@ -378,7 +379,7 @@ print('HyperFrames note:', info.get('hyperframes_note'))
 
 | Engine | Used For | Requires |
 |--------|----------|----------|
-| **FFmpeg** | Video-only cuts, concat, trim, subtitle burn | `ffmpeg` binary (always available) |
+| **FFmpeg** | Footage-led editing: cuts, concat, trim, per-cut xfade transitions (`cuts[].transition_in/out` — fade/wipe/slide/circle/zoom vocab, durations clamp 0.1–2.0s), keyframed overlays (position/scale/opacity with easing; rotation NOT rendered), static overlay `opacity`, overlay `audio_mix`, text overlays via drawtext (`overlays[].type="text"` — x/y/opacity keyframes only), PiP via `cuts[].layer="overlay"` (operation=`render` only), `cuts[].transform.crop`, output canvas via `metadata.compose_target` (e.g. 1080x1920 9:16 or 4K), subtitle burn | `ffmpeg` binary (always available) |
 | **Remotion** | React-based composition: still images → animated video, text cards, stat cards, charts, callouts, comparisons, transitions with spring physics, word-level caption burn, TalkingHead avatar | Node.js (`npx`) + `remotion-composer/` + `node_modules` |
 | **HyperFrames** | HTML/CSS/GSAP composition: kinetic typography, product promos, launch reels, website-to-video, registry-block-driven scenes, SVG character rigs | Node.js ≥ 22 + FFmpeg + `npx` (consumed via `npx hyperframes`) |
 
@@ -414,15 +415,28 @@ For these requests:
 See `remotion-composer/SCENE_TYPES.md` for the authoritative list and their cut schemas. Current scene types usable via `cut.type`:
 `text_card`, `stat_card`, `callout`, `comparison`, `hero_title`, `terminal_scene`, `anime_scene`, `bar_chart`, `line_chart`, `pie_chart`, `kpi_grid`, `progress_bar`. Overlay types include `section_title`, `stat_reveal`, `hero_title`, `provider_chip`.
 
-**When Remotion is NOT available** and `render_runtime="remotion"` was NOT locked, `video_compose` may use FFmpeg Ken Burns motion on still images. This still works but produces less engaging visuals. Mention this tradeoff in the proposal. When `render_runtime="remotion"` IS locked and Remotion is unavailable, that's a blocker — escalate, don't silently swap.
+**When Remotion is NOT available** and `render_runtime="remotion"` was NOT locked, the FFmpeg path can still deliver a real footage-led edit — xfade transitions, keyframed/text overlays, PiP, crop, custom canvas (see the runtime table above) — and `motion_ops` `pan_zoom` bakes anti-jitter punch-ins/pans/Ken Burns moves into real footage (zoompan with a ~4x pre-upscale, so slow zooms don't stair-step). But the FFmpeg compose path handles **video sources only**: a still image in `cuts[]` is rejected with an error directing to Remotion (stills can appear as `overlays[]` graphics, not cuts). For still-image-led concepts FFmpeg remains the degraded path — mention this tradeoff in the proposal. When `render_runtime="remotion"` IS locked and Remotion is unavailable, that's a blocker — escalate, don't silently swap.
 
 When `render_runtime="hyperframes"` is locked and HyperFrames is unavailable (Node < 22, missing `ffmpeg`/`npx`, or `hyperframes doctor` reports issues), that's also a blocker. Do not substitute Remotion or FFmpeg without user approval + a logged `render_runtime_selection` decision.
 
 Routing is automatic — `video_compose` reads `edit_decisions.render_runtime` and dispatches to the matching engine (`_render_via_hyperframes`, `_remotion_render`, or `_render_via_ffmpeg`). But the **agent must know both Remotion and HyperFrames exist at proposal time** so it can design the visual approach intentionally. Don't default to Remotion for motion-graphics-heavy concepts that HTML/GSAP would express more naturally, and don't default to HyperFrames for briefs that reuse the existing React scene stack.
 
+### HDR Handling (HARD RULE — never silently tonemap HDR)
+
+Modern phone footage is frequently **HDR** (HLG or PQ, 10-bit). Converting it to SDR throws away the dynamic range the user shot. **Never silently tonemap HDR to SDR.** Before editing any source footage, run the three-step check:
+
+1. **Detect the source.** Call `is_hdr_source(path)` (in `tools/video/_shared.py`). `hdr=True` (with `kind` = `hlg` or `pq`) means the clip is HDR. SDR sources need no special handling — and you must NEVER fabricate HDR from an SDR source.
+2. **Check the device.** Read `video_compose.get_info()["hdr_encode"]`. `available=False` means this machine has no 10-bit HEVC encoder (`hevc_videotoolbox` or 10-bit `libx265`), so HDR cannot be preserved here.
+3. **Decide with the user, log it.** Record an `hdr_handling` decision (`preserve` / `tonemap` / `mixed`) in `decision_log`:
+   - HDR source + device can encode HDR → **preserve** (default): encode HEVC main10 `yuv420p10le` carrying the source's `color_primaries`/`color_trc`/`colorspace` + `-tag:v hvc1`; minimize re-encodes; stream-copy the video through audio muxing.
+   - HDR source mixed with SDR-only generated assets (cutout, restyle, AI/stock images) → those can't be HDR; surface the choice (preserve-with-flat-SDR-inserts vs tonemap-all-to-SDR). Don't pick silently.
+   - HDR source + device cannot encode HDR → surface the blocker; tonemap only with explicit consent.
+
+**Tool caveat:** the current video tools (`motion_ops`, the `video_compose` overlay/keyframe path, `object_cutout`) are **8-bit SDR only** — running HDR footage through them silently degrades it. For an HDR deliverable, do the cut with HDR-aware FFmpeg directly until the tools gain a 10-bit HLG/PQ passthrough mode. (The older `animation-talking-head-50-50` "tonemap for mixed SDR composite" guidance is a *deliberate, logged* choice for that pipeline — not license to tonemap HDR silently elsewhere.)
+
 ## Capability Discovery
 
-OpenMontage uses two layers for capability choice:
+OpenNolan uses two layers for capability choice:
 
 - selector tools: capability-level routing such as `tts_selector` and `video_selector`
 - provider tools: concrete tools discovered via the registry that call a specific backend
@@ -631,6 +645,7 @@ Tool rules:
 | `talking-head-screen-demo-reel` | Creator-led product/workflow Reels with warm desk A-roll, real screen proof, large PIP, tactile keyboard inserts, short all-caps caption hits, and keyword CTA |
 | `pixel-rpg-product-explainer` | Game-map metaphor explainers with pixel/quest visual language |
 | `founder_clean_reel` | Talking-head founder reels with clean editorial captions and restrained overlays |
+| `anthropic-editorial-animated` | Anthropic-style warm editorial motion for talking-head explainers: ivory paper, clay/coral, slate ink, Fraunces serif + Inter; logo bumpers, kinetic boxes, counters, source-receipt proof cards |
 
 For Greg-theme productions, prefer the portable playbook and skill pair:
 `styles/greg-isenberg-product-explainer.yaml` and
@@ -641,12 +656,12 @@ media.
 
 ## Layer Map
 
-OpenMontage has three instruction layers:
+OpenNolan has three instruction layers:
 
 1. `tools/`
    What exists, what is available, cost, runtime, fallback, related skills.
 2. `skills/`
-   How OpenMontage wants those tools used in pipelines.
+   How OpenNolan wants those tools used in pipelines.
 3. `.agents/skills/`
    Raw vendor or technology knowledge.
 
@@ -680,7 +695,7 @@ The `.agents/skills/` directory is large. When you're not coming in through a to
 | **Capture** | `playwright-recording` (browser flows), `ffmpeg` (post) |
 | **Visualization** | `beautiful-mermaid`, `d3-viz`, `manim-composer`, `manimce-best-practices`, `manimgl-best-practices` |
 | **Media editing** | `video-edit`, `video-download`, `video-understand`, `video_toolkit`, `visual-style` |
-| **Social media & content marketing** | `instagram-reels` (short-form attention engineering, hook families), `instagram-carousel` (swipe-funnel carousel system), `daily-carousel-remix` (remix shared carousels into Het's Anthropic-inspired theme), `daily-tech-carousel` (daily "what happened in tech" digest carousel), `source-backed-reel-evidence-montage` (news/AI reels with article-screenshot proof chains), `editorial-ai-product-design-system` (premium editorial AI/product motion design — palette, mascots, workflow diagrams), `xurl` (X/Twitter API via official CLI — post, search, DM, media) |
+| **Social media & content marketing** | `instagram-reels` (short-form attention engineering, hook families), `instagram-carousel` (swipe-funnel carousel system), `daily-carousel-remix` (remix shared carousels into a warm Anthropic-inspired theme), `daily-tech-carousel` (daily "what happened in tech" digest carousel), `source-backed-reel-evidence-montage` (news/AI reels with article-screenshot proof chains), `editorial-ai-product-design-system` (premium editorial AI/product motion design — palette, mascots, workflow diagrams), `xurl` (X/Twitter API via official CLI — post, search, DM, media) |
 
 **When in doubt, read the category's meta routing file first:**
 - Picking an animation runtime? → `skills/meta/animation-runtime-selector.md` routes between Remotion primitives, GSAP plugins, framer-motion, Lottie, Manim, D3.

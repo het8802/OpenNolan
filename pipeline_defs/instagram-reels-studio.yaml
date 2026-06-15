@@ -1,0 +1,202 @@
+name: instagram-reels-studio
+version: "1.0"
+description: >
+  Instagram-Edits-style creator workflow. Turns a brief (or source clips) into a vertical
+  short-form reel using OpenNolan's Edits-parity toolset: SAM2 cutouts, keyframe overlay
+  motion, beat-synced cutting, freeze/reverse/speed/volume/pan-zoom motion ops, AI restyle,
+  voiceover recording + voice effects, SFX library, GIPHY/Tenor stickers, styled text cards,
+  region masks, and reusable templates. The edit stage is the heart — it orchestrates those
+  tools onto the edit_decisions artifact (overlays[].keyframes, beat-aligned cuts,
+  per-cut xfade transitions, social-reel grammar).
+category: custom
+stability: beta
+default_checkpoint_policy: guided
+
+extensions:
+  custom_scripts: false
+  custom_playbooks: true
+  custom_skills: true
+  custom_tools: false
+
+required_skills:
+  - pipelines/instagram-reels-studio/idea-director
+  - pipelines/instagram-reels-studio/script-director
+  - pipelines/instagram-reels-studio/scene-director
+  - pipelines/instagram-reels-studio/asset-director
+  - pipelines/instagram-reels-studio/edit-director
+  - pipelines/instagram-reels-studio/compose-director
+  - pipelines/instagram-reels-studio/publish-director
+  - meta/reviewer
+  - meta/checkpoint-protocol
+
+compatible_playbooks:
+  recommended:
+    - kinetic-whiteboard-captions
+    - flat-motion-graphics
+    - talking-head-screen-demo-reel
+  also_works: []
+  custom_allowed: true
+
+stages:
+  - name: idea
+    skill: pipelines/instagram-reels-studio/idea-director
+    produces:
+      - brief
+      - decision_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Hook, target platform (Reels/Shorts/TikTok), duration, and tone are clear
+      - render_runtime chosen explicitly (ffmpeg default; remotion=social-reel optional)
+      - A template is selected or "from scratch" is justified
+    success_criteria:
+      - Schema-valid brief artifact
+      - Brief records render_runtime and (if any) the chosen template
+
+  - name: script
+    skill: pipelines/instagram-reels-studio/script-director
+    required_artifacts_in:
+      - brief
+    produces:
+      - script
+    optional_tools:
+      - transcriber
+    tools_available:
+      - transcriber
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Hook lands in the first 2 seconds
+      - Beats are short and punchy (reel pacing)
+    success_criteria:
+      - Schema-valid script artifact
+
+  - name: scene_plan
+    skill: pipelines/instagram-reels-studio/scene-director
+    required_artifacts_in:
+      - script
+    produces:
+      - scene_plan
+    optional_tools:
+      - frame_sampler
+    tools_available:
+      - frame_sampler
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Vertical 9:16 framing planned per scene
+      - Cutout / keyframe / beat-sync / restyle opportunities flagged per scene
+    success_criteria:
+      - Schema-valid scene_plan artifact with per-scene aspect ratio and duration
+
+  - name: assets
+    skill: pipelines/instagram-reels-studio/asset-director
+    required_artifacts_in:
+      - scene_plan
+    produces:
+      - asset_manifest
+    optional_tools:
+      - object_cutout
+      - restyle_video
+      - subtitle_gen
+      - music_gen
+      - audio_enhance
+      - voice_ops
+      - sfx_kit
+      - sticker_search
+      - text_card_gen
+    tools_available:
+      - object_cutout
+      - restyle_video
+      - subtitle_gen
+      - music_gen
+      - freesound_music
+      - audio_enhance
+      - voice_ops
+      - sfx_kit
+      - sticker_search
+      - text_card_gen
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Cutouts and restyled clips generated where the scene plan called for them
+      - Paid tools (object_cutout, restyle_video) were confirm-gated and cached
+      - Music + captions prepared
+    success_criteria:
+      - Schema-valid asset_manifest with provenance for every generated asset
+
+  - name: edit
+    skill: pipelines/instagram-reels-studio/edit-director
+    required_artifacts_in:
+      - scene_plan
+      - asset_manifest
+    produces:
+      - edit_decisions
+    tools_available:
+      - beat_cutter
+      - motion_ops
+      - keyframe_animate
+      - template_apply
+      - mask_ops
+      - text_card_gen
+      - sticker_search
+      - sfx_kit
+      - voice_ops
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Cuts land on the beat where the brief is music-led (beat_cutter, speech_safe otherwise)
+      - Overlays (cutouts/text) animate via overlays[].keyframes where motion was planned
+      - Freeze/reverse/speed/volume/pan-zoom/clip-fx applied via motion_ops (and region masks via mask_ops) as derived clips
+      - renderer_family carried forward (social-reel) and render_runtime unchanged
+    success_criteria:
+      - Schema-valid edit_decisions artifact
+      - Keyframed overlays validate; beat-aligned cuts present when music-led
+
+  - name: compose
+    skill: pipelines/instagram-reels-studio/compose-director
+    required_artifacts_in:
+      - edit_decisions
+      - asset_manifest
+    produces:
+      - render_report
+      - final_review
+    required_tools:
+      - video_compose
+    optional_tools:
+      - audio_mixer
+      - color_grade
+    tools_available:
+      - video_compose
+      - audio_mixer
+      - color_grade
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - video_compose routes by edit_decisions.render_runtime (no silent runtime swap)
+      - Keyframed overlays actually animate in the output
+      - Output is vertical 9:16 and watermark-free
+    success_criteria:
+      - Schema-valid render_report artifact
+      - Output file exists and passes ffprobe validation
+
+  - name: publish
+    skill: pipelines/instagram-reels-studio/publish-director
+    required_artifacts_in:
+      - render_report
+    optional_artifacts_in:
+      - brief
+    produces:
+      - publish_log
+    tools_available:
+      - content_signal
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Watermark-free export packaged with caption/hashtags metadata
+      - content_signal advisory score reviewed (never a gate)
+      - Direct IG/FB publish is deferred (Wave 7) — export for manual posting
+    success_criteria:
+      - Schema-valid publish_log artifact
+      - Export directory contains the reel + metadata

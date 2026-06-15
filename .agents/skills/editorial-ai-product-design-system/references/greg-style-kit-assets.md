@@ -1,6 +1,6 @@
 # Greg-style reusable asset kit notes
 
-Use when building reusable Remotion/OpenMontage assets for Het's AI/startup videos, based on public Greg Isenberg / Roberto Nickson visual patterns.
+Use when building reusable Remotion/OpenNolan assets for your AI/startup videos, based on public Greg Isenberg / Roberto Nickson visual patterns.
 
 ## Target directory
 
@@ -22,7 +22,7 @@ greg-style-kit/
 ## Production rules
 
 - Recreate the **design schema**, not Greg's original copyrighted thumbnails/assets.
-- Use warm paper backgrounds, forest-green outlines, mint/sage AI accents, coral only for failure/reject, gold for money/value, and sage/warm-gray for product UI borders/shadows. Avoid purple/violet/lavender/mauve accents for Het's Greg-theme output.
+- Use warm paper backgrounds, forest-green outlines, mint/sage AI accents, coral only for failure/reject, gold for money/value, and sage/warm-gray for product UI borders/shadows. Avoid purple/violet/lavender/mauve accents for your Greg-theme output.
 - Prefer original deterministic SVG/Pillow assets for icons, shapes, background textures, and previews; use native image generation only for non-deterministic hero illustrations when explicitly requested.
 - Fonts: Fraunces for editorial hook/type; Inter for labels, UI, nodes. Google Fonts files may download as TrueType URLs even if saved generically; verify magic bytes and use `.ttf` extension when appropriate.
 - Generate an `asset-ledger.json` and a visual contact sheet/preview image before delivery.
@@ -40,4 +40,4 @@ unzip -t /path/to/greg-style-kit.zip
 for f in /path/to/greg-style-kit/sfx/*.wav; do ffprobe -v error -show_entries format=duration,size -of default=nw=1 "$f"; done
 ```
 
-Deliver both the zip and the preview image to Slack so Het can inspect the vibe quickly.
+Deliver both the zip and the preview image so the user can inspect the vibe quickly.

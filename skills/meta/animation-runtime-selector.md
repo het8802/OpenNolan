@@ -18,7 +18,7 @@ Apply when:
 
 ## Runtime choice (Remotion vs HyperFrames vs FFmpeg)
 
-OpenMontage separates creative grammar (`renderer_family`) from technical
+OpenNolan separates creative grammar (`renderer_family`) from technical
 engine (`render_runtime`). Both are locked at proposal and carried through
 `edit_decisions` unchanged. Silent runtime swaps at compose time are a
 contract violation.
@@ -55,7 +55,7 @@ when both were available is a CRITICAL reviewer finding.
 | Kinetic typography, HTML/GSAP-native motion, product promo, launch reel | **hyperframes** | `skills/core/hyperframes.md` + `.agents/skills/hyperframes/SKILL.md` |
 | Website → video, UI-driven composition | **hyperframes** | `.agents/skills/website-to-hyperframes/SKILL.md` |
 | Registry block needed (data-chart, grain-overlay, shader transitions, etc.) | **hyperframes** | `.agents/skills/hyperframes-registry/SKILL.md` |
-| Pure concat / trim of source clips, no composition needed | **ffmpeg** | `skills/core/ffmpeg.md` |
+| Footage-led cut/trim/concat edit — incl. per-cut xfade transitions, keyframed/text overlays, PiP, crop, custom canvas — with no React/HTML scene composition | **ffmpeg** | `skills/core/ffmpeg.md` |
 | Selected runtime is unavailable | **escalate** — do not substitute silently | `AGENT_GUIDE.md` → Escalate Blockers |
 
 Read `skills/core/hyperframes.md` for the full Remotion-vs-HyperFrames

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/content_signal_report",
+  "$id": "opennolan/artifacts/content_signal_report",
   "title": "Content Signal Report",
   "description": "Predicted social-media virality signal for a finished short-form render, produced by the Meta TRIBE v2 brain-encoding model hosted on Replicate (prakhar-bhartiya/meta-tribev2-social-media-content-signal). ADVISORY ONLY: this score never gates publishing. Field names mirror the model's verified output schema.",
   "type": "object",

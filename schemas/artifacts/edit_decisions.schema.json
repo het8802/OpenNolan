@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/edit_decisions",
+  "$id": "opennolan/artifacts/edit_decisions",
   "title": "Edit Decisions",
   "description": "Editorial decisions produced by the Edit Agent.",
   "type": "object",
@@ -21,7 +21,8 @@
           "layer": {
             "type": "string",
             "enum": ["primary", "overlay", "background"],
-            "default": "primary"
+            "default": "primary",
+            "description": "Track routing on the FFmpeg render path (first multi-track step; the Mission Control editor's layer dropdown writes this). 'overlay' lifts the cut OUT of the base concat and composites it as a timed picture-in-picture video overlay: it starts at the project time where it sits in cuts[] order (accumulated duration of the primary/background cuts listed before it), runs for (out-in)/speed, is sized by transform.scale as a fraction of canvas width (default 0.30), and placed by transform.position as a named anchor (default top-right). Its audio is NOT mixed — use overlays[].audio_mix for that. 'primary'/'background'/absent concatenate on the base track (unchanged behavior)."
           },
           "transform": {
             "type": "object",
@@ -66,23 +67,100 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["asset_id", "start_seconds", "end_seconds", "position"],
+        "required": ["start_seconds", "end_seconds"],
+        "allOf": [
+          {
+            "if": { "properties": { "type": { "const": "text" } }, "required": ["type"] },
+            "then": { "required": ["text"] },
+            "else": { "required": ["asset_id", "position"] }
+          }
+        ],
         "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["image", "video", "text"],
+            "description": "Overlay kind. Absent/'image'/'video' = asset-backed overlay (requires asset_id + position). 'text' renders via FFmpeg drawtext (requires text; asset_id not needed). Text overlays are an FFmpeg-runtime feature."
+          },
           "asset_id": { "type": "string" },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Text content for type='text'. Special characters (colons, quotes, commas, %) are escaped by the renderer; %{...} expansion is disabled."
+          },
+          "font_path": {
+            "type": "string",
+            "description": "Optional .ttf/.ttc font file for type='text'. Default resolves a bold sans from common system font dirs (same candidate list as text_card_gen)."
+          },
+          "font_size": { "type": "integer", "minimum": 1, "default": 48 },
+          "color": {
+            "type": "string",
+            "default": "white",
+            "description": "Text color for type='text' (ffmpeg color: name, #RRGGBB, or 0xRRGGBB[AA])."
+          },
+          "box": {
+            "type": "object",
+            "description": "Background box behind the text (type='text' only).",
+            "properties": {
+              "color": { "type": "string", "default": "black" },
+              "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5 },
+              "padding": { "type": "integer", "minimum": 0, "default": 10 }
+            },
+            "additionalProperties": false
+          },
           "start_seconds": { "type": "number", "minimum": 0 },
           "end_seconds": { "type": "number", "minimum": 0 },
           "position": {
-            "type": "object",
-            "properties": {
-              "x": { "type": "number" },
-              "y": { "type": "number" },
-              "width": { "type": "number" },
-              "height": { "type": "number" }
-            },
-            "required": ["x", "y"]
+            "description": "Pixel position object, or (text overlays only) a named anchor string. Text overlays default to bottom-center when omitted.",
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "x": { "type": "number" },
+                  "y": { "type": "number" },
+                  "width": { "type": "number" },
+                  "height": { "type": "number" }
+                },
+                "required": ["x", "y"]
+              },
+              {
+                "type": "string",
+                "enum": ["top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"]
+              }
+            ]
           },
           "animation": { "type": "string" },
-          "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+          "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+          "audio_mix": {
+            "type": "object",
+            "description": "Mix the overlay source's own audio into the base track. FFmpeg path: trimmed to the overlay window, delayed to start_seconds, amix duration=first (base length wins). Skipped with a warning when the source has no audio stream.",
+            "properties": {
+              "enabled": { "type": "boolean", "default": false },
+              "volume": { "type": "number", "minimum": 0, "maximum": 2, "default": 1.0 }
+            },
+            "additionalProperties": false
+          },
+          "keyframes": {
+            "type": "array",
+            "description": "Per-overlay motion timeline. Each keyframe sets the layer's transform/opacity at an absolute project time `t` (seconds). The renderer interpolates between consecutive keyframes using the `easing` of the earlier one. Omit for a static overlay (back-compatible). Text overlays honor x/y/opacity keyframes only (scale/rotation are warned and ignored on the drawtext path).",
+            "items": {
+              "type": "object",
+              "required": ["t"],
+              "properties": {
+                "t": { "type": "number", "minimum": 0, "description": "Absolute project time in seconds (same axis as start_seconds)" },
+                "x": { "type": "number", "description": "X position in px (overlay origin)" },
+                "y": { "type": "number", "description": "Y position in px (overlay origin)" },
+                "scale": { "type": "number", "minimum": 0, "description": "Uniform scale multiplier (1.0 = native)" },
+                "rotation": { "type": "number", "description": "Rotation in degrees, clockwise" },
+                "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+                "easing": {
+                  "type": "string",
+                  "description": "Interpolation curve toward the NEXT keyframe",
+                  "enum": ["linear", "ease-in", "ease-out", "ease-in-out", "spring", "step"]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
         },
         "additionalProperties": false
       }
@@ -191,8 +269,8 @@
     },
     "renderer_family": {
       "type": "string",
-      "enum": ["explainer-data", "explainer-teacher", "cinematic-trailer", "documentary-montage", "product-reveal", "screen-demo", "presenter", "animation-first"],
-      "description": "Locked at proposal stage — creative grammar for this deliverable. Preserved from proposal_packet; edit MUST NOT change without a logged decision."
+      "enum": ["explainer-data", "explainer-teacher", "cinematic-trailer", "documentary-montage", "product-reveal", "screen-demo", "presenter", "animation-first", "social-reel"],
+      "description": "Locked at proposal stage — creative grammar for this deliverable. Preserved from proposal_packet; edit MUST NOT change without a logged decision. NOTE: video_compose._get_composition_id (RENDERER_FAMILY_MAP) RAISES on an unrecognized value — adding an enum value here is NOT sufficient on its own; a matching RENDERER_FAMILY_MAP entry + a real Remotion composition must exist before any artifact emits it. 'social-reel' is reserved for the instagram-reels-studio pipeline (Phase 2)."
     },
     "render_runtime": {
       "type": "string",
@@ -207,7 +285,27 @@
         "verdict": { "type": "string", "enum": ["strong", "acceptable", "revise", "fail"] }
       }
     },
-    "metadata": { "type": "object" }
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "compose_target": {
+          "type": "object",
+          "description": "Output canvas for the FFmpeg compose path. Precedence: compose_target > profile-resolved resolution > 1920x1080@30. Width/height must be even (yuv420p).",
+          "properties": {
+            "width": { "type": "integer", "minimum": 16 },
+            "height": { "type": "integer", "minimum": 16 },
+            "fps": { "type": "number", "exclusiveMinimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "default_transition_duration": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 2.0,
+          "description": "Global default duration (seconds) for cuts[].transition_in/out when a cut omits transition_duration. FFmpeg xfade path clamps all transition durations to [0.1, 2.0]. Default 0.5."
+        }
+      }
+    }
   },
   "additionalProperties": false
 }

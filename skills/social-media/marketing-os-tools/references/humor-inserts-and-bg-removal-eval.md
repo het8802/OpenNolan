@@ -1,6 +1,6 @@
 # Humor inserts and talking-head background removal evaluation
 
-Use this note when Het asks to add humor/memes/GIFs to Reels from a script, or to compare background-removal options for talking-head footage.
+Use this note when the user asks to add humor/memes/GIFs to Reels from a script, or to compare background-removal options for talking-head footage.
 
 ## Class workflow
 
@@ -12,7 +12,7 @@ Use this note when Het asks to add humor/memes/GIFs to Reels from a script, or t
 
 ## Meme/GIF retrieval lessons
 
-- Public semantic meme indexes can prove the concept, but are usually not production-ready for Het's AI/dev/founder/operator Reels: many hits are too text-heavy, obscure, or not funny at Reel speed.
+- Public semantic meme indexes can prove the concept, but are usually not production-ready for your AI/dev/founder/operator Reels: many hits are too text-heavy, obscure, or not funny at Reel speed.
 - Better durable path: curate a local folder of AI/dev/founder/startup/operator humor memes and GIFs, then index that corpus with a local semantic meme-search tool (for example, `neonwatty/meme-search`). Query it from the script-derived humor beats.
 - Keep Tenor/GIPHY as fallback sources after API keys are configured, especially for recognizable reaction GIFs; track source URLs/license/usage in the asset ledger.
 - Useful output shape: `beat -> query -> top candidates -> thumbnail/contact sheet -> selected asset -> suggested timestamp/overlay note`.
@@ -21,7 +21,7 @@ Use this note when Het asks to add humor/memes/GIFs to Reels from a script, or t
 
 - Robust Video Matting (RVM) is a strong default for normal talking-head clips because it tends to preserve a stable human matte and remove room/background objects better than generic image segmentation.
 - `rembg`/video-background-remover-style pipelines are useful fallback CLIs for green-screen style output, but inspect hair/hand edges before production use.
-- BackgroundMattingV2-style workflows require a clean empty-background plate from the same camera angle. If Het wants the best possible result in a fixed room, ask him to record 2-3 seconds of empty background before/after the take.
+- BackgroundMattingV2-style workflows require a clean empty-background plate from the same camera angle. If the user wants the best possible result in a fixed room, ask them to record 2-3 seconds of empty background before/after the take.
 - MODNet-style portrait mattes may keep non-human objects as foreground on some clips; always compare visually before choosing.
 
 ## QA commands/patterns

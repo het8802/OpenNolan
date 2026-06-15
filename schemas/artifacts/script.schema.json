@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/script",
+  "$id": "opennolan/artifacts/script",
   "title": "Production Script",
   "description": "Timestamped script produced by the Script Writer agent.",
   "type": "object",

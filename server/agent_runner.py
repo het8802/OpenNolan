@@ -1,6 +1,6 @@
 """Headless agent runner for Mission Control.
 
-Wraps the Claude Agent SDK as the engine that drives OpenMontage pipelines,
+Wraps the Claude Agent SDK as the engine that drives OpenNolan pipelines,
 the same engine a human Claude Code session uses today. Both behavioral
 spikes validated (on Sonnet) that a headless agent obeys the contract: reads
 AGENT_GUIDE, produces schema-valid artifacts, records the render-runtime
@@ -10,7 +10,7 @@ This module adds the safety layer the spikes told us we need:
 
 - decide_tool: a code-level permission policy. Safe reads/writes run free; Bash
   commands are inspected for destructive/exfil patterns and routed to a UI
-  confirm. (OpenMontage tools run as Python *through Bash*, so a tool-NAME
+  confirm. (OpenNolan tools run as Python *through Bash*, so a tool-NAME
   allowlist can't work — the risk is in the command string.)
 - A hard cost ceiling via the SDK-native `max_budget_usd`.
 - A system prompt that re-asserts the contract so a headless run doesn't drift,
@@ -25,14 +25,15 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
 from server.activity import record_tool_use
 
-DEFAULT_MODEL = "claude-sonnet-4-6"          # cheaper than Opus, held the contract in the spike
-DEFAULT_MAX_BUDGET_USD = 5.0                 # SDK-native hard ceiling per session
+DEFAULT_MODEL = "claude-opus-4-8"            # most capable model; strongest at long-horizon agentic runs
+DEFAULT_MAX_BUDGET_USD = 15.0                # SDK-native hard ceiling per session
 DEFAULT_CONFIRM_TIMEOUT_S = 300
 DEFAULT_ANSWER_TIMEOUT_S = 900               # users may take a while to answer a question
 
@@ -124,7 +125,7 @@ def make_can_use_tool(confirm_handler: Optional[ConfirmHandler] = None):
     return can_use_tool
 
 
-AGENT_SYSTEM_PROMPT = """You are the OpenMontage production agent, running HEADLESS. \
+AGENT_SYSTEM_PROMPT = """You are the OpenNolan production agent, running HEADLESS. \
 The user steers via a Mission Control UI between turns.
 
 Obey the repo contract exactly:
@@ -154,9 +155,43 @@ Announce cost before any paid generation. Never exceed the budget.
 """
 
 
+# The same locations the Agent SDK searches in subprocess_cli._find_cli, so this
+# gate agrees with what the SDK will actually resolve at call time.
+_CLI_FALLBACK_LOCATIONS = (
+    Path("/usr/local/bin/claude"),
+    Path.home() / ".npm-global/bin/claude",
+    Path.home() / ".local/bin/claude",
+    Path.home() / "node_modules/.bin/claude",
+    Path.home() / ".yarn/bin/claude",
+    Path.home() / ".claude/local/claude",
+)
+
+
+def claude_cli_available() -> bool:
+    """True if the `claude` CLI is resolvable on this machine.
+
+    The Agent SDK drives this CLI as a subprocess, and the CLI authenticates from
+    its OWN stored login (e.g. the macOS Keychain) when no env credential is set.
+    So a resolvable CLI means the agent can run even without CLAUDE_CODE_OAUTH_TOKEN
+    — a user already logged into Claude Code needs no env token. (Verified: an SDK
+    query with both auth env vars unset returns a normal response on a logged-in
+    machine.) CLI present-but-not-logged-in is rare for a Claude Code user; if it
+    happens, the agent call surfaces the real auth error rather than a blank 503.
+    """
+    if shutil.which("claude"):
+        return True
+    return any(p.is_file() for p in _CLI_FALLBACK_LOCATIONS)
+
+
 def auth_configured() -> bool:
-    """True if the SDK has credentials to run (subscription OAuth or API key)."""
-    return bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"))
+    """True if the agent has a way to authenticate.
+
+    Either an explicit env credential (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY)
+    OR a resolvable `claude` CLI that self-authenticates from its stored login.
+    """
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"):
+        return True
+    return claude_cli_available()
 
 
 def build_agent_options(
@@ -169,7 +204,7 @@ def build_agent_options(
     mcp_servers: Optional[dict[str, Any]] = None,
     disallowed_tools: Optional[list[str]] = None,
 ):
-    """Construct ClaudeAgentOptions for an OpenMontage agent session.
+    """Construct ClaudeAgentOptions for an OpenNolan agent session.
 
     ``resume`` is a prior session_id. When set, the SDK restores that
     conversation's full history into the new client, so a session that died

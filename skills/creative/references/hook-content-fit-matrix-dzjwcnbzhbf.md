@@ -42,7 +42,7 @@ Do **not** reuse the same hook style for every Reel/script. The hook should matc
 | Contrarian / myth-bust | Create tension against a common belief | Challenging but defensible | `You may not agree with this...`, `The real truth is...`, `Everyone says X, but...` |
 | Authority / proof | Establish credibility fast | Evidence-first, concrete | `I tested this on...`, `Here’s the proof...`, `After X reps/results, I learned...` |
 
-## OpenMontage implementation rules
+## OpenNolan implementation rules
 
 When a script, scene plan, or pipeline asks for an Instagram/short-form hook:
 
@@ -58,14 +58,14 @@ When a script, scene plan, or pipeline asks for an Instagram/short-form hook:
    - Contrarian → A/B cards, red X/green check, reversed assumption, comment prompt.
    - Authority → proof receipt, dashboard, source screenshot, result montage.
 4. Treat mismatch as a retention bug. Example: a proof-heavy post opened with a vague curiosity hook feels weak; a personal story opened with a generic “Here’s how to...” feels emotionally flat.
-5. For Het’s AI/tech content, translate generic hooks into founder/operator stakes immediately after the first line.
+5. For your AI/tech content, translate generic hooks into founder/operator stakes immediately after the first line.
 
-## Het-specific examples
+## Domain-specific examples
 
 - Educational: `Here’s how to turn a messy AI demo into a proof-backed Reel.`
 - Storytelling: `I learned this the hard way: AI videos fail when they look generated, not built.`
 - Contrarian: `You may not agree with this, but most AI agents don’t need better models.`
-- Authority/proof: `I tested 5 AI video workflows — this was the only one worth syncing to OpenMontage.`
+- Authority/proof: `I tested 5 AI video workflows — this was the only one worth syncing to OpenNolan.`
 
 ## Asset
 

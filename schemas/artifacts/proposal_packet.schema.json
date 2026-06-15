@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/proposal_packet",
+  "$id": "opennolan/artifacts/proposal_packet",
   "title": "Proposal Packet",
   "description": "Pre-production proposal containing concept options, production plan, cost estimate, and approval gate. The user reviews and approves this before any assets are generated or money is spent.",
   "type": "object",

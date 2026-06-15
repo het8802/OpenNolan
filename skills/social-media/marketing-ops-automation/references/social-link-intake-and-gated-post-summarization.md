@@ -19,7 +19,7 @@ Summarize from the strongest retrievable evidence and clearly label access limit
 6. If media was downloaded locally only for analysis/learning, delete it after extracting and storing the reusable lesson. Keep only small notes or skill updates unless the user explicitly asks to preserve raw media.
 7. Do not overclaim transcripts, spoken content, or comments unless directly retrieved.
 
-## When Het says “Learn this”
+## When the user says “Learn this”
 
 Do not store reusable Instagram strategy lessons primarily in memory. Extract the durable pattern and update the right skill:
 
@@ -27,7 +27,7 @@ Do not store reusable Instagram strategy lessons primarily in memory. Extract th
 - Carousels, swipe funnels, slide jobs, save-worthy post systems, visual carousel design → patch `instagram-carousel`.
 - If the post teaches a distinct reusable domain system that does not belong in either skill, create a new focused skill and cross-reference it.
 
-Keep only a tiny memory pointer if needed; skills are the source of truth for Het's learned Instagram creator knowledge.
+Keep only a tiny memory pointer if needed; skills are the source of truth for your learned Instagram creator knowledge.
 
 ## Useful probe
 

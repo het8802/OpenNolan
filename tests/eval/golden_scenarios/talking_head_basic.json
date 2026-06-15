@@ -3,7 +3,7 @@
   "pipeline_type": "talking-head",
   "description": "Basic talking-head pipeline: 15s vertical clip with burned subtitles",
   "inputs": {
-    "footage_path": "C:/Users/ishan/Documents/SocialMedia/IshanAIVideos/pipeline/2026-03-08/seg1_intro.mp4",
+    "footage_path": "/path/to/talking_head_intro.mp4",
     "model_size": "base",
     "target_platform": "youtube"
   },

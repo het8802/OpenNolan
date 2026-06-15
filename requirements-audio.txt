@@ -1,0 +1,6 @@
+# OpenNolan - Optional audio-analysis dependencies
+# Heavy transitive stack (numba, llvmlite, scipy) kept OUT of base requirements.txt.
+# Install only if you use beat-synced editing (tools/video/beat_cutter.py):
+#   pip install -r requirements-audio.txt
+-r requirements.txt
+librosa>=0.10

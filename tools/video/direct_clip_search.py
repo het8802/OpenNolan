@@ -58,7 +58,7 @@ class DirectClipSearch(BaseTool):
     version = "0.1.0"
     tier = ToolTier.SOURCE
     capability = "clip_acquisition"
-    provider = "openmontage"
+    provider = "opennolan"
     stability = ToolStability.BETA
     execution_mode = ExecutionMode.SYNC
     determinism = Determinism.DETERMINISTIC

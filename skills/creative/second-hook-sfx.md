@@ -12,13 +12,13 @@ Accessible transcript:
 
 > Use "fahhhh" for epic fails. Use [whoosh] for zoom in, zoom out, or transitions. Use "riser" for building suspense or making a very strong point. Use "pop/click" when you add overlays. Use "crickets" to show awkward silences. You can find these sound effects free to download on myinstants.com.
 
-Do **not** copy the Reel audio into OpenMontage deliverables. Treat the Reel as a pattern source. Use OpenMontage's in-repo `assets/sfx/` library when possible, generate bespoke replacements when needed, or ask the user to supply licensed sounds.
+Do **not** copy the Reel audio into OpenNolan deliverables. Treat the Reel as a pattern source. Use OpenNolan's in-repo `assets/sfx/` library when possible, generate bespoke replacements when needed, or ask the user to supply licensed sounds.
 
 ## Core Pattern
 
 For short-form social videos, each important visual/spoken beat gets a lightweight audio cue that clarifies the emotional instruction:
 
-| SFX family | Use when the beat means... | OpenMontage existing asset | If missing, generate/source this |
+| SFX family | Use when the beat means... | OpenNolan existing asset | If missing, generate/source this |
 |---|---|---|---|
 | `fahhhh` / falling-fail | Epic fail, mistake reveal, "wrong way", rejected idea, bad result | closest: `impact-soft` at lower volume, or `bass-drop-soft` for bigger fail | Short comedic descending vocalized fail sting, dry, meme-like but not obnoxious, 0.6-1.0s |
 | `whoosh` | Zoom-in, zoom-out, swipe, scene transition, text/card travel | `whoosh-fast`, `whoosh-deep`, `swipe-paper` | Clean fast air whoosh, short tail, modern motion graphics, 0.4-0.8s |
@@ -35,7 +35,7 @@ For short-form social videos, each important visual/spoken beat gets a lightweig
 - **Density cap:** in dialogue-heavy videos, use at most one SFX every ~2 seconds unless the scene is deliberately a fast montage.
 - **Dialogue priority:** SFX must sit below narration. Peak target is usually -18 to -12 dB, with extra ducking when VO overlaps.
 
-## Reels / OpenMontage Placement Recipes
+## Reels / OpenNolan Placement Recipes
 
 ### Wrong-way / right-way hook
 1. Show the bad output, failed attempt, or common mistake.
@@ -97,9 +97,9 @@ Paths are repo-relative. Do not copy shared SFX into `projects/<name>/assets/aud
 
 ## Sound-Sourcing Notes
 
-- The reference Reel points viewers to `myinstants.com` for free downloads, but OpenMontage should still verify license/provenance before using third-party files in client/public deliverables.
+- The reference Reel points viewers to `myinstants.com` for free downloads, but OpenNolan should still verify license/provenance before using third-party files in client/public deliverables.
 - For internal drafts, placeholder SFX are acceptable if clearly labeled in the asset manifest.
-- For publishable videos, prefer OpenMontage-owned generated SFX, user-supplied licensed files, or clearly royalty-free sources.
+- For publishable videos, prefer OpenNolan-owned generated SFX, user-supplied licensed files, or clearly royalty-free sources.
 - If creating permanent shared effects for `fahhhh` or `crickets`, extend `scripts/generate_educational_sfx.py`, regenerate the manifest, then update `skills/creative/sfx-library.md`.
 
 ## Review Checklist

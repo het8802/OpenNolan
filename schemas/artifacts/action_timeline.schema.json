@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/action_timeline",
+  "$id": "opennolan/artifacts/action_timeline",
   "title": "Action Timeline",
   "description": "Timed character actions and poses compiled for rendering.",
   "type": "object",

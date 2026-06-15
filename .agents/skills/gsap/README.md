@@ -1,10 +1,10 @@
-# GSAP Skills in OpenMontage
+# GSAP Skills in OpenNolan
 
 Eight Layer 3 skills teaching the agent correct GSAP (GreenSock Animation Platform) usage. Sourced from [greensock/gsap-skills](https://github.com/greensock/gsap-skills), MIT licensed.
 
 ## Why GSAP is in this repo
 
-OpenMontage doesn't use GSAP directly today — Remotion compositions are driven by `useCurrentFrame()` + `interpolate()` + `spring()`. GSAP becomes relevant in two concrete scenarios:
+OpenNolan doesn't use GSAP directly today — Remotion compositions are driven by `useCurrentFrame()` + `interpolate()` + `spring()`. GSAP becomes relevant in two concrete scenarios:
 
 1. **Advanced text / SVG / motion-path animation inside a Remotion component.** GSAP's plugin family (SplitText, MorphSVG, DrawSVG, MotionPath, CustomEase) solves problems that are painful to hand-roll with primitive `interpolate()` calls. When you need per-character reveals, curved camera paths over SVG, or morphing between two arbitrary shapes — reach for GSAP.
 2. **HyperFrames composition (future)**. If the parallel HyperFrames engine gets wired in (see `DESIGN.md` / earlier discussion), GSAP is its native animation runtime via the Frame Adapter pattern — timelines are paused and registered on `window.__timelines`, and the engine seeks them frame-by-frame. GSAP timeline authoring becomes a day-1 skill.

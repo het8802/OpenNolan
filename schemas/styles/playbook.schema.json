@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/styles/playbook",
+  "$id": "opennolan/styles/playbook",
   "title": "Style Playbook",
   "description": "Visual style definition controlling all aesthetic choices in a video pipeline. Schema v2 adds chart_palette, typography scale/weight systems, and color rules.",
   "type": "object",

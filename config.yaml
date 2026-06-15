@@ -1,4 +1,4 @@
-# OpenMontage - Global Configuration
+# OpenNolan - Global Configuration
 
 llm:
   provider: anthropic            # anthropic | openai | gemini | openrouter | ollama | mistral | minimax

@@ -7,53 +7,53 @@ upstream, or be recorded in the local-edit log below.
 ## Source
 
 - Repo: https://github.com/heygen-com/hyperframes
-- Local clone: `C:\Users\ishan\Documents\hyperframes`
+- Local clone: `~/hyperframes`
 - Vendored commit: `d291358`
 - Vendored date: `2026-04-17`
 
 ## Mirrored directories
 
-| OpenMontage path                               | Upstream path                             |
+| OpenNolan path                               | Upstream path                             |
 | ---------------------------------------------- | ----------------------------------------- |
 | `.agents/skills/hyperframes/`                  | `skills/hyperframes/`                     |
 | `.agents/skills/hyperframes-cli/`              | `skills/hyperframes-cli/`                 |
 | `.agents/skills/hyperframes-registry/`         | `skills/hyperframes-registry/`            |
 | `.agents/skills/website-to-hyperframes/`       | `skills/website-to-hyperframes/`          |
 
-The `gsap` upstream skill is NOT re-vendored — OpenMontage already ships its
+The `gsap` upstream skill is NOT re-vendored — OpenNolan already ships its
 own GSAP skill family under `.agents/skills/gsap*/`.
 
 ## Local edits
 
 Any divergence from upstream is noted at the top of the edited file as an
-HTML comment starting with `OpenMontage-local`. Current edits:
+HTML comment starting with `OpenNolan-local`. Current edits:
 
 - `hyperframes-cli/SKILL.md` — added `validate` to the command list and a
   dedicated Validation section. Upstream omits it, but the CLI ships it and
-  OpenMontage's HyperFrames runtime path relies on `hyperframes validate` as
+  OpenNolan's HyperFrames runtime path relies on `hyperframes validate` as
   a real browser-based contract check before render.
 
 ## Re-sync procedure
 
 ```bash
 # From the hyperframes clone
-cd C:/Users/ishan/Documents/hyperframes
+cd ~/hyperframes
 git pull
 
-# From OpenMontage
-cd C:/Users/ishan/Documents/OpenMontage
+# From OpenNolan
+cd ~/OpenNolan
 rm -rf .agents/skills/hyperframes .agents/skills/hyperframes-cli \
        .agents/skills/hyperframes-registry .agents/skills/website-to-hyperframes
-cp -r C:/Users/ishan/Documents/hyperframes/skills/hyperframes          .agents/skills/
-cp -r C:/Users/ishan/Documents/hyperframes/skills/hyperframes-cli      .agents/skills/
-cp -r C:/Users/ishan/Documents/hyperframes/skills/hyperframes-registry .agents/skills/
-cp -r C:/Users/ishan/Documents/hyperframes/skills/website-to-hyperframes .agents/skills/
+cp -r ~/hyperframes/skills/hyperframes          .agents/skills/
+cp -r ~/hyperframes/skills/hyperframes-cli      .agents/skills/
+cp -r ~/hyperframes/skills/hyperframes-registry .agents/skills/
+cp -r ~/hyperframes/skills/website-to-hyperframes .agents/skills/
 # Then re-apply the local edits listed above and bump the vendored commit SHA.
 ```
 
 ## Why we vendor instead of referencing the upstream clone directly
 
-1. OpenMontage contributors may not have the HyperFrames monorepo on disk.
-2. Skills must be readable from the OpenMontage tree for agent discovery.
+1. OpenNolan contributors may not have the HyperFrames monorepo on disk.
+2. Skills must be readable from the OpenNolan tree for agent discovery.
 3. We want deterministic knowledge — upstream moves; we control when we pick
    up changes.

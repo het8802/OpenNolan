@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import * as api from './api.js'
+import { LineChart } from './components/LineChart.jsx'
+import Editor from './editor/Editor.jsx'
 
 // Configure marked for safe, compact output
 marked.setOptions({ breaks: true, gfm: true })
@@ -53,6 +55,7 @@ export default function App() {
   const [uploadTick, setUploadTick] = useState(0)             // bump to refresh asset listing
   const [threads, setThreads] = useState([])                  // chat threads for the project
   const [activeThread, setActiveThread] = useState(null)      // current thread id
+  const [editing, setEditing] = useState(false)               // manual editor open (full-screen)
   const messagesRef = useRef([])                              // latest messages, for thread persistence
   const sessionIdRef = useRef(null)                           // latest agent session_id
   const abortRef = useRef(null)                               // aborts the in-flight chat stream (Stop)
@@ -274,11 +277,21 @@ export default function App() {
     )
   }
 
+  if (editing) {
+    return (
+      <div className="app">
+        <Editor projectId={selected} state={state} onClose={() => setEditing(false)} />
+        {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       <ProjectBar
         state={state} projects={projects} selected={selected}
-        onBack={() => { setSelected(null); clearChat(); setActiveThread(null) }}
+        onEdit={() => setEditing(true)}
+        onBack={() => { setSelected(null); clearChat(); setActiveThread(null); setEditing(false) }}
       />
       <main className="grid">
         <ChatPanel
@@ -329,7 +342,7 @@ function Dashboard({ pipelines, projects, onOpen, onCreate }) {
   return (
     <div className="dashboard">
       <header className="dash-header">
-        <div className="brand"><span className="dot" /> OpenMontage <span className="muted">· Mission Control</span></div>
+        <div className="brand"><span className="dot" /> OpenNolan <span className="muted">· Mission Control</span></div>
         <div className="dash-sub">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
       </header>
       <div className="dash-grid">
@@ -412,7 +425,7 @@ function CreateModal({ pipelines, onClose, onCreate }) {
 
 // ─── Project Bar (slim top bar inside a project) ────────────────────────────────
 
-function ProjectBar({ state, projects, selected, onBack }) {
+function ProjectBar({ state, projects, selected, onBack, onEdit }) {
   const p = projects.find(x => x.project_id === selected)
   const name = state?.name || p?.name || selected
   const type = state?.pipeline_type || p?.pipeline_type || ''
@@ -429,6 +442,7 @@ function ProjectBar({ state, projects, selected, onBack }) {
         {runtime
           ? <span className="chip on runtime-used" title="Composition runtime used by this project">🎬 {runtime}</span>
           : <span className="chip off" title="No render runtime chosen yet">runtime: not set</span>}
+        {onEdit && <button className="editor-open-btn" onClick={onEdit} title="Hand-edit this project's timeline">✎ Edit</button>}
       </div>
     </header>
   )
@@ -1262,97 +1276,8 @@ function scoreColor(v) {
   return 'var(--red)'
 }
 
-// Reusable, dependency-free SVG line chart.
-// series: [{ key, label, color, points:[{x,y}], bold, hidden }]
-// x is the data domain (seconds here), y is 0..yMax.
-function LineChart({ series, xMax, yMax = 100, yTicks = [0, 25, 50, 75, 100], height = 240, xLabel = 'time (s)', yLabel = 'score' }) {
-  const wrapRef = useRef(null)
-  const [width, setWidth] = useState(560)
-  const [hoverPx, setHoverPx] = useState(null)
-
-  // Track the container width so the chart fills the modal responsively.
-  useEffect(() => {
-    const el = wrapRef.current
-    if (!el || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(entries => {
-      const w = entries[0]?.contentRect?.width
-      if (w) setWidth(Math.max(280, Math.floor(w)))
-    })
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-
-  const pad = { top: 14, right: 14, bottom: 30, left: 32 }
-  const innerW = Math.max(1, width - pad.left - pad.right)
-  const innerH = Math.max(1, height - pad.top - pad.bottom)
-  const sx = x => pad.left + (xMax > 0 ? (x / xMax) * innerW : 0)
-  const sy = y => pad.top + innerH - (Math.max(0, Math.min(yMax, y)) / yMax) * innerH
-
-  const visible = series.filter(s => !s.hidden && s.points && s.points.length)
-  const nearest = (pts, x) => pts.reduce((a, b) => (Math.abs(b.x - x) < Math.abs(a.x - x) ? b : a))
-
-  const tickN = 6
-  const xTicks = []
-  for (let i = 0; i <= tickN; i++) xTicks.push(Math.round((xMax / tickN) * i))
-
-  // Hover: map cursor px -> data x, snap to the nearest point of the bold (or first) series.
-  const primary = visible.find(s => s.bold) || visible[0]
-  let focus = null
-  if (hoverPx != null && primary) {
-    const dataX = ((hoverPx - pad.left) / innerW) * xMax
-    focus = nearest(primary.points, dataX)
-  }
-
-  function onMove(e) {
-    const rect = e.currentTarget.getBoundingClientRect()
-    setHoverPx(((e.clientX - rect.left) / rect.width) * width)
-  }
-
-  return (
-    <div className="lc-wrap" ref={wrapRef}>
-      <svg className="lc-svg" viewBox={`0 0 ${width} ${height}`} width="100%" height={height}
-        onMouseMove={onMove} onMouseLeave={() => setHoverPx(null)}
-        role="img" aria-label={`${yLabel} versus ${xLabel}`}>
-        {yTicks.map(t => (
-          <g key={`y${t}`}>
-            <line className="lc-grid" x1={pad.left} y1={sy(t)} x2={width - pad.right} y2={sy(t)} />
-            <text className="lc-axis" x={pad.left - 6} y={sy(t)} textAnchor="end" dominantBaseline="middle">{t}</text>
-          </g>
-        ))}
-        {xTicks.map((t, i) => (
-          <text key={`x${i}`} className="lc-axis" x={sx(t)} y={height - pad.bottom + 15} textAnchor="middle">{t}</text>
-        ))}
-        <text className="lc-axis-title" x={pad.left + innerW / 2} y={height - 2} textAnchor="middle">{xLabel}</text>
-
-        {visible.map(s => (
-          <polyline key={s.key} className={`lc-line ${s.bold ? 'bold' : ''}`} fill="none" stroke={s.color}
-            points={s.points.map(p => `${sx(p.x)},${sy(p.y)}`).join(' ')} />
-        ))}
-
-        {focus && (
-          <g>
-            <line className="lc-focus" x1={sx(focus.x)} y1={pad.top} x2={sx(focus.x)} y2={pad.top + innerH} />
-            {visible.map(s => {
-              const pt = nearest(s.points, focus.x)
-              return <circle key={s.key} className="lc-dot" cx={sx(pt.x)} cy={sy(pt.y)} r={s.bold ? 3.5 : 2.5} fill={s.color} />
-            })}
-          </g>
-        )}
-      </svg>
-      {focus && (
-        <div className="lc-tip">
-          <span className="lc-tip-x">{focus.x.toFixed(1)}s</span>
-          {visible.map(s => (
-            <span key={s.key} className="lc-tip-row">
-              <span className="lc-tip-dot" style={{ background: s.color }} />
-              {s.label}<b>{Math.round(nearest(s.points, focus.x).y)}</b>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
+// LineChart moved to ./components/LineChart.jsx (imported at top) so the manual
+// editor's keyframe-curve editor can reuse the same dependency-free SVG chart.
 
 function ContentSignalView({ c }) {
   const timeline = Array.isArray(c.timeline) ? c.timeline : []
@@ -1464,6 +1389,7 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
   const [data, setData] = useState(null)
   const inputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
+  const [viewer, setViewer] = useState(null)   // { items:[{kind,name,url,path}], index } — lightbox
 
   // Poll the asset listing for the selected project (live as the agent writes files).
   useEffect(() => {
@@ -1483,6 +1409,15 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
   const renders = data?.renders || []
   const files = data?.kinds?.[activeKind] || []
 
+  // Lightbox item lists. The URL carries the file's mtime as a cache-bust token so
+  // a freshly finished render (same path, new bytes) reloads without a page refresh.
+  const gridItems = files.map(f => ({
+    kind: activeKind, name: f.name, path: f.path, url: api.fileUrl(selected, f.path, f.mtime),
+  }))
+  const renderItems = renders.map(r => ({
+    kind: 'video', name: r.name, path: r.path, url: api.fileUrl(selected, r.path, r.mtime),
+  }))
+
   return (
     <section className="panel assets">
       <h2>Assets</h2>
@@ -1493,10 +1428,20 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
           {renders.length > 0 && (
             <div className="renders">
               <div className="renders-label">🎬 Final render</div>
-              {renders.map(r => (
+              {renders.map((r, i) => (
                 <div key={r.path} className="render-item">
-                  <video controls src={api.fileUrl(selected, r.path)} />
-                  <a className="render-dl" href={api.fileUrl(selected, r.path)} download>{r.name}</a>
+                  {/* key on path+mtime so a re-render (or a poll that first caught the
+                      file mid-write) remounts the <video> and re-fetches the final bytes. */}
+                  <video key={`${r.path}:${r.mtime}`} controls
+                    src={api.fileUrl(selected, r.path, r.mtime)} />
+                  <div className="render-actions">
+                    <button className="render-expand" onClick={() => setViewer({ items: renderItems, index: i })}>
+                      ⛶ Full screen
+                    </button>
+                    <a className="render-dl" href={api.fileUrl(selected, r.path, r.mtime)} download={r.name}>
+                      ⤓ {r.name}
+                    </a>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1516,8 +1461,9 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
 
           <div className="asset-grid">
             {files.length === 0 && <p className="empty">No {activeKind} yet.</p>}
-            {files.map(f => (
-              <AssetItem key={f.path} kind={activeKind} url={api.fileUrl(selected, f.path)} name={f.name} />
+            {gridItems.map((it, i) => (
+              <AssetItem key={it.path} kind={it.kind} url={it.url} name={it.name}
+                onOpen={() => setViewer({ items: gridItems, index: i })} />
             ))}
           </div>
 
@@ -1533,17 +1479,84 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
           </div>
         </div>
       )}
+      {viewer && (
+        <AssetModal items={viewer.items} index={viewer.index} onClose={() => setViewer(null)} />
+      )}
     </section>
   )
 }
 
-function AssetItem({ kind, url, name }) {
+// A grid tile. Clicking it opens the asset full-screen in the center lightbox (like an
+// artifact). Video/audio thumbnails are non-interactive previews — the real player (with
+// controls) lives in the lightbox so a single click always opens it.
+function AssetItem({ kind, url, name, onOpen }) {
   return (
-    <div className="asset-item" title={name}>
+    <div className="asset-item clickable" title={name} role="button" tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}>
       {kind === 'images' && <img src={url} alt={name} loading="lazy" />}
-      {kind === 'video' && <video src={url} controls preload="metadata" />}
-      {(kind === 'audio' || kind === 'music') && <audio src={url} controls preload="none" />}
+      {kind === 'video' && (
+        <div className="asset-thumb video">
+          <video src={url} preload="metadata" muted playsInline />
+          <span className="asset-play">▶</span>
+        </div>
+      )}
+      {(kind === 'audio' || kind === 'music') && (
+        <div className="asset-thumb audio"><span className="asset-audio-icon">🎵</span></div>
+      )}
       <div className="asset-name">{name}</div>
+    </div>
+  )
+}
+
+// Center lightbox: opens an asset full-screen over the app, mirroring how artifacts
+// open in the middle. Esc / backdrop-click closes; ←/→ steps through the current list.
+function AssetModal({ items, index, onClose }) {
+  const [i, setI] = useState(index)
+  useEffect(() => { setI(index) }, [index])
+  const prev = () => setI(x => (x - 1 + items.length) % items.length)
+  const next = () => setI(x => (x + 1) % items.length)
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowLeft') setI(x => (x - 1 + items.length) % items.length)
+      else if (e.key === 'ArrowRight') setI(x => (x + 1) % items.length)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [items.length, onClose])
+
+  const item = items[i]
+  if (!item) return null
+  const multi = items.length > 1
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="asset-lightbox" onClick={e => e.stopPropagation()}>
+        <div className="al-head">
+          <span className="al-name" title={item.name}>{item.name}</span>
+          <div className="al-actions">
+            <a className="al-dl" href={item.url} download={item.name} title="Download">⤓</a>
+            <button className="am-close" onClick={onClose} title="Close (Esc)">✕</button>
+          </div>
+        </div>
+        <div className="al-stage">
+          {multi && <button className="al-nav prev" onClick={prev} title="Previous (←)">‹</button>}
+          {/* key on the URL so navigating remounts the media (fresh load + autoplay) */}
+          <div className="al-media" key={item.url}>
+            {item.kind === 'images' && <img src={item.url} alt={item.name} />}
+            {item.kind === 'video' && <video src={item.url} controls autoPlay />}
+            {(item.kind === 'audio' || item.kind === 'music') && (
+              <div className="al-audio">
+                <div className="al-audio-icon">🎵</div>
+                <audio src={item.url} controls autoPlay />
+              </div>
+            )}
+          </div>
+          {multi && <button className="al-nav next" onClick={next} title="Next (→)">›</button>}
+        </div>
+        {multi && <div className="al-count">{i + 1} / {items.length}</div>}
+      </div>
     </div>
   )
 }

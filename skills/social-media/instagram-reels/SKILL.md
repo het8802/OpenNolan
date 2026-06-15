@@ -1,18 +1,18 @@
 ---
 name: instagram-reels
-description: Use when creating, critiquing, researching, or scripting Instagram Reels, TikToks, YouTube Shorts, short-form talking-head videos, hooks, or creator-pattern analysis for Het's AI/tech/startup content.
+description: Use when creating, critiquing, researching, or scripting Instagram Reels, TikToks, YouTube Shorts, short-form talking-head videos, hooks, or creator-pattern analysis for AI/tech/startup content.
 ---
 
 # Instagram Reels
 
-## OpenMontage mirror rule
-When Het shares Instagram algorithm, user psychology, engagement, hook, carousel, or editing lessons, store durable learning in the relevant Hermes social-media skill **and** mirror it into OpenMontage repo-local files under `/home/ubuntu/projects/OpenMontage/skills/social-media/` so his local synced AI agent can use it. Use real Markdown/support files, not symlinks. Session-specific details belong in `references/`; class-level operating rules belong in `SKILL.md`. See `references/openmontage-social-media-mirror.md`.
+## OpenNolan mirror rule
+When the user shares Instagram algorithm, user psychology, engagement, hook, carousel, or editing lessons, store durable learning in the relevant social-media skill **and** mirror it into OpenNolan repo-local files under `~/projects/OpenNolan/skills/social-media/` so their local synced AI agent can use it. Use real Markdown/support files, not symlinks. Session-specific details belong in `references/`; class-level operating rules belong in `SKILL.md`. See `references/opennolan-social-media-mirror.md`.
 
 ## Core principle
 Treat short-form as **attention engineering**, not video summarization. The first 2–5 seconds must combine a visual hook, spoken hook, and audio/SFX cue; the rest must reward the hook with useful, emotionally legible payoff.
 
-## Source library learned from Het's shared Instagram posts
-These are distilled from posts/reels Het explicitly said to “Learn this.” Update this section whenever Het shares more legit Instagram creators/posts.
+## Source library learned from shared Instagram posts
+These are distilled from posts/reels the user explicitly said to “Learn this.” Update this section whenever the user shares more legit Instagram creators/posts.
 
 ### Reusable hook families
 Use these four hook families instead of rewriting from scratch:
@@ -34,7 +34,7 @@ Before writing hooks, validate:
 Do not open with “X launched Y” unless that phrasing itself creates tension. Convert news into founder/operator implications.
 
 ### Retention psychology / Instagram algorithm model
-Use this as the operating model for future lessons Het shares about engaging Reels. Preserve new psychology/algorithm observations here or in a narrow sub-skill, not only in chat memory.
+Use this as the operating model for future lessons the user shares about engaging Reels. Preserve new psychology/algorithm observations here or in a narrow sub-skill, not only in chat memory.
 
 - Instagram distribution is behavior-led: prioritize watch time, completion rate, replays, shares per view, saves per view, and comment intent. Likes are weaker than retention/share signals.
 - The first seconds must create an **open loop**: a surprising claim, status threat, hidden mechanism, unfinished framework, or visible transformation. The viewer should feel “I need the next beat.”
@@ -57,14 +57,14 @@ The 7 friction levers shown:
 6. Cut right before the answer/reveal → creates an unresolved loop and comments.
 7. Wear something distracting/backwards/mismatched → viewers notice and point it out.
 
-Reusable ethical adaptations for Het’s AI/tech content:
+Reusable ethical adaptations for your AI/tech content:
 - Use **intentional mystery props** tied to the topic (e.g., sticky note labeled “$10M bottleneck,” old keyboard, redacted roadmap) rather than fake factual errors.
 - Use **pause-worthy proof flashes**: quick prompt, GitHub diff, API bill, dashboard, or checklist glimpse — then offer the full resource via CTA.
 - Use **controlled near-mistakes** only when harmless and self-aware, e.g. “Did you catch the wrong assumption?” instead of mislabeling facts.
 - Use **cut-before-reveal** sparingly; pay off the answer in comments/follow-up or it becomes frustrating clickbait.
 - Add a final meta-question: “Which mistake did you catch?” / “Which tab would you pause on?” to convert attention into comments.
 
-Why it works: annoyance, curiosity, correction impulse, and confusion are engagement triggers. But for Het’s brand, use friction to increase participation and rewatch, not to erode trust.
+Why it works: annoyance, curiosity, correction impulse, and confusion are engagement triggers. But for your brand, use friction to increase participation and rewatch, not to erode trust.
 
 ### First 2–5 seconds: visual + spoken + SFX
 Every Reel script should specify:
@@ -75,14 +75,14 @@ Every Reel script should specify:
 Example: `A-vs-B sticky notes + contrarian/problem + stamp SFX` → “AI assistant ❌ / Invoice chaser ✅”.
 
 #### Second-hook SFX lesson
-Learned from Tanishaa Bhansali Reel `DYqo3PbBBYN` (Jun 2026): sound effects act as a **second hook** after the visual/spoken hook. For Reels/OpenMontage edits, map common SFX to emotional function instead of sprinkling random sounds:
+Learned from Tanishaa Bhansali Reel `DYqo3PbBBYN` (Jun 2026): sound effects act as a **second hook** after the visual/spoken hook. For Reels/OpenNolan edits, map common SFX to emotional function instead of sprinkling random sounds:
 - `fahhhh` / fail sting = epic fail, bad output, wrong-way comparison.
 - `whoosh` = zoom-in, zoom-out, swipe, transition, card travel.
 - `riser` = suspense before a reveal, strong point, stat/punchline buildup.
 - `pop/click` = overlay, bullet, label, UI card, cursor/tap microinteraction.
 - `crickets` = awkward silence, joke pause, dead-room moment.
 
-Timing rules: SFX should start 10–20 ms before the visual it accents; risers should end exactly on the reveal frame; comedy sounds need a short pause/hold to read; dialogue-heavy Reels should stay around one SFX every ~2 seconds. OpenMontage implementation detail is saved in `openmontage-video-production` reference `references/second-hook-sfx-reel.md`.
+Timing rules: SFX should start 10–20 ms before the visual it accents; risers should end exactly on the reveal frame; comedy sounds need a short pause/hold to read; dialogue-heavy Reels should stay around one SFX every ~2 seconds. OpenNolan implementation detail is saved in `opennolan-video-production` reference `references/second-hook-sfx-reel.md`.
 
 ### Mobile safe-zone layout lesson
 Learned from Bhavini Panjwani Reel `DY4p39tskeY` (Jun 2026): creators should design vertical Reels around Instagram UI/cropping safe zones, not just aesthetics. The Reel is a 15s talking-head tutorial with translucent overlays that point to where content belongs.
@@ -98,7 +98,7 @@ Reusable explainer format:
 - Use color-coded overlays (`green = safe`, `yellow/teal = hook/caption bands`, `red = avoid`) directly on the footage.
 - Narration can be extremely simple: “this is your safe zone / this is where the hook goes / this is where captions go / don’t put anything here.” The value comes from visual clarity, not clever copy.
 - Pace one spatial rule every 2–3 seconds; pair each rule with a pointing gesture, dotted arrow, or rectangle highlight so it is instantly screenshot-worthy.
-- Use this checklist before exporting Het’s Reels/OpenMontage/Remotion videos: face/subject safe, hook readable in upper-middle, subtitles above bottom UI, no key text in side rails, CTA not hidden by buttons.
+- Use this checklist before exporting your Reels/OpenNolan/Remotion videos: face/subject safe, hook readable in upper-middle, subtitles above bottom UI, no key text in side rails, CTA not hidden by buttons.
 
 ### Greg Isenberg / Roberto Nickson short-form production system
 Learned from Greg Isenberg's public Roberto Nickson masterclass and X thread (Oct 2025): the polished "programmatic" look is mostly a **templated assembly line**, not a magic one-click generator. Reusable rules:
@@ -106,29 +106,29 @@ Learned from Greg Isenberg's public Roberto Nickson masterclass and X thread (Oc
 - Record quickly with teleprompter; do not over-optimize the take.
 - Edit like dopamine engineering: something changes every few seconds—jump cut, caption hit, pattern interrupt, screen-recording move, generated B-roll, SFX.
 - Use contextual generated visuals instead of generic stock when possible. Publicly cited stack includes Apple Notes, Prompter Pro, OBS, Screen Studio, Downie, optimized Premiere workflow, Nano Banana, Kling, Sora 2; Greg has also cited ChatGPT + Veo/CapCut/Final Cut and Remotion-inside-Codex in related posts.
-- Key implementation lesson for Het: Remotion/FFmpeg should be used as a deterministic assembler around a strong design system, shot vocabulary, captions, B-roll, and sound design—not as a blank React canvas that invents taste on demand.
+- Key implementation lesson: Remotion/FFmpeg should be used as a deterministic assembler around a strong design system, shot vocabulary, captions, B-roll, and sound design—not as a blank React canvas that invents taste on demand.
 
-#### Greg-style Remotion implementation for Het
-Use this when Het asks for Greg Isenberg-like Instagram Reels, Hyperagent-style AI product reels, or clean editorial programmatic videos.
+#### Greg-style Remotion implementation
+Use this when the user asks for Greg Isenberg-like Instagram Reels, Hyperagent-style AI product reels, or clean editorial programmatic videos.
 
 **Canonical local assets and demo:**
-- Asset kit root: `/home/ubuntu/greg-style-kit`
-- Zip archive: `/home/ubuntu/greg-style-kit.zip`
-- Asset preview: `/home/ubuntu/greg-style-kit/previews/asset-preview.png`
-- Asset ledger: `/home/ubuntu/greg-style-kit/asset-ledger.json`
-- Working demo Remotion project: `/home/ubuntu/greg-style-demo`
-- Final 10s demo: `/home/ubuntu/greg-style-demo/greg-style-demo-10s-final.mp4`
-- Demo source: `/home/ubuntu/greg-style-demo/src/Composition.tsx`, `Root.tsx`, `index.css`
-- Demo QA contact sheet: `/home/ubuntu/greg-style-demo/contact-sheet-final.jpg`
+- Asset kit root: `~/greg-style-kit`
+- Zip archive: `~/greg-style-kit.zip`
+- Asset preview: `~/greg-style-kit/previews/asset-preview.png`
+- Asset ledger: `~/greg-style-kit/asset-ledger.json`
+- Working demo Remotion project: `~/greg-style-demo`
+- Final 10s demo: `~/greg-style-demo/greg-style-demo-10s-final.mp4`
+- Demo source: `~/greg-style-demo/src/Composition.tsx`, `Root.tsx`, `index.css`
+- Demo QA contact sheet: `~/greg-style-demo/contact-sheet-final.jpg`
 
 **Existing reusable assets:**
-- Fonts: `/home/ubuntu/greg-style-kit/fonts/Fraunces/` and `/home/ubuntu/greg-style-kit/fonts/Inter/` from Google Fonts OFL. Use Fraunces or Georgia-like serif for editorial hooks; Inter/DM Sans-like sans for UI labels.
-- Palette: `/home/ubuntu/greg-style-kit/palettes/greg-editorial.json`.
-- Backgrounds: `/home/ubuntu/greg-style-kit/backgrounds/warm-paper.png`, `subtle-noise.png`, `mint-gradient.png`.
-- Icons: `/home/ubuntu/greg-style-kit/icons/robot-agent.svg`, `document.svg`, `checklist.svg`, `map-pin.svg`, `browser.svg`, `dollar.svg`, `cursor.svg`.
-- Shapes: `/home/ubuntu/greg-style-kit/shapes/dashed-container.svg`, `pill-label.svg`, `rounded-node.svg`, `progress-bar.svg`.
-- SFX placeholders: `/home/ubuntu/greg-style-kit/sfx/soft-pop.wav`, `whoosh.wav`, `click.wav`, `riser.wav`. Replace with ElevenLabs/generated SFX when keys exist.
-- Starter components: `/home/ubuntu/greg-style-kit/templates/*.tsx` (`workflow-diagram`, `multi-agent-map`, `truth-card`, `ai-output-card`, `talking-head-quote`, etc.).
+- Fonts: `~/greg-style-kit/fonts/Fraunces/` and `~/greg-style-kit/fonts/Inter/` from Google Fonts OFL. Use Fraunces or Georgia-like serif for editorial hooks; Inter/DM Sans-like sans for UI labels.
+- Palette: `~/greg-style-kit/palettes/greg-editorial.json`.
+- Backgrounds: `~/greg-style-kit/backgrounds/warm-paper.png`, `subtle-noise.png`, `mint-gradient.png`.
+- Icons: `~/greg-style-kit/icons/robot-agent.svg`, `document.svg`, `checklist.svg`, `map-pin.svg`, `browser.svg`, `dollar.svg`, `cursor.svg`.
+- Shapes: `~/greg-style-kit/shapes/dashed-container.svg`, `pill-label.svg`, `rounded-node.svg`, `progress-bar.svg`.
+- SFX placeholders: `~/greg-style-kit/sfx/soft-pop.wav`, `whoosh.wav`, `click.wav`, `riser.wav`. Replace with ElevenLabs/generated SFX when keys exist.
+- Starter components: `~/greg-style-kit/templates/*.tsx` (`workflow-diagram`, `multi-agent-map`, `truth-card`, `ai-output-card`, `talking-head-quote`, etc.).
 
 **Asset provenance / how the first kit was created:**
 - Background PNGs were generated locally: warm paper base, subtle noise overlay, mint gradient.
@@ -151,13 +151,13 @@ Use this when Het asks for Greg Isenberg-like Instagram Reels, Hyperagent-style 
 - Use existing SVGs/shapes for generic UI metaphors; create new simple SVGs only when the concept is abstract/systemic (agent, workflow, checklist, database, money, browser, map).
 - For specific topical images inside the reel—founder portrait style, product scene, unusual metaphor, B-roll still, cinematic object, company/product illustration—prefer **Codex CLI with native `$imagegen` / image-generation capability** to create AI-generated images, then use Remotion as the assembler. Do not default to hand-coded placeholder art for these topical assets.
 - For storyboards or “help me visualize the whole video” deliverables, do **not** default to a PIL/HTML/programmatic contact sheet as the final visual unless the user asks for deterministic wireframes. Create a text beat sheet if useful, then use native `$imagegen` to produce a polished AI-generated storyboard/contact sheet in the editorial AI-product style.
-- Store generated topical assets under the project, e.g. `/home/ubuntu/<reel-project>/public/generated/` with descriptive names and a small `asset-ledger.json` recording prompt, source, and usage.
+- Store generated topical assets under the project, e.g. `~/<reel-project>/public/generated/` with descriptive names and a small `asset-ledger.json` recording prompt, source, and usage.
 - Treat text embedded in AI-generated images as decorative/background unless it is clearly legible after mobile QA; add primary readable text as Remotion overlays.
 - Keep copyrighted/reference material out of the final. Use Greg/other creators as style references only; recreate schema, not assets.
 
 **Remotion build pattern:**
 1. Scaffold or reuse a project: `npx create-video@latest --yes --blank --no-tailwind <project>` then `npm i`.
-2. Copy or symlink `/home/ubuntu/greg-style-kit` into `public/greg-style-kit`.
+2. Copy or symlink `~/greg-style-kit` into `public/greg-style-kit`.
 3. Register a 1080×1920, 30fps composition. For 10s: `durationInFrames={300}`.
 4. Load fonts in CSS from `../public/greg-style-kit/fonts/...`.
 5. Build scenes as deterministic components: background, headline card, workflow map, dashboard mock, proof frame, final checklist.
@@ -195,10 +195,10 @@ The three actual skills are saved in `claude-code-design-skills`:
 2. Impeccable design = layout/spacing/typography cleanup in one design-polish pass.
 3. Taste Skill = real design references so AI stops generating generic websites.
 
-Use this pattern for Het’s AI/tooling content when the lesson is: the tool is not enough; the workflow/context/reference system creates the quality gap.
+Use this pattern for AI/tooling content when the lesson is: the tool is not enough; the workflow/context/reference system creates the quality gap.
 
 #### InsiderForce kinetic whiteboard caption style
-Learned from InsiderForce Reel `DYxBWLIHFM5` (May 2026), “Three Claude Code skills that make you look like a designer overnight.” Use when Het wants a clean faceless AI/design Reel where text, VO, and product mockups carry the whole video.
+Learned from InsiderForce Reel `DYxBWLIHFM5` (May 2026), “Three Claude Code skills that make you look like a designer overnight.” Use when you want a clean faceless AI/design Reel where text, VO, and product mockups carry the whole video.
 
 Reusable visual grammar:
 - Background: matte off-white/very light gray with faint grid/texture, subtle watermark, and soft drop shadows. Use sparse decorative brand props (red starburst/sun icon, grayscale 3D hand/object, key, black circular logo badge) as parallax/background accents.
@@ -208,8 +208,8 @@ Reusable visual grammar:
 - Transition language: quick blur/zoom wipes between sections; vertical card swipes; object-driven slides; no talking head required. Motion should feel like a clean animated presentation deck rather than stock B-roll.
 - Beat structure: hook title builds word-by-word → numbered skill card → problem list → solution/payoff phrase → repeat for 3 skills → keyword CTA/product mockup → follow-gate ending.
 - Replication note: in Remotion/HyperFrames, implement text as tokenized timed spans with per-token opacity/translate/blur, not ordinary subtitles. Align each phrase reveal to VO word timings; add micro SFX/pop/whoosh on section titles, bullets, and card entrances.
-- Smoothing technique learned from the first OpenMontage/HyperFrames replica: avoid meme-like `0.09s` scale yoyo pops, large `translateY`, heavy blur, and `back.out` card overshoot. Use a premium soft-settle instead: reveal key words over roughly `0.28–0.36s`, begin `0.06–0.10s` before spoken stress, limit initial y motion to `12–18px`, blur to `2–3px`, scale payoff text only to `1.03–1.04`, then settle to `1.0` over `0.18–0.25s`; start floating-card ambient drift only after entrance animations settle.
-- OpenMontage implementation note: when Het asks to turn this into an OpenMontage reusable style, create both a Layer 2 creative skill and a YAML style playbook, validate the style schema, and update OpenMontage's skill index. When he asks for the actual video, use the HyperFrames production run/pitfall checklist in `references/openmontage-kinetic-whiteboard-captions.md` before rendering and delivering the MP4 + QA contact sheet. Pay special attention to the smoother-motion pitfall: avoid abrupt yoyo pops and bouncy proof-card entrances; use slower soft-settle word/payoff reveals and delayed ambient drift for the premium whiteboard vibe.
+- Smoothing technique learned from the first OpenNolan/HyperFrames replica: avoid meme-like `0.09s` scale yoyo pops, large `translateY`, heavy blur, and `back.out` card overshoot. Use a premium soft-settle instead: reveal key words over roughly `0.28–0.36s`, begin `0.06–0.10s` before spoken stress, limit initial y motion to `12–18px`, blur to `2–3px`, scale payoff text only to `1.03–1.04`, then settle to `1.0` over `0.18–0.25s`; start floating-card ambient drift only after entrance animations settle.
+- OpenNolan implementation note: when the user asks to turn this into an OpenNolan reusable style, create both a Layer 2 creative skill and a YAML style playbook, validate the style schema, and update OpenNolan's skill index. When they ask for the actual video, use the HyperFrames production run/pitfall checklist in `references/opennolan-kinetic-whiteboard-captions.md` before rendering and delivering the MP4 + QA contact sheet. Pay special attention to the smoother-motion pitfall: avoid abrupt yoyo pops and bouncy proof-card entrances; use slower soft-settle word/payoff reveals and delayed ambient drift for the premium whiteboard vibe.
 
 Why it works:
 - The viewer gets a readable “animated notes” version of the voiceover, but only the key words dominate, so it avoids subtitle fatigue.
@@ -217,10 +217,10 @@ Why it works:
 - The white background and repeated brand props create continuity while UI mockups provide proof and topic specificity.
 
 #### Talking-head screen demo Reel style
-Learned from Arshman Khalid Reel `DY6UXkINLri` / Clicko Chrome-extension demo (May 2026): use `talking-head-screen-demo-reel` when Het wants a Reel where the creator talks to camera while actual browser/product footage runs behind him, with creator PIP, dark UI proof, tactile keyboard inserts, short all-caps phrase captions, and a comment-keyword CTA.
+Learned from Arshman Khalid Reel `DY6UXkINLri` / Clicko Chrome-extension demo (May 2026): use `talking-head-screen-demo-reel` when you want a Reel where the creator talks to camera while actual browser/product footage runs behind them, with creator PIP, dark UI proof, tactile keyboard inserts, short all-caps phrase captions, and a comment-keyword CTA.
 
 ### Pixel RPG product explainer style
-Learned from Reel `DY5SPASumP8` (May 2026): use when Het wants an OpenMontage/HyperFrames/Remotion AI-tool tutorial that feels like a playable mini-world rather than a plain SaaS explainer. Full session reference: `references/dy5spas-pixel-rpg-product-explainer.md`.
+Learned from Reel `DY5SPASumP8` (May 2026): use when you want an OpenNolan/HyperFrames/Remotion AI-tool tutorial that feels like a playable mini-world rather than a plain SaaS explainer. Full session reference: `references/dy5spas-pixel-rpg-product-explainer.md`.
 
 Reusable visual grammar:
 - Hook with a top-down pixel/RPG world-state: avatar, old computer/tool node, purple crystal/quest object, beige tile/off-white map, and threat labels (`Layoffs`, `Automation`, `Budget Cuts`, `Competition`) radiating from a cracked portal.
@@ -230,7 +230,7 @@ Reusable visual grammar:
 - Prompt bars are hero UI objects: black rounded pill, green rim glow, app icons, typed prompt text, result card above.
 - Transform AI output into tangible artifacts: 7-day checklist, 30-day plan, post grid, profile/proof board. The final payoff should be proof-of-work/identity, not a generic CTA.
 - Motion vocabulary: `rpg-walk`, `portal-crack`, `desktop-window-stack`, `phrase-collage-build`, `keyword-color-hit`, `dotted-connector-draw`, `radial-tag-populate`, `prompt-bar-type`, `response-to-artifact`, `proof-grid-land`.
-- OpenMontage implementation created from this session: `skills/creative/pixel-rpg-product-explainer.md` and `styles/pixel-rpg-product-explainer.yaml` in `/home/ubuntu/projects/OpenMontage`; validate with the style schema and `load_playbook('pixel-rpg-product-explainer')` before use.
+- OpenNolan implementation created from this session: `skills/creative/pixel-rpg-product-explainer.md` and `styles/pixel-rpg-product-explainer.yaml` in the OpenNolan repo; validate with the style schema and `load_playbook('pixel-rpg-product-explainer')` before use.
 
 Why it works:
 - It makes an abstract AI workflow feel spatial and game-like: connect, prompt, retrieve, plan, publish.
@@ -251,7 +251,7 @@ Reusable structure:
 - Use hand-drawn yellow/blue circles, top-right creator PIP, snap cuts, punch-ins, and final poster reveal.
 - Final visual languages observed: (1) bright green background, deep blue curved blob, royal-blue bold text, grayscale cutout people/objects, strong scale contrast; (2) dark teal/yellow India map, small white survey title/date, soft texture/starburst accents, blurred/spotlight data callout, warm illustrated faces for emotional context.
 
-OpenMontage implementation created in `/home/ubuntu/projects/OpenMontage`: `skills/creative/visual-hierarchy-edit-fix.md` and `styles/visual-hierarchy-edit-fix.yaml`. Detailed notes are in `openmontage-video-production` reference `references/aevy-visual-hierarchy-edit-fix-reel.md`.
+OpenNolan implementation created in the OpenNolan repo: `skills/creative/visual-hierarchy-edit-fix.md` and `styles/visual-hierarchy-edit-fix.yaml`. Detailed notes are in `opennolan-video-production` reference `references/aevy-visual-hierarchy-edit-fix-reel.md`.
 
 ### Expression-to-effect visual dictionary Reel
 Learned from Aevy Video School Reel `DW8cy5gS1Qh` (Apr 2026), caption “Stop keyframing everything”: technical tutorials can become highly save-worthy when each beat shows the **motion outcome first**, then reveals the exact expression/formula as a large bracketed label.
@@ -263,7 +263,7 @@ Reusable structure:
 - Text hierarchy: oversized tan/brown italic bracket label (`[ Wiggle ]`) > formula > small target line > minimal bottom subtitles.
 - CTA: show real destination proof (profile/community/resource screen) with a red highlight around the join/link target.
 
-OpenMontage implementation detail is saved in `openmontage-video-production` reference `references/after-effects-expression-cheatsheet-reel.md`.
+OpenNolan implementation detail is saved in `opennolan-video-production` reference `references/after-effects-expression-cheatsheet-reel.md`.
 
 ### Hook/content fit matrix
 Learned from Chase Dimond / @chasehunterdimond IG post `DZJWCnBzhbf` (Jun 2026): the fastest way to improve hooks is to **match the hook psychology to the content type**, not reuse one generic hook style.
@@ -274,14 +274,14 @@ Reusable matrix:
 - Contrarian/myth-busting posts need **tension**. Use shells like “You may not agree with this...” / “Everyone says X, but...” and show expectation-vs-reality, A/B cards, red X/green check, or a debate prompt.
 - Authority/proof posts need **evidence-first credibility**. Use shells like “I tested this...” / “Here’s the proof...” and open with receipts, dashboards, source screenshots, metrics, or result montages.
 
-Treat hook/content mismatch as a retention bug: a proof-heavy post opened with vague curiosity feels weak; a personal story opened with generic “how-to” copy feels emotionally flat. OpenMontage copy of this lesson is saved at `/home/ubuntu/projects/OpenMontage/skills/creative/references/hook-content-fit-matrix-dzjwcnbzhbf.md` and wired into `skills/creative/short-form.md`.
+Treat hook/content mismatch as a retention bug: a proof-heavy post opened with vague curiosity feels weak; a personal story opened with generic “how-to” copy feels emotionally flat. OpenNolan copy of this lesson is saved at `~/projects/OpenNolan/skills/creative/references/hook-content-fit-matrix-dzjwcnbzhbf.md` and wired into `skills/creative/short-form.md`.
 
 ### Low-friction “hooks that always work” phrase bank
 Learned from Richard Ens Jr / @richardensjr Reel `DWzni9xEcxL` (Apr 6, 2026): the Reel is a simple save-bait list with creator holding up 10 fingers + cover text “10 hooks that always work,” then one hook phrase per beat. Use these as **opening phrase shells**, not final scripts; adapt them to AI/tech/founder stakes with a concrete payoff in the next line.
 
-Reinforced by Het-shared Claude prompt carousel `DYeB85-CHph` / slide 3: when a morning script hook feels flat, run a **5-angle hook rewrite pass** before finalizing. Rewrite the same core idea as: (1) bold claim, (2) personal confession/experiment, (3) surprising stat or quantified shift, (4) direct question, and (5) “you’ve been doing X wrong” correction. Pick the version with the clearest founder/operator tension, then make the next line immediately prove it so it does not feel like clickbait. Session detail and retrieval fallback: `references/claude-content-prompts-dyeb85.md`.
+Reinforced by a shared Claude prompt carousel / slide 3: when a morning script hook feels flat, run a **5-angle hook rewrite pass** before finalizing. Rewrite the same core idea as: (1) bold claim, (2) personal confession/experiment, (3) surprising stat or quantified shift, (4) direct question, and (5) “you’ve been doing X wrong” correction. Pick the version with the clearest founder/operator tension, then make the next line immediately prove it so it does not feel like clickbait. Session detail and retrieval fallback: `references/claude-content-prompts-dyeb85.md`.
 
-Reinforced by Het-shared @marketing.shekhar carousel `DX5F_-4Gbea` (May 2026): package hooks as a **hook library / swipe file** with a keyword CTA (“Comment HOOKS”) and a cover promise like “10 hooks that stop the scroll.” For Reels, this means hook posts should feel like a stealable asset, not generic advice: one hook shell per beat, each immediately adapted to Het’s niche.
+Reinforced by a shared hook-library carousel (May 2026): package hooks as a **hook library / swipe file** with a keyword CTA (“Comment HOOKS”) and a cover promise like “10 hooks that stop the scroll.” For Reels, this means hook posts should feel like a stealable asset, not generic advice: one hook shell per beat, each immediately adapted to your niche.
 
 The 10 reusable phrase shells:
 1. “Nobody mentions this.”
@@ -299,7 +299,7 @@ Why this works:
 - Each shell creates a micro open-loop: hidden info, regret, interruption, pattern recognition, truth reveal, time-saving, surprise, urgency, disagreement, or fresh discovery.
 - The list format is inherently save-worthy and lets the viewer quickly map each phrase to their own niche.
 - The phrase alone is not enough; immediately follow with specificity: `Nobody mentions this: the best AI agent businesses are not selling agents — they are selling recovered time in one painful workflow.`
-- Best use for Het: convert generic creator hooks into founder/operator versions by adding a concrete audience, pain, time horizon, or workflow.
+- Best use: convert generic creator hooks into founder/operator versions by adding a concrete audience, pain, time horizon, or workflow.
 
 ### Platform-role matrix Reel: “Reels bring in, carousels teach, stories convert”
 Learned from Aayush Swamy / @iamaayushswamy Reel `DWUCCNVjCYT` (Mar 25, 2026): a strong educational Reel can be a **role matrix** comparing 3 content formats against audience stage, objective, cadence, and content examples.
@@ -312,7 +312,7 @@ Reusable framework:
 - Suggested cadence from the Reel: Stories 2–3/day; carousels 2–3/week; Reels 3–6/week depending on style.
 - Example ending taxonomy: Stories = personal life, client results, testimonials; Carousels = screenshotable guides/lists + client results; Reels = educational + storytelling content.
 
-Adaptation for Het’s AI/tech/startup content:
+Adaptation for your AI/tech/startup content:
 - Reels: bring in cold founders/operators with story/news teardowns and useful AI workflow demos.
 - Carousels: package the exact frameworks/checklists/prompt stacks people save and share.
 - Stories: build trust with behind-the-scenes experiments, proof, polls, offers, and direct CTAs.
@@ -336,7 +336,7 @@ AI/tech examples:
 Reusable thumbnail/cover pattern from the same Reel: `How to make BETTER [outcome]` + episode number + collage of proof/examples + visible transformation metric (`10K → 1.2M`) + human teacher frame. Use for recurring educational series like “How to make BETTER HOOKS ep 3” or “How to make BETTER AI DEMOS ep 2”.
 
 ### One-of-one positioning matrix Reel
-Learned from Kallaway / @kallawaymarketing Reel `DY-F7HluecL` (Jun 2026), “5 ways to position your personal brand to survive the AI era.” Use when Het asks for creator-positioning, category-design, personal-brand, or “AI era differentiation” content.
+Learned from Kallaway / @kallawaymarketing Reel `DY-F7HluecL` (Jun 2026), “5 ways to position your personal brand to survive the AI era.” Use when the user asks for creator-positioning, category-design, personal-brand, or “AI era differentiation” content.
 
 Reusable content framework:
 - Core thesis: in the AI era, generic creators/tools get commoditized; survival comes from **one-of-one positioning**. You do not need to win every dimension — aim to be top 3 in one bucket inside your niche.
@@ -352,7 +352,7 @@ Reusable visual grammar:
 - Typography: red all-caps labels for section/category names, white body labels, occasional editorial serif italic for bucket names/examples. Keep subtitles short and centered near bottom, not full sentence captions.
 - Motion: path draw-on, glowing node activation, card float/slide, quick cut back to talking head for authority, then proof overlay. Avoid random B-roll; every visual either anchors the framework or proves one bucket.
 
-Adaptation for Het’s AI/tech/startup content:
+Adaptation for your AI/tech/startup content:
 - Use this to help founders/operators choose their distribution moat: e.g. `premium AI product demos`, `original AI-market theses`, `tactical workflow breakdowns`, `rare SWE+cloud+AI+founder combo`, or `builder aura`.
 - Good hook shell: “If your AI content sounds like everyone else’s, pick one of these five moats.”
 - Make the CTA a diagnostic asset: “Comment BRAND for the positioning worksheet” / “DM MOAT for the AI-builder positioning map.”
@@ -378,12 +378,12 @@ Visual structure to reuse:
 - Show examples as small phone/post screenshots with arrows and labels; proof beats should appear immediately after each abstract claim.
 - End with a keyword CTA that promises the deeper asset: `Comment “Dopamine” to get full video`.
 
-Adaptation for Het’s AI/tech/startup content:
+Adaptation for your AI/tech/startup content:
 - Use this framework for educational meta-content, AI workflow breakdowns, and creator/business strategy videos.
-- Example AI Reel ladder: stimulation = unusual AI output/UI collapse; captivation = “why do most AI demos feel fake?”; anticipation = reveal 3 demo layers; validation = “the problem is not the model, it is missing workflow proof”; affection = Het’s recurring builder/operator POV; revelation = repeated “Het explains the hidden system behind AI products” series.
+- Example AI Reel ladder: stimulation = unusual AI output/UI collapse; captivation = “why do most AI demos feel fake?”; anticipation = reveal 3 demo layers; validation = “the problem is not the model, it is missing workflow proof”; affection = your recurring builder/operator POV; revelation = a repeated “the hidden system behind AI products” series.
 - Before publishing, ask: what is the stun gun, what is the open question, how long do we delay the answer, and is the answer genuinely non-obvious?
 
-## Script shape for Het's AI/tech/startup videos
+## Script shape for AI/tech/startup videos
 1. **Hook:** compressed, tension-first line. Avoid generic AI hype.
 2. **Pattern:** what the news/signal reveals.
 3. **Proof:** 1–3 source-backed facts; avoid overclaiming.
@@ -392,14 +392,14 @@ Adaptation for Het’s AI/tech/startup content:
 6. **Takeaway/CTA:** ask for a checklist, comment keyword, or save-worthy follow-up.
 
 ## Notion storage workflow for one-off and scheduled scripts
-When Het asks for a one-off Reel/TikTok/Short script from an Instagram video/post, or when a scheduled Instagram AI/Tech Script Engine job creates a daily talking script, write the script locally first, then store it in Notion when access is available:
+When the user asks for a one-off Reel/TikTok/Short script from an Instagram video/post, or when a scheduled Instagram AI/Tech Script Engine job creates a daily talking script, write the script locally first, then store it in Notion when access is available:
 1. Target hub: Notion page `Content Ideas`.
-2. Date grouping: find or create a real child page under `Content Ideas` named exactly today's America/Los_Angeles date in `MM/DD/YYYY` format, e.g. `06/02/2026`. Do not use the older `Individual ideas` toggle or `Weeks` for one-off or daily scripts unless Het explicitly asks.
-3. Create a real child page inside that date page named exactly `{topic} - {YYYY-MM-DD}` using the current date unless Het specifies another date. Do not use `link_to_page`/linked-page blocks.
+2. Date grouping: find or create a real child page under `Content Ideas` named exactly today's date in your local timezone in `MM/DD/YYYY` format, e.g. `06/02/2026`. Do not use the older `Individual ideas` toggle or `Weeks` for one-off or daily scripts unless the user explicitly asks.
+3. Create a real child page inside that date page named exactly `{topic} - {YYYY-MM-DD}` using the current date unless the user specifies another date. Do not use `link_to_page`/linked-page blocks.
 4. Put the full script inside that page, including topic/angle, visual hook, spoken script, on-screen text, shot list, caption, source links, and any `Asset/B-roll brief for follow-up cron` section.
 5. Verify the Notion write by fetching/confirming the created daily page and script page ID/URL before claiming success.
-6. If Notion access is blocked, keep the local markdown deliverable and clearly tell Het `Notion storage blocked` with the exact blocker (for example Composio auth, invalid Notion API token, missing `Content Ideas`, or page-creation failure). Do not silently skip storage and do not imply the script was saved in Notion.
-7. For exact Notion API/Composio implementation details for the daily-page structure, consult the `productivity/notion` support file `references/content-ideas-toggle-pages.md`.
+6. If Notion access is blocked, keep the local markdown deliverable and clearly tell the user `Notion storage blocked` with the exact blocker (for example integration auth, invalid Notion API token, missing `Content Ideas`, or page-creation failure). Do not silently skip storage and do not imply the script was saved in Notion.
+7. For exact Notion API implementation details for the daily-page structure, consult the `productivity/notion` support file `references/content-ideas-toggle-pages.md`.
 
 ## Quality bar
 - Optimize zero-follower posts for **watch time + shares/view**.
@@ -418,19 +418,19 @@ When Het asks for a one-off Reel/TikTok/Short script from an Instagram video/pos
 - Saving new Instagram lessons only in memory. Update this skill, or create a narrower skill if the lesson is a distinct reusable system.
 
 ## Evolving this skill
-When Het shares a new Instagram Reel/post and says “learn this”:
+When the user shares a new Instagram Reel/post and says “learn this”:
 1. Use `social-link-summarization` or browser/web extraction to capture public metadata, caption, preview image, and any accessible transcript/visual pattern.
 2. If Instagram blocks normal scraping or only shows a login shell, use the fallback in `references/instagram-reel-learning-workflow.md`: `yt-dlp` metadata, manual format URL download if needed, FFmpeg contact sheet, local `faster_whisper` transcript, then pattern extraction.
 3. Do not trust a generic local-video analysis response that says it cannot access the video; verify with frames/contact sheet plus transcript.
-4. If a Reel/video is downloaded locally for analysis, extract the reusable pattern, patch the relevant skill, then delete the downloaded MP4/images/metadata artifacts unless Het explicitly asks to keep them. Do not let temporary Instagram media accumulate on disk.
+4. If a Reel/video is downloaded locally for analysis, extract the reusable pattern, patch the relevant skill, then delete the downloaded MP4/images/metadata artifacts unless the user explicitly asks to keep them. Do not let temporary Instagram media accumulate on disk.
 5. If it improves Reels/hooks/scripts, patch this skill with a concise new rule or source-library note.
 6. If it is about carousels, update `instagram-carousel` instead.
 7. If it is a separate domain system, create a new skill and cross-reference it here.
 8. Keep persistent memory minimal: store only a pointer/preference if necessary, not the full lesson.
-9. If the lesson is about Instagram algorithm, user psychology, engagement, hooks, editing, or OpenMontage production, also mirror the relevant social-media skill files into `/home/ubuntu/projects/OpenMontage/skills/social-media/` as real repo files so Het's GitHub-synced local OpenMontage agent can use them. Do not rely on symlinks. See `references/openmontage-social-media-skill-mirror.md`.
+9. If the lesson is about Instagram algorithm, user psychology, engagement, hooks, editing, or OpenNolan production, also mirror the relevant social-media skill files into `~/projects/OpenNolan/skills/social-media/` as real repo files so the GitHub-synced local OpenNolan agent can use them. Do not rely on symlinks. See `references/opennolan-social-media-skill-mirror.md`.
 
 ## Extracting resource links from a Reel
-When Het shares a Reel that lists tools/skills/repos/resources and asks for “all the links,” do not just summarize visible names. Use the link-list workflow in `references/instagram-reel-link-extraction.md`: capture metadata with `yt-dlp`, create contact sheets/full-size frames for OCR, search for companion posts/pages promised by the creator, parse install commands or repo slugs when available, verify repos with `git ls-remote`, then return a compact numbered table of names and canonical links. This is especially useful for fast slideshow Reels where many resources share one umbrella repo.
+When the user shares a Reel that lists tools/skills/repos/resources and asks for “all the links,” do not just summarize visible names. Use the link-list workflow in `references/instagram-reel-link-extraction.md`: capture metadata with `yt-dlp`, create contact sheets/full-size frames for OCR, search for companion posts/pages promised by the creator, parse install commands or repo slugs when available, verify repos with `git ls-remote`, then return a compact numbered table of names and canonical links. This is especially useful for fast slideshow Reels where many resources share one umbrella repo.
 
 ## Recalling previously shared Instagram resources
-When Het asks what Instagram-shared projects/tools/repos he has already sent, use the recall workflow in `references/recalling-instagram-shared-resources.md`: search past sessions for direct `instagram.com/reel` user messages first, distinguish direct user shares from automated marketing research snippets, reuse prior extracted link tables when available, and label umbrella/list matches instead of overclaiming exact canonical repos. For “some” requests, return a compact high-confidence list rather than dumping every extracted item.
+When the user asks what Instagram-shared projects/tools/repos they have already sent, use the recall workflow in `references/recalling-instagram-shared-resources.md`: search past sessions for direct `instagram.com/reel` user messages first, distinguish direct user shares from automated marketing research snippets, reuse prior extracted link tables when available, and label umbrella/list matches instead of overclaiming exact canonical repos. For “some” requests, return a compact high-confidence list rather than dumping every extracted item.

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/character_design",
+  "$id": "opennolan/artifacts/character_design",
   "title": "Character Design",
   "description": "Character definitions for local rigged animation.",
   "type": "object",

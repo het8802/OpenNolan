@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/review",
+  "$id": "opennolan/artifacts/review",
   "title": "Stage Review",
   "description": "Structured review findings and stage-agent dispositions from the Reviewer.",
   "type": "object",

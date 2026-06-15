@@ -2,17 +2,17 @@
 name: marketing-ops-automation
 description: "Automate a full-stack content marketing workflow: trend scouting, idea reports, approval-gated scripts, asset/video production, and scheduling/posting integrations."
 version: 1.0.0
-author: Hermes Agent
+author: OpenNolan
 license: MIT
 metadata:
-  hermes:
+  marketing-os:
     tags: [marketing, social-media, cron, content-calendar, trend-research, remotion, image-generation, approvals]
-    related_skills: [hermes-agent, xurl, youtube-content]
+    related_skills: [xurl, youtube-content]
 ---
 
 # Marketing Ops Automation
 
-Use this skill when the user says “Marketing OS,” but interpret it as Het’s AI/tech content engine, not generic marketing-advice content. The domain focus is AI tools, AI companies, model/product launches, funding, startup incubators/programs/applications, founder credits/perks, events, devtools, infrastructure, and creator-pattern research for short-form content.
+Use this skill when the user says “Marketing OS,” but interpret it as an AI/tech content engine, not generic marketing-advice content. The domain focus is AI tools, AI companies, model/product launches, funding, startup incubators/programs/applications, founder credits/perks, events, devtools, infrastructure, and creator-pattern research for short-form content.
 
 Core principle: **separate research, ideation, scriptwriting, production, and posting into approval-gated stages**. Never auto-post or commit spend unless the user explicitly grants that authority.
 
@@ -23,17 +23,17 @@ Core principle: **separate research, ideation, scriptwriting, production, and po
    - If the user gives an obvious schedule or asks to proceed, act immediately and note assumptions (especially timezone).
 
 2. **Trend scouting and one-off research**
-   - Run recurring local-only trend collection so the user is not spammed. For Het's AI/tech content engine, run at the cadence the user requested; the Instagram AI/Tech Script Engine currently uses a 4-hour collector (`every 240m`) feeding a daily synthesis/script job.
+   - Run recurring local-only trend collection so the user is not spammed. For an AI/tech content engine, run at the cadence the user requested; the Instagram AI/Tech Script Engine currently uses a 4-hour collector (`every 240m`) feeding a daily synthesis/script job.
    - Do not aim for generic marketing advice. The default subject matter is: AI tools, AI companies, model/product launches, funding rounds, startup incubator applications, accelerator deadlines, grant/credit/perk programs, events/conferences/hackathons, devtools, agents, infra, chips, open source, and practical startup/operator opportunities.
    - Search TikTok/Instagram/Reels, YouTube/Shorts, X, Reddit, Google Trends, competitor accounts, newsletters/blogs, and trend reports for creator and audience signal.
    - For AI/tech/funding videos, broaden research beyond generic web results: AI/product launches, funding rounds, acquisitions, YC/startup activity, arXiv/research, GitHub/Product Hunt/Hacker News/Reddit builder signals, and creator-pattern analysis from top Instagram/Reels/Shorts/TikTok AI creators.
    - For startup opportunity content, track application windows, eligibility, deadlines, benefits/credits, application links, founder fit, and why the opportunity matters now.
    - Creator research must extract topics, hook patterns, visual formats, comment/audience demand, and reusable framing—not just account names.
-   - For one-off “do research and send me a script” requests, act immediately: gather source-backed evidence, write the script, save it under `~/.hermes/marketing-os/scripts/YYYY-MM-DD/`, and deliver to the requested channel if the user explicitly asked to send.
+   - For one-off “do research and send me a script” requests, act immediately: gather source-backed evidence, write the script, save it under `~/marketing-os/scripts/YYYY-MM-DD/`, and deliver to the requested channel if the user explicitly asked to send.
    - Exa is approved for Marketing OS research up to the user's configured $5 cap; use configured env such as `EXA_API_KEY`, `EXA_SPEND_CAP_USD`, and `AI_VIDEO_SEARCH_PROVIDER=exa` when available, and notify before exceeding the cap.
-   - Store structured evidence in durable files, e.g. `~/.hermes/marketing-os/trends/YYYY-MM-DD.jsonl` or `~/.hermes/marketing-os/research/YYYY-MM-DD/hour-HH.jsonl`.
+   - Store structured evidence in durable files, e.g. `~/marketing-os/trends/YYYY-MM-DD.jsonl` or `~/marketing-os/research/YYYY-MM-DD/hour-HH.jsonl`.
    - Each record should include timestamp, platform, topic, source URL, evidence summary, creator/market signal, opportunity details if any, angle, confidence, and source type.
-   - If Het sends an Instagram/social post as a “research seed” for tomorrow, save it durably instead of relying on chat context only. Use an inbox such as `~/.hermes/marketing-os/research/user-submitted-posts.jsonl` with URL, submitted time, platform, accessible metadata/thumbnail summary, topic guess, intent, and status. The next collector/script run should research around the seed, verify claims, and decide whether it belongs in the daily script, digest carousel, or only as creator-pattern context.
+   - If the user sends an Instagram/social post as a “research seed” for tomorrow, save it durably instead of relying on chat context only. Use an inbox such as `~/marketing-os/research/user-submitted-posts.jsonl` with URL, submitted time, platform, accessible metadata/thumbnail summary, topic guess, intent, and status. The next collector/script run should research around the seed, verify claims, and decide whether it belongs in the daily script, digest carousel, or only as creator-pattern context.
    - For user-shared social links (Instagram/Reels, Threads, TikTok, X/Twitter) that are gated or metadata-only, treat link intake as part of Marketing OS research: inspect public metadata, search exact shortcode/caption/handle, analyze preview thumbnails, label access limits, and do not claim transcript/comment access unless directly retrieved. See `references/social-link-intake-and-gated-post-summarization.md`.
    - See `references/ai-tech-creator-research-strategy.md` for the required AI-tech hourly research, creator-research fields, daily 5 PM synthesis bar, and strategy-updating loop.
 
@@ -43,19 +43,19 @@ Core principle: **separate research, ideation, scriptwriting, production, and po
    - Include a clear approval instruction: `Reply with the numbers you approve, e.g. approve 1, 4, 7.`
 
 4. **Approval-gated scripts**
-   - At the script deadline, search recent session history for explicit approvals and also read durable approval files such as `~/.hermes/marketing-os/approvals/YYYY-MM-DD.md`.
+   - At the script deadline, search recent session history for explicit approvals and also read durable approval files such as `~/marketing-os/approvals/YYYY-MM-DD.md`.
    - Accept only clear approvals such as `approve 1, 3`, `approved #2`, or `go with 4 and 7`.
    - If approvals are missing or ambiguous, ask for approval/clarification instead of guessing.
    - If approval arrives after the scheduled script job already ran, record it, inspect cron output and script files, then either trigger recovery or generate the scripts immediately if the user asks for them now.
-   - Save scripts under `~/.hermes/marketing-os/scripts/YYYY-MM-DD/idea-N.md`.
+   - Save scripts under `~/marketing-os/scripts/YYYY-MM-DD/idea-N.md`.
 
 5. **Production**
    - Generate images/assets using the configured image generation tool/provider.
-   - For vertical short-form video, create a production folder such as `~/.hermes/marketing-os/productions/YYYY-MM-DD/idea-N/`.
-   - For larger/recurring AI-news video work, prefer a separate typed production-pipeline project instead of ad-hoc one-off renders. The proven scaffold path is `/home/ubuntu/ai-video-pipeline`; it models research cards, scripts, storyboards, asset ledgers, timestamped audio, timeline JSON, rendering, QA reports, and export packages.
+   - For vertical short-form video, create a production folder such as `~/marketing-os/productions/YYYY-MM-DD/idea-N/`.
+   - For larger/recurring AI-news video work, prefer a separate typed production-pipeline project instead of ad-hoc one-off renders. The proven scaffold path is `~/ai-video-pipeline`; it models research cards, scripts, storyboards, asset ledgers, timestamped audio, timeline JSON, rendering, QA reports, and export packages.
    - Use Remotion/Node/ffmpeg when available. If rendering is blocked, produce ready-to-run code and exact commands; do not claim files rendered.
-   - If the user specifically asks for OpenMontage, HyperFrames, reference-reel translation, or reusable motion/style systems, load `openmontage-video-production` and treat it as the production sub-workflow under this Marketing OS umbrella rather than creating a one-off video skill.
-   - Verify any file exists before referencing `MEDIA:/absolute/path/to/file`. For Slack delivery, do not assume `MEDIA:` will upload the MP4: the generic `send_message` connector may omit Slack media attachments and only send the text/path. After sending, inspect the tool response for media warnings and disclose whether Slack received a native attachment or just the local file path.
+   - If the user specifically asks for OpenNolan, HyperFrames, reference-reel translation, or reusable motion/style systems, load `opennolan-video-production` and treat it as the production sub-workflow under this Marketing OS umbrella rather than creating a one-off video skill.
+   - Verify any file exists before referencing `MEDIA:/absolute/path/to/file`. For delivery, do not assume `MEDIA:` will upload the MP4: the generic `send_message` connector may omit media attachments and only send the text/path. After sending, inspect the tool response for media warnings and disclose whether the delivery channel received a native attachment or just the local file path.
    - For vertical short-form video, do **not** ship a single generated image with captions pasted over it, do **not** ship pure kinetic-text graphics, and do **not** ship a slideshow of still images as a real production draft unless the user explicitly asked for a lightweight test. Storyboard the script into 5–8 beats, then build a video-first edit: source actual moving B-roll/video clips where possible, record/simulate product or form interactions, use animated UI/screen captures, or generate video/motion-graphics shots. Stills are supporting assets only; if used, animate them with layered parallax/internal subject motion rather than simple pan/zoom. Every 2–4 seconds should contain a retention event such as a cut, motion accent, camera move, text reveal, prop/UI change, SFX hit, pattern interrupt, or perspective shift. Use captions as selective emphasis rather than the entire script.
    - For production-grade factual AI-news videos, do not render directly from a topic. Require a source-backed research card, fact-checked script, storyboard, complete scene assets, timestamped voiceover/forced alignment, deterministic timeline, and QA gate before export.
    - For video deliverables, verify the MP4 is actually decodable, not just present: run `ffprobe -v error -show_entries format=duration,size` and `ffmpeg -v error -i <file>.mp4 -f null -`. A timed-out or killed ffmpeg process can leave a file with no `moov` atom or invalid NAL units.
@@ -79,13 +79,13 @@ Use subagents when the workflow benefits from parallelism:
 - **Video producer:** generates Remotion structure, render commands, captions/subtitles, thumbnails.
 - **QA/editor:** checks factual grounding, file existence, approval compliance, and platform constraints.
 
-## Hermes Cron Implementation
+## Cron Implementation
 
 For an Instagram AI/Tech Script Engine talking-head workflow, keep the system lean: local research, daily creator brief/talking script, then a separate asset/B-roll pack job. The current preferred pattern is:
 
 1. Research collector: `deliver=local`, schedule `every 240m` unless the user requests a different cadence.
-2. Daily concept + talking script: `deliver=<valid named target>`, e.g. `slack:marketing-os`; include flexible talking points and an `Asset/B-roll brief for follow-up cron` section.
-3. Daily asset + B-roll pack: schedule 15–60 minutes after the script; use `codex` plus local media tools to create 5–10 SVG/PNG supporting visuals, `README.md`, `asset-ledger.jsonl`, `broll-suggestions.md`, and `hook-recommendation.md` under `~/.hermes/marketing-os/assets/YYYY-MM-DD/daily-ai-tech-video/`. The hook recommendation must pick a relevant Kallaway/FigJam Short Form Lego Bricks combo from the stored FigJam-derived hook database, not from the generated PNG/SVG asset cards: one visual hook brick + one spoken hook brick + exact first 2–5 second shot/spoken line + matching SFX/audio cue. The asset cards should then support that hook, not determine it. If the user asks for the actual FigJam hook video/clip, treat that as a request for an embedded playable reference clip; do not answer with only taxonomy text. Use `marketing-os-tools` → `references/figjam-video-hook-extraction.md` for the extraction/disclosure workflow.
+2. Daily concept + talking script: `deliver=<valid named target>`, e.g. your delivery channel; include flexible talking points and an `Asset/B-roll brief for follow-up cron` section.
+3. Daily asset + B-roll pack: schedule 15–60 minutes after the script; use `codex` plus local media tools to create 5–10 SVG/PNG supporting visuals, `README.md`, `asset-ledger.jsonl`, `broll-suggestions.md`, and `hook-recommendation.md` under `~/marketing-os/assets/YYYY-MM-DD/daily-ai-tech-video/`. The hook recommendation must pick a relevant Kallaway/FigJam Short Form Lego Bricks combo from the stored FigJam-derived hook database, not from the generated PNG/SVG asset cards: one visual hook brick + one spoken hook brick + exact first 2–5 second shot/spoken line + matching SFX/audio cue. The asset cards should then support that hook, not determine it. If the user asks for the actual FigJam hook video/clip, treat that as a request for an embedded playable reference clip; do not answer with only taxonomy text. Use `marketing-os-tools` → `references/figjam-video-hook-extraction.md` for the extraction/disclosure workflow.
 
 For a broader approval-gated daily marketing loop, create separate cron jobs rather than one monolithic job:
 
@@ -94,19 +94,19 @@ For a broader approval-gated daily marketing loop, create separate cron jobs rat
 3. Approved scripts: `deliver=origin`, schedule e.g. `0 19 * * *`.
 4. Production: `deliver=origin`, schedule e.g. `0 21 * * *`.
 
-Always check the live timezone (`date` plus `TZ=America/Los_Angeles date`) before creating time-based jobs. For Het, treat stated cron times as Bay Area Pacific time (`America/Los_Angeles`) unless he explicitly says otherwise; convert to the scheduler's timezone before saving the cron expression and state both local and UTC next-run times. Do not default to UTC/server time for his marketing cron jobs.
+Always check the live timezone (`date` plus `TZ=<your timezone> date`) before creating time-based jobs. Treat stated cron times as your local timezone unless the user explicitly says otherwise; convert to the scheduler's timezone before saving the cron expression and state both local and UTC next-run times. Do not default to UTC/server time for marketing cron jobs.
 
-When the user asks where marketing cron results will appear, audit the live cron and channel state before answering: inspect `~/.hermes/cron/jobs.json` for each job's `deliver` and `origin`, then map Slack/Telegram/etc. IDs through `~/.hermes/channel_directory.json`. `deliver=origin` means the original chat/thread/topic, which may be a DM thread rather than a public channel; `deliver=local` means no platform post. Check `~/.hermes/cron/output/<job-id>/` for generated run output and delivery errors before claiming what was sent.
+When the user asks where marketing cron results will appear, audit the live cron and channel state before answering: inspect `~/cron/jobs.json` for each job's `deliver` and `origin`, then map delivery-channel IDs through `~/channel_directory.json`. `deliver=origin` means the original chat/thread/topic, which may be a DM thread rather than a public channel; `deliver=local` means no platform post. Check `~/cron/output/<job-id>/` for generated run output and delivery errors before claiming what was sent.
 
-When moving Marketing OS jobs to a named Slack channel, first list messaging targets, send a low-impact test message if the user requests it, then set `deliver` to the resolved Slack channel ID (for example `slack:C…`) rather than leaving `origin`. Also update job prompts that still say "origin thread" or an old timezone/channel so generated messages are self-consistent.
+When moving Marketing OS jobs to a named delivery channel, first list messaging targets, send a low-impact test message if the user requests it, then set `deliver` to the resolved channel ID rather than leaving `origin`. Also update job prompts that still say "origin thread" or an old timezone/channel so generated messages are self-consistent.
 
 Late approvals are common: if an approval comes after the downstream cron has already run, write an approval file, inspect output directories, and do not imply deliverables exist until verified. If the user asks for the deliverable immediately, generate it in the current session rather than only triggering the next cron tick.
 
-Daily script cron recovery: if Het asks for “today’s script” and the scheduled daily concept/script job failed or the expected `scripts/YYYY-MM-DD/daily-ai-tech-video.md` is missing, recover manually in-session from `research/latest.md`, today/previous-day research JSONL/synthesis files, and verified source pages. Save the recovered script to the normal path and verify it before replying. Do not present yesterday’s script as today’s, and do not only trigger/wait on cron when Het needs the script now. See `references/daily-script-cron-recovery.md`.
+Daily script cron recovery: if the user asks for “today’s script” and the scheduled daily concept/script job failed or the expected `scripts/YYYY-MM-DD/daily-ai-tech-video.md` is missing, recover manually in-session from `research/latest.md`, today/previous-day research JSONL/synthesis files, and verified source pages. Save the recovered script to the normal path and verify it before replying. Do not present yesterday’s script as today’s, and do not only trigger/wait on cron when the user needs the script now. See `references/daily-script-cron-recovery.md`.
 
 See `references/hourly-marketing-cron.md` for a concrete cron prompt set and file layout used in a Slack marketing workflow.
 See `references/instagram-ai-tech-script-engine.md` for the Instagram-focused successor pattern: keep 4-hour AI/tech research, daily talking-head script, and a follow-up Codex-generated asset/B-roll pack while treating old `marketing-os` paths as legacy storage.
-See `references/daily-tech-carousel-digest-workflow.md` for the separate 7AM draft-only “What happened in tech today” digest carousel workflow that turns non-winning research signals into one-slide-per-idea carousel drafts for `#daily-carousels` with explicit approval before posting.
+See `references/daily-tech-carousel-digest-workflow.md` for the separate 7AM draft-only “What happened in tech today” digest carousel workflow that turns non-winning research signals into one-slide-per-idea carousel drafts for your delivery channel with explicit approval before posting.
 See `references/figjam-hook-database-cron-integration.md` for adding Kallaway/FigJam Short Form Lego Bricks hook recommendations to daily script and asset-pack cron jobs, including the `hook-recommendation.md` artifact.
 See `references/ai-tech-creator-research-strategy.md` for the AI/tech/funding + creator research strategy: hourly source collection, top creator topic/format tracking, daily 5 PM concept/script synthesis, and reusable skill-update rules.
 See `references/social-link-intake-and-gated-post-summarization.md` for summarizing and learning from user-shared gated social links without overclaiming access to transcripts/comments.
@@ -134,7 +134,7 @@ When recommending tools:
 - **Compare free alternatives.** Name free alternatives and explain why they are insufficient for this workflow.
 - **State ROI.** Explain what the tool saves or unlocks (time, money, compute, LLM tokens, unavailable data, quality).
 - **Check startup programs.** Look for startup credits, free tiers, startup discounts, and eligibility/application links.
-- **Record recommendations.** Maintain `~/.hermes/marketing-os/tool-wishlist.md` with date, workflow stage, exact tool/API/Actor + URL, pricing, free alternatives, why not free, ROI reason, startup credits/discounts, priority, and approval/config needed.
+- **Record recommendations.** Maintain `~/marketing-os/tool-wishlist.md` with date, workflow stage, exact tool/API/Actor + URL, pricing, free alternatives, why not free, ROI reason, startup credits/discounts, priority, and approval/config needed.
 
 Known starting points:
 
@@ -159,7 +159,7 @@ See `references/apify-and-tool-roi.md` for a concise Apify/tool recommendation p
 
 Before finalizing setup:
 
-- `hermes tools list` confirms required toolsets are enabled (`web`, `browser`, `terminal`, `file`, `code_execution`, `image_gen`, `vision`, `video`, `delegation`, `session_search`, `cronjob`).
+- The marketing-OS tools list confirms required toolsets are enabled (`web`, `browser`, `terminal`, `file`, `code_execution`, `image_gen`, `vision`, `video`, `delegation`, `session_search`, `cronjob`).
 - Cron jobs exist with correct schedules and delivery targets.
 - User-facing jobs deliver to the intended origin/thread; noisy research jobs deliver local-only.
 - Timezone assumption is stated.

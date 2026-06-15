@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/asset_manifest",
+  "$id": "opennolan/artifacts/asset_manifest",
   "title": "Asset Manifest",
   "description": "Inventory of generated/sourced assets produced by the Asset Generator.",
   "type": "object",

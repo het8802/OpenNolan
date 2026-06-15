@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/checkpoints/checkpoint",
+  "$id": "opennolan/checkpoints/checkpoint",
   "title": "Pipeline Checkpoint",
   "description": "Full resumable snapshot after each pipeline stage.",
   "type": "object",

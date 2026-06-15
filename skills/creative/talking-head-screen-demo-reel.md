@@ -1,7 +1,7 @@
 # Talking Head Screen Demo Reel — Creative Skill
 
 ## When to Use
-Use this for vertical social videos where Het/creator explains a workflow while actual product/browser footage runs behind or under him. Best for AI tools, SaaS walkthroughs, coding flows, job-search automations, founder ops, and Chrome-extension-like demos.
+Use this for vertical social videos where the creator explains a workflow while actual product/browser footage runs behind or under them. Best for AI tools, SaaS walkthroughs, coding flows, job-search automations, founder ops, and Chrome-extension-like demos.
 
 Reference pattern: Arshman Khalid / Clicko Reel `DY6UXkINLri`. Preserve the grammar: warm talking head + real screen proof + large PIP + tactile keyboard shot + short all-caps phrase captions + keyword CTA. Do not copy the creator's assets, face, room, or exact product.
 
@@ -43,7 +43,7 @@ The viewer should feel: **I watched the creator use it live.** Talking head give
 | 52-63s | Rewrite/improvement | Select weak part; generated replacement appears | Caption before/after action |
 | 63-70s | Time saved + CTA | Return to full talking head or final proof | Big keyword CTA |
 
-## OpenMontage Implementation
+## OpenNolan Implementation
 1. Select `talking-head-screen-demo-reel` pipeline for net-new creator + screen-proof production. If user already has raw talking-head footage, `hybrid` can also work; if only screen capture is needed, use `screen-demo` with this playbook.
 2. At idea/proposal, require a proof map: every spoken claim must map to `page`, `click`, `highlight`, `prompt`, `output`, or `replacement`.
 3. Present render runtime choice per `AGENT_GUIDE.md`: HyperFrames is best for HTML/CSS/GSAP PIP, captions, prompt boxes, and UI punch-ins; Remotion is best for deterministic React caption timing and reusable component renders. Do not silently pick.
@@ -74,7 +74,7 @@ The viewer should feel: **I watched the creator use it live.** Talking head give
 - Browser zoom 125-150%; dark mode preferred for contrast.
 - Use demo data; hide private info.
 - PIP must not cover important buttons, prompt boxes, or generated result lines.
-- Primary readable text should be OpenMontage overlay text, not embedded in screenshots.
+- Primary readable text should be OpenNolan overlay text, not embedded in screenshots.
 
 ## QA Checklist
 - [ ] Audience + pain/outcome in first 5s.

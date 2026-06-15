@@ -9,16 +9,16 @@ Use these tools when creating TikTok, YouTube Shorts, YouTube videos, or content
 
 ## Tool Directory
 
-Prefer `HERMES_TOOLS_DIR` when set. Otherwise use:
+Prefer `MARKETING_OS_TOOLS_DIR` when set. Otherwise use:
 
 ```bash
-$HOME/hermes-tools/marketing-os
+$HOME/marketing-os
 ```
 
 On a local Mac test install, the path may be:
 
 ```bash
-$HOME/Downloads/hermes-tools/marketing-os
+$HOME/Downloads/marketing-os
 ```
 
 ## Rules
@@ -41,7 +41,7 @@ Canonical source: Kallaway / Content Game FigJam board, "Short Form Lego Bricks 
 
 Important: choose the hook bricks from this FigJam-derived hook database **before** designing/generated asset cards. Do not reverse-engineer the hook from the PNG/SVG asset pack. In `hook-recommendation.md` or user-facing recommendations, explicitly name the selected FigJam visual brick(s), selected spoken brick, opening shot, first spoken line, SFX/audio cue, and why that exact combo fits the topic.
 
-If Het asks for the "actual video from FigJam" or a hook he can "edit into the video," he means a playable embedded reference clip, not the text taxonomy. Try extraction honestly, disclose limitations, and if generating a replacement, label it as an original FigJam-style insert. See `references/figjam-video-hook-extraction.md`.
+If the user asks for the "actual video from FigJam" or a hook they can "edit into the video," they mean a playable embedded reference clip, not the text taxonomy. Try extraction honestly, disclose limitations, and if generating a replacement, label it as an original FigJam-style insert. See `references/figjam-video-hook-extraction.md`.
 
 Visual hook categories learned from Kallaway's "Short Form Lego Bricks / Visual + Spoken Hooks" FigJam board:
 
@@ -60,7 +60,7 @@ Practical rule: never open with static setup if a hook can start with movement, 
 
 ## Instagram carousel/static image packs
 
-When creating Instagram carousels from Marketing OS scripts, do not default to flat HTML/PPT-style cards. The user prefers aesthetic, premium-looking images; if a generated carousel looks like HTML components, basic web cards, or a slide deck, treat that as a miss and redo/refine it. First resolve the exact source: if Het asks in a Slack/thread reply to make a carousel “out of this,” use the referenced parent/thread concept and saved script, not a rejected-ideas/digest variant unless explicitly requested. When Het explicitly asks to use Codex, or when a more designed static image set is needed, use Codex to generate/refine a deterministic Pillow-based `generate_carousel.py`, 1080x1350 PNG slides, a contact sheet, and caption/README files, then QA with vision and run a targeted Codex refinement pass for readability/design issues before delivery. Deliver ordered individual slide images first; zip files are optional backup only. See `references/codex-aesthetic-carousel-generation.md` and the `instagram-carousel` skill.
+When creating Instagram carousels from Marketing OS scripts, do not default to flat HTML/PPT-style cards. The user prefers aesthetic, premium-looking images; if a generated carousel looks like HTML components, basic web cards, or a slide deck, treat that as a miss and redo/refine it. First resolve the exact source: if the user asks in a thread reply to make a carousel “out of this,” use the referenced parent/thread concept and saved script, not a rejected-ideas/digest variant unless explicitly requested. When the user explicitly asks to use Codex, or when a more designed static image set is needed, use Codex to generate/refine a deterministic Pillow-based `generate_carousel.py`, 1080x1350 PNG slides, a contact sheet, and caption/README files, then QA with vision and run a targeted Codex refinement pass for readability/design issues before delivery. Deliver ordered individual slide images first; zip files are optional backup only. See `references/codex-aesthetic-carousel-generation.md` and the `instagram-carousel` skill.
 
 ## Talking-head asset packs
 
@@ -74,17 +74,17 @@ When the user is filming themselves and only needs supporting insert visuals, do
 
 ## Humor inserts and background removal for Reels
 
-When Het asks for humorous memes/GIFs from a voiceover/script, extract concrete humor beats from the script first, query each source, and deliver a contact sheet rather than a raw list of links. For fast Reels, prefer **animated reaction GIFs/MP4s with no or minimal text** over static long-caption memes; viewers will not read long meme text during a 0.5-1.5s insert. Prefer MP4 GIF variants when available because they edit and compress better than raw GIFs. Prefer a curated local AI/dev/founder/operator meme+GIF corpus with semantic search for production use; treat public meme indexes as proof-of-concept/discovery only.
+When the user asks for humorous memes/GIFs from a voiceover/script, extract concrete humor beats from the script first, query each source, and deliver a contact sheet rather than a raw list of links. For fast Reels, prefer **animated reaction GIFs/MP4s with no or minimal text** over static long-caption memes; viewers will not read long meme text during a 0.5-1.5s insert. Prefer MP4 GIF variants when available because they edit and compress better than raw GIFs. Prefer a curated local AI/dev/founder/operator meme+GIF corpus with semantic search for production use; treat public meme indexes as proof-of-concept/discovery only.
 
 For talking-head background removal comparisons, test the same short representative clip across tools, normalize outputs to the same background, and deliver a comparison video/contact sheet before recommending the default. After a short clip succeeds, validate the chosen tool on the **full talking-head duration** using a CPU-friendly proxy first (for example 360x640 at 15fps), then create a side-by-side QA video and contact sheet sampled across the whole clip to catch temporal drift/flicker. Default to RVM-style matting for normal talking-head clips, keep rembg/video-background-remover as a simple fallback, and ask for an empty-background plate when trying BackgroundMattingV2-style workflows. See `references/humor-inserts-and-bg-removal-eval.md` and `references/rvm-long-and-reaction-gif-eval.md`.
 
 ## Local generated-video fallback
 
-When Remotion/TTS integrations are unavailable or too heavy, a fully local path is acceptable for drafts: generate VO with `edge-tts` or the configured Hermes `text_to_speech` tool, draw 9:16 scenes with Python/Pillow when available or pure FFmpeg `drawbox`/`drawtext` filters when Python imaging libraries are missing, encode with FFmpeg, then mux the VO with a quiet generated bed (`sine`/`anoisesrc`) if needed. This avoids third-party B-roll/licensing, but still requires the normal ledger, decode check, black-frame check, and contact-sheet review. If using FFmpeg text overlays, wrap long captions into safe line lengths before rendering; contact-sheet QA should catch and trigger fixes for right-edge clipping.
+When Remotion/TTS integrations are unavailable or too heavy, a fully local path is acceptable for drafts: generate VO with `edge-tts` or the configured marketing-OS `text_to_speech` tool, draw 9:16 scenes with Python/Pillow when available or pure FFmpeg `drawbox`/`drawtext` filters when Python imaging libraries are missing, encode with FFmpeg, then mux the VO with a quiet generated bed (`sine`/`anoisesrc`) if needed. This avoids third-party B-roll/licensing, but still requires the normal ledger, decode check, black-frame check, and contact-sheet review. If using FFmpeg text overlays, wrap long captions into safe line lengths before rendering; contact-sheet QA should catch and trigger fixes for right-edge clipping.
 
 For a reusable video-first local motion-graphics workflow, including FFmpeg QA commands and the `afade=d=0.7` duration gotcha, see `references/local-motion-graphics-fallback.md`.
 For procedural Python/Pillow + FFmpeg rendering details—NumPy background performance, 15fps draft targets, silent-render reuse, generated-local ledgers, and slide-in text contact-sheet pitfalls—see `references/procedural-motion-graphics-rendering-notes.md`.
-For OpenMontage fast draft production when cloud TTS fails or Remotion is too slow, including Piper/local voice fallback, FFmpeg muxing, contact-sheet fixes, and Slack delivery language, see `references/openmontage-ffmpeg-draft-render.md`.
+For OpenNolan fast draft production when cloud TTS fails or Remotion is too slow, including Piper/local voice fallback, FFmpeg muxing, contact-sheet fixes, and delivery-channel language, see `references/opennolan-ffmpeg-draft-render.md`.
 For approval-gate / vertical-AI shorts, including contact-sheet fixes for blank stamps, final CTA safe areas, washed-out cards, and lower-third overlap, see `references/approval-gate-short-qa.md`.
 
 ## Commands

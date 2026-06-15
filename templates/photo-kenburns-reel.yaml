@@ -1,0 +1,36 @@
+version: "1.0"
+name: "Photo Ken-Burns Reel"
+description: >
+  Three stills with slow Ken-Burns motion and crossfades, over a soft music bed with
+  ducking and sentence captions. Good for photo dumps, recap reels, and quote cards.
+aspect_ratio: "9:16"
+target_seconds: 12
+render_runtime: "ffmpeg"
+renderer_family: "social-reel"
+slots:
+  - slot_id: "photo1"
+    kind: "image"
+    seconds: 4.0
+    animation: "ken-burns-slow-zoom"
+    transition_in: "fade"
+    transition_duration: 0.5
+  - slot_id: "photo2"
+    kind: "image"
+    seconds: 4.0
+    animation: "ken-burns-pan-left"
+    transition_in: "dissolve"
+    transition_duration: 0.5
+  - slot_id: "photo3"
+    kind: "image"
+    seconds: 4.0
+    animation: "ken-burns-slow-zoom"
+    transition_in: "dissolve"
+    transition_duration: 0.5
+music:
+  enabled: true
+  volume: 0.6
+  ducking: true
+subtitles:
+  enabled: true
+  style: "sentence"
+  position: "bottom-center"

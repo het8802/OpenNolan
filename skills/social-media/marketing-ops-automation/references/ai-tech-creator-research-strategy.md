@@ -1,12 +1,12 @@
 # AI Tech + Creator Research Strategy
 
-Use this reference for Marketing OS research. Despite the name, Marketing OS is Het's AI/tech content engine, not a generic marketing-advice system. Research should focus on AI tools, companies, funding, startup incubators/applications, accelerator programs, founder credits/perks, events, devtools, agents, infrastructure, model releases, enterprise AI, and consumer AI.
+Use this reference for Marketing OS research. Despite the name, Marketing OS is an AI/tech content engine, not a generic marketing-advice system. Research should focus on AI tools, companies, funding, startup incubators/applications, accelerator programs, founder credits/perks, events, devtools, agents, infrastructure, model releases, enterprise AI, and consumer AI.
 
 ## Research cadence
 
 - Hourly research jobs are source collection only and should deliver local-only.
-- Daily 5 PM Pacific jobs should synthesize the last 24 hours of research into one strong video concept and a ready-to-film script.
-- Store hourly evidence as JSONL under `~/.hermes/marketing-os/research/YYYY-MM-DD/hour-HH.jsonl` and maintain a rolling strategy note under `~/.hermes/marketing-os/strategy/research-playbook.md`.
+- Daily 5 PM (your local timezone) jobs should synthesize the last 24 hours of research into one strong video concept and a ready-to-film script.
+- Store hourly evidence as JSONL under `~/marketing-os/research/YYYY-MM-DD/hour-HH.jsonl` and maintain a rolling strategy note under `~/marketing-os/strategy/research-playbook.md`.
 
 ## Required source mix
 
@@ -30,7 +30,7 @@ For creator research, do not merely list creator names. Capture:
 - visual format: talking head, screen recording, green screen, news card, demo, skit, carousel-style video, benchmark comparison, reaction, teardown
 - why it is getting attention: controversy, utility, novelty, status, fear, money, workflow improvement, founder/operator relevance
 - comments/questions that reveal audience demand
-- reusable pattern for Het's content
+- reusable pattern for your content
 
 Prefer approved/free routes first. Apify TikTok scraping is approved only for the named low-volume actor already approved; other paid tools require approval. Instagram scraping should use free/public/manual browser observation unless an exact paid actor/tool is approved.
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/artifacts/cost_log",
+  "$id": "opennolan/artifacts/cost_log",
   "title": "Cost Log",
   "description": "Estimated, reserved, and actual spend by operation.",
   "type": "object",

@@ -19,10 +19,12 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -41,6 +43,7 @@ def _classify(rel_parts: tuple[str, ...], ext: str) -> Optional[str]:
         return "music" if "music" in rel_parts else "audio"
     return None
 
+from lib.env_loader import load_env
 from lib.pipeline_loader import get_stage_order, list_pipelines, load_pipeline
 from lib.project import (
     ASSET_SUBDIRS,
@@ -52,8 +55,10 @@ from lib.project import (
 )
 from server import activity as activity_mod
 from server import artifacts as artifacts_mod
+from server import editor as editor_mod
 from server import threads as thread_store
 from server.agent_runner import AgentRunner, auth_configured
+from server.render_jobs import RenderJobStore
 from server.state import FileStateSource, StateSource
 
 
@@ -90,7 +95,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _default_projects_dir() -> Path:
-    return Path(os.environ.get("OPENMONTAGE_PROJECTS_DIR", REPO_ROOT / "projects"))
+    return Path(os.environ.get("OPENNOLAN_PROJECTS_DIR", REPO_ROOT / "projects"))
 
 
 def _default_capabilities() -> dict[str, Any]:
@@ -114,7 +119,15 @@ def create_app(
     capabilities_provider: Optional[Callable[[], dict[str, Any]]] = None,
     agent_runner: Optional[AgentRunner] = None,
 ) -> FastAPI:
-    app = FastAPI(title="OpenMontage Mission Control", version="0.1.0")
+    # Load .env so the backend picks up agent auth (CLAUDE_CODE_OAUTH_TOKEN /
+    # ANTHROPIC_API_KEY) and provider keys the same way every tool does via
+    # lib.env_loader. Without this the token had to be exported in the launching
+    # shell, so a plain `uvicorn` restart silently dropped auth → chat 503s.
+    # load_dotenv does NOT override vars already set in the environment, so an
+    # explicitly-exported token still wins.
+    load_env()
+
+    app = FastAPI(title="OpenNolan Mission Control", version="0.1.0")
 
     pdir = Path(projects_dir) if projects_dir is not None else _default_projects_dir()
     source = state_source or FileStateSource(pdir)
@@ -124,11 +137,17 @@ def create_app(
     app.state.state_source = source
     app.state.capabilities_cache = None  # lazily populated, then reused
     app.state.agent_runner = agent_runner  # injected (tests) or lazily built
+    app.state.render_store = None  # editor render-job runner, lazily built
 
     def _runner() -> Optional[AgentRunner]:
         if app.state.agent_runner is None and auth_configured():
             app.state.agent_runner = AgentRunner(repo_root=REPO_ROOT)
         return app.state.agent_runner
+
+    def _render_store() -> RenderJobStore:
+        if app.state.render_store is None:
+            app.state.render_store = RenderJobStore(pdir)
+        return app.state.render_store
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -233,15 +252,20 @@ def create_app(
                 rel = f.relative_to(proj)
                 kind = _classify(rel.parts, f.suffix)
                 if kind:
-                    kinds[kind].append({"path": str(rel), "name": f.name, "size_bytes": f.stat().st_size})
+                    stat = f.stat()
+                    kinds[kind].append({"path": str(rel), "name": f.name,
+                                        "size_bytes": stat.st_size, "mtime": int(stat.st_mtime)})
 
         renders: list[dict[str, Any]] = []
         renders_dir = proj / "renders"
         if renders_dir.is_dir():
             for f in sorted(renders_dir.rglob("*")):
                 if f.is_file() and f.suffix.lower() in VIDEO_EXTS and not f.name.startswith("."):
+                    stat = f.stat()
+                    # mtime is the cache-bust/remount key the UI uses so a freshly
+                    # finished (or re-rendered) MP4 reloads without a page refresh.
                     renders.append({"path": str(f.relative_to(proj)), "name": f.name,
-                                    "size_bytes": f.stat().st_size})
+                                    "size_bytes": stat.st_size, "mtime": int(stat.st_mtime)})
 
         return {"project_id": project_id, "kinds": kinds, "renders": renders}
 
@@ -285,6 +309,119 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"artifact {key!r} not found")
         return art
 
+    # ── Manual editor: edit_decisions read/write + render jobs ────────────
+    # The editor is the human-driven exception to agent-first orchestration.
+    # Writes go through the same schema gate as the agent; renders reuse the
+    # exact video_compose path the compose stage uses.
+
+    @app.get("/api/projects/{project_id}/edit_decisions")
+    def get_edit_decisions(project_id: str) -> dict[str, Any]:
+        """The editable timeline spec. `content` is null for a project with none yet
+        (the UI scaffolds a minimal valid doc rather than erroring)."""
+        if get_project_record(pdir, project_id) is None:
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        return {"project_id": project_id, "content": editor_mod.read_edit_decisions(pdir, project_id)}
+
+    @app.put("/api/projects/{project_id}/edit_decisions")
+    def put_edit_decisions(project_id: str, doc: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """Validate against the edit_decisions schema and atomically write.
+        Returns 422 with the validation message on schema failure (file untouched)."""
+        if get_project_record(pdir, project_id) is None:
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        try:
+            editor_mod.write_edit_decisions(pdir, project_id, doc)
+        except editor_mod.EditDecisionsInvalid as exc:
+            raise HTTPException(status_code=422, detail=str(exc)[:1500])
+        return {"project_id": project_id, "saved": True}
+
+    @app.post("/api/projects/{project_id}/render", status_code=202)
+    def start_render(project_id: str) -> dict[str, Any]:
+        """Start a background render of the saved edit_decisions. Returns a job_id to poll.
+        Supersedes any in-flight render for this project."""
+        if get_project_record(pdir, project_id) is None:
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        job_id = _render_store().start(project_id)
+        return {"project_id": project_id, "job_id": job_id, "status": "queued"}
+
+    @app.get("/api/projects/{project_id}/render/{job_id}")
+    def render_status(project_id: str, job_id: str) -> dict[str, Any]:
+        """Poll a render job: {status: queued|running|done|failed, output_path?, error?}."""
+        st = _render_store().status(job_id)
+        if st is None or st.get("project_id") != project_id:
+            raise HTTPException(status_code=404, detail=f"render job {job_id!r} not found")
+        return st
+
+    @app.get("/api/projects/{project_id}/frame")
+    def get_frame(project_id: str, path: str, t: float = 0.0):
+        """Extract a single still at time `t` from a project video (cheap scrub preview).
+        Path-traversal protected, exactly like /file."""
+        proj = (pdir / project_id).resolve()
+        target = (pdir / project_id / path).resolve()
+        if proj != target and proj not in target.parents:
+            raise HTTPException(status_code=400, detail="path traversal detected")
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="file not found")
+        if shutil.which("ffmpeg") is None:
+            raise HTTPException(status_code=503, detail="ffmpeg not available for frame extraction")
+        out = Path(tempfile.mkstemp(suffix=".jpg")[1])
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-ss", str(max(0.0, t)), "-i", str(target),
+             "-frames:v", "1", "-q:v", "3", str(out)],
+            capture_output=True,
+        )
+        if proc.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+            raise HTTPException(status_code=500, detail="frame extraction failed")
+        return FileResponse(str(out), media_type="image/jpeg")
+
+    @app.get("/api/projects/{project_id}/source")
+    def get_source(project_id: str, ref: str):
+        """Serve a cut's SOURCE clip for live (pre-render) scrub preview.
+
+        `ref` is a cut's `source` value (asset_id or path); resolution mirrors video_compose
+        and is confined to the project dir. FileResponse honors Range requests, so the
+        browser can seek the <video> for smooth scrubbing without a render."""
+        if get_project_record(pdir, project_id) is None:
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        target = editor_mod.resolve_source_path(pdir, project_id, ref)
+        if target is None:
+            raise HTTPException(status_code=404, detail="source not found within project")
+        return FileResponse(str(target))
+
+    @app.get("/api/projects/{project_id}/source_meta")
+    def source_meta(project_id: str, ref: str) -> dict[str, Any]:
+        """Probe a source clip's duration + dimensions (for trim bounds and scrub math).
+
+        `duration` is null if ffprobe is unavailable — trimming still works, just unclamped."""
+        if get_project_record(pdir, project_id) is None:
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        target = editor_mod.resolve_source_path(pdir, project_id, ref)
+        if target is None:
+            raise HTTPException(status_code=404, detail="source not found within project")
+        rel = str(target.relative_to((pdir / project_id).resolve()))
+        meta: dict[str, Any] = {
+            "project_id": project_id, "ref": ref, "path": rel,
+            "duration": None, "width": None, "height": None,
+        }
+        if shutil.which("ffprobe") is not None:
+            proc = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", "stream=width,height", "-show_entries", "format=duration",
+                 "-of", "json", str(target)],
+                capture_output=True, text=True,
+            )
+            if proc.returncode == 0:
+                try:
+                    data = json.loads(proc.stdout)
+                    dur = (data.get("format") or {}).get("duration")
+                    meta["duration"] = float(dur) if dur is not None else None
+                    streams = data.get("streams") or []
+                    if streams:
+                        meta["width"] = streams[0].get("width")
+                        meta["height"] = streams[0].get("height")
+                except (ValueError, KeyError, TypeError):
+                    pass
+        return meta
+
     @app.get("/api/projects/{project_id}/activity")
     def project_activity(
         project_id: str, limit: Optional[int] = None, since: Optional[str] = None
@@ -320,9 +457,12 @@ def create_app(
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "agent auth not configured. Run `claude setup-token` and set "
-                    "CLAUDE_CODE_OAUTH_TOKEN (and unset ANTHROPIC_API_KEY to use your "
-                    "Claude subscription instead of per-token billing)."
+                    "agent auth not configured. Easiest fix: install and log into "
+                    "Claude Code on this machine (`npm i -g @anthropic-ai/claude-code`, "
+                    "then `claude` to log in) — the agent then uses your subscription "
+                    "automatically. Or run `claude setup-token` and put "
+                    "CLAUDE_CODE_OAUTH_TOKEN in .env (unset ANTHROPIC_API_KEY to avoid "
+                    "per-token billing)."
                 ),
             )
         runner = _runner()

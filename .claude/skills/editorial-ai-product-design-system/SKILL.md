@@ -32,7 +32,7 @@ Core principle: make AI feel like a **designed product system**, not generic neo
 Rules:
 - Keep red rare so it means “fail/reject.”
 - Use green for both brand/system energy and approval.
-- Avoid purple, violet, lavender, and obsidian/crystal accents for Het's Greg-theme reels; they read like a different reference world. Use sage/warm-gray UI depth or gold value accents instead.
+- Avoid purple, violet, lavender, and obsidian/crystal accents for your Greg-theme reels; they read like a different reference world. Use sage/warm-gray UI depth or gold value accents instead.
 
 ### Typography
 - Pair **editorial serif** + **modern sans**.
@@ -229,7 +229,7 @@ Use this variant when the script is about a new AI distribution channel, ads pla
 
 When turning scripts into Greg/editorial AI-product Reels, do not produce only animated text and generic UI cards. Build an asset evidence kit first:
 
-- Extract cropped screenshot receipts from any relevant links, articles, product pages, reports, repos, docs, tweets/posts, or social proof. Use them as layered proof cards with readable OpenMontage/Remotion overlay text.
+- Extract cropped screenshot receipts from any relevant links, articles, product pages, reports, repos, docs, tweets/posts, or social proof. Use them as layered proof cards with readable OpenNolan/Remotion overlay text.
 - Source relevant commercial-safe b-roll or public-domain/project-corpus footage for concrete beats: founders working, coding, dashboards, offices, data centers, social feeds, product workflows, etc.
 - Treat YouTube footage as reference unless the user owns it or licensing/permission is clear; if not clear, recreate the beat with stock footage or generated visuals.
 - Generate AI images/UI mockups for abstract or product-specific beats: hero backdrops, workflow boards, agent/evaluation scenes, founder metaphor props, output/profile/proof boards.
@@ -308,9 +308,9 @@ Use these as editorial motion grammar, **not** as visual motifs. Do not bring ov
 - Slide 8: CTA tied to template/comment keyword.
 
 ## Reusable asset kits
-When Het asks for a Greg-style / editorial AI-product Remotion or OpenMontage kit, create a reusable asset directory before building full templates: fonts, palette JSON, original SVG icons, original SVG shapes, 1080×1920 paper backgrounds, SFX placeholders or ElevenLabs-generated SFX, lightweight TSX starter components, asset ledger, zip, and visual preview/contact sheet. See `references/greg-style-kit-assets.md` for the base structure, QA checks, and SFX fallback.
+When the user asks for a Greg-style / editorial AI-product Remotion or OpenNolan kit, create a reusable asset directory before building full templates: fonts, palette JSON, original SVG icons, original SVG shapes, 1080×1920 paper backgrounds, SFX placeholders or ElevenLabs-generated SFX, lightweight TSX starter components, asset ledger, zip, and visual preview/contact sheet. See `references/greg-style-kit-assets.md` for the base structure, QA checks, and SFX fallback.
 
-When Het asks to generate **lots of assets/icons/backgrounds for future informational Reels**, produce an expanded reusable kit: Codex-native `$imagegen` PNG backgrounds/hero scenes/UI cards/sticker sheets plus deterministic SVG overlay icons/shapes, Remotion starter primitives, ledger, contact sheet, and zip. Use `references/greg-style-expanded-asset-kit.md` for the proven directory shape, prompt rules, Codex timeout recovery from `~/.codex/generated_images/<thread_id>/`, Python zip fallback, and verification checklist.
+When the user asks to generate **lots of assets/icons/backgrounds for future informational Reels**, produce an expanded reusable kit: Codex-native `$imagegen` PNG backgrounds/hero scenes/UI cards/sticker sheets plus deterministic SVG overlay icons/shapes, Remotion starter primitives, ledger, contact sheet, and zip. Use `references/greg-style-expanded-asset-kit.md` for the proven directory shape, prompt rules, Codex timeout recovery from `~/.codex/generated_images/<thread_id>/`, Python zip fallback, and verification checklist.
 
 ## Common mistakes
 - Using dark neon AI aesthetics; this system is warm editorial/product, not cyberpunk.
@@ -319,4 +319,4 @@ When Het asks to generate **lots of assets/icons/backgrounds for future informat
 - Treating mascot as decorative; it must represent agent role or quality judgment.
 - Overfilling frames; negative space is part of the premium look.
 - Using red casually; red must mean reject/fail.
-- Delivering a zip without a preview/contact sheet; Het needs to inspect the vibe quickly before approving template build-out.
+- Delivering a zip without a preview/contact sheet; the user needs to inspect the vibe quickly before approving template build-out.

@@ -34,7 +34,7 @@ ffmpeg -y -loglevel error \
 
 - A blank-looking contact-sheet tile is not enough to prove the video has a blank scene. Extract frames at suspicious timestamps and/or build a scene-midpoint sheet before deciding.
 - An unused tile in a tiled contact sheet can look like a blank rendered frame. Label or avoid unused slots when sharing QA images.
-- If an end card samples as multiple identical frames, decide whether it is intentional hold time or a pacing problem. For Het’s Marketing OS videos, long repeated CTA frames generally feel stale; prefer one clear CTA scene with motion/state changes.
+- If an end card samples as multiple identical frames, decide whether it is intentional hold time or a pacing problem. For Marketing OS videos, long repeated CTA frames generally feel stale; prefer one clear CTA scene with motion/state changes.
 - Small floating UI chips (e.g. SCORE/TRIAGE/SHIP, RELEVANCE/EVIDENCE/FIT) should be decorative unless enlarged. Do not rely on them for essential mobile comprehension.
 
 ## Delivery checklist used

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "openmontage/pipelines/pipeline_manifest",
+  "$id": "opennolan/pipelines/pipeline_manifest",
   "title": "Pipeline Manifest",
   "description": "Declarative pipeline definition specifying stages, artifacts, tools, and policies.",
   "type": "object",

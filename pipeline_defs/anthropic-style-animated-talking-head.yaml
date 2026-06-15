@@ -1,0 +1,341 @@
+name: anthropic-style-animated-talking-head
+version: "1.0"
+description: >
+  Creator talking-head explainers intercut with Anthropic-style editorial motion graphics.
+  The creator's recorded talking head + voiceover is the spine (audio used UNTOUCHED — never
+  cut, re-timed, or speed-changed); the agent layers in kinetic typography, drawn diagrams,
+  racing counters, logo bumpers, status pills, and source-receipt proof cards in the warm
+  Anthropic editorial look (ivory paper, clay/coral, slate ink, Fraunces serif + Inter).
+
+  Two defining behaviors:
+  (1) CLAIM-TRIGGERED RESEARCH — for every verifiable factual claim the creator makes
+      ("Stripe migrated 50M lines of Ruby in a day"), the agent finds a credible article,
+      captures it, and shows it as a source-receipt overlay/animation with the exact claim
+      phrase highlighted by a clay marker sweep.
+  (2) SMART SHOT-MODE SELECTION — the agent decides per beat whether to show the talking head
+      full-frame, keep the face with a graphic overlay, use a 50-50 split (animation top /
+      face bottom), or cover the whole frame with animation (VO continues underneath).
+
+  Composition is a segment-rebuild assembly in FFmpeg: the talking head is the base track,
+  full-frame animation cutaways and alpha overlays (rendered in HyperFrames) are composited
+  per beat, the 50-50 split is a vstack of the animation panel over a face-centered TH crop,
+  and the ORIGINAL talking-head audio is copied through so the voiceover is byte-for-byte
+  unchanged. Built from the validated "Anthropic split the frontier in two" (Fable 5 /
+  Mythos 5) reel.
+
+category: hybrid
+stability: beta
+default_checkpoint_policy: guided
+
+extensions:
+  custom_scripts: true
+  custom_playbooks: true
+  custom_skills: true
+  custom_tools: false
+
+orchestration:
+  mode: executive-producer
+  skill: pipelines/anthropic-style-animated-talking-head/executive-producer
+  budget_default_usd: 1.50
+  max_revisions_per_stage: 3
+  max_send_backs: 2
+  max_wall_time_minutes: 25
+
+compatible_playbooks:
+  recommended:
+    - anthropic-editorial-animated
+  also_works:
+    - greg-isenberg-product-explainer
+    - greg-editorial
+  custom_allowed: true
+
+required_skills:
+  - pipelines/anthropic-style-animated-talking-head/executive-producer
+  - pipelines/anthropic-style-animated-talking-head/idea-director
+  - pipelines/anthropic-style-animated-talking-head/script-director
+  - pipelines/anthropic-style-animated-talking-head/research-director
+  - pipelines/anthropic-style-animated-talking-head/scene-director
+  - pipelines/anthropic-style-animated-talking-head/asset-director
+  - pipelines/anthropic-style-animated-talking-head/edit-director
+  - pipelines/anthropic-style-animated-talking-head/compose-director
+  - pipelines/anthropic-style-animated-talking-head/publish-director
+  - meta/reviewer
+  - meta/checkpoint-protocol
+  - meta/animation-runtime-selector
+
+stages:
+  # ── idea: brief + footage intake ──────────────────────────────────
+  - name: idea
+    skill: pipelines/anthropic-style-animated-talking-head/idea-director
+    produces:
+      - brief
+      - decision_log
+    optional_tools:
+      - video_analyzer
+    tools_available:
+      - video_analyzer
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Brief captures topic, hook, target audience, platform, duration, and CTA
+      - Provided talking-head footage referenced; HDR/SDR + resolution + audio presence probed and recorded
+      - Playbook locked (default anthropic-editorial-animated)
+      - render_runtime recorded in decision_log (hyperframes for animated assets + ffmpeg for assembly)
+    success_criteria:
+      - Schema-valid brief artifact
+      - Brief references the source talking head with confirmed continuous audio (the untouched VO spine)
+      - HDR check logged (never silently tonemap); SDR confirmed or HDR handling decided with the user
+
+  # ── script: transcribe the TH, map beats, flag claims ─────────────
+  - name: script
+    skill: pipelines/anthropic-style-animated-talking-head/script-director
+    required_artifacts_in:
+      - brief
+    produces:
+      - script
+      - transcript
+    required_tools:
+      - transcriber
+    tools_available:
+      - transcriber
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Word-level transcript produced (whisperx); avg confidence acceptable
+      - Sections aligned to topic/beat changes with start/end timestamps from words[]
+      - Each section gets a provisional shot_mode hint and lists any factual CLAIMS verbatim (for the research stage)
+      - VO is treated as fixed — no rewriting, cutting, or re-timing of the creator's audio
+    success_criteria:
+      - Schema-valid script artifact + transcript with word-level timestamps
+      - claims[] list extracted verbatim with the exact spoken phrase + its word-timestamp span
+      - Every section carries a provisional shot_mode hint
+
+  # ── research: verify every claim against credible sources ─────────
+  - name: research
+    skill: pipelines/anthropic-style-animated-talking-head/research-director
+    required_artifacts_in:
+      - script
+    optional_artifacts_in:
+      - transcript
+    produces:
+      - research_brief
+    tools_available:
+      - webpage_screenshot
+      - web_image_search
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Every claims[] entry resolved to a CREDIBLE source (official post, major outlet, primary doc) with URL + exact_quote + date + credibility label
+      - The exact on-screen highlight phrase is captured verbatim from the source (for marker-sweep targeting)
+      - Article screenshots captured via webpage_screenshot for the strongest proof beats; real logos fetched via web_image_search
+      - Reported-but-unverified claims explicitly flagged; derived numbers bounded as labeled ranges
+      - Each claim mapped to a proof presentation (overlay source-card vs full-frame receipt) and its trigger-word timestamp
+    success_criteria:
+      - Schema-valid research_brief with claims[] (spoken_phrase, source_url, exact_quote, date, credibility, proof_presentation, highlight_phrase, screenshot_path?)
+      - Each verifiable claim has >=1 credible source; unverifiable claims labeled, not faked
+      - No fabricated screenshots impersonating publications for unverifiable claims
+
+  # ── scene_plan: assign shot modes + sync + design specs ───────────
+  - name: scene_plan
+    skill: pipelines/anthropic-style-animated-talking-head/scene-director
+    required_artifacts_in:
+      - script
+      - research_brief
+    optional_artifacts_in:
+      - transcript
+    produces:
+      - scene_plan
+    optional_tools:
+      - frame_sampler
+      - face_tracker
+    tools_available:
+      - frame_sampler
+      - face_tracker
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - "Every beat assigned ONE shot_mode via the decision heuristics: talking_head_full / talking_head_overlay / split_5050 / animation_full / claim_proof (see scene-director 'Shot-Mode Selection')"
+      - "Claim beats use claim_proof: source-receipt card (overlay or full-frame) with the exact verified phrase marker-swept, landing on the spoken claim"
+      - "NARRATION SYNC (hard rule): every reveal time derived from transcript words[] and lands ON its trigger word, never before; box-stacks/diagrams build progressively, one item per spoken point"
+      - "Alternation: no talking_head_full run > ~9s without a cutaway/overlay; overlays positioned to NEVER cover the face (face position from frame_sampler)"
+      - "split_5050: face_crop_y chosen by frame sampling so the face is CENTERED in the bottom 1080x960 panel (not cropped to ceiling)"
+      - Each animated asset has a hyperframes_spec detailed enough to author the HTML; fonts follow the playbook (Fraunces titles, Inter sub/numerals)
+      - Caption config (if captions used) is layout-aware, never bottom-pinned into the platform UI shadow zone
+    success_criteria:
+      - Schema-valid scene_plan; ordered beats with shot_mode, time window, hyperframes_spec / overlay spec / split spec / claim_proof spec
+      - metadata.face_crop_y recorded for split beats; every reveal records trigger_word + words[] timestamp
+
+  # ── assets: build the animated assets + proof + TH segments ───────
+  - name: assets
+    skill: pipelines/anthropic-style-animated-talking-head/asset-director
+    required_artifacts_in:
+      - scene_plan
+    optional_artifacts_in:
+      - script
+      - research_brief
+    produces:
+      - asset_manifest
+    optional_tools:
+      - subtitle_gen
+      - image_selector
+      - web_image_search
+      - webpage_screenshot
+      - music_search
+      - music_gen
+      - audio_mixer
+    tools_available:
+      - subtitle_gen
+      - image_selector
+      - web_image_search
+      - webpage_screenshot
+      - music_search
+      - music_gen
+      - audio_mixer
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - HyperFrames workspace at projects/<name>/hf/ — one composition per subdir (dir = index.html), shared fonts/ symlink; full-frame cutaways author for mp4, alpha overlays + 50-50 panels for mov/native
+      - Fonts copied locally (Fraunces + Inter); titles/labels use Fraunces, sub/eyebrows/numerals use Inter (the corrected look)
+      - Source-receipt cards built from research_brief (real masthead + headline + date + URL) with the highlight phrase wired for a clay marker sweep; live screenshots only when mobile-legible, else faithful cards
+      - Real logos fetched (web_image_search, type_image=transparent) and seated on light chips; charts via local graphics
+      - Talking-head segments are crop/scale only (NO color-space flags, NO -pix_fmt on HDR)
+      - Every composition passes npx hyperframes lint (0 errors)
+    success_criteria:
+      - Schema-valid asset_manifest with provenance (provider, url, license, scene_id, role) per asset
+      - All HyperFrames compositions lint clean; alpha overlays render to mov (ProRes 4444), full-frame cutaways + split panels to mp4
+      - layer3_skills_read present (hyperframes, editorial-ai-product-design-system, ai-video-gen/elevenlabs as used)
+
+  # ── edit: the cut plan (shot decisions) + assembly recipe ─────────
+  - name: edit
+    skill: pipelines/anthropic-style-animated-talking-head/edit-director
+    required_artifacts_in:
+      - scene_plan
+      - asset_manifest
+    optional_artifacts_in:
+      - script
+    produces:
+      - edit_decisions
+    tools_available:
+      - silence_cutter
+      - video_trimmer
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - "Cut plan is CONTIGUOUS over the full TH duration — every second maps to exactly one shot_mode segment; segment lengths sum to the TH duration so the untouched audio stays in sync"
+      - "Per segment: kind (th / th_overlay / split / animation_full / claim_proof), source asset, fit rule (trim if clip>=window, freeze-last-frame/hold if window>clip — NEVER change VO speed)"
+      - "Micro-segments (<0.6s) of face are removed by extending the neighboring cutaway/overlay"
+      - render_runtime carried unchanged from idea (hyperframes assets + ffmpeg assembly); audio = original TH copied through
+    success_criteria:
+      - Schema-valid edit_decisions; segment table sums to TH duration; each segment references a valid source
+      - Audio handling explicitly 'copy original TH audio' (VO untouched)
+
+  # ── compose: FFmpeg segment-rebuild assembly + QA ─────────────────
+  - name: compose
+    skill: pipelines/anthropic-style-animated-talking-head/compose-director
+    required_artifacts_in:
+      - edit_decisions
+      - asset_manifest
+    optional_artifacts_in:
+      - scene_plan
+    produces:
+      - render_report
+      - final_review
+    required_tools:
+      - video_compose
+    optional_tools:
+      - audio_mixer
+      - visual_qa
+      - frame_sampler
+    tools_available:
+      - video_compose
+      - audio_mixer
+      - visual_qa
+      - frame_sampler
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - "Segment-rebuild assembly: th (crop/scale) · th_overlay (overlay alpha mov on full-frame TH) · split (vstack animation-panel 1080x960 over face-centered TH crop 1080x960) · animation_full (cutaway mp4) · claim_proof (source card overlay/full-frame with marker-sweep on the verified phrase)"
+      - "Identical encode params across all segments so concat -c copy is clean; final mux copies the ORIGINAL TH audio (-c:a copy) — VO byte-for-byte unchanged"
+      - "split face crop CENTERS the face in the bottom panel (verify by frame sampling — not cropped to ceiling); overlays never cover the face"
+      - "NARRATION SYNC verified by before/after-word frame sampling: no reveal/overlay/highlight before its trigger word; claim highlight lands exactly on the spoken phrase. Early reveal = CRITICAL -> retime + re-render"
+      - "QA MANDATORY: ffprobe (1080x1920/30fps/duration ~= TH duration), ffmpeg decode -f null, blackdetect, contact sheet across the timeline; HDR not silently tonemapped"
+    success_criteria:
+      - Schema-valid render_report; output 9:16 1080x1920 H.264, plays clean, no long black segments
+      - Audio duration == source TH audio duration; VO unchanged
+      - Narration sync + claim-highlight sync verified by frame sampling; self_review_completed with per-segment notes
+
+  # ── publish ───────────────────────────────────────────────────────
+  - name: publish
+    skill: pipelines/anthropic-style-animated-talking-head/publish-director
+    required_artifacts_in:
+      - render_report
+    optional_artifacts_in:
+      - script
+      - research_brief
+    produces:
+      - publish_log
+    optional_tools:
+      - content_signal
+    tools_available:
+      - content_signal
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Caption/hook leads with the strongest line and names sources where claims are made (claim integrity preserved)
+      - Hashtags relevant to AI/tech/startup; cover concept matches the warm editorial look
+    success_criteria:
+      - Schema-valid publish_log with caption, hashtags, cover concept, and the source list for every on-screen claim
+
+metadata:
+  built_from: "projects/anthropic-two-tier-reel (Fable 5 / Mythos 5 reel)"
+  canvas: "1080x1920 (9:16)"
+  audio_policy: "Original talking-head VO is the spine and is used UNTOUCHED — copied through with -c:a copy. Never cut, re-time, or speed-change it. Visuals are timed to the VO, never the reverse."
+
+  shot_modes:
+    talking_head_full:
+      description: "Full-frame creator face (1080x1920), no graphics. Use for the personal hook line, direct-to-camera connection, opinions/takes, the 'but there's a catch' beat, transitions, and the like/share/follow outro."
+      max_unbroken_seconds: 9
+    talking_head_overlay:
+      description: "Full-frame creator face with alpha graphics composited on top (rendered as ProRes-4444 .mov in HyperFrames): logo pop+rotate bumpers, key-term pills, status pills, a checklist that builds box-by-box low in the frame, or a small source-receipt card in a corner. Use when a graphic ANNOTATES the speaker without replacing them. Graphics MUST be positioned clear of the face (face position from frame_sampler)."
+      rule: "Overlays never cover the face; anchor them low / in negative space; reveals land on the trigger word."
+    split_5050:
+      description: "Vertical 50-50 split: animation panel on top (1080x960), creator face on the bottom (1080x960, cropped & CENTERED on the face). Use for a sustained explanation beat that needs a supporting animation (a racing counter, a small diagram, a chart) while the speaker stays present."
+      face_crop_rule: "Crop the TH to a 1080x960 window centered on the face (face_crop_y from frame sampling). NEVER crop to y=0/ceiling."
+    animation_full:
+      description: "Full-frame animation cutaway (1080x1920 mp4), VO continues underneath. Use for dense/complex visuals where the face would distract: multi-node diagrams, big stat cards, proof-receipt stacks, comparison boards, the data/benchmark beats."
+      fit_rule: "Trim the cutaway to the window if clip>=window; freeze the last frame to hold if window>clip. NEVER change VO speed to fit."
+    claim_proof:
+      description: "A verifiable factual claim is on-screen-proven: a faithful source-receipt card (browser chrome + URL + real masthead + date + the real article screenshot as a banner + a '✓ VERIFIED · <domain>' eyebrow) with the EXACT verified phrase highlighted by a clay marker sweep, landing on the spoken claim. Driven by research_brief."
+      presentation:
+        sequenced_after_animation: "PREFERRED when the claim beat already has a full-frame animation (a stat, device, calendar, etc.). Play the animation's hero reveal, then CUT to the full-frame article card for the proof. Both share the ivory background so the cut is seamless and reads as one beat ('here's the number… and here's the receipt'). The animation lands on the first part of the claim, the article + highlight lands on the proof phrase."
+        overlay_card: "Only as a COMPACT citation that does NOT cover the hero — e.g. a small source card over the talking head (face visible) or in clear negative space. NEVER overlay a full article card on top of a busy full-frame animation (it double-stacks two graphics and looks cluttered — a real user rejection)."
+        full_frame_receipt: "The article/receipt is the whole frame (or a stack of corroborating receipts). Good when the claim has no companion animation."
+
+  shot_selection_heuristics:
+    - "Default to talking_head_full at the open (personal hook) and close (CTA/outro), and for opinion/transition lines with no specific visual."
+    - "Use claim_proof whenever the creator states a verifiable fact/number/quote that research_brief resolved to a credible source — show the receipt with the phrase highlighted ON the claim. If that beat ALSO has a companion animation (stat/device/calendar), SEQUENCE it (animation hero → cut to full-frame article on the shared ivory bg) rather than overlaying the article on top of the animation."
+    - "NEVER stack two busy graphics (e.g. a full article card on top of a full-frame stat animation). Either sequence them, or keep one as a compact element that doesn't cover the other's hero. (Validated: the user rejected article-on-animation overlay; sequencing animation→article was the fix.)"
+    - "Use animation_full for dense data/proof/diagram beats (stats, comparisons, multi-node maps, receipt stacks) where the visual is the point."
+    - "Use split_5050 for a sustained explanation that benefits from ONE supporting animation (counter / small chart / small diagram) while keeping the speaker present — e.g. a 'X tokens of context' counter."
+    - "Use talking_head_overlay for annotations that should sit WITH the face: logo bumpers, a key-term/stat pill, a checklist building box-by-box on the spoken points, a small source card."
+    - "Never run talking_head_full longer than ~9s without a cutaway or overlay; never let an overlay cover the face; alternate face and graphics to keep energy."
+
+  render_strategy:
+    name: ffmpeg_segment_rebuild
+    description: >
+      The talking head is the base. Build the timeline as CONTIGUOUS segments (one per beat,
+      summing to the TH duration). Encode every segment with IDENTICAL params, concat with
+      -c copy, then mux the ORIGINAL TH audio with -c:a copy (VO untouched).
+      Per segment kind:
+        th             -> TH [a,b], scale/crop to 1080x1920, fps 30 (crop & scale only, no color flags)
+        th_overlay     -> TH [a,b] with an alpha .mov overlaid at 0,0 (overlay=format=auto)
+        split          -> vstack: [animation panel 1080x960] over [TH [a,b] crop=1080:960:0:<face_crop_y>]
+        animation_full -> cutaway .mp4 (trim to window, or tpad clone-last-frame to hold)
+        claim_proof    -> source-receipt card as overlay or full-frame, marker-sweep on the verified phrase
+      Animated assets (cutaways, alpha overlays, split panels, receipt cards) are authored and
+      rendered in HyperFrames (alpha overlays -> --format mov ProRes 4444; full-frame & panels -> mp4).
+    critical_rules:
+      - "Original TH audio copied through (-c:a copy). Never cut, re-time, or change VO speed."
+      - "Talking-head video gets crop & scale ONLY — never -colorspace/-color_* / -pix_fmt flags on the TH (would dull HDR). HDR sources: never silently tonemap (see AGENT_GUIDE HDR rule)."
+      - "split crop must CENTER the face in the bottom 1080x960 panel (face_crop_y from sampling)."
+      - "Every animated reveal lands ON its transcript trigger word; verify by before/after-word frame sampling."
