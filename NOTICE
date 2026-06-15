@@ -1,0 +1,53 @@
+OpenNolan
+=========
+
+OpenNolan is an AGPL-3.0 fork of OpenMontage.
+
+This product includes software developed by the OpenMontage project and its
+contributors. The original work and the substantial majority of this codebase
+were created by calesthio. OpenNolan preserves that authorship and adds
+further contributions on top of it.
+
+--------------------------------------------------------------------------------
+Copyright notices
+--------------------------------------------------------------------------------
+
+Original work — OpenMontage
+  Copyright (C) 2026 calesthio
+  https://github.com/calesthio/OpenMontage
+
+Fork additions — OpenNolan
+  Copyright (C) 2026 Het Tikawala
+
+--------------------------------------------------------------------------------
+License
+--------------------------------------------------------------------------------
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+
+The full text of the license is in the LICENSE file. The LICENSE file is the
+unmodified, verbatim GNU AGPL-3.0 license document and must not be altered.
+
+--------------------------------------------------------------------------------
+Third-party components
+--------------------------------------------------------------------------------
+
+This repository also vendors third-party material that is distributed under its
+own license terms, which are retained alongside each component. These include
+(non-exhaustive):
+
+  - Manim example code and documentation (.agents/skills/manimce-best-practices,
+    .agents/skills/manimgl-best-practices, and the corresponding .claude/skills
+    copies)
+      Copyright (C) 2025 3Blue1Brown (Grant Sanderson) — original video code
+      Copyright (C) 2026 Adithya S Kolavi — adapted examples and documentation
+      See the LICENSE.txt files within those directories.
+
+Those notices and license files must be preserved.
