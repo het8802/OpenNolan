@@ -6,7 +6,7 @@ Session learning: the daily Instagram AI/Tech Script Engine asset pack should in
 
 For daily short-form concept/script and asset-pack jobs, include a concept-specific **FigJam hook combo**:
 
-- **Visual hook brick:** choose from the `marketing-os-tools` Short Form Lego Bricks taxonomy: subject motion, graphic/text overlay, visual selection, pattern interrupt/visual switching, or effects/transitions.
+- **Visual hook brick:** choose from the `content-os-tools` Short Form Lego Bricks taxonomy: subject motion, graphic/text overlay, visual selection, pattern interrupt/visual switching, or effects/transitions.
 - **Spoken hook brick:** choose from educational/storytelling formats such as secret reveal, case study, problem, contrarian, warning, list, hypothetical, comparison, question, ranking/rating, authority/proof, or personal experience.
 - **Execution detail:** exact first 2–5 second shot plan, exact first spoken line, matching SFX/audio cue, props/assets needed, and why it fits the concept.
 

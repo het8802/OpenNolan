@@ -19,7 +19,7 @@ Use this when implementing or auditing the daily `What happened in tech so far` 
   - Name: `Instagram AI/Tech — daily What Happened in Tech carousel draft`
   - Schedule: `0 7 * * *` / 7:00 AM in your local timezone
   - Delivery: your delivery channel
-  - Output: `~/marketing-os/daily-carousels/YYYY-MM-DD/what-happened-in-tech/`
+  - Output: `~/content-os/daily-carousels/YYYY-MM-DD/what-happened-in-tech/`
 - Approval/posting checker job:
   - Name: `Instagram AI/Tech — approved daily carousel posting checker`
   - Schedule: `every 30m`
@@ -29,7 +29,7 @@ Use this when implementing or auditing the daily `What happened in tech so far` 
 
 ## Setup sequence
 
-1. Confirm `daily-tech-carousel`, `instagram-carousel`, `marketing-ops-automation`, `marketing-os-tools`, `codex`, your Instagram API integration, and delivery-channel skills are available.
+1. Confirm `daily-tech-carousel`, `instagram-carousel`, `marketing-ops-automation`, `content-os-tools`, `codex`, your Instagram API integration, and delivery-channel skills are available.
 2. Verify the delivery target by sending a low-impact test to your delivery channel.
 3. Create the 7AM draft cron with these requirements:
    - load `daily-tech-carousel` as primary skill;

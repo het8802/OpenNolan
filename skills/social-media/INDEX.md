@@ -10,7 +10,7 @@ This directory holds repo-local copies of the social-media skill set for OpenNol
 - `instagram-carousel` — 5 files
 - `instagram-reels` — 11 files
 - `marketing-ops-automation` — 20 files
-- `marketing-os-tools` — 9 files
+- `content-os-tools` — 9 files
 - `source-backed-reel-evidence-montage` — 3 files
 - `talking-head-screen-demo-reel` — 3 files
 - `xurl` — 1 files

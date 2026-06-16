@@ -4,7 +4,7 @@ Use this reference when a marketing-automation subagent recommends Apify, social
 
 ## Default stance
 
-1. Prefer free/public sources first: web search, platform trend pages, Google Trends, TikTok Creative Center, public competitor posts, YouTube pages/transcripts, Reddit, newsletters/blogs, and existing marketing-OS tools.
+1. Prefer free/public sources first: web search, platform trend pages, Google Trends, TikTok Creative Center, public competitor posts, YouTube pages/transcripts, Reddit, newsletters/blogs, and existing content-OS tools.
 2. Prefer free Apify Actors/apps and low-volume metadata runs before paid/high-volume scraping.
 3. Do not recommend paid tools unless the benefit is concrete: saves time, money, compute, or LLM tokens; unlocks data we cannot otherwise get; improves output quality materially; or reduces operational risk.
 
@@ -22,7 +22,7 @@ Every paid or credentialed tool recommendation should include:
 - Priority: High/Medium/Low.
 - What the user must approve or configure.
 
-Append durable recommendations to `~/marketing-os/tool-wishlist.md`.
+Append durable recommendations to `~/content-os/tool-wishlist.md`.
 
 ## Apify pricing notes observed in May 2026
 
