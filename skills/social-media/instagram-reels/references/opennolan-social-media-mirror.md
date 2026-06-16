@@ -20,6 +20,6 @@ Do not use symlinks for this mirror. OpenNolan is synced through GitHub to your 
 ## Pitfalls
 
 - Chat memory alone is not enough; your local agent cannot read it.
-- OpenNolan-only storage is not enough; the marketing-OS may miss the lesson in future sessions.
+- OpenNolan-only storage is not enough; the content-OS may miss the lesson in future sessions.
 - Avoid one narrow skill per Reel/post. Keep class-level skills rich and put specific source notes in `references/`.
 - Redact credentials and secrets before mirroring or pushing.

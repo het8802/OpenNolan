@@ -8,8 +8,8 @@ Use when the user sends an Instagram carousel/post and says to save the repos/to
    - `Post.from_shortcode(L.context, "SHORTCODE")`
    - read `owner_username`, `caption`, `typename`, and `mediacount`
    - for carousel posts, iterate `post.get_sidecar_nodes()` and download each `display_url`
-3. Save assets under a durable marketing-OS research folder, e.g.:
-   - `~/marketing-os/research/<topic>-<shortcode>/slide-01.jpg ...`
+3. Save assets under a durable content-OS research folder, e.g.:
+   - `~/content-os/research/<topic>-<shortcode>/slide-01.jpg ...`
    - `caption.txt`
    - `contact-sheet.jpg`
 4. Make a contact sheet and OCR/analyze it with vision for fast extraction of repo names, categories, and visible benefit text.

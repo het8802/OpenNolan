@@ -43,11 +43,25 @@ This repository also vendors third-party material that is distributed under its
 own license terms, which are retained alongside each component. These include
 (non-exhaustive):
 
-  - Manim example code and documentation (.agents/skills/manimce-best-practices,
-    .agents/skills/manimgl-best-practices, and the corresponding .claude/skills
-    copies)
+  - Manim Community Edition examples and documentation
+    (.agents/skills/manimce-best-practices and the corresponding .claude/skills
+    copy)
+      Copyright (C) 2026 Adithya S Kolavi
+      Licensed under the MIT License. See the LICENSE.txt within those
+      directories.
+
+  - ManimGL (3Blue1Brown) examples and documentation
+    (.agents/skills/manimgl-best-practices and the corresponding .claude/skills
+    copy)
       Copyright (C) 2025 3Blue1Brown (Grant Sanderson) — original video code
       Copyright (C) 2026 Adithya S Kolavi — adapted examples and documentation
-      See the LICENSE.txt files within those directories.
+      Licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+      International (CC BY-NC-SA 4.0). This material is NOT covered by the
+      AGPL-3.0 that licenses the rest of OpenNolan. The NonCommercial term of
+      CC BY-NC-SA 4.0 applies to these specific files: they may not be used for
+      commercial purposes, and any adaptation must be redistributed under the
+      same license. See the LICENSE.txt within those directories.
 
-Those notices and license files must be preserved.
+Those notices and license files must be preserved. For the specific files they
+cover, the third-party license terms above take precedence over the project's
+AGPL-3.0 license.

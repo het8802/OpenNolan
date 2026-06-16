@@ -15,20 +15,20 @@ Add a separate draft-only workflow that converts the remaining strong research s
 ## Recommended Architecture
 
 1. **Research source**
-   - Read `~/marketing-os/research/latest.md`.
-   - Read current/previous day `~/marketing-os/research/YYYY-MM-DD/*.jsonl`.
+   - Read `~/content-os/research/latest.md`.
+   - Read current/previous day `~/content-os/research/YYYY-MM-DD/*.jsonl`.
    - Read `daily-5pm-synthesis.md` and the daily script to identify the main selected winner.
    - Exclude or de-emphasize the selected winner so the digest does not duplicate the main workflow.
 
 2. **7AM draft-generation cron**
    - Schedule: `0 7 * * *` in your local timezone.
-   - Skills: `marketing-ops-automation`, `marketing-os-tools`, `instagram-carousel`, `instagram-reels` if needed for hook alignment, and `codex` for deterministic local image generation.
+   - Skills: `marketing-ops-automation`, `content-os-tools`, `instagram-carousel`, `instagram-reels` if needed for hook alignment, and `codex` for deterministic local image generation.
    - Deliver draft to your delivery channel once the user creates/invites the bot.
 
 3. **Output folder**
 
 ```text
-~/marketing-os/daily-carousels/YYYY-MM-DD/what-happened-in-tech/
+~/content-os/daily-carousels/YYYY-MM-DD/what-happened-in-tech/
 ```
 
 Expected files:
@@ -102,7 +102,7 @@ Operational rule: prefer the primary lunch/early-afternoon slot when the carouse
 
 ## Delivery Channel
 
-Use a separate channel for draft review/approval. The marketing-OS may not be able to create channels directly; the user should create it and invite the bot, then configure the cron delivery to that channel ID.
+Use a separate channel for draft review/approval. The content-OS may not be able to create channels directly; the user should create it and invite the bot, then configure the cron delivery to that channel ID.
 
 ## Common Pitfalls
 

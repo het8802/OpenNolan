@@ -141,7 +141,7 @@ Avoid:
 When the user sends an Instagram carousel/post and says to “save these,” “save the repos,” or “we might make a video out of it,” treat it as source capture, not carousel creation. Archive the post assets, extract the reusable list/ideas, verify links where possible, and save a concise Notion/source note. Use `references/instagram-carousel-source-capture.md` for the proven workflow, including the Instagram shortcode/Instaloader fallback, contact-sheet OCR, GitHub normalization, and deliverable shape.
 
 When asked to find or send an already-created carousel:
-1. Prefer carousel output folders before generic asset-pack folders: `~/marketing-os/carousels/`, especially names containing `codex`, `aesthetic`, or the topic/date.
+1. Prefer carousel output folders before generic asset-pack folders: `~/content-os/carousels/`, especially names containing `codex`, `aesthetic`, or the topic/date.
 2. If the user mentions “created with Codex,” search prior sessions and local PNGs by mtime/name before assuming the daily asset pack is the carousel.
 3. Send slides by numeric filename order (`slide-01.png`, `slide-02.png`, …), not README asset-list order unless the README explicitly defines carousel order.
 

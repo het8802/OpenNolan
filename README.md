@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="OpenNolan" width="200">
+  <img src="assets/OpenNolan_logo.png" alt="OpenNolan" width="200">
 </p>
 
 <h1 align="center">OpenNolan</h1>

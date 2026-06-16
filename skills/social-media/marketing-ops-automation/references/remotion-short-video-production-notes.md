@@ -1,10 +1,10 @@
 # Remotion Short-Video Production Notes
 
-Condensed learning from producing Marketing OS videos after user feedback that earlier outputs were bland.
+Condensed learning from producing Content OS videos after user feedback that earlier outputs were bland.
 
 ## Approved creative bar
 
-The user approved the Idea 10 Remotion v3 direction as “much better.” For future short-form Marketing OS videos:
+The user approved the Idea 10 Remotion v3 direction as “much better.” For future short-form Content OS videos:
 
 - Start with a storyboard, not a full-script caption pass.
 - Generate/source multiple 9:16 visuals per script; avoid one-image videos.

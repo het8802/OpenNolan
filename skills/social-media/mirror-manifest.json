@@ -1,6 +1,6 @@
 {
   "destination": "skills/social-media",
-  "generated_at_utc": "2026-06-05T19:15:50Z",
+  "generated_at_utc": "2026-06-16T18:48:04Z",
   "mirrored": [
     {
       "skill": "daily-carousel-remix",
@@ -19,13 +19,13 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 9822,
-          "sha256": "b8e208b3c0bfec25a8c7f78b421633e885f2802c9dd0ccd7809f07c3a388a7b5"
+          "bytes": 9812,
+          "sha256": "59021b277879d6916e99d1fd0ceb638bc2081374a7552b8cecf39a8ae8f2bd62"
         },
         {
           "path": "references/cron-setup.md",
-          "bytes": 4781,
-          "sha256": "9badf53e36943fcb476ee53f03ed1c23b1e866f11f08a9741f90cd72a71b3472"
+          "bytes": 4777,
+          "sha256": "561f6df161ef6eb8f36a1af6e8926e502f4d364b8a7b4d5334a6d54d0572caa3"
         }
       ]
     },
@@ -56,8 +56,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 20512,
-          "sha256": "be1e0d7c16a3b313b6ea42895c33c3b91750f7c12c262b0e900be1ddca693de1"
+          "bytes": 20510,
+          "sha256": "54b0f24e7928583abfeeda22b38c10f79420a208ea49d6373d112a4516fabf13"
         },
         {
           "path": "references/anthropic-inspired-carousel-style.md",
@@ -66,8 +66,8 @@
         },
         {
           "path": "references/instagram-carousel-source-capture.md",
-          "bytes": 2198,
-          "sha256": "9aa816ff5369290360ed452b23f8a9783f48e33307d19cdc8ef13effdf5bf56f"
+          "bytes": 2194,
+          "sha256": "5eb51daed84248c76f31ba93836da3a028fcfcb818d3fa79b409aeaa49f5dc87"
         },
         {
           "path": "references/product-card-grid-carousel-production.md",
@@ -117,8 +117,8 @@
         },
         {
           "path": "references/openai-credits-greg-remotion-reel.md",
-          "bytes": 5997,
-          "sha256": "15bf9ab634c978f95b4912b559ba0633a463f911841f0d2a9ed56d8632fb393f"
+          "bytes": 5995,
+          "sha256": "574427da758d6a3659b2300f9665792ff1b4073b8bc9801d3957308b6d7f394e"
         },
         {
           "path": "references/opennolan-kinetic-whiteboard-captions.md",
@@ -127,13 +127,13 @@
         },
         {
           "path": "references/opennolan-social-media-mirror.md",
-          "bytes": 1563,
-          "sha256": "7f4d1c6210a18bec0ed9df1e9c37b5c8320d0d6c361dd5bc5a51fbfdd134fde7"
+          "bytes": 1561,
+          "sha256": "f203fd0b7b6dcd8580a57fd66152b231536f0e27ce0acc0628a09b722a29cd1d"
         },
         {
           "path": "references/opennolan-social-media-skill-mirror.md",
-          "bytes": 2428,
-          "sha256": "56a2b65dd160ec3a7f2dc2fcedf16ab6efd2d40c5c7915f5ea9cf1d37878379f"
+          "bytes": 2418,
+          "sha256": "e243ce9bc774eed5dd2be74a8cb4d34815f1a1c83ba9fec2a1ee523536a15e7f"
         },
         {
           "path": "references/recalling-instagram-shared-resources.md",
@@ -153,23 +153,23 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 21431,
-          "sha256": "d252566fd0240f9812de1315e05f78b8f011911bfcc40f40459f2710ed9f1e5f"
+          "bytes": 21387,
+          "sha256": "bf0866084ba0e2a41fc976637f19857c1758692335d8a6185d8a678f116c0722"
         },
         {
           "path": "references/ai-tech-creator-research-strategy.md",
-          "bytes": 4770,
-          "sha256": "cf8cd034be07fbd6da96732edf5ae1dcd1e06f002fa512d3b3c5e815af8b34c5"
+          "bytes": 4762,
+          "sha256": "e9e2361997c2ae7f66d69f451082e174e560f236fdd35aa62451dc02e995f8cf"
         },
         {
           "path": "references/apify-and-tool-roi.md",
-          "bytes": 3317,
-          "sha256": "32cdc5cd34f71636f4423d3d76cfafa016c996c9e9644b2123e6dd9a133d0bcc"
+          "bytes": 3313,
+          "sha256": "f7d02f4171b0d18cf725b801aaddd4d6b54578179c631f4ed050a0d088dfe8d3"
         },
         {
           "path": "references/approval-recovery.md",
-          "bytes": 1927,
-          "sha256": "e63008f4a423c9eb1d18da253f4f3ab294ca6636597a1075ce0ade0a142131a8"
+          "bytes": 1915,
+          "sha256": "a076c9d772ed2cb739b848f54925b993909ff7dccab9fa79c1b8450b0ad7d864"
         },
         {
           "path": "references/creative-short-video-workflow.md",
@@ -178,38 +178,38 @@
         },
         {
           "path": "references/cron-delivery-audit.md",
-          "bytes": 3875,
-          "sha256": "af998358c5d7af01f699c3de0d8d42d519d8d07bdb40965083bda3ac22d23d8b"
+          "bytes": 3865,
+          "sha256": "89444c716862e11c9b3e357363043a6906c506d1775613577862347655bfafcb"
         },
         {
           "path": "references/daily-script-cron-recovery.md",
-          "bytes": 2113,
-          "sha256": "bfcd73e8e645953748b47e13c0defc4e3dff710f8005fd04f3b559b51ead1b76"
+          "bytes": 2107,
+          "sha256": "4380753bb17c064fe48a170b57cdcc07b5c2684bc58769b5139f9b8d326e645b"
         },
         {
           "path": "references/daily-tech-carousel-digest-workflow.md",
-          "bytes": 4856,
-          "sha256": "7896547e3a5b0cc5452dcf7c02c7abe3ccdecd6605e828e1f213729a46eac742"
+          "bytes": 4846,
+          "sha256": "869e233ba395002189b8b1b55afa4b0cb7225cd50577574e410afb50d136cc5f"
         },
         {
           "path": "references/figjam-hook-database-cron-integration.md",
-          "bytes": 2020,
-          "sha256": "3b88297469b31d05fef1d25651c87dbd2fa89dedf426c39ee725c2c2733162b0"
+          "bytes": 2018,
+          "sha256": "1601b4847b4fadc452bf982bffae838d55f51e133a28b810100cf92b574a28fe"
         },
         {
           "path": "references/hourly-marketing-cron.md",
-          "bytes": 4407,
-          "sha256": "e6e2aae6951eb889afbf4276090628959978c85b1761f8b3f7a9aaa5aa17487a"
+          "bytes": 4397,
+          "sha256": "5a2d5fae2d70e24a93a4bb6f88da96907f112d9a38ad4705df2cb5ee470d89f1"
         },
         {
           "path": "references/idea-4-v2-remotion-qa-notes.md",
-          "bytes": 2997,
-          "sha256": "71a3102740a06819f3776c9724f5d2c917a73c63819d80af45b750727856b770"
+          "bytes": 2991,
+          "sha256": "609dcaa959fb0d496d556934c993904d7dcbc6f6e41338484b3ff510766e86c9"
         },
         {
           "path": "references/instagram-ai-tech-script-engine.md",
-          "bytes": 3035,
-          "sha256": "1ebd52d9f6f5256d4ea73bf1384ed2d223cc41d0c1275f4a680ea2927d5fee7b"
+          "bytes": 3023,
+          "sha256": "984a49d9d1633e9792a0c65a47ecfcdd022885c9e4ae4d04012fc7ca559b8d5b"
         },
         {
           "path": "references/production-pipeline-project-scaffold.md",
@@ -218,23 +218,23 @@
         },
         {
           "path": "references/remotion-short-video-production-notes.md",
-          "bytes": 4912,
-          "sha256": "31753c654229cbafcf1753b6ccdc6ff229b2bc0941b5f6e775fedae216b14ce6"
+          "bytes": 4908,
+          "sha256": "0e4faa047dad267e0834b326a0b30109738cf9a311b7f0bc9de457d9b0e4e677"
         },
         {
           "path": "references/slack-media-attachment-limitation.md",
-          "bytes": 1562,
-          "sha256": "4fba01188757a8b6fa6b9a82fca6fc8a269ec4bd16982628f1707ad94b6f9c0b"
+          "bytes": 1558,
+          "sha256": "7cfc7903e952bcc551182f69ade01a6ce76be960d8179fa230a001388d896364"
         },
         {
           "path": "references/social-link-intake-and-gated-post-summarization.md",
-          "bytes": 4099,
-          "sha256": "18b3261926787ce7b8b73ce0064f87989f8049c0c1fb1d1eae09e51286fb560c"
+          "bytes": 4097,
+          "sha256": "340dcbbd6596de87627f3d4331c3918eeb111d8f2dc571c268f66b4c1eec13d8"
         },
         {
           "path": "references/tts-voice-selection-and-slack-delivery-notes.md",
-          "bytes": 2580,
-          "sha256": "a532dbca7736f871762ee8d847942c96d500e4aceaf225137f54ffd7bd1397b7"
+          "bytes": 2570,
+          "sha256": "4d25ff74cbaca086ef6d6a261267aa7f97a1a05df77f37bb304e73b145e6faac"
         },
         {
           "path": "references/typed-ai-video-pipeline-v0.md",
@@ -243,8 +243,8 @@
         },
         {
           "path": "references/video-craft-learning-loop.md",
-          "bytes": 3016,
-          "sha256": "39163d200dad573da115d860d12ee9496fbede20b0b77c529a1f985de6fb7708"
+          "bytes": 3012,
+          "sha256": "0b029cc9e03a38bb63fc536200f4c3ec39a06a38f60d6b583ed55180394304d3"
         },
         {
           "path": "references/viral-claude-validation-angle.md",
@@ -254,23 +254,23 @@
       ]
     },
     {
-      "skill": "marketing-os-tools",
+      "skill": "content-os-tools",
       "file_count": 9,
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 11722,
-          "sha256": "ad118c6fcc9c47b2e790a27bf43c16c79bc92f599671146b349716c197624940"
+          "bytes": 11704,
+          "sha256": "50b0756e3aa535cbce0ed5dfbe6398780c0e8a787549e436d77bd209a8688659"
         },
         {
           "path": "references/approval-gate-short-qa.md",
-          "bytes": 2104,
-          "sha256": "a86c530f33e2f131390ef7a0e8eaa962126182647deb16c7f7cbec9243c39d7d"
+          "bytes": 2102,
+          "sha256": "575c8ca4d0fec43788312509c2b170511b7e66eda6c1a333a42956d874e23ec1"
         },
         {
           "path": "references/codex-aesthetic-carousel-generation.md",
-          "bytes": 4942,
-          "sha256": "7e73d94d58872ef78a6bdb8f1dc26196456d30134f1d7c45ae88abf2fde00dc1"
+          "bytes": 4940,
+          "sha256": "3237803dc1dc51db3e08c234b241548c212659cc7ad68e31e5387dc98d95ca7e"
         },
         {
           "path": "references/figjam-video-hook-extraction.md",
@@ -284,8 +284,8 @@
         },
         {
           "path": "references/local-motion-graphics-fallback.md",
-          "bytes": 3020,
-          "sha256": "9047c7d7f6a327a93ca0bd74581fcd60b46ccb98ffcb30afb2ef55c7b6bd9ef6"
+          "bytes": 3016,
+          "sha256": "8990f9aaeb56efcddf78297239230c37c2c15e7f1173995e0491b0cb71b31d9a"
         },
         {
           "path": "references/opennolan-ffmpeg-draft-render.md",
@@ -294,8 +294,8 @@
         },
         {
           "path": "references/procedural-motion-graphics-rendering-notes.md",
-          "bytes": 2759,
-          "sha256": "161996bc847d123c1597c9385bd8542b62c0e67c2aaad56d238e8e0d4db7145d"
+          "bytes": 2757,
+          "sha256": "015af419a4ec78dfe45f4ab5b7f13e3ba38413f9565c0e295eff6a845b4f4cee"
         },
         {
           "path": "references/rvm-long-and-reaction-gif-eval.md",

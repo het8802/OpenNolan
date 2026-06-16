@@ -6,11 +6,11 @@ Use this when the user asks for "today's script" and the scheduled Instagram AI/
 
 1. Check the target date in your local timezone.
 2. Verify whether the expected script file exists under:
-   - `~/marketing-os/scripts/YYYY-MM-DD/daily-ai-tech-video.md`
+   - `~/content-os/scripts/YYYY-MM-DD/daily-ai-tech-video.md`
 3. If missing, inspect the live cron status/output enough to know whether the scheduled job failed or is still pending.
 4. Do **not** stop at "the cron failed" or only trigger the cron and wait. The user asked for the deliverable now.
 5. Build the script manually from the current research corpus:
-   - `~/marketing-os/research/latest.md`
+   - `~/content-os/research/latest.md`
    - today's `research/YYYY-MM-DD/*.jsonl` if present
    - previous day's synthesis/research if today's collector is empty
    - authoritative web/source extracts for the top claims
@@ -26,7 +26,7 @@ Use this when the user asks for "today's script" and the scheduled Instagram AI/
    - caption/CTA/hashtags
    - asset/B-roll brief
 7. Save the recovered file to the normal path so downstream carousel/asset jobs can use it:
-   - `~/marketing-os/scripts/YYYY-MM-DD/daily-ai-tech-video.md`
+   - `~/content-os/scripts/YYYY-MM-DD/daily-ai-tech-video.md`
 8. Verify by reading the saved file before replying.
 9. Tell the user concisely that the cron failed and you recovered the script manually; include the path and the usable talking script.
 
