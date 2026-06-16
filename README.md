@@ -30,7 +30,7 @@ Tell it the short-form video you want. OpenNolan's AI agent researches the hook,
 This is not a single-clip prompt toy. OpenNolan runs the **entire short-form editing pipeline** — the same sequence a creator grinds through by hand in CapCut or Instagram Edits — automated end to end. Use it two ways: open the **web app** (Mission Control) and work in a visual editor, or drive it from your **AI coding assistant** in plain language.
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/f77ce7a4-68b8-4f94-a287-e94bf50a32e1" width="100%" controls></video>
+  <video src="https://raw.githubusercontent.com/het8802/OpenNolan/main/assets/opennolan-demo.mp4" width="100%" controls></video>
 </div>
 
 ---
