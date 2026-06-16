@@ -3,7 +3,7 @@
 Use this as a concrete reference when the user asks to turn a daily AI/tech script into a clean Greg Isenberg / Hyperagent-style informational Reel without talking head.
 
 ## Source and output
-- Source script: `~/marketing-os/scripts/2026-05-21/daily-ai-tech-video.md`
+- Source script: `~/content-os/scripts/2026-05-21/daily-ai-tech-video.md`
 - Project: `~/openai-credits-greg-reel`
 - Silent/design MP4: `~/openai-credits-greg-reel/openai-credits-greg-reel.mp4`
 - Final MP4 with ElevenLabs VO: `~/openai-credits-greg-reel/openai-credits-greg-reel-with-vo.mp4`

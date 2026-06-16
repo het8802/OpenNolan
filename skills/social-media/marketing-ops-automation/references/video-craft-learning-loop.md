@@ -1,6 +1,6 @@
 # Video Craft Learning Loop
 
-Use this for Marketing OS video production and for recurring improvement jobs.
+Use this for Content OS video production and for recurring improvement jobs.
 
 ## Core correction
 
@@ -18,7 +18,7 @@ Before making a new recurring format, study current platform patterns from YouTu
 - Audio language: music bed, whooshes, impacts, risers, silence drops, voice cadence.
 - CTA style: explicit action, search phrase, save/share trigger, comment prompt.
 
-Save learnings under `~/marketing-os/video-craft/YYYY-MM-DD.md` and update this skill when a recurring rule emerges.
+Save learnings under `~/content-os/video-craft/YYYY-MM-DD.md` and update this skill when a recurring rule emerges.
 
 ## Production standard
 

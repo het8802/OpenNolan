@@ -1,6 +1,6 @@
 """Editor write-layer for Mission Control (manual, human-driven editing).
 
-OpenMontage is agent-first: orchestration lives in skills, not Python. The MANUAL editor
+OpenNolan is agent-first: orchestration lives in skills, not Python. The MANUAL editor
 is a deliberate, documented exception — the *human* is the orchestrator. But the artifact
 contract is preserved end to end: every write goes through `validate_artifact`, and a
 schema failure raises `EditDecisionsInvalid` WITHOUT touching the file on disk.

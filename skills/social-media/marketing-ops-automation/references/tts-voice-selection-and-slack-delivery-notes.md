@@ -1,6 +1,6 @@
 # TTS voice selection and Slack delivery notes
 
-Session learning from a Marketing OS test short:
+Session learning from a Content OS test short:
 
 ## Voice selection
 
@@ -8,7 +8,7 @@ Session learning from a Marketing OS test short:
 - For creator-style shorts, prefer a more energetic social-media voice.
 - Current preferred voice: `Liam - Energetic, Social Media Creator` (`TX3LPaxmHKxFdv7VOQHJ`).
 - Keep provider `elevenlabs` and model `eleven_multilingual_v2` unless there is a reason to test another model.
-- Configure with your marketing-OS config, for example:
+- Configure with your content-OS config, for example:
 
 ```bash
 config set tts.elevenlabs.voice_id TX3LPaxmHKxFdv7VOQHJ
@@ -25,12 +25,12 @@ OpenAI just opened a new door for student AI clubs. If your campus has builders,
 
 ## ElevenLabs voice discovery
 
-Use the configured marketing-OS env reader, not raw `os.environ`, because `.env` may not be shell-exported:
+Use the configured content-OS env reader, not raw `os.environ`, because `.env` may not be shell-exported:
 
 ```bash
 python3 - <<'PY'
 import requests
-from marketing_os.config import get_env_value
+from content_os.config import get_env_value
 key = get_env_value('ELEVENLABS_API_KEY')
 r = requests.get('https://api.elevenlabs.io/v1/voices', headers={'xi-api-key': key}, timeout=30)
 r.raise_for_status()
@@ -49,7 +49,7 @@ Useful available voices seen in this environment:
 
 ## Slack delivery pitfall
 
-The `send_message` connector accepts `MEDIA:/path` in text, but for Slack the media attachment was omitted with a warning: native media delivery is not currently supported for Slack by this connector. When sending Marketing OS videos to Slack:
+The `send_message` connector accepts `MEDIA:/path` in text, but for Slack the media attachment was omitted with a warning: native media delivery is not currently supported for Slack by this connector. When sending Content OS videos to Slack:
 
 1. Send the script, source, QA summary, and local file path.
 2. Do not imply the MP4 is attached unless the Slack connector explicitly confirms an upload.

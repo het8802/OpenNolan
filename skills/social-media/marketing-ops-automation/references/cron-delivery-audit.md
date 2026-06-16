@@ -1,6 +1,6 @@
-# Cron delivery audit for Marketing OS
+# Cron delivery audit for Content OS
 
-Use this reference when a user asks where scheduled Marketing OS results go, whether the delivery channel gets them, or which channel/thread receives them.
+Use this reference when a user asks where scheduled Content OS results go, whether the delivery channel gets them, or which channel/thread receives them.
 
 ## Audit workflow
 
@@ -18,9 +18,9 @@ Use this reference when a user asks where scheduled Marketing OS results go, whe
    - Check last status / delivery error fields before claiming delivery succeeded.
 5. Answer in concrete terms: job name, id, delivery mode, platform, chat/thread, and whether it is a DM or channel.
 
-## Pitfall from a Marketing OS delivery-channel setup
+## Pitfall from a Content OS delivery-channel setup
 
-A Marketing OS setup had these jobs:
+A Content OS setup had these jobs:
 
 - Hourly trend scout: `deliver=local`; it wrote trend records and tool wishlist files only.
 - 5 PM ideas, 7 PM approved scripts, and 9 PM production: `deliver=origin`; origin was the delivery channel.
@@ -35,7 +35,7 @@ The correct answer was that user-facing jobs go to the original DM thread, not t
 
 ## Changing destination to a named channel
 
-When the user asks to move Marketing OS output to a named channel:
+When the user asks to move Content OS output to a named channel:
 
 1. Use `send_message(action="list")` to refresh visible messaging targets.
 2. If the channel is not listed but the user says the app was added, try a direct target for a low-impact test message when explicitly requested.

@@ -1,12 +1,12 @@
 # AI Tech + Creator Research Strategy
 
-Use this reference for Marketing OS research. Despite the name, Marketing OS is an AI/tech content engine, not a generic marketing-advice system. Research should focus on AI tools, companies, funding, startup incubators/applications, accelerator programs, founder credits/perks, events, devtools, agents, infrastructure, model releases, enterprise AI, and consumer AI.
+Use this reference for Content OS research. Despite the name, Content OS is an AI/tech content engine, not a generic marketing-advice system. Research should focus on AI tools, companies, funding, startup incubators/applications, accelerator programs, founder credits/perks, events, devtools, agents, infrastructure, model releases, enterprise AI, and consumer AI.
 
 ## Research cadence
 
 - Hourly research jobs are source collection only and should deliver local-only.
 - Daily 5 PM (your local timezone) jobs should synthesize the last 24 hours of research into one strong video concept and a ready-to-film script.
-- Store hourly evidence as JSONL under `~/marketing-os/research/YYYY-MM-DD/hour-HH.jsonl` and maintain a rolling strategy note under `~/marketing-os/strategy/research-playbook.md`.
+- Store hourly evidence as JSONL under `~/content-os/research/YYYY-MM-DD/hour-HH.jsonl` and maintain a rolling strategy note under `~/content-os/strategy/research-playbook.md`.
 
 ## Required source mix
 

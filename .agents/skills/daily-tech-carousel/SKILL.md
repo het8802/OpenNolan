@@ -16,10 +16,10 @@ This is a **daily digest carousel**, not the main selected-idea carousel. Use th
 
 ## Inputs
 Read these first:
-1. `~/marketing-os/research/latest.md`
-2. `~/marketing-os/research/YYYY-MM-DD/*.jsonl` for today and previous day
-3. `~/marketing-os/research/YYYY-MM-DD/daily-5pm-synthesis.md` if present
-4. `~/marketing-os/scripts/YYYY-MM-DD/daily-ai-tech-video.md` if present
+1. `~/content-os/research/latest.md`
+2. `~/content-os/research/YYYY-MM-DD/*.jsonl` for today and previous day
+3. `~/content-os/research/YYYY-MM-DD/daily-5pm-synthesis.md` if present
+4. `~/content-os/scripts/YYYY-MM-DD/daily-ai-tech-video.md` if present
 5. Existing approval/status file for the same date if rerunning
 
 ## Topic selection
@@ -66,7 +66,7 @@ Follow `instagram-carousel` visual quality standards:
 Create a detailed design brief and per-slide prompt file before generating images. Then use Codex/local tooling to generate deterministic PNGs and a contact sheet.
 
 Expected output folder:
-`~/marketing-os/daily-carousels/YYYY-MM-DD/what-happened-in-tech/`
+`~/content-os/daily-carousels/YYYY-MM-DD/what-happened-in-tech/`
 
 Required files:
 - `README.md` — overview, selected topics, source files, status, usage notes.

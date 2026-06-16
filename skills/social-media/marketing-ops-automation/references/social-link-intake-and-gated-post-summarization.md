@@ -1,6 +1,6 @@
 # Social link intake and gated-post summarization
 
-Use this reference when a user shares an Instagram Reel/post, Threads post, TikTok, X/Twitter post, or similar social link as research input for Marketing OS, creator-pattern learning, or a direct summary request.
+Use this reference when a user shares an Instagram Reel/post, Threads post, TikTok, X/Twitter post, or similar social link as research input for Content OS, creator-pattern learning, or a direct summary request.
 
 ## Core standard
 

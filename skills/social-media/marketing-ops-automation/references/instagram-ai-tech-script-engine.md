@@ -1,13 +1,13 @@
 # Instagram AI/Tech Script Engine notes
 
-Use this when the user wants the old Marketing OS reduced to an Instagram-focused AI/tech content engine.
+Use this when the user wants the old Content OS reduced to an Instagram-focused AI/tech content engine.
 
 ## Operating shape
 
-- Keep the research + script loop; do not assume the user wants full Marketing OS production/posting.
+- Keep the research + script loop; do not assume the user wants full Content OS production/posting.
 - User mostly records talking-head Instagram videos and uses supporting images/videos as edit inserts.
 - Research should cover AI tools/products, AI companies, funding, startup programs, credits/perks, events, devtools, agents, infrastructure, and creator-pattern signal.
-- Legacy storage paths may still be `~/marketing-os/...`; treat those paths as historical storage, not as a sign the content should be generic marketing advice.
+- Legacy storage paths may still be `~/content-os/...`; treat those paths as historical storage, not as a sign the content should be generic marketing advice.
 
 ## Cron pattern
 
@@ -16,7 +16,7 @@ Recommended active jobs:
 1. **4-hour research collector**
    - Schedule: `every 240m` unless the user requests a different cadence.
    - Delivery: `local`.
-   - Writes JSONL evidence and rolling summaries under `~/marketing-os/research/`.
+   - Writes JSONL evidence and rolling summaries under `~/content-os/research/`.
 
 2. **Daily concept + talking script**
    - Delivery: valid named messaging target (your delivery channel), not stale raw channel IDs.
@@ -25,8 +25,8 @@ Recommended active jobs:
 
 3. **Daily asset + B-roll pack**
    - Schedule: 15–60 minutes after the script job.
-   - Skills: `marketing-ops-automation`, `marketing-os-tools`, `codex`.
-   - Creates `~/marketing-os/assets/YYYY-MM-DD/daily-ai-tech-video/` with:
+   - Skills: `marketing-ops-automation`, `content-os-tools`, `codex`.
+   - Creates `~/content-os/assets/YYYY-MM-DD/daily-ai-tech-video/` with:
      - `README.md`
      - `asset-ledger.jsonl`
      - `broll-suggestions.md`
