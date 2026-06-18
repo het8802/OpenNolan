@@ -26,6 +26,7 @@ from typing import Any, Callable, Optional
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif"}
@@ -552,6 +553,20 @@ def create_app(
             pdir, project_id, thread_id,
             messages=body.messages, session_id=body.session_id, title=body.title,
         )
+
+    # Serve the built Mission Control UI (web/dist) for the packaged desktop app.
+    # Mounted LAST so every /api/* route above takes precedence; the SPA and its
+    # assets are then same-origin with the API (no CORS) when Electron loads
+    # http://127.0.0.1:<port>/. No-op in dev: when web/dist is absent, Vite serves
+    # the SPA on :5173 and proxies /api here. (html=True serves index.html at "/".)
+    #
+    # NOTE: html=True does NOT catch-all unknown paths -> index.html. The current UI
+    # has no client-side router, so every load hits "/" and this is fine. If WS3 adds
+    # a history-API router with deep links, add a fallback returning
+    # FileResponse(web_dist / "index.html") for non-/api 404s.
+    web_dist = REPO_ROOT / "web" / "dist"
+    if web_dist.is_dir():
+        app.mount("/", StaticFiles(directory=str(web_dist), html=True), name="ui")
 
     return app
 

@@ -1,0 +1,15 @@
+{
+  "name": "opennolan-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenNolan desktop app (Electron shell over the local Mission Control backend).",
+  "main": "main.js",
+  "scripts": {
+    "prestart": "npm --prefix ../web run build",
+    "start": "electron .",
+    "dev": "ELECTRON_DEV=1 electron ."
+  },
+  "devDependencies": {
+    "electron": "^42.0.0"
+  }
+}
