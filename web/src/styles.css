@@ -744,6 +744,14 @@ select { cursor: pointer; }
 .st-canvas select { font: inherit; font-size: 0.76rem; padding: 0.25rem 0.4rem; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .st-chip { padding: 0.22rem 0.45rem; }
 .st-chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.st-play { font-size: 0.85rem; border: 1px solid var(--line); background: #fff; color: var(--ink);
+  border-radius: 50%; width: 2rem; height: 2rem; cursor: pointer; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+.st-play:hover { border-color: var(--accent); color: var(--accent); }
+.st-stage-play { position: absolute; inset: 0; margin: auto; width: 64px; height: 64px;
+  border-radius: 50%; border: none; background: #00000055; color: #fff; font-size: 1.5rem;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; padding-left: 4px; }
+.st-stage-play:hover { background: #00000077; }
 .st-toggle { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .st-seg { border: none; border-radius: 0; padding: 0.32rem 0.6rem; background: #fff; }
 .st-seg.on { background: var(--accent); color: #fff; }

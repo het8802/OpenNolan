@@ -6,8 +6,8 @@ import { SPEED_PRESETS, CANVAS_PRESETS } from './model.js'
 
 export default function StudioToolbar({
   doc, canvas, ffmpeg, selCut, selOverlayIndex,
-  canUndo, canRedo, dirty, rendering, hasRender, previewMode, assets,
-  onUndo, onRedo, onSave, onRender, onPreviewMode,
+  canUndo, canRedo, dirty, rendering, hasRender, previewMode, playing, assets,
+  onUndo, onRedo, onSave, onRender, onTogglePlay, onPreviewMode,
   onSplit, onDuplicate, onDelete, onSpeed, onAddText, onAddImage, onCanvas,
 }) {
   const images = assets?.kinds?.images || []
@@ -80,13 +80,16 @@ export default function StudioToolbar({
       )}
 
       <div className="st-grp st-grp-right">
+        <button className="st-play" onClick={onTogglePlay} title="Play / pause (Space)" aria-label={playing ? 'Pause' : 'Play'}>
+          {playing ? '⏸' : '▶'}
+        </button>
         <span className="st-toggle">
           <button className={`st-seg ${previewMode === 'source' ? 'on' : ''}`} onClick={() => onPreviewMode('source')} title="Live source scrub">Source</button>
           <button className={`st-seg ${previewMode === 'render' ? 'on' : ''}`} onClick={() => onPreviewMode('render')} disabled={!hasRender} title="Composed render">Render</button>
         </span>
         <button className="st-btn" onClick={onSave} disabled={!dirty} title="Save (⌘S)">Save</button>
         <button className="st-btn st-primary" onClick={onRender} disabled={rendering} title="Render preview (render-once)">
-          {rendering ? 'Rendering…' : '▶ Render'}
+          {rendering ? 'Rendering…' : 'Render'}
         </button>
       </div>
     </div>

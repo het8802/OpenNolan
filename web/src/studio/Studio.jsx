@@ -33,6 +33,7 @@ export default function Studio({ projectId, state, onClose }) {
   const [selection, setSelection] = useState(null) // {kind:'cut',id} | {kind:'overlay',index}
   const [playhead, setPlayhead] = useState(0)      // project seconds
   const [previewMode, setPreviewMode] = useState('source') // 'source' | 'render'
+  const [playing, setPlaying] = useState(false)            // transport play/pause
 
   const [assets, setAssets] = useState({ kinds: { images: [], video: [], audio: [], music: [] }, renders: [] })
   const [sourceMetas, setSourceMetas] = useState({}) // ref -> {duration,width,height}
@@ -51,6 +52,16 @@ export default function Studio({ projectId, state, onClose }) {
     setNotice({ kind, msg })
     if (kind === 'ok') setTimeout(() => setNotice(n => (n && n.msg === msg ? null : n)), 2600)
   }, [])
+
+  // Transport. Playback advances the playhead (via Preview's onScrub); a USER scrub or a
+  // preview-mode switch pauses, so manual seeking never fights playback.
+  const togglePlay = useCallback(() => {
+    const atEnd = playhead >= interp.timelineDuration(doc) - 1e-3
+    if (!playing && atEnd) setPlayhead(0) // hitting play at the end restarts from the top
+    setPlaying(!playing)
+  }, [playing, playhead, doc])
+  const seekFromUser = useCallback((t) => { setPlaying(false); setPlayhead(t) }, [])
+  const changePreviewMode = useCallback((m) => { setPlaying(false); setPreviewMode(m) }, [])
 
   // ── load ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -259,6 +270,7 @@ export default function Studio({ projectId, state, onClose }) {
     const onKey = (e) => {
       const t = e.target
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); setPlaying(p => !p); return } // space = play/pause
       const mod = e.metaKey || e.ctrlKey
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return }
       if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(); return }
@@ -295,9 +307,9 @@ export default function Studio({ projectId, state, onClose }) {
           selCut={selCut} selOverlayIndex={selOverlayIndex}
           canUndo={past.length > 0} canRedo={future.length > 0}
           dirty={dirty} rendering={rendering} hasRender={!!renderPath} previewMode={previewMode}
-          assets={assets}
+          playing={playing} assets={assets}
           onUndo={undo} onRedo={redo} onSave={save} onRender={render}
-          onPreviewMode={setPreviewMode}
+          onTogglePlay={togglePlay} onPreviewMode={changePreviewMode}
           onSplit={onSplit} onDuplicate={onDuplicate} onDelete={onDelete} onSpeed={onSpeed}
           onAddText={onAddText} onAddImage={onAddImage} onCanvas={onCanvas}
         />
@@ -315,7 +327,7 @@ export default function Studio({ projectId, state, onClose }) {
         <StudioPreview
           projectId={projectId} doc={doc} playhead={playhead}
           previewMode={previewMode} renderPath={renderPath} renderVersion={renderVersion}
-          onScrub={setPlayhead}
+          playing={playing} onScrub={setPlayhead} onPlayingChange={setPlaying}
         />
         <StudioInspector
           projectId={projectId} doc={doc} canvas={canvas} ffmpeg={ffmpeg}
@@ -327,7 +339,7 @@ export default function Studio({ projectId, state, onClose }) {
         <StudioTimeline
           projectId={projectId} doc={doc} dur={dur} zoom={zoom} playhead={playhead}
           selection={selection} sourceMetas={sourceMetas}
-          onSeek={setPlayhead} onSelect={setSelection} onTrim={onTrim} onTrimBegin={onTrimBegin}
+          onSeek={seekFromUser} onSelect={setSelection} onTrim={onTrim} onTrimBegin={onTrimBegin}
           onReorder={onReorder} onZoom={setZoom}
         />
       </div>
