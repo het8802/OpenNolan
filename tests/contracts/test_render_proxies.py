@@ -6,8 +6,10 @@ need their Node runtimes and aren't exercised here; the ffmpeg runtime fully
 validates the orchestration (slice -> render solo -> cache -> ffmpeg assemble).
 """
 
+import json
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -231,3 +233,87 @@ def test_distinct_source_windows_get_distinct_proxies(tmp_path, monkeypatch):
     assert r.success, r.error
     paths = [p["proxy_path"] for p in r.data["proxies"]]
     assert len(set(paths)) == 2     # distinct windows -> distinct keys -> distinct files
+
+
+@pytest.mark.skipif(not _have_ffmpeg(), reason="ffmpeg required")
+def test_render_proxies_one_call_mode_renders_final(tmp_path, monkeypatch):
+    """With output_path, render_proxies renders the proxies AND assembles the final
+    in one call (the cached drop-in for operation='render')."""
+    monkeypatch.setenv("OPENNOLAN_CACHE_DIR", str(tmp_path / "cache"))
+    a = tmp_path / "a.mp4"
+    b = tmp_path / "b.mp4"
+    _mk_clip(a, color="red")
+    _mk_clip(b, color="blue")
+    ed = {
+        "version": "1.0", "render_runtime": "ffmpeg", "renderer_family": "explainer-data",
+        "metadata": {"compose_target": {"width": 320, "height": 240, "fps": 30}},
+        "cuts": [
+            {"id": "s1", "source": "a", "in_seconds": 0, "out_seconds": 1},
+            {"id": "s2", "source": "b", "in_seconds": 0, "out_seconds": 1},
+        ],
+    }
+    am = {"assets": [
+        {"id": "a", "type": "video", "path": str(a), "source_tool": "t", "scene_id": "s1"},
+        {"id": "b", "type": "video", "path": str(b), "source_tool": "t", "scene_id": "s2"},
+    ]}
+    final = tmp_path / "final.mp4"
+    res = VideoCompose().execute({
+        "operation": "render_proxies", "edit_decisions": ed, "asset_manifest": am,
+        "output_path": str(final), "proxies_dir": str(tmp_path / "proxies"),
+    })
+    assert res.success, res.error
+    assert final.exists() and final.stat().st_size > 0
+    assert res.data["n_rendered"] == 2 and res.data["n_cached"] == 0
+
+
+@pytest.mark.skipif(not _have_ffmpeg(), reason="ffmpeg required")
+def test_render_jobs_uses_proxy_cache_e2e(tmp_path, monkeypatch):
+    """The actual editor wiring: RenderJobStore renders via the proxy engine, so a
+    second render of an unchanged timeline reuses every scene from cache."""
+    monkeypatch.setenv("OPENNOLAN_CACHE_DIR", str(tmp_path / "cache"))
+    from server.render_jobs import RenderJobStore
+
+    projects = tmp_path / "projects"
+    pid = "demo"
+    art = projects / pid / "artifacts"
+    art.mkdir(parents=True)
+    av = projects / pid / "assets" / "video"
+    a, b = av / "a.mp4", av / "b.mp4"
+    _mk_clip(a, color="red")
+    _mk_clip(b, color="blue")
+    ed = {
+        "version": "1.0", "render_runtime": "ffmpeg", "renderer_family": "explainer-data",
+        "metadata": {"compose_target": {"width": 320, "height": 240, "fps": 30}},
+        "cuts": [
+            {"id": "s1", "source": "a", "in_seconds": 0, "out_seconds": 1},
+            {"id": "s2", "source": "b", "in_seconds": 0, "out_seconds": 1},
+        ],
+    }
+    am = {"assets": [
+        {"id": "a", "type": "video", "path": str(a), "source_tool": "t", "scene_id": "s1"},
+        {"id": "b", "type": "video", "path": str(b), "source_tool": "t", "scene_id": "s2"},
+    ]}
+    (art / "edit_decisions.json").write_text(json.dumps(ed))
+    (art / "asset_manifest.json").write_text(json.dumps(am))
+
+    store = RenderJobStore(projects)
+
+    def run():
+        jid = store.start(pid)
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            st = store.status(jid)
+            if st and st["status"] in ("done", "failed"):
+                return st
+            time.sleep(0.05)
+        return store.status(jid)
+
+    st1 = run()
+    assert st1["status"] == "done", st1
+    out1 = projects / pid / st1["output_path"]
+    assert out1.exists() and out1.stat().st_size > 0
+
+    # Re-render the unchanged timeline -> every scene is a cache hit.
+    st2 = run()
+    assert st2["status"] == "done", st2
+    assert any("0 scene(s) re-rendered" in w for w in (st2.get("warnings") or [])), st2.get("warnings")

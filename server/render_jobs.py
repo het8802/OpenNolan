@@ -7,8 +7,9 @@ supersedes the prior one (the superseded job's result is discarded). No external
 this is a local app, not a cluster.
 
     POST /render ──▶ start() ──▶ thread:  read edit_decisions + asset_manifest
-                       │                  ──▶ VideoCompose.execute(operation="render")
-                       ▼                                    │
+                       │                  ──▶ VideoCompose.execute(operation="render_proxies")
+                       ▼                       (render-once: per-scene cached clips → assemble)
+                       │                                    │
                     job_id                                  ▼
     GET /render/{job_id} ──▶ status()  {queued|running|done|failed, output_path?, error?}
 
@@ -94,16 +95,25 @@ class RenderJobStore:
             renders_dir.mkdir(parents=True, exist_ok=True)
             out_path = renders_dir / out_name
 
+            # Render-once: render each scene to a content-cached proxy clip, then
+            # assemble (cheap ffmpeg concat) into out_path. On an unchanged timeline
+            # every scene is a cache hit, so a re-edit only re-renders what changed.
             result = self._video_compose().execute({
-                "operation": "render",
+                "operation": "render_proxies",
                 "edit_decisions": edit_decisions,
                 "asset_manifest": asset_manifest,
                 "output_path": str(out_path),
+                "proxies_dir": str(renders_dir / "proxies"),
             })
 
             if result.success and out_path.exists():
                 data = result.data or {}
                 warnings = list(preview_warnings) + list(data.get("warnings") or [])
+                if "n_scenes" in data:
+                    warnings.append(
+                        f"{data.get('n_rendered', 0)} scene(s) re-rendered, "
+                        f"{data.get('n_cached', 0)} reused from cache"
+                    )
                 self._set(
                     job_id, project_id,
                     status="done",

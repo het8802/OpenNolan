@@ -936,19 +936,39 @@ class VideoCompose(BaseTool):
                 Path(assemble_edl_path).write_text(json.dumps(assemble_ed, indent=2))
 
         n_cached = sum(1 for p in proxies if p["cache_hit"])
+        proxy_summary = {
+            "operation": "render_proxies",
+            "proxies": proxies,
+            "assemble_edit_decisions": assemble_ed,
+            "n_scenes": len(proxies),
+            "n_cached": n_cached,
+            "n_rendered": len(proxies) - n_cached,
+            "canvas": canvas,
+            "render_runtime": render_runtime,
+        }
+
+        # One-call mode: with an output_path, also assemble + render the proxies to
+        # a final video — the cached drop-in for operation="render" the editor uses
+        # (only changed scenes re-rendered above; this pass is a cheap ffmpeg concat
+        # that also applies overlays/audio and runs the final review once). Without
+        # output_path, return just the proxies + the assemble EDL.
+        output_path = inputs.get("output_path")
+        if not output_path:
+            return ToolResult(success=True, data=proxy_summary, artifacts=[p["proxy_path"] for p in proxies])
+
+        final_res = self._render({
+            "edit_decisions": assemble_ed,
+            "asset_manifest": {"assets": []},  # proxy sources are absolute file paths
+            "output_path": str(output_path),
+            "profile": profile,
+        })
+        data = dict(final_res.data or {})
+        data.update(proxy_summary)
         return ToolResult(
-            success=True,
-            data={
-                "operation": "render_proxies",
-                "proxies": proxies,
-                "assemble_edit_decisions": assemble_ed,
-                "n_scenes": len(proxies),
-                "n_cached": n_cached,
-                "n_rendered": len(proxies) - n_cached,
-                "canvas": canvas,
-                "render_runtime": render_runtime,
-            },
-            artifacts=[p["proxy_path"] for p in proxies],
+            success=final_res.success,
+            data=data,
+            artifacts=final_res.artifacts or [p["proxy_path"] for p in proxies],
+            error=final_res.error,
         )
 
     def _render_scene_proxy(
