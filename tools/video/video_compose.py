@@ -72,11 +72,13 @@ class VideoCompose(BaseTool):
         "properties": {
             "operation": {
                 "type": "string",
-                "enum": ["compose", "render", "remotion_render", "burn_subtitles", "overlay", "encode"],
+                "enum": ["compose", "render", "render_proxies", "remotion_render", "burn_subtitles", "overlay", "encode"],
                 "description": (
                     "compose: low-level concat cuts + audio + subtitles. "
                     "render: high-level — resolves asset IDs, auto-routes to Remotion "
                     "for images/animations or FFmpeg for video-only. Preferred for compose-director. "
+                    "render_proxies: render each scene SOLO to a content-cached proxy clip, then "
+                    "return an ffmpeg-runtime assemble EDL (render-once / NLE model — re-edits are cheap concats). "
                     "remotion_render: render via Remotion (Node.js). "
                     "burn_subtitles: burn subtitle file into existing video. "
                     "overlay: composite overlays onto base video. "
@@ -436,6 +438,8 @@ class VideoCompose(BaseTool):
                 result = self._compose(inputs)
             elif operation == "render":
                 result = self._render(inputs)
+            elif operation == "render_proxies":
+                result = self._render_proxies(inputs)
             elif operation == "remotion_render":
                 result = self._remotion_render(inputs)
             elif operation == "burn_subtitles":
@@ -725,6 +729,321 @@ class VideoCompose(BaseTool):
                 )
             target_w, target_h, target_fps = ct_w, ct_h, ct_fps
         return None, target_w, target_h, target_fps
+
+    def _render_proxies(self, inputs: dict[str, Any]) -> ToolResult:
+        """Render each scene to its OWN cached clip, then emit an FFmpeg assemble EDL.
+
+        The render-once / NLE model (M2): rendering a scene (Remotion/HyperFrames)
+        is expensive, so we render each scene SOLO to a proxy clip ONCE, cache it
+        by content, and hand back an `ffmpeg`-runtime edit_decisions whose cuts
+        point at those proxies. From then on, editing the ARRANGEMENT (order,
+        transitions, audio, subtitles) is a cheap FFmpeg concat — proxies are
+        reused from cache. Only a scene whose content changes misses and re-renders.
+
+        Boundary (v1): a proxy bakes the scene's CONTENT rendered solo at native
+        speed (no transform/transitions). The assemble EDL applies ordering,
+        cross-scene transitions, per-scene speed + transform/crop, audio,
+        subtitles and overlays — all cheap FFmpeg. So reordering, retiming,
+        cropping, re-transitioning and re-scoring are FREE; only a change to a
+        scene's own content (source / trim window / animation / playbook)
+        re-renders that one scene.
+
+        The returned `assemble_edit_decisions` MUST be rendered via
+        operation="render" (render_runtime=ffmpeg) — NOT operation="compose",
+        which drops overlays[] and layer routing.
+
+        Inputs: edit_decisions (with the locked render_runtime), asset_manifest,
+        proxies_dir (where clips are written), optional profile/output_profile,
+        optional assemble_edl_path (also persist the assemble EDL there).
+        """
+        import hashlib
+        from tools.video.render_cache import ProxyCache, file_content_hash
+
+        edit_decisions = inputs.get("edit_decisions")
+        if not edit_decisions:
+            return ToolResult(success=False, error="edit_decisions required for render_proxies")
+        asset_manifest = inputs.get("asset_manifest") or {"assets": []}
+        cuts = edit_decisions.get("cuts", [])
+        if not cuts:
+            return ToolResult(success=False, error="No cuts in edit_decisions")
+
+        render_runtime = (edit_decisions.get("render_runtime") or "").strip().lower()
+        if render_runtime not in ("remotion", "hyperframes", "ffmpeg"):
+            return ToolResult(
+                success=False,
+                error=(
+                    f"render_proxies needs a valid render_runtime locked in "
+                    f"edit_decisions (got {render_runtime!r}). Valid: remotion, "
+                    f"hyperframes, ffmpeg."
+                ),
+            )
+
+        renderer_family = edit_decisions.get("renderer_family")
+        profile = inputs.get("profile") or inputs.get("output_profile")
+        canvas_err, cw, ch, cfps = self._resolve_canvas(edit_decisions, profile)
+        if canvas_err:
+            return ToolResult(success=False, error=canvas_err)
+        canvas = {"width": cw, "height": ch, "fps": cfps}
+
+        # Playbook materially changes Remotion/HyperFrames pixels (palette, fonts,
+        # motion), so fold its identity into the key for animated runtimes — else a
+        # playbook edit is a stale cache HIT. ffmpeg ignores the playbook.
+        playbook_identity = None
+        if render_runtime in ("remotion", "hyperframes"):
+            playbook_ref = (
+                (edit_decisions.get("metadata") or {}).get("playbook")
+                or inputs.get("playbook") or inputs.get("playbook_name")
+            )
+            if playbook_ref:
+                _pb = Path(str(playbook_ref))
+                playbook_identity = {
+                    "ref": str(playbook_ref),
+                    "hash": file_content_hash(_pb) if _pb.exists() else "",
+                }
+
+        proxies_dir = Path(inputs.get("proxies_dir") or "renders/proxies")
+        proxies_dir.mkdir(parents=True, exist_ok=True)
+
+        asset_lookup = {a["id"]: a for a in asset_manifest.get("assets", []) if a.get("id")}
+        cache = ProxyCache()
+
+        proxies: list[dict[str, Any]] = []
+        for i, cut in enumerate(cuts):
+            scene_id = str(cut.get("id") or f"scene_{i:03d}")
+
+            if str(cut.get("layer") or "").lower() == "overlay":
+                return ToolResult(
+                    success=False,
+                    error=(
+                        f"scene {scene_id!r}: layer='overlay' (PiP) cuts aren't "
+                        "supported by the proxy path yet — a solo render flattens "
+                        "PiP. Render PiP via the direct ffmpeg path, or split those "
+                        "cuts out before render_proxies."
+                    ),
+                )
+
+            source_ref = cut.get("source", "")
+            source_path = asset_lookup.get(source_ref, {}).get("path", source_ref)
+            if source_path and Path(source_path).exists():
+                src_hash = file_content_hash(source_path)
+            else:
+                # No on-disk source (animated scene): key on the asset record (or the
+                # bare ref) so distinct unresolved sources don't share one bucket.
+                _blob = json.dumps(asset_lookup.get(source_ref, source_ref), sort_keys=True, default=str)
+                src_hash = "unresolved:" + hashlib.sha256(_blob.encode()).hexdigest()
+
+            try:
+                orig_in = float(cut.get("in_seconds", 0))
+                orig_out = float(cut.get("out_seconds", 0))
+            except (TypeError, ValueError):
+                orig_in, orig_out = 0.0, 0.0
+            dur = round(orig_out - orig_in, 4)
+            if dur <= 0:
+                return ToolResult(
+                    success=False,
+                    error=f"scene {scene_id!r}: out_seconds must be > in_seconds (duration {dur})",
+                )
+
+            # Solo scene spec. Transitions, speed and transform are applied at the
+            # cheap ASSEMBLE layer, so they're stripped from the proxy render.
+            solo_cut = {
+                k: v for k, v in cut.items()
+                if k not in ("transition_in", "transition_out", "transition_duration",
+                             "speed", "transform", "reason")
+            }
+            solo_cut["id"] = scene_id
+            solo_cut["source"] = source_path
+            if render_runtime == "ffmpeg":
+                # _compose reads in/out as the SOURCE trim — keep the real window so
+                # the proxy bakes the requested seconds, not always 0..dur.
+                solo_cut["in_seconds"] = orig_in
+                solo_cut["out_seconds"] = orig_out
+            else:
+                # Remotion/HyperFrames: in/out are the TIMELINE position; source trim
+                # rides on source_in_seconds (preserved). Re-zero to render from t=0.
+                solo_cut["in_seconds"] = 0.0
+                solo_cut["out_seconds"] = dur
+
+            identity = {
+                "v": 2,
+                "render_runtime": render_runtime,
+                "renderer_family": renderer_family,
+                "canvas": canvas,
+                "playbook": playbook_identity,
+                "trim": {"in": orig_in, "out": orig_out},
+                "scene": {k: v for k, v in solo_cut.items() if k != "source"},
+                "source_hash": src_hash,
+            }
+            key = cache.key(identity)
+            # Content-addressed filename: each distinct identity owns a distinct file,
+            # so a re-render with new content can never clobber an older proxy that a
+            # cached record still points at (the stale-pixel-HIT bug).
+            proxy_path = proxies_dir / f"{scene_id}.{key[:16]}.mp4"
+
+            with cache.lock(key):
+                rec = cache.get(key)
+                if rec:
+                    proxies.append({
+                        "scene_id": scene_id,
+                        "proxy_path": rec["proxy_path"],
+                        "duration_seconds": rec.get("duration_seconds", dur),
+                        "cache_hit": True,
+                        "render_runtime": render_runtime,
+                    })
+                    continue
+
+                solo_ed: dict[str, Any] = {
+                    "version": edit_decisions.get("version", "1.0"),
+                    "render_runtime": render_runtime,
+                    "cuts": [solo_cut],
+                }
+                if renderer_family:
+                    solo_ed["renderer_family"] = renderer_family
+                if edit_decisions.get("metadata"):
+                    solo_ed["metadata"] = edit_decisions["metadata"]
+
+                render_res = self._render_scene_proxy(
+                    render_runtime, solo_ed, asset_manifest, proxy_path, profile,
+                )
+                if not render_res.success:
+                    return ToolResult(
+                        success=False,
+                        error=f"proxy render failed for scene {scene_id!r}: {render_res.error}",
+                    )
+                cache.put(key, {
+                    "proxy_path": str(proxy_path),
+                    "scene_id": scene_id,
+                    "render_runtime": render_runtime,
+                    "duration_seconds": dur,
+                    "source_hash": src_hash,
+                })
+                proxies.append({
+                    "scene_id": scene_id,
+                    "proxy_path": str(proxy_path),
+                    "duration_seconds": dur,
+                    "cache_hit": False,
+                    "render_runtime": render_runtime,
+                })
+
+        assemble_ed = self._build_assemble_edl(edit_decisions, proxies)
+
+        assemble_edl_path = inputs.get("assemble_edl_path")
+        if assemble_edl_path:
+            try:
+                from lib.atomic_io import atomic_write_json
+                atomic_write_json(Path(assemble_edl_path), assemble_ed)
+            except Exception:
+                Path(assemble_edl_path).write_text(json.dumps(assemble_ed, indent=2))
+
+        n_cached = sum(1 for p in proxies if p["cache_hit"])
+        return ToolResult(
+            success=True,
+            data={
+                "operation": "render_proxies",
+                "proxies": proxies,
+                "assemble_edit_decisions": assemble_ed,
+                "n_scenes": len(proxies),
+                "n_cached": n_cached,
+                "n_rendered": len(proxies) - n_cached,
+                "canvas": canvas,
+                "render_runtime": render_runtime,
+            },
+            artifacts=[p["proxy_path"] for p in proxies],
+        )
+
+    def _render_scene_proxy(
+        self,
+        render_runtime: str,
+        solo_ed: dict[str, Any],
+        asset_manifest: dict[str, Any],
+        proxy_path: Path,
+        profile: Optional[str],
+    ) -> ToolResult:
+        """Render ONE solo scene to proxy_path via the locked runtime (lean path)."""
+        proxy_path = Path(proxy_path)
+        proxy_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if render_runtime == "ffmpeg":
+            # _compose wants cut sources as real file paths (already resolved here).
+            return self._compose({
+                "edit_decisions": solo_ed,
+                "output_path": str(proxy_path),
+                "profile": profile,
+            })
+        if render_runtime == "remotion":
+            inp: dict[str, Any] = {"edit_decisions": solo_ed, "output_path": str(proxy_path)}
+            if profile:
+                inp["profile"] = profile
+            return self._remotion_render(inp)
+        if render_runtime == "hyperframes":
+            return self._render_via_hyperframes(
+                inputs={"output_path": str(proxy_path)},
+                edit_decisions=solo_ed,
+                asset_manifest=asset_manifest,
+                resolved_cuts=solo_ed["cuts"],
+                output_path=proxy_path,
+                profile=profile,
+            )
+        return ToolResult(success=False, error=f"unknown render_runtime {render_runtime!r}")
+
+    def _build_assemble_edl(
+        self,
+        original: dict[str, Any],
+        proxies: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Build an ffmpeg-runtime edit_decisions that concatenates the proxies.
+
+        Each assemble cut references its proxy 1:1 (in=0..duration) and re-applies
+        the scene's per-cut speed / transform / cross-scene transitions at the
+        cheap FFmpeg layer (matched to the original cut by scene id). overlays /
+        audio / music / subtitles / renderer_family pass through.
+
+        The result MUST be rendered via operation="render" (render_runtime=ffmpeg),
+        NOT operation="compose" — compose drops overlays[] and layer routing.
+        """
+        orig_by_id = {
+            str(c.get("id") or f"scene_{i:03d}"): c
+            for i, c in enumerate(original.get("cuts", []))
+        }
+        assemble_cuts: list[dict[str, Any]] = []
+        for p in proxies:
+            sid = p["scene_id"]
+            oc = orig_by_id.get(sid, {})
+            try:
+                out_s = round(float(p["duration_seconds"]), 4)
+            except (TypeError, ValueError):
+                out_s = 0.0
+            cut: dict[str, Any] = {
+                "id": sid,
+                "source": p["proxy_path"],
+                "in_seconds": 0.0,
+                "out_seconds": out_s,
+            }
+            for k in ("speed", "transform", "transition_in", "transition_out", "transition_duration"):
+                if k in oc:
+                    cut[k] = oc[k]
+            assemble_cuts.append(cut)
+
+        assembled: dict[str, Any] = {
+            "version": original.get("version", "1.0"),
+            "render_runtime": "ffmpeg",
+            "cuts": assemble_cuts,
+        }
+        for k in ("renderer_family", "overlays", "audio", "music", "subtitles", "transitions"):
+            if original.get(k) is not None:
+                assembled[k] = original[k]
+
+        # Make the two-phase render legible to governance: this ffmpeg pass
+        # ASSEMBLES proxies that were rendered in the locked runtime — it is NOT a
+        # runtime swap. Drop the carried proposal_render_runtime (which would read
+        # as a remotion->ffmpeg swap in the final-review check) and record the real
+        # proxy runtime for the audit trail.
+        meta = dict(original.get("metadata") or {})
+        meta.pop("proposal_render_runtime", None)
+        meta["assemble_of_proxies"] = True
+        meta["proxy_render_runtime"] = original.get("render_runtime")
+        assembled["metadata"] = meta
+        return assembled
 
     def _compose(self, inputs: dict[str, Any]) -> ToolResult:
         """FFmpeg composition: cut segments, transitions, audio, subtitles.
@@ -1706,6 +2025,16 @@ class VideoCompose(BaseTool):
         """
         options = inputs.get("options", {})
         subtitle_burn = options.get("subtitle_burn", True)
+
+        # Bridge the timeline's audio track into compose's audio_path the same way
+        # subtitles are bridged below — _compose only muxes inputs["audio_path"], so
+        # without this an edit_decisions.audio (e.g. the VO carried onto a
+        # proxy-assemble EDL) is silently dropped. An explicit audio_path wins.
+        if not inputs.get("audio_path"):
+            _ed_audio = edit_decisions.get("audio") or {}
+            _ed_audio_path = _ed_audio.get("path") if isinstance(_ed_audio, dict) else None
+            if _ed_audio_path and Path(_ed_audio_path).exists():
+                inputs = dict(inputs, audio_path=_ed_audio_path)
 
         subtitle_path = inputs.get("subtitle_path")
         if subtitle_burn and not subtitle_path:
