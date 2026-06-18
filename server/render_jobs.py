@@ -23,7 +23,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from server.editor import read_asset_manifest, read_edit_decisions
+from server.editor import read_asset_manifest, read_edit_decisions, resolve_source_path
 
 
 class RenderJobStore:
@@ -64,6 +64,52 @@ class RenderJobStore:
     def _is_superseded(self, project_id: str, job_id: str) -> bool:
         return self._active_by_project.get(project_id) != job_id
 
+    def _resolve_sources(self, project_id: str, edit_decisions: dict[str, Any]) -> dict[str, Any]:
+        """Rewrite every cut.source and asset-backed overlay.asset_id to an ABSOLUTE on-disk
+        path (render-only copy; never persisted).
+
+        The Studio (and the agent) store these refs PROJECT-relative (e.g.
+        "assets/video/x.mp4") or as asset-manifest ids. video_compose resolves bare relative
+        refs from the process cwd (repo root), so a project-relative ref points at a
+        nonexistent <repo>/assets/... and the render fails ("Cut source not found"). The scrub
+        preview hides this because it goes through editor.resolve_source_path. So we resolve
+        the SAME way here and hand the renderer absolute paths it can always find. Refs that
+        don't resolve to a file (animated/not-yet-on-disk scenes) are left untouched so the
+        proxy path's unresolved-hash branch still applies.
+        """
+        def absolute(ref: str) -> str:
+            if not ref:
+                return ref
+            p = resolve_source_path(self._projects_dir, project_id, ref)
+            return str(p) if p else ref
+
+        changed = False
+        cuts = []
+        for c in edit_decisions.get("cuts", []) or []:
+            src = c.get("source")
+            new = absolute(src) if src else src
+            if new != src:
+                c = dict(c, source=new); changed = True
+            cuts.append(c)
+
+        overlays = edit_decisions.get("overlays")
+        new_overlays = None
+        if overlays:
+            new_overlays = []
+            for o in overlays:
+                aid = o.get("asset_id")
+                new = absolute(aid) if aid else aid
+                if new != aid:
+                    o = dict(o, asset_id=new); changed = True
+                new_overlays.append(o)
+
+        if not changed:
+            return edit_decisions
+        out = dict(edit_decisions, cuts=cuts)
+        if new_overlays is not None:
+            out["overlays"] = new_overlays
+        return out
+
     def _set(self, job_id: str, project_id: str, **fields: Any) -> None:
         with self._lock:
             if self._is_superseded(project_id, job_id):
@@ -90,6 +136,10 @@ class RenderJobStore:
                 preview_warnings.append(
                     "rendered with a default renderer_family='social-reel'; set it explicitly to lock it."
                 )
+
+            # Hand the renderer absolute source/asset paths (project-relative refs don't
+            # resolve from the server cwd). Render-only copy — NOT persisted.
+            edit_decisions = self._resolve_sources(project_id, edit_decisions)
 
             renders_dir = self._projects_dir / project_id / "renders"
             renders_dir.mkdir(parents=True, exist_ok=True)

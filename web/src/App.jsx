@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import * as api from './api.js'
 import { LineChart } from './components/LineChart.jsx'
-import Editor from './editor/Editor.jsx'
+import Studio from './studio/Studio.jsx'
 
 // Configure marked for safe, compact output
 marked.setOptions({ breaks: true, gfm: true })
@@ -280,7 +280,7 @@ export default function App() {
   if (editing) {
     return (
       <div className="app">
-        <Editor projectId={selected} state={state} onClose={() => setEditing(false)} />
+        <Studio projectId={selected} state={state} onClose={() => setEditing(false)} />
         {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
       </div>
     )

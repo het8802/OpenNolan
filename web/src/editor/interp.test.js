@@ -3,6 +3,8 @@ import {
   interpolateAt, sanitizeCut, sanitizeOverlay, updateCut, updateOverlay,
   upsertKeyframe, removeKeyframe, scaffoldEditDecisions, timelineDuration,
   cutDuration, cutStarts, cutAtTime, trimCut, splitCutAtPlayhead, MIN_SOURCE_SPAN,
+  removeCut, duplicateCut, reorderCut, addCut, addOverlay, removeOverlay,
+  setCanvas, canvasOf,
 } from './interp.js'
 
 describe('interpolateAt (mirrors FFmpeg _piecewise_linear_expr)', () => {
@@ -202,5 +204,117 @@ describe('project-time math', () => {
       cuts: [{ in_seconds: 0, out_seconds: 3 }],
       overlays: [{ end_seconds: 10 }],
     })).toBe(10)
+  })
+})
+
+describe('sanitizeOverlay keeps text-overlay + audio_mix + box fields (studio editor)', () => {
+  it('preserves text-overlay fields and whitelists nested box', () => {
+    const o = sanitizeOverlay({
+      type: 'text', text: 'HELLO', font_size: 64, color: 'white', font_path: 'x.ttf',
+      box: { color: 'black', opacity: 0.5, padding: 12, bogus: 1 },
+      start_seconds: 0, end_seconds: 2, position: 'bottom-center', opacity: 0.9,
+      INVENTED: 'nope',
+    })
+    expect(o).toEqual({
+      type: 'text', text: 'HELLO', font_size: 64, color: 'white', font_path: 'x.ttf',
+      box: { color: 'black', opacity: 0.5, padding: 12 },
+      start_seconds: 0, end_seconds: 2, position: 'bottom-center', opacity: 0.9,
+    })
+    expect(o.INVENTED).toBeUndefined()
+    expect(o.box.bogus).toBeUndefined()
+  })
+  it('keeps a STRING position (named anchor) intact, whitelists an OBJECT position', () => {
+    expect(sanitizeOverlay({ type: 'text', text: 'a', position: 'top-right', start_seconds: 0, end_seconds: 1 }).position)
+      .toBe('top-right')
+    expect(sanitizeOverlay({ asset_id: 'logo', position: { x: 1, y: 2, width: 3, height: 4, z: 9 }, start_seconds: 0, end_seconds: 1 }).position)
+      .toEqual({ x: 1, y: 2, width: 3, height: 4 })
+  })
+  it('whitelists audio_mix to {enabled, volume}', () => {
+    expect(sanitizeOverlay({ asset_id: 'v', start_seconds: 0, end_seconds: 1, audio_mix: { enabled: true, volume: 1.5, junk: 1 } }).audio_mix)
+      .toEqual({ enabled: true, volume: 1.5 })
+  })
+})
+
+describe('sanitizeOverlay coerces schema-typed values (save can never 422)', () => {
+  it('rounds font_size and box.padding to integers', () => {
+    const o = sanitizeOverlay({ type: 'text', text: 'a', start_seconds: 0, end_seconds: 1,
+      font_size: 48.7, box: { color: 'black', opacity: 0.5, padding: 11.4 } })
+    expect(o.font_size).toBe(49)
+    expect(o.box.padding).toBe(11)
+  })
+  it('clamps keyframe t>=0, scale>=0, opacity in [0,1]', () => {
+    const o = sanitizeOverlay({ asset_id: 'x', start_seconds: 0, end_seconds: 2, keyframes: [
+      { t: -3, opacity: 1.8, scale: -0.5 },
+      { t: 1, opacity: -0.2, x: 50 },
+    ] })
+    expect(o.keyframes[0]).toEqual({ t: 0, opacity: 1, scale: 0 })
+    expect(o.keyframes[1]).toEqual({ t: 1, opacity: 0, x: 50 })
+  })
+})
+
+describe('updateOverlay / removeOverlay no-op on out-of-range index (no stale-dirty)', () => {
+  const doc = () => ({ version: '1.0', render_runtime: 'ffmpeg', cuts: [], overlays: [{ type: 'text', text: 'a', start_seconds: 0, end_seconds: 1 }] })
+  it('updateOverlay returns the SAME doc when index is out of range', () => {
+    const d = doc()
+    expect(updateOverlay(d, 5, { opacity: 0.5 })).toBe(d)
+    expect(updateOverlay(d, -1, { opacity: 0.5 })).toBe(d)
+  })
+  it('removeOverlay returns the SAME doc when index is out of range', () => {
+    const d = doc()
+    expect(removeOverlay(d, 9)).toBe(d)
+  })
+})
+
+describe('sanitizeCut whitelists transform.crop', () => {
+  it('drops stray keys inside transform.crop', () => {
+    const c = sanitizeCut({ id: 'c1', source: 's', in_seconds: 0, out_seconds: 1,
+      transform: { scale: 1, crop: { x: 0, y: 200, width: 1080, height: 1920, junk: 9 }, junk2: 1 } })
+    expect(c.transform.crop).toEqual({ x: 0, y: 200, width: 1080, height: 1920 })
+    expect(c.transform.junk2).toBeUndefined()
+  })
+})
+
+describe('structural mutators (studio editor)', () => {
+  const doc = () => ({
+    version: '1.0', render_runtime: 'ffmpeg', renderer_family: 'social-reel',
+    cuts: [
+      { id: 'a', source: 's1', in_seconds: 0, out_seconds: 2 },
+      { id: 'b', source: 's2', in_seconds: 0, out_seconds: 3 },
+      { id: 'c', source: 's3', in_seconds: 0, out_seconds: 1 },
+    ],
+  })
+  it('removeCut drops by id; no-op (referential) when id missing', () => {
+    const d = doc()
+    expect(removeCut(d, 'b').cuts.map(c => c.id)).toEqual(['a', 'c'])
+    expect(removeCut(d, 'zzz')).toBe(d)
+  })
+  it('duplicateCut inserts a unique-id copy right after the original', () => {
+    const out = duplicateCut(doc(), 'a')
+    expect(out.cuts.map(c => c.id)).toEqual(['a', 'a-2', 'b', 'c'])
+    expect(out.cuts[1].source).toBe('s1')
+  })
+  it('reorderCut moves a clip; clamps out-of-range dest', () => {
+    expect(reorderCut(doc(), 0, 2).cuts.map(c => c.id)).toEqual(['b', 'c', 'a'])
+    expect(reorderCut(doc(), 2, 0).cuts.map(c => c.id)).toEqual(['c', 'a', 'b'])
+    expect(reorderCut(doc(), 0, 99).cuts.map(c => c.id)).toEqual(['b', 'c', 'a'])
+    expect(reorderCut(doc(), 9, 0)).toEqual(doc())  // out-of-range source = no structural change
+  })
+  it('addCut forces a unique id and inserts at index (default end)', () => {
+    const out = addCut(doc(), { id: 'a', source: 'sX', in_seconds: 0, out_seconds: 1 }, 1)
+    expect(out.cuts.map(c => c.id)).toEqual(['a', 'a-2', 'b', 'c'])  // collided 'a' -> 'a-2'
+    expect(addCut(doc(), { id: 'z', source: 'sZ', in_seconds: 0, out_seconds: 1 }).cuts.map(c => c.id))
+      .toEqual(['a', 'b', 'c', 'z'])
+  })
+  it('addOverlay appends a sanitized overlay; removeOverlay drops by index', () => {
+    const withOv = addOverlay(doc(), { type: 'text', text: 'hi', start_seconds: 0, end_seconds: 1, INVALID: 1 })
+    expect(withOv.overlays).toHaveLength(1)
+    expect(withOv.overlays[0].INVALID).toBeUndefined()
+    expect(removeOverlay(withOv, 0).overlays).toHaveLength(0)
+  })
+  it('setCanvas merges compose_target; canvasOf falls back to 1920x1080@30', () => {
+    expect(canvasOf({})).toEqual({ width: 1920, height: 1080, fps: 30 })
+    const d = setCanvas(doc(), { width: 1080, height: 1920 })
+    expect(d.metadata.compose_target).toEqual({ width: 1080, height: 1920 })
+    expect(canvasOf(setCanvas(d, { fps: 24 }))).toEqual({ width: 1080, height: 1920, fps: 24 })
   })
 })

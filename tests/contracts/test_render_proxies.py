@@ -317,3 +317,74 @@ def test_render_jobs_uses_proxy_cache_e2e(tmp_path, monkeypatch):
     st2 = run()
     assert st2["status"] == "done", st2
     assert any("0 scene(s) re-rendered" in w for w in (st2.get("warnings") or [])), st2.get("warnings")
+
+
+# ---- editor regression: Studio writes PROJECT-relative refs ----
+
+def test_resolve_sources_rewrites_project_relative_refs_to_absolute(tmp_path):
+    """RenderJobStore._resolve_sources maps the project-relative source/asset_id the Studio
+    UI writes (e.g. 'assets/video/a.mp4') to an ABSOLUTE on-disk path the renderer can find,
+    and leaves unresolvable refs untouched (animated/not-yet-on-disk scenes)."""
+    from server.render_jobs import RenderJobStore
+
+    projects = tmp_path / "projects"
+    pid = "studio-demo"
+    vid = projects / pid / "assets" / "video" / "a.mp4"
+    img = projects / pid / "assets" / "images" / "logo.png"
+    vid.parent.mkdir(parents=True); vid.write_bytes(b"\x00\x00")
+    img.parent.mkdir(parents=True); img.write_bytes(b"\x89PNG")
+
+    ed = {
+        "version": "1.0", "render_runtime": "ffmpeg",
+        "cuts": [
+            {"id": "c1", "source": "assets/video/a.mp4", "in_seconds": 0, "out_seconds": 1},
+            {"id": "c2", "source": "assets/video/missing.mp4", "in_seconds": 0, "out_seconds": 1},
+        ],
+        "overlays": [
+            {"type": "image", "asset_id": "assets/images/logo.png", "start_seconds": 0,
+             "end_seconds": 1, "position": {"x": 0, "y": 0, "width": 100}},
+            {"type": "text", "text": "hi", "start_seconds": 0, "end_seconds": 1, "position": "bottom-center"},
+        ],
+    }
+    out = RenderJobStore(projects)._resolve_sources(pid, ed)
+
+    assert out["cuts"][0]["source"] == str(vid.resolve())          # project-relative -> absolute
+    assert out["cuts"][1]["source"] == "assets/video/missing.mp4"  # unresolved -> untouched
+    assert out["overlays"][0]["asset_id"] == str(img.resolve())    # overlay asset resolved too
+    assert "asset_id" not in out["overlays"][1]                    # text overlay untouched
+    assert ed["cuts"][0]["source"] == "assets/video/a.mp4"         # original NOT mutated
+
+
+@pytest.mark.skipif(not _have_ffmpeg(), reason="ffmpeg required")
+def test_render_jobs_renders_studio_project_relative_source_e2e(tmp_path, monkeypatch):
+    """The exact CRITICAL the review caught: a clip whose source is the PROJECT-relative path
+    the Studio writes (no asset_manifest entry) must actually render — not fail with
+    'Cut source not found'."""
+    monkeypatch.setenv("OPENNOLAN_CACHE_DIR", str(tmp_path / "cache"))
+    from server.render_jobs import RenderJobStore
+
+    projects = tmp_path / "projects"
+    pid = "studio-e2e"
+    art = projects / pid / "artifacts"
+    art.mkdir(parents=True)
+    clip = projects / pid / "assets" / "video" / "base.mp4"
+    _mk_clip(clip, color="green")
+    ed = {
+        "version": "1.0", "render_runtime": "ffmpeg", "renderer_family": "social-reel",
+        "metadata": {"compose_target": {"width": 320, "height": 240, "fps": 30}},
+        "cuts": [{"id": "c1", "source": "assets/video/base.mp4", "in_seconds": 0, "out_seconds": 1}],
+    }
+    (art / "edit_decisions.json").write_text(json.dumps(ed))
+    (art / "asset_manifest.json").write_text(json.dumps({"assets": []}))  # no manifest entry
+
+    store = RenderJobStore(projects)
+    jid = store.start(pid)
+    deadline = time.time() + 60
+    st = None
+    while time.time() < deadline:
+        st = store.status(jid)
+        if st and st["status"] in ("done", "failed"):
+            break
+        time.sleep(0.05)
+    assert st and st["status"] == "done", st
+    assert (projects / pid / st["output_path"]).stat().st_size > 0

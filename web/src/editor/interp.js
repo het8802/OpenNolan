@@ -22,9 +22,16 @@ const round3 = (x) => Math.round(Number(x) * 1000) / 1000
 // Schema field whitelists (keep in sync with schemas/artifacts/edit_decisions.schema.json).
 const CUT_FIELDS = ['id', 'source', 'in_seconds', 'out_seconds', 'speed', 'layer',
   'transform', 'transition_in', 'transition_out', 'transition_duration', 'reason']
-const OVERLAY_FIELDS = ['asset_id', 'start_seconds', 'end_seconds', 'position',
-  'animation', 'opacity', 'keyframes']
+// Overlays carry BOTH the asset-backed fields (image/video) and the text-overlay fields
+// (type=text → text/font/color/box) plus per-overlay audio_mix. The old editor whitelisted
+// only the asset fields, which silently dropped text/box/audio_mix on save; the studio editor
+// edits those, so they must survive sanitization.
+const OVERLAY_FIELDS = ['type', 'asset_id', 'text', 'font_path', 'font_size', 'color', 'box',
+  'start_seconds', 'end_seconds', 'position', 'animation', 'opacity', 'audio_mix', 'keyframes']
 const POSITION_FIELDS = ['x', 'y', 'width', 'height']
+const BOX_FIELDS = ['color', 'opacity', 'padding']
+const AUDIO_MIX_FIELDS = ['enabled', 'volume']
+const CROP_FIELDS = ['x', 'y', 'width', 'height']
 const KEYFRAME_FIELDS = ['t', 'x', 'y', 'scale', 'rotation', 'opacity', 'easing']
 
 function pick(obj, allowed) {
@@ -38,15 +45,36 @@ export function sanitizeCut(cut) {
   const c = pick(cut, CUT_FIELDS)
   if (c.transform && typeof c.transform === 'object') {
     c.transform = pick(c.transform, ['scale', 'position', 'animation', 'crop'])
+    if (c.transform.crop && typeof c.transform.crop === 'object') {
+      c.transform.crop = pick(c.transform.crop, CROP_FIELDS)
+    }
   }
   return c
 }
 
-/** Sanitize an overlay (incl. nested position + keyframes) to schema-known fields. */
+/** Pick + value-coerce a single keyframe so no UI path can emit a schema-invalid value
+ * (t>=0, scale>=0, opacity in [0,1]; x/y/rotation unbounded). The schema is strict, so
+ * clamping HERE — at the one chokepoint every keyframe flows through — keeps the
+ * "a Save can never be rejected" invariant honest for VALUES, not just keys. */
+function cleanKeyframe(k) {
+  const o = pick(k, KEYFRAME_FIELDS)
+  if (o.t != null) o.t = Math.max(0, Number(o.t))
+  if (o.scale != null) o.scale = Math.max(0, Number(o.scale))
+  if (o.opacity != null) o.opacity = Math.max(0, Math.min(1, Number(o.opacity)))
+  return o
+}
+
+/** Sanitize an overlay (incl. nested position/box/audio_mix/keyframes) to schema-known
+ * fields AND schema-valid values. `position` may be a STRING (named anchor, text overlays)
+ * or an OBJECT ({x,y,width,height}). font_size/box.padding are schema integers, so we round. */
 export function sanitizeOverlay(ov) {
   const o = pick(ov, OVERLAY_FIELDS)
   if (o.position && typeof o.position === 'object') o.position = pick(o.position, POSITION_FIELDS)
-  if (Array.isArray(o.keyframes)) o.keyframes = o.keyframes.map(k => pick(k, KEYFRAME_FIELDS))
+  if (o.box && typeof o.box === 'object') o.box = pick(o.box, BOX_FIELDS)
+  if (o.audio_mix && typeof o.audio_mix === 'object') o.audio_mix = pick(o.audio_mix, AUDIO_MIX_FIELDS)
+  if (o.font_size != null) o.font_size = Math.round(Number(o.font_size))
+  if (o.box && o.box.padding != null) o.box.padding = Math.round(Number(o.box.padding))
+  if (Array.isArray(o.keyframes)) o.keyframes = o.keyframes.map(cleanKeyframe)
   return o
 }
 
@@ -83,21 +111,24 @@ export function updateCut(doc, cutId, patch) {
 }
 
 export function updateOverlay(doc, index, patch) {
+  // Out-of-range index (e.g. a selection gone stale after undo/redo) is a no-op — return
+  // the SAME doc so commit()'s referential guard suppresses a spurious history/dirty entry.
+  if (index < 0 || index >= (doc.overlays || []).length) return doc
   const overlays = (doc.overlays || []).map((o, i) =>
     (i === index ? sanitizeOverlay({ ...o, ...patch }) : o))
   return { ...doc, overlays }
 }
 
 export function setOverlayKeyframes(doc, index, keyframes) {
-  return updateOverlay(doc, index, { keyframes: keyframes.map(k => pick(k, KEYFRAME_FIELDS)) })
+  return updateOverlay(doc, index, { keyframes: keyframes.map(cleanKeyframe) })
 }
 
 export function upsertKeyframe(doc, index, kf) {
   const ov = (doc.overlays || [])[index]
   if (!ov) return doc
   const kfs = [...(ov.keyframes || [])]
-  const at = kfs.findIndex(k => Number(k.t) === Number(kf.t))
-  const clean = pick(kf, KEYFRAME_FIELDS)
+  const clean = cleanKeyframe(kf)
+  const at = kfs.findIndex(k => Number(k.t) === Number(clean.t))
   if (at >= 0) kfs[at] = { ...kfs[at], ...clean }
   else kfs.push(clean)
   kfs.sort((a, b) => Number(a.t) - Number(b.t))
@@ -233,4 +264,78 @@ export function splitCutAtPlayhead(doc, t) {
   const cuts = [...(doc.cuts || [])]
   cuts.splice(index, 1, first, second)
   return { ...doc, cuts }
+}
+
+// ── clip-level structural mutators (studio editor) ──────────────────────────
+
+/** Remove a cut by id. Returns the doc unchanged if not found. Callers guard the last cut. */
+export function removeCut(doc, cutId) {
+  const cuts = (doc?.cuts || []).filter(c => c.id !== cutId)
+  if (cuts.length === (doc?.cuts || []).length) return doc
+  return { ...doc, cuts }
+}
+
+/** Duplicate a cut (fresh unique id), inserting the copy directly after the original. */
+export function duplicateCut(doc, cutId) {
+  const cuts = doc?.cuts || []
+  const i = cuts.findIndex(c => c.id === cutId)
+  if (i < 0) return doc
+  const clone = sanitizeCut({ ...cuts[i], id: uniqueCutId(doc, cuts[i].id || `c${i + 1}`) })
+  const next = [...cuts]
+  next.splice(i + 1, 0, clone)
+  return { ...doc, cuts: next }
+}
+
+/** Move the cut at `fromIndex` to `toIndex` (drag-reorder). Clamped; no-op if out of range. */
+export function reorderCut(doc, fromIndex, toIndex) {
+  const cuts = [...(doc?.cuts || [])]
+  if (fromIndex < 0 || fromIndex >= cuts.length) return doc
+  const [moved] = cuts.splice(fromIndex, 1)
+  const dest = Math.max(0, Math.min(cuts.length, toIndex))
+  cuts.splice(dest, 0, moved)
+  return { ...doc, cuts }
+}
+
+/** Append a cut (id forced unique against existing cuts) at `atIndex` (default end). */
+export function addCut(doc, cut, atIndex) {
+  const cuts = [...(doc?.cuts || [])]
+  const keepId = cut.id && !cuts.some(x => x.id === cut.id)
+  const c = sanitizeCut({ ...cut, id: keepId ? cut.id : uniqueCutId(doc, cut.id || 'c') })
+  const at = atIndex == null ? cuts.length : Math.max(0, Math.min(cuts.length, atIndex))
+  cuts.splice(at, 0, c)
+  return { ...doc, cuts }
+}
+
+/** Append a sanitized overlay. Returns the new doc; index of the new overlay = overlays.length-1. */
+export function addOverlay(doc, overlay) {
+  const overlays = [...(doc?.overlays || []), sanitizeOverlay(overlay)]
+  return { ...doc, overlays }
+}
+
+/** Remove the overlay at `index`. No-op (same doc) if out of range. */
+export function removeOverlay(doc, index) {
+  if (index < 0 || index >= (doc?.overlays || []).length) return doc
+  const overlays = (doc.overlays || []).filter((_, i) => i !== index)
+  return { ...doc, overlays }
+}
+
+/** Set the output canvas (metadata.compose_target). Merges so unspecified dims are kept. */
+export function setCanvas(doc, { width, height, fps } = {}) {
+  const meta = { ...(doc.metadata || {}) }
+  const ct = { ...(meta.compose_target || {}) }
+  if (width != null) ct.width = Math.round(width)
+  if (height != null) ct.height = Math.round(height)
+  if (fps != null) ct.fps = fps
+  meta.compose_target = ct
+  return { ...doc, metadata: meta }
+}
+
+/** Read the effective output canvas. Mirrors the renderer's fallback (1920x1080@30). */
+export function canvasOf(doc) {
+  const ct = doc?.metadata?.compose_target || {}
+  return {
+    width: Number(ct.width) || 1920,
+    height: Number(ct.height) || 1080,
+    fps: Number(ct.fps) || 30,
+  }
 }
