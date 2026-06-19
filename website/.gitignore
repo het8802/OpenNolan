@@ -1,0 +1,10 @@
+node_modules/
+.vercel/
+.env
+.env.local
+.env*.local
+.DS_Store
+
+# Large source media — only the web-optimized versions are tracked/deployed
+assets/gallery/showcase.MP4
+.vercel

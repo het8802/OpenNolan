@@ -1,0 +1,10 @@
+# Source media that should NOT be deployed (the web-optimized versions ship instead).
+# The 78MB HLG/HEVC original; showcase-web.mp4 (the H.264 web version) is what the site uses.
+assets/gallery/showcase.MP4
+
+# Retina PNG screenshots (~1.7-2MB each); the page ships the ~150KB .webp versions.
+assets/gallery/app-screenshot-1.png
+assets/gallery/app-screenshot-2.png
+
+# Stray probe clip, never referenced by the page.
+assets/gallery/_test.mp4

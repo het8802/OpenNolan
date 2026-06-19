@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenNolan — Make content people actually stop for</title>
+  <meta name="description" content="OpenNolan turns your product into scroll-stopping Reels and TikToks — finding the trending hooks, memes, sounds and fast cuts that vertical video needs to win attention. Local-first, on your Mac, with your own key. Join the waitlist." />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="OpenNolan — Make content people actually stop for" />
+  <meta property="og:description" content="Turn your product into scroll-stopping short-form content. Trending hooks, memes, sound, fast cuts — assembled for you. Join the waitlist." />
+  <meta property="og:site_name" content="OpenNolan" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="theme-color" content="#FBF8F1" />
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23D9694A'/%3E%3Cpath d='M13 10.5l9 5.5-9 5.5z' fill='%23FBF8F1'/%3E%3C/svg%3E" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;450;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --paper:#FBF8F1; --paper-2:#F4ECDD; --paper-3:#EFE4D1; --card:#FFFDF8;
+      --ink:#201C17; --ink-soft:#524B43; --muted:#8C8378;
+      --coral:#D9694A; --coral-strong:#BF4E2E; --coral-soft:#F0C9B6;
+      --sage:#6E7F63; --sage-soft:#D7DDCE; --sand:#E8C79B;
+      --line:rgba(32,28,23,0.10); --line-strong:rgba(32,28,23,0.18);
+      --shadow-sm:0 1px 2px rgba(32,28,23,0.06),0 2px 6px rgba(32,28,23,0.05);
+      --shadow-md:0 8px 24px rgba(32,28,23,0.08),0 2px 8px rgba(32,28,23,0.05);
+      --shadow-lg:0 24px 60px rgba(46,30,20,0.16),0 6px 18px rgba(46,30,20,0.08);
+      --radius:18px; --radius-sm:12px; --maxw:1120px;
+      --serif:'Fraunces',Georgia,'Times New Roman',serif;
+      --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    }
+    *,*::before,*::after{box-sizing:border-box;}
+    [hidden]{display:none !important;}
+    html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;}
+    body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--paper);line-height:1.6;font-size:17px;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;overflow-x:hidden;}
+    body::before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;background:radial-gradient(60% 50% at 80% -8%,rgba(217,105,74,0.16),transparent 60%),radial-gradient(48% 40% at 4% 6%,rgba(110,127,99,0.12),transparent 60%),radial-gradient(70% 60% at 50% 120%,rgba(232,199,155,0.16),transparent 60%);}
+    body::after{content:"";position:fixed;inset:0;z-index:-1;opacity:.035;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+    a{color:inherit;text-decoration:none;}
+    h1,h2,h3{font-family:var(--serif);font-weight:600;letter-spacing:-0.015em;line-height:1.08;margin:0;color:var(--ink);}
+    p{margin:0;}
+    .wrap{width:100%;max-width:var(--maxw);margin:0 auto;padding:0 28px;}
+    .eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--coral-strong);}
+    .eyebrow::before{content:"";width:22px;height:1.5px;background:var(--coral);display:inline-block;}
+
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;font-family:var(--sans);font-size:16px;font-weight:600;padding:14px 22px;border-radius:12px;border:1px solid transparent;cursor:pointer;transition:transform .18s,box-shadow .18s,background .18s,border-color .18s,color .18s;white-space:nowrap;line-height:1;}
+    .btn-primary{background:var(--coral);color:#fff;box-shadow:0 8px 20px rgba(217,105,74,0.30);}
+    .btn-primary:hover{background:var(--coral-strong);transform:translateY(-1px);box-shadow:0 12px 26px rgba(191,78,46,0.34);}
+    .btn-ghost{background:transparent;color:var(--ink);border-color:var(--line-strong);}
+    .btn-ghost:hover{border-color:var(--ink);background:rgba(32,28,23,0.04);}
+    .btn-disabled{background:transparent;color:var(--muted);border:1px dashed var(--line-strong);cursor:not-allowed;}
+    .btn-disabled .soon{font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--coral-strong);background:var(--coral-soft);padding:3px 7px;border-radius:999px;}
+
+    header.nav{position:sticky;top:0;z-index:50;-webkit-backdrop-filter:saturate(140%) blur(10px);backdrop-filter:saturate(140%) blur(10px);background:rgba(251,248,241,0.72);border-bottom:1px solid transparent;transition:border-color .2s,background .2s;}
+    header.nav.scrolled{border-bottom-color:var(--line);background:rgba(251,248,241,0.9);}
+    .nav-inner{display:flex;align-items:center;justify-content:space-between;height:68px;}
+    .brand{display:inline-flex;align-items:center;gap:11px;font-family:var(--serif);font-weight:600;font-size:21px;letter-spacing:-0.01em;}
+    .brand .mark{width:30px;height:30px;border-radius:9px;flex:none;}
+    .nav-links{display:flex;align-items:center;gap:30px;}
+    .nav-links a.navlink{font-size:15px;font-weight:500;color:var(--ink-soft);transition:color .15s;}
+    .nav-links a.navlink:hover{color:var(--ink);}
+    .nav-cta{display:flex;align-items:center;gap:14px;}
+    .nav-cta .btn{padding:10px 18px;font-size:15px;}
+    @media (max-width:860px){.nav-links .navlink{display:none;}}
+
+    /* Hero */
+    .hero{padding:58px 0 76px;}
+    .hero-grid{display:flex;flex-direction:column;align-items:center;text-align:center;}
+    .hero-copy{width:100%;max-width:680px;}
+    .hero h1{font-size:clamp(38px,5.4vw,62px);font-weight:600;margin:20px auto 0;max-width:18ch;}
+    .hero h1 .accent{color:var(--coral);font-style:italic;font-weight:500;}
+    .hero-sub{font-size:19px;color:var(--ink-soft);margin:22px auto 0;max-width:56ch;}
+    .hero-form{margin-top:30px;}
+    .hero-form .form-note,.hero-form .form-status{justify-content:center;text-align:center;}
+    .hero-actions{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:18px;flex-wrap:wrap;}
+
+    .waitlist-form{width:100%;max-width:480px;margin-left:auto;margin-right:auto;}
+    .field-row{display:flex;gap:10px;background:var(--card);border:1px solid var(--line-strong);border-radius:14px;padding:7px 7px 7px 8px;box-shadow:var(--shadow-sm);transition:border-color .15s,box-shadow .15s;}
+    .field-row:focus-within{border-color:var(--coral);box-shadow:0 0 0 4px rgba(217,105,74,0.14);}
+    .field-row input[type="email"]{flex:1;min-width:0;border:none;outline:none;background:transparent;font-family:var(--sans);font-size:16px;color:var(--ink);padding:10px 8px 10px 10px;}
+    .field-row input::placeholder{color:var(--muted);}
+    .field-row .btn{flex:none;}
+    .form-note{margin-top:11px;font-size:13.5px;color:var(--muted);display:flex;align-items:center;gap:7px;}
+    .form-status{margin-top:12px;font-size:15px;font-weight:500;min-height:1.2em;}
+    .form-status.error{color:var(--coral-strong);}
+    .form-status.success{color:var(--sage);}
+    .hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0;}
+    .form-success-card{display:none;background:var(--sage-soft);border:1px solid rgba(110,127,99,0.35);border-radius:14px;padding:18px 20px;max-width:460px;margin-left:auto;margin-right:auto;}
+    .form-success-card.show{display:block;animation:pop .3s;}
+    .form-success-card h4{font-family:var(--serif);font-size:19px;margin:0 0 4px;color:#3c4733;}
+    .form-success-card p{font-size:14.5px;color:#4d5743;}
+    @keyframes pop{from{transform:scale(.97);opacity:0;}to{transform:scale(1);opacity:1;}}
+
+    /* ===== Hero: animated OpenNolan editor window (desktop-scale) ===== */
+    .editor-stage{position:relative;display:flex;flex-direction:column;align-items:center;width:100%;max-width:980px;margin:0 auto;}
+    .ed-window{position:relative;width:100%;max-width:980px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-lg);overflow:hidden;contain:layout paint;font-family:var(--sans);}
+    .ed-window .mono{font-variant-numeric:tabular-nums;}
+    .hero-visual{width:100%;margin-top:54px;}
+
+    /* title bar */
+    .ed-titlebar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;height:42px;padding:0 16px;background:var(--paper-2);border-bottom:1px solid var(--line);}
+    .ed-lights{display:flex;gap:8px;}
+    .ed-lights i{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08);}
+    .ed-lights .l-r{background:#ED6A5E;}.ed-lights .l-a{background:#F5BE4F;}.ed-lights .l-g{background:#61C554;}
+    .ed-title{text-align:center;font-size:14px;font-weight:500;color:var(--ink-soft);white-space:nowrap;}
+    .ed-project{justify-self:end;font-size:13px;color:var(--muted);white-space:nowrap;}
+    .ed-project::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--coral);margin-right:6px;vertical-align:middle;}
+
+    /* toolbar */
+    .ed-toolbar{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--card);border-bottom:1px solid var(--line);overflow:hidden;}
+    .tb{font-family:var(--sans);cursor:default;}
+    .tb-pill{font:500 12.5px/1 var(--sans);color:var(--ink-soft);background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:7px 11px;white-space:nowrap;transition:background .2s,transform .2s,border-color .2s;}
+    .tb-pill.pressed{background:var(--coral-soft);border-color:var(--coral-soft);transform:scale(.95);}
+    .tb-div{flex:none;width:1px;height:18px;background:var(--line);}
+    .tb-label{font-size:12.5px;color:var(--muted);white-space:nowrap;}
+    .tb-speed{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+    .tb-speed span{font:500 11.5px/1 var(--sans);color:var(--ink-soft);padding:6px 8px;border-right:1px solid var(--line);}
+    .tb-speed span:last-child{border-right:none;}
+    .tb-speed span.on{background:var(--coral-soft);color:var(--coral-strong);font-weight:600;}
+    .tb-render{position:relative;margin-left:auto;font:600 12.5px/1 var(--sans);background:var(--coral);color:#fff;border:none;border-radius:8px;padding:8px 16px;white-space:nowrap;transition:background .3s;}
+    .tb-render.pulsing{animation:renderPulse .55s ease;}
+    .tb-render.done{background:var(--sage);}
+    .tb-render.done::before{content:"✓ ";}
+    .tb-render.done::after{content:"";position:absolute;inset:-2px;border-radius:10px;animation:successPulse .8s ease;}
+
+    /* body */
+    .ed-body{display:flex;align-items:stretch;height:386px;}
+
+    /* agent rail */
+    .ed-agent{flex:none;width:208px;display:flex;flex-direction:column;padding:14px 13px;background:var(--paper);border-right:1px solid var(--line);}
+    .ag-head{display:flex;align-items:center;gap:8px;font:600 11px/1 var(--sans);letter-spacing:.1em;color:var(--ink-soft);text-transform:uppercase;}
+    .ag-dot{width:8px;height:8px;border-radius:50%;background:var(--coral);animation:agDotPulse 2s infinite;}
+    .ag-feed{list-style:none;margin:13px 0 0;padding:0;flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-end;gap:8px;overflow:hidden;}
+    .ag-card{position:relative;background:var(--card);border:1px solid var(--line);border-left:2.5px solid var(--coral);border-radius:9px;padding:9px 11px;display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.32;color:var(--ink);overflow:hidden;}
+    .ag-card.show{animation:agCardRise .4s ease;}
+    .ag-card.faded{opacity:.45;}
+    .ag-ic{flex:none;font-size:13px;line-height:1.1;}
+    .ag-card span{flex:1;min-width:0;}
+    .ag-bar{position:absolute;left:0;bottom:0;height:2px;width:100%;background:var(--coral);transform-origin:left;transform:scaleX(0);}
+    .ag-card.show .ag-bar{animation:agBar 1.1s linear forwards;}
+    .ag-pipe{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;}
+    .pp{font:600 10.5px/1 var(--sans);color:var(--muted);background:var(--paper-2);border-radius:6px;padding:5px 8px;transition:background .3s,color .3s;}
+    .pp.busy{color:var(--coral-strong);animation:ppPulse 1s infinite;}
+    .pp.done{color:#fff;background:var(--sage);}
+    .pp.done::before{content:"✓";margin-right:3px;}
+    .ag-input{display:flex;align-items:center;gap:7px;margin-top:12px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 9px;font-size:11px;color:var(--muted);}
+    .ag-input span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .ag-send{flex:none;font-size:11px;font-weight:600;color:#fff;background:var(--coral);border-radius:6px;padding:5px 9px;}
+
+    /* dark video canvas */
+    .ed-canvas{position:relative;flex:1;min-width:0;margin:10px;background:#0B0B0C;border-radius:11px;overflow:hidden;display:flex;align-items:center;justify-content:center;}
+    .ed-canvas video{height:100%;width:auto;max-width:100%;object-fit:cover;display:block;}
+    .cv-play{position:absolute;inset:0;margin:auto;width:52px;height:52px;display:grid;place-items:center;background:rgba(11,11,12,.42);border-radius:50%;transition:opacity .4s;}
+    .cv-play svg{width:24px;height:24px;}
+    .cv-play.gone{opacity:0;}
+    .cv-hud{position:absolute;left:10px;bottom:10px;font:500 11px/1 var(--sans);font-variant-numeric:tabular-nums;color:#fff;background:rgba(11,11,12,.6);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);padding:5px 9px;border-radius:7px;white-space:nowrap;}
+    .cv-search{position:absolute;left:50%;bottom:38px;width:min(78%,360px);background:rgba(251,248,241,.97);border:1px solid var(--line);border-radius:11px;padding:11px;opacity:0;transform:translate(-50%,14px);transition:opacity .35s,transform .35s;pointer-events:none;box-shadow:0 12px 30px rgba(0,0,0,.4);}
+    .cv-search.show{opacity:1;transform:translate(-50%,0);}
+    .cs-row{display:flex;align-items:center;gap:8px;font:500 13px/1 var(--sans);color:var(--ink-soft);}
+    .cs-row svg{width:15px;height:15px;flex:none;color:var(--muted);}
+    .cs-row span{white-space:nowrap;overflow:hidden;}
+    .cs-tiles{display:flex;gap:8px;margin-top:10px;}
+    .cs-tiles i{flex:1;height:42px;border-radius:7px;background:linear-gradient(135deg,var(--paper-3),var(--sand));opacity:0;}
+    .cv-search.show .cs-tiles i{animation:tileIn .5s ease forwards;}
+    .cv-search.show .cs-tiles i:nth-child(1){animation-delay:.2s;}
+    .cv-search.show .cs-tiles i:nth-child(2){animation-delay:.34s;}
+    .cv-search.show .cs-tiles i:nth-child(3){animation-delay:.48s;}
+    .cv-shot{position:absolute;top:18px;left:50%;width:208px;aspect-ratio:16/10;background:linear-gradient(150deg,#fff,#eef0ff);border-radius:10px;box-shadow:0 14px 30px rgba(0,0,0,.45);display:flex;align-items:flex-end;gap:6px;padding:12px;opacity:0;transform:translate(-50%,-26px) scale(.9) rotate(-3deg);transition:opacity .5s,transform .5s cubic-bezier(.34,1.3,.64,1);}
+    .cv-shot.show{opacity:1;transform:translate(-50%,0) scale(1) rotate(0);}
+    .cv-shot .shot-bar{flex:1;border-radius:3px 3px 0 0;background:linear-gradient(180deg,var(--coral),var(--coral-soft));}
+    .cv-shot .shot-bar:nth-child(1){height:38%;}.cv-shot .shot-bar:nth-child(2){height:62%;}.cv-shot .shot-bar:nth-child(3){height:90%;}
+    .cv-shot em{position:absolute;top:8px;left:11px;font-style:normal;font:600 10px/1 var(--sans);color:var(--muted);}
+    .cv-cap{position:absolute;left:0;right:0;bottom:18px;text-align:center;opacity:0;transform:translateY(8px);transition:opacity .35s,transform .35s;}
+    .cv-cap.show{opacity:1;transform:translateY(0);}
+    .cv-cap b{font:800 20px/1.25 var(--sans);text-transform:uppercase;letter-spacing:.01em;color:#fff;background:rgba(11,11,12,.74);padding:4px 9px;border-radius:6px;box-decoration-break:clone;-webkit-box-decoration-break:clone;}
+    .cv-cap .kw{display:inline-block;color:var(--coral);}
+    .cv-cap.show .kw{animation:capWordPop .5s ease .12s;}
+
+    /* clip inspector */
+    .ed-inspector{flex:none;width:216px;padding:14px;background:var(--card);border-left:1px solid var(--line);opacity:.35;transition:opacity .4s;overflow:hidden;}
+    .ed-inspector.lit{opacity:1;}
+    .in-head{font:600 13px/1.2 var(--sans);color:var(--ink-soft);margin-bottom:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .in-head b{color:var(--ink);}
+    .in-grp{margin-bottom:13px;}
+    .in-lab{font:600 9.5px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;}
+    .in-val{font-size:11px;color:var(--ink-soft);}
+    .in-val.ell{max-width:188px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .in-fields{display:flex;gap:6px;}
+    .in-fields.col{flex-direction:column;gap:5px;}
+    .in-f{flex:1;min-width:0;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:5px 8px;overflow:hidden;}
+    .in-fields.col .in-f{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+    .in-f label{display:block;font-size:8.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;}
+    .in-fields.col .in-f label{margin:0;}
+    .in-f span{display:inline-block;font-size:11.5px;color:var(--ink);font-variant-numeric:tabular-nums;}
+    .in-link{font-size:11px;color:var(--coral-strong);}
+
+    /* timeline dock */
+    .ed-timeline{background:var(--paper-2);border-top:1px solid var(--line);padding:11px 14px 14px;}
+    .tl-head{display:flex;align-items:center;justify-content:space-between;}
+    .tl-total{font:500 11.5px/1 var(--sans);color:var(--ink-soft);}
+    .tl-zoom{position:relative;display:inline-flex;align-items:center;width:92px;height:14px;}
+    .tz-track{flex:1;height:3px;background:var(--line);border-radius:2px;}
+    .tz-thumb{position:absolute;top:50%;margin-top:-5px;right:20px;width:10px;height:10px;border-radius:50%;background:var(--coral);transition:right .4s ease;}
+    .tl-zoom.fit .tz-thumb{right:5px;}
+    .tl-ruler{display:flex;justify-content:space-between;margin-top:9px;font:500 10px/1 var(--sans);color:var(--muted);font-variant-numeric:tabular-nums;}
+    .tl-tracks{position:relative;margin-top:8px;}
+    .tl-track{position:relative;height:34px;border-radius:9px;background:rgba(32,28,23,0.05);}
+    .tl-track + .tl-track{margin-top:8px;}
+    .tl-audio{transform:scaleY(0);transform-origin:top;transition:transform .4s ease;}
+    .tl-audio.show{transform:scaleY(1);}
+    .clip{position:absolute;top:4px;bottom:4px;border-radius:7px;display:flex;align-items:center;padding:0 10px;overflow:hidden;transform-origin:left center;opacity:0;transform:translateY(13px) scale(.96);transition:opacity .45s,transform .45s cubic-bezier(.34,1.4,.64,1);}
+    .clip.placed{opacity:1;transform:translateY(0) scale(1);}
+    .clip.placed.trim{transform:scaleX(.82);}
+    .clip span{display:block;font:600 11.5px/1 var(--sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;z-index:1;transition:transform .45s cubic-bezier(.34,1.4,.64,1);transform-origin:left;}
+    .clip.trim span{transform:scaleX(1.22);}
+    .c-coral{background:var(--coral);}.c-coral span{color:#fff;}
+    .c-lav{background:#C9C2E8;}.c-lav span{color:var(--ink);}
+    .c-sage{background:#9FB08C;}.c-sage span{color:#fff;}
+    .c-sand{background:var(--sand);}.c-sand span{color:var(--ink);}
+    .clip.ov{top:3px;bottom:auto;height:15px;}.clip.ov span{font-size:9.5px;}
+    .c-music{background:linear-gradient(180deg,var(--sand),var(--coral-soft));}.c-music span{color:var(--ink);}
+    .wave{position:absolute;inset:0;display:flex;align-items:center;gap:1.5px;padding:0 8px;clip-path:inset(0 100% 0 0);}
+    .clip.placed .wave{animation:waveDraw 1s ease forwards;}
+    .wave i{flex:1;height:30%;background:rgba(32,28,23,.32);border-radius:1px;animation:waveBar 1.2s ease-in-out infinite;}
+    .tl-playhead{position:absolute;top:0;bottom:0;left:0;width:2px;background:var(--coral);box-shadow:0 0 0 1px rgba(217,105,74,.25);transform:translateX(0);will-change:transform;}
+
+    /* success toast + ghost cursor + status caption */
+    .ed-toast{position:absolute;right:12px;top:12px;display:inline-flex;align-items:center;gap:7px;background:var(--sage-soft);border:1px solid rgba(110,127,99,.4);color:#3c4733;font:600 12px/1 var(--sans);padding:9px 13px;border-radius:10px;box-shadow:0 10px 24px rgba(46,30,20,.28);opacity:0;transform:translateY(-10px);transition:opacity .4s,transform .4s;z-index:18;}
+    .ed-toast svg{width:15px;height:15px;}
+    .ed-toast.show{opacity:1;transform:translateY(0);}
+    .ed-cursor{position:absolute;top:0;left:0;width:24px;height:24px;z-index:30;pointer-events:none;will-change:transform;transition:transform .55s cubic-bezier(.4,.1,.2,1);filter:drop-shadow(0 2px 6px rgba(217,105,74,.45));}
+    .ed-cursor svg{width:100%;height:100%;display:block;}
+    .ed-status{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:22px;font:500 15px/1.3 var(--sans);color:var(--ink-soft);min-height:1.3em;}
+    .es-spin{flex:none;width:14px;height:14px;border-radius:50%;border:2px solid var(--coral-soft);border-top-color:var(--coral);animation:spin .8s linear infinite;}
+    #esLabel{display:inline-block;}
+    #esLabel.swap{animation:fieldSwap .4s ease;}
+    .in-f span.swap,.in-head b.swap{animation:fieldSwap .4s ease;}
+
+    @keyframes renderPulse{0%{transform:scale(1);}45%{transform:scale(1.06);}100%{transform:scale(1);}}
+    @keyframes successPulse{0%{box-shadow:0 0 0 0 rgba(110,127,99,.5);}100%{box-shadow:0 0 0 13px rgba(110,127,99,0);}}
+    @keyframes agDotPulse{0%{box-shadow:0 0 0 0 rgba(217,105,74,.5);}70%{box-shadow:0 0 0 5px rgba(217,105,74,0);}100%{box-shadow:0 0 0 0 rgba(217,105,74,0);}}
+    @keyframes agCardRise{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+    @keyframes agBar{from{transform:scaleX(0);}to{transform:scaleX(1);}}
+    @keyframes ppPulse{0%,100%{opacity:1;}50%{opacity:.5;}}
+    @keyframes capWordPop{0%{transform:scale(1);}40%{transform:scale(1.13);}100%{transform:scale(1);}}
+    @keyframes fieldSwap{0%{opacity:1;}30%{opacity:0;transform:translateY(4px);}100%{opacity:1;transform:translateY(0);}}
+    @keyframes spin{to{transform:rotate(360deg);}}
+    @keyframes tileIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+    @keyframes waveDraw{to{clip-path:inset(0 0 0 0);}}
+    @keyframes waveBar{0%,100%{height:25%;}50%{height:78%;}}
+
+    /* tablet/mobile: drop the side rails, fill the canvas, cap window width */
+    @media (max-width:920px){
+      .hero{padding:48px 0 44px;}
+      .hero-visual{margin-top:44px;}
+      .editor-stage{max-width:600px;}
+      .ed-agent,.ed-inspector{display:none;}
+      .ed-body{height:300px;}
+      .ed-canvas video{width:100%;height:100%;object-fit:cover;}
+    }
+    /* narrow windows: trim the toolbar to its essential pills so nothing clips */
+    @media (max-width:560px){
+      .ed-toolbar .tb-label,.ed-toolbar .tb-div,.ed-toolbar .tb-speed,.ed-toolbar [data-tb="del"],.ed-toolbar [data-tb="dup"]{display:none;}
+      .ed-body{height:260px;}
+      .cv-hud{display:none;} /* avoid colliding with the caption on the narrow canvas */
+      .cv-cap b{font-size:16px;}
+      .ed-toast{font-size:11px;padding:7px 10px;}
+      .tl-ruler span:nth-child(even){visibility:hidden;}
+    }
+
+    /* screenshots band — real product UI */
+    .shots-2up{display:grid;grid-template-columns:1fr 1fr;gap:28px;}
+    .app-shot{margin:0;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg);overflow:hidden;transition:transform .2s,box-shadow .2s;}
+    .app-shot:hover{transform:translateY(-4px);box-shadow:var(--shadow-lg),0 30px 60px rgba(46,30,20,.12);}
+    .app-shot .as-bar{display:flex;align-items:center;gap:6px;height:30px;padding:0 12px;background:var(--paper-2);border-bottom:1px solid var(--line);}
+    .app-shot .as-bar i{width:9px;height:9px;border-radius:50%;}
+    .app-shot .as-bar i:nth-child(1){background:#ED6A5E;}.app-shot .as-bar i:nth-child(2){background:#F5BE4F;}.app-shot .as-bar i:nth-child(3){background:#61C554;}
+    .app-shot .as-bar span{margin-left:8px;font-size:11.5px;color:var(--ink-soft);}
+    .app-shot img{display:block;width:100%;height:auto;background:#0B0B0C;}
+    .app-shot figcaption{padding:15px 18px;font-size:14px;color:var(--ink-soft);}
+    @media (max-width:820px){.shots-2up{grid-template-columns:1fr;gap:22px;}}
+
+    section{padding:90px 0;}
+    .section-head{max-width:680px;margin-bottom:50px;}
+    .section-head h2{font-size:clamp(30px,3.8vw,44px);margin-top:16px;}
+    .section-head p{font-size:18px;color:var(--ink-soft);margin-top:16px;}
+    .center{text-align:center;margin-left:auto;margin-right:auto;}
+    .center .eyebrow{justify-content:center;}
+
+    /* Problem */
+    .problem{background:linear-gradient(180deg,transparent,rgba(244,236,221,0.5) 30%,rgba(244,236,221,0.5) 70%,transparent);}
+    .cards-3{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;}
+    .pcard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:30px 26px;box-shadow:var(--shadow-sm);}
+    .pcard .ic{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;background:var(--coral-soft);margin-bottom:18px;}
+    .pcard h3{font-size:20px;margin-bottom:9px;}
+    .pcard p{color:var(--ink-soft);font-size:15.5px;}
+
+    /* Insight / playbook */
+    .insight{background:var(--ink);color:var(--paper);position:relative;overflow:hidden;}
+    .insight::before{content:"";position:absolute;inset:0;opacity:.55;pointer-events:none;background:radial-gradient(45% 55% at 88% 0%,rgba(217,105,74,0.22),transparent 60%),radial-gradient(40% 50% at 6% 100%,rgba(110,127,99,0.18),transparent 60%);}
+    .insight .wrap{position:relative;z-index:1;}
+    .insight h2{color:var(--paper);max-width:18ch;}
+    .insight .lead{font-size:18px;color:rgba(251,248,241,0.74);margin-top:18px;max-width:60ch;}
+    .insight .eyebrow{color:var(--sand);}
+    .insight .eyebrow::before{background:var(--sand);}
+    .principles{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:44px;}
+    .principle{background:rgba(255,253,248,0.05);border:1px solid rgba(251,248,241,0.14);border-radius:14px;padding:20px 18px;}
+    .principle .n{font-family:var(--serif);font-size:13px;font-weight:600;color:var(--sand);letter-spacing:.04em;}
+    .principle h4{font-family:var(--sans);font-size:15px;font-weight:600;color:var(--paper);margin:10px 0 5px;}
+    .principle p{font-size:13px;color:rgba(251,248,241,0.6);line-height:1.5;}
+    @media (max-width:860px){.principles{grid-template-columns:1fr 1fr;}}
+
+    /* Steps */
+    .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;}
+    .step{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:32px 28px 30px;box-shadow:var(--shadow-sm);position:relative;}
+    .step .num{font-family:var(--serif);font-size:40px;font-weight:600;color:var(--coral);line-height:1;margin-bottom:16px;display:block;}
+    .step h3{font-size:21px;margin-bottom:10px;}
+    .step p{color:var(--ink-soft);font-size:15.5px;}
+
+    /* ===== Features gallery ===== */
+    .gallery-shell{display:grid;grid-template-columns:0.92fr 1.08fr;gap:34px;align-items:start;}
+    .gallery-list{display:flex;flex-direction:column;gap:10px;}
+    .gx{display:flex;gap:15px;align-items:flex-start;text-align:left;width:100%;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;cursor:pointer;font-family:var(--sans);transition:border-color .18s,box-shadow .18s,background .18s,transform .18s;}
+    .gx:hover{border-color:var(--line-strong);transform:translateY(-1px);}
+    .gx.active{border-color:var(--coral);background:#fff;box-shadow:0 10px 26px rgba(217,105,74,0.13);}
+    .gx .gic{flex:none;width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background:var(--paper-2);color:var(--coral-strong);transition:background .18s,color .18s;}
+    .gx.active .gic{background:var(--coral);color:#fff;}
+    .gx .gtxt h3{font-family:var(--sans);font-size:16px;font-weight:600;color:var(--ink);margin:0 0 3px;}
+    .gx .gtxt p{font-size:13.5px;color:var(--muted);line-height:1.45;}
+    .gx.active .gtxt p{color:var(--ink-soft);}
+
+    .gallery-stage{position:sticky;top:90px;background:linear-gradient(160deg,#FFFDF8,#F4ECDD);border:1px solid var(--line-strong);border-radius:24px;box-shadow:var(--shadow-md);padding:26px;min-height:560px;display:flex;flex-direction:column;}
+    .stage-media{flex:1;display:flex;align-items:center;justify-content:center;min-height:420px;}
+    .gpanel{display:none;width:100%;height:100%;align-items:center;justify-content:center;flex-direction:column;}
+    .gpanel.active{display:flex;animation:fade .35s;}
+    @keyframes fade{from{opacity:0;}to{opacity:1;}}
+    .gpanel video{max-height:440px;max-width:100%;border-radius:16px;box-shadow:var(--shadow-lg);background:#000;display:block;}
+    .gpanel video.landscape{width:100%;max-height:none;}
+    .stage-cap{margin-top:20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+    .stage-cap .ct{font-family:var(--serif);font-size:19px;font-weight:600;color:var(--ink);}
+    .stage-cap .cd{font-size:14px;color:var(--ink-soft);margin-top:3px;max-width:46ch;}
+    .real-badge{flex:none;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--sage);background:var(--sage-soft);padding:5px 10px;border-radius:999px;}
+    .real-badge.mock{color:var(--coral-strong);background:var(--coral-soft);}
+
+    /* SFX panel */
+    .sfx-panel{width:100%;max-width:380px;}
+    .sfx-visual{display:flex;align-items:flex-end;justify-content:center;gap:5px;height:120px;margin-bottom:26px;}
+    .sfx-visual span{width:7px;border-radius:4px;background:linear-gradient(180deg,var(--coral),var(--sand));opacity:.85;animation:eq 1.1s ease-in-out infinite;}
+    @keyframes eq{0%,100%{height:18px;}50%{height:96px;}}
+    .sfx-chips{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;}
+    .sfx-chip{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line-strong);border-radius:999px;padding:10px 16px;font-family:var(--sans);font-size:14px;font-weight:600;color:var(--ink);cursor:pointer;transition:border-color .15s,transform .12s,background .15s;}
+    .sfx-chip:hover{border-color:var(--coral);transform:translateY(-1px);}
+    .sfx-chip.playing{background:var(--coral);color:#fff;border-color:var(--coral);}
+    .sfx-chip svg{flex:none;}
+
+    /* Stickers mock */
+    .stk{width:100%;max-width:380px;}
+    .stk-search{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line-strong);border-radius:12px;padding:11px 14px;color:var(--muted);font-size:14px;margin-bottom:16px;}
+    .stk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+    .stk-tile{aspect-ratio:1;border-radius:12px;display:grid;place-items:center;font-size:30px;background:var(--paper-2);border:1px solid var(--line);position:relative;overflow:hidden;}
+    .stk-tile.hot::after{content:"🔥";position:absolute;top:4px;right:5px;font-size:11px;}
+    .stk-cap{text-align:center;margin-top:14px;font-size:12.5px;color:var(--muted);}
+
+    @media (max-width:920px){
+      .gallery-shell{grid-template-columns:1fr;gap:22px;}
+      .gallery-stage{position:static;order:-1;min-height:0;padding:20px;}
+      .stage-media{min-height:340px;}
+      .gpanel video{max-height:360px;}
+      .gallery-list{flex-direction:row;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;}
+      .gx{flex:0 0 78%;scroll-snap-align:start;}
+    }
+
+    /* Trust */
+    .trust-inner{margin-top:0;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-md);display:grid;grid-template-columns:repeat(4,1fr);overflow:hidden;}
+    .trust-item{padding:26px 22px;text-align:center;border-right:1px solid var(--line);}
+    .trust-item:last-child{border-right:none;}
+    .trust-item .big{font-family:var(--serif);font-size:18px;font-weight:600;color:var(--ink);display:flex;align-items:center;justify-content:center;gap:8px;}
+    .trust-item .sub{font-size:13px;color:var(--muted);margin-top:4px;}
+    .trust-item svg{color:var(--coral);}
+    @media (max-width:760px){.trust-inner{grid-template-columns:1fr 1fr;}.trust-item:nth-child(1),.trust-item:nth-child(2){border-bottom:1px solid var(--line);}.trust-item:nth-child(2){border-right:none;}}
+
+    /* CTA */
+    .cta-final{text-align:center;}
+    .cta-card{background:linear-gradient(155deg,#FFFDF8,#F4ECDD);border:1px solid var(--line-strong);border-radius:26px;padding:64px 40px;box-shadow:var(--shadow-md);position:relative;overflow:hidden;}
+    .cta-card::before{content:"";position:absolute;inset:0;opacity:.8;pointer-events:none;background:radial-gradient(40% 60% at 88% 0%,rgba(217,105,74,0.16),transparent 60%),radial-gradient(40% 60% at 0% 100%,rgba(110,127,99,0.14),transparent 60%);}
+    .cta-card>*{position:relative;z-index:1;}
+    .cta-card h2{font-size:clamp(30px,4vw,46px);max-width:18ch;margin:0 auto;}
+    .cta-card p{font-size:18px;color:var(--ink-soft);margin:18px auto 30px;max-width:54ch;}
+    .cta-card .waitlist-form,.cta-card .form-success-card{margin-left:auto;margin-right:auto;}
+    .cta-card .form-note,.cta-card .form-status{justify-content:center;text-align:center;}
+
+    footer{padding:56px 0 40px;border-top:1px solid var(--line);}
+    .foot-grid{display:flex;justify-content:space-between;align-items:flex-start;gap:40px;flex-wrap:wrap;}
+    .foot-brand{max-width:330px;}
+    .foot-brand p{color:var(--ink-soft);font-size:15px;margin-top:14px;}
+    .foot-cols{display:flex;gap:64px;flex-wrap:wrap;}
+    .foot-col h5{font-size:13px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin:0 0 14px;font-weight:700;}
+    .foot-col a{display:block;color:var(--ink-soft);font-size:15px;margin-bottom:10px;transition:color .15s;}
+    .foot-col a:hover{color:var(--coral-strong);}
+    .foot-bottom{margin-top:44px;padding-top:22px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:13.5px;color:var(--muted);}
+    .badge-progress{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--coral-strong);background:var(--coral-soft);padding:5px 12px;border-radius:999px;font-weight:600;}
+    .dot-live{width:8px;height:8px;border-radius:50%;background:var(--sage);animation:pulse 2s infinite;}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(110,127,99,0.45);}70%{box-shadow:0 0 0 7px rgba(110,127,99,0);}100%{box-shadow:0 0 0 0 rgba(110,127,99,0);}}
+
+    .reveal{opacity:0;transform:translateY(22px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);}
+    .reveal.in{opacity:1;transform:none;}
+
+    @media (max-width:820px){.cards-3,.steps{grid-template-columns:1fr;}section{padding:64px 0;}}
+    @media (max-width:480px){.wrap{padding:0 20px;}.field-row{flex-direction:column;}.field-row .btn{width:100%;}.trust-inner{grid-template-columns:1fr;}.trust-item{border-right:none !important;border-bottom:1px solid var(--line);}.trust-item:last-child{border-bottom:none;}.stk-grid{grid-template-columns:repeat(4,1fr);}}
+    @media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important;scroll-behavior:auto !important;}.reveal{opacity:1;transform:none;}}
+  </style>
+</head>
+<body>
+
+  <header class="nav" id="nav">
+    <div class="wrap nav-inner">
+      <a href="#top" class="brand" aria-label="OpenNolan home">
+        <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#D9694A"/><path d="M13 10.2l9.2 5.8-9.2 5.8z" fill="#FBF8F1"/></svg>
+        OpenNolan
+      </a>
+      <nav class="nav-links">
+        <a href="#problem" class="navlink">Why</a>
+        <a href="#playbook" class="navlink">The playbook</a>
+        <a href="#features" class="navlink">Features</a>
+        <a href="#" class="navlink" data-github hidden>GitHub</a>
+      </nav>
+      <div class="nav-cta">
+        <a href="#" class="btn btn-ghost" data-github hidden style="padding:10px 16px;">GitHub</a>
+        <a href="#waitlist" class="btn btn-primary">Join the waitlist</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+
+    <!-- HERO -->
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <span class="eyebrow">For founders &amp; builders · short-form that converts</span>
+          <h1>Make content people actually <span class="accent">stop</span> for.</h1>
+          <p class="hero-sub">OpenNolan turns your product into scroll-stopping Reels and TikToks — finding the trending hooks, memes, sounds and fast cuts that vertical video needs to win attention. On your Mac, with your own key.</p>
+
+          <form class="hero-form waitlist-form" novalidate>
+            <div class="field-row">
+              <input type="email" name="email" placeholder="you@startup.com" autocomplete="email" required aria-label="Email address" />
+              <input type="text" name="company" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+              <button type="submit" class="btn btn-primary">Join the waitlist</button>
+            </div>
+            <p class="form-note">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              Be first when the Mac app ships. No spam — just the launch.
+            </p>
+            <p class="form-status" role="status" aria-live="polite"></p>
+          </form>
+          <div class="form-success-card" role="status">
+            <h4>You're on the list 🎬</h4>
+            <p>Check your inbox — we just sent a confirmation. We'll email you again the moment OpenNolan is ready to download.</p>
+          </div>
+
+          <div class="hero-actions">
+            <button class="btn btn-disabled" disabled aria-disabled="true">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.5 1c-1.3.08-2.8.87-3.7 1.9-.8.92-1.5 2.3-1.2 3.6 1.4.1 2.85-.7 3.72-1.74.83-1 1.43-2.36 1.18-3.76zM20.9 17.2c-.55 1.27-.82 1.84-1.53 2.97-1 1.57-2.4 3.53-4.14 3.54-1.55.02-1.95-1-4.05-.99-2.1.01-2.54 1.01-4.09.99-1.74-.01-3.07-1.78-4.07-3.36C1.2 16.9.9 11.7 2.6 9c1.2-1.93 3.1-3.06 4.88-3.06 1.82 0 2.96 1 4.46 1 1.46 0 2.35-1 4.45-1 1.59 0 3.27.86 4.47 2.36-3.93 2.15-3.29 7.76.04 8.9z"/></svg>
+              Download for Mac <span class="soon">Soon</span>
+            </button>
+            <a href="#features" class="btn btn-ghost">See it in action</a>
+          </div>
+        </div>
+
+        <div class="hero-visual reveal">
+          <div class="editor-stage">
+            <div class="ed-window" id="edWindow" role="img" aria-label="The OpenNolan editor: an AI agent assembles a vertical video on a timeline — placing cuts, trimming clips, adding music, dropping in a screenshot, searching the web and rendering.">
+
+              <!-- title bar -->
+              <div class="ed-titlebar">
+                <div class="ed-lights" aria-hidden="true"><i class="l-r"></i><i class="l-a"></i><i class="l-g"></i></div>
+                <div class="ed-title">OpenNolan — Editor</div>
+                <div class="ed-project">test-demo</div>
+              </div>
+
+              <!-- toolbar -->
+              <div class="ed-toolbar" aria-hidden="true">
+                <button class="tb tb-pill" data-tb="text" tabindex="-1">+ Text</button>
+                <button class="tb tb-pill" data-tb="image" tabindex="-1">+ Image</button>
+                <span class="tb-div"></span>
+                <span class="tb-label">9:16 · 1080×1920</span>
+                <span class="tb-div"></span>
+                <button class="tb tb-pill" data-tb="split" tabindex="-1">Split</button>
+                <button class="tb tb-pill" data-tb="dup" tabindex="-1">Duplicate</button>
+                <button class="tb tb-pill" data-tb="del" tabindex="-1">Delete</button>
+                <span class="tb-div"></span>
+                <span class="tb-speed"><span>0.5×</span><span class="on">1×</span><span>1.5×</span><span>2×</span><span>4×</span></span>
+                <button class="tb tb-render" id="tbRender" data-tb="render" tabindex="-1">Render</button>
+              </div>
+
+              <!-- body: agent rail | canvas | inspector -->
+              <div class="ed-body">
+                <aside class="ed-agent" aria-hidden="true">
+                  <div class="ag-head"><span class="ag-dot"></span> Agent</div>
+                  <ul class="ag-feed" id="agFeed"></ul>
+                  <div class="ag-pipe" id="agPipe">
+                    <span class="pp" data-pp="research">research</span>
+                    <span class="pp" data-pp="edit">edit</span>
+                    <span class="pp" data-pp="compose">compose</span>
+                    <span class="pp" data-pp="publish">publish</span>
+                  </div>
+                  <div class="ag-input"><span>Message the agent…</span><b class="ag-send">Send</b></div>
+                </aside>
+
+                <div class="ed-canvas">
+                  <video id="edVideo" src="assets/gallery/showcase-web.mp4" poster="assets/gallery/showcase-web.jpg" muted loop playsinline preload="metadata" aria-label="Preview of the reel being edited"></video>
+                  <div class="cv-play" id="cvPlay" aria-hidden="true"><svg viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg></div>
+                  <div class="cv-search" id="cvSearch" aria-hidden="true">
+                    <div class="cs-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg><span id="csQuery"></span></div>
+                    <div class="cs-tiles"><i></i><i></i><i></i></div>
+                  </div>
+                  <div class="cv-shot" id="cvShot" aria-hidden="true"><em>dashboard.png</em><span class="shot-bar"></span><span class="shot-bar"></span><span class="shot-bar"></span></div>
+                  <div class="cv-cap" id="cvCap" aria-hidden="true"><b>make people <span class="kw">stop</span></b></div>
+                  <div class="cv-hud" id="cvHud" aria-hidden="true">src 0:00.0 · timeline 0:00.0 / 1:20.0</div>
+                  <div class="ed-toast" id="edToast" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg>
+                    Rendered · 1:20.9 · 1080×1920
+                  </div>
+                </div>
+
+                <aside class="ed-inspector" id="edInspector" aria-hidden="true">
+                  <div class="in-head">Clip — <b id="inClip">c01_th_hook</b></div>
+                  <div class="in-grp"><div class="in-lab">Source</div><div class="in-val ell">7ECA7F2D-6F48-…</div></div>
+                  <div class="in-grp"><div class="in-lab">Trim &amp; speed</div>
+                    <div class="in-fields">
+                      <div class="in-f"><label>In (s)</label><span id="inIn">0.00</span></div>
+                      <div class="in-f"><label>Out (s)</label><span id="inOut">2.64</span></div>
+                      <div class="in-f"><label>Speed</label><span>1.0×</span></div>
+                    </div>
+                  </div>
+                  <div class="in-grp"><div class="in-lab">Crop</div><div class="in-link">+ add crop</div></div>
+                  <div class="in-grp"><div class="in-lab">Transitions</div>
+                    <div class="in-fields col">
+                      <div class="in-f"><label>In</label><span>Hard cut</span></div>
+                      <div class="in-f"><label>Out</label><span>Hard cut</span></div>
+                      <div class="in-f"><label>Duration</label><span>0.5s</span></div>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+
+              <!-- timeline dock -->
+              <div class="ed-timeline">
+                <div class="tl-head">
+                  <span class="tl-total mono">1:20.9 total</span>
+                  <span class="tl-zoom" id="tlZoom" aria-hidden="true"><i class="tz-track"></i><i class="tz-thumb"></i></span>
+                </div>
+                <div class="tl-ruler mono" aria-hidden="true">
+                  <span>0:02</span><span>0:04</span><span>0:06</span><span>0:08</span><span>0:10</span><span>0:12</span><span>0:14</span>
+                </div>
+                <div class="tl-tracks">
+                  <div class="tl-track" id="trkVideo">
+                    <div class="clip c-coral" data-clip="hook"   style="left:0%;width:18%"><span>7ECA7F2D-6F48-…</span></div>
+                    <div class="clip c-lav"   data-clip="thesis" style="left:18.6%;width:38%"><span>anim_b2_thesis</span></div>
+                    <div class="clip c-sage"  data-clip="title"  style="left:57.2%;width:42%"><span>claim_b3_opener_title</span></div>
+                    <div class="clip c-sand ov" data-clip="shot" style="left:64%;width:11%"><span>dashboard.png</span></div>
+                  </div>
+                  <div class="tl-track tl-audio" id="trkAudio">
+                    <div class="clip c-music" data-clip="music" style="left:0%;width:99%"><span>track_warm_pulse.mp3</span><div class="wave" aria-hidden="true"></div></div>
+                  </div>
+                  <div class="tl-playhead" id="tlPlayhead"></div>
+                </div>
+              </div>
+
+              <!-- ghost cursor -->
+              <div class="ed-cursor" id="edCursor" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M5 3l14 7-6 1.5L9 18z" fill="var(--coral)" stroke="#fff" stroke-width="1.2"/></svg>
+              </div>
+            </div>
+
+            <div class="ed-status" id="edStatus"><span class="es-spin" aria-hidden="true"></span><span id="esLabel">Reading the brief…</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PROBLEM -->
+    <section class="problem" id="problem">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <span class="eyebrow">Why your videos aren't landing</span>
+          <h2>Great product. And nobody's watching.</h2>
+          <p>Short-form is how products get discovered now — but the videos that actually travel don't look like the ones founders make.</p>
+        </div>
+        <div class="cards-3">
+          <div class="pcard reveal">
+            <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BF4E2E" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+            <h3>The first second decides it</h3>
+            <p>Scrollers bail in under a second. With no hook to stop the thumb, your view count dies before your pitch even starts.</p>
+          </div>
+          <div class="pcard reveal">
+            <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BF4E2E" stroke-width="2" aria-hidden="true"><path d="m4 16 5-6 4 4 7-8"/><path d="M4 20h16"/></svg></div>
+            <h3>Flat and slow gets skipped</h3>
+            <p>Calmly talking to camera is a desktop habit. The feed rewards fast cuts, motion, memes and pattern interrupts — editing you don't have time for.</p>
+          </div>
+          <div class="pcard reveal">
+            <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BF4E2E" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v8m-4-4h8"/></svg></div>
+            <h3>Editing eats your week</h3>
+            <p>Hunting trending audio, cutting B-roll, syncing captions, adding proof — it's a part-time job you never signed up for.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PLAYBOOK / INSIGHT -->
+    <section class="insight" id="playbook">
+      <div class="wrap">
+        <div class="section-head reveal" style="margin-bottom:8px;">
+          <span class="eyebrow">The short-form playbook</span>
+          <h2>Vertical video is a fight for attention — and it has rules.</h2>
+          <p class="lead">Every reel that travels runs the same formula. OpenNolan bakes it in: it finds the trending pieces and assembles the high-paced cut, so you ship videos that follow the playbook without studying it.</p>
+        </div>
+        <div class="principles">
+          <div class="principle reveal"><span class="n">01</span><h4>Hook in &lt;1s</h4><p>Open on the payoff or a pattern interrupt before anyone can scroll.</p></div>
+          <div class="principle reveal"><span class="n">02</span><h4>Cut every 1–3s</h4><p>Hard cuts and motion reset attention and keep the thumb still.</p></div>
+          <div class="principle reveal"><span class="n">03</span><h4>Trending sound</h4><p>Ride the audio and memes the algorithm is already pushing.</p></div>
+          <div class="principle reveal"><span class="n">04</span><h4>Captions on mute</h4><p>85% watch with sound off — burned-in captions carry the message.</p></div>
+          <div class="principle reveal"><span class="n">05</span><h4>Show receipts</h4><p>Screenshots, stats and proof make the claim land and convert.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section id="how">
+      <div class="wrap">
+        <div class="section-head center reveal">
+          <span class="eyebrow">How it works</span>
+          <h2>From product to posted — without the editing grind.</h2>
+        </div>
+        <div class="steps">
+          <div class="step reveal">
+            <span class="num">1</span>
+            <h3>Bring your product</h3>
+            <p>Drop in a screen recording or clip, or just describe it. Add your own API key — no account, no subscription.</p>
+          </div>
+          <div class="step reveal">
+            <span class="num">2</span>
+            <h3>It engineers the attention</h3>
+            <p>OpenNolan pulls trending hooks, memes, GIFs and sounds, and cuts a fast-paced first draft tuned for the feed.</p>
+          </div>
+          <div class="step reveal">
+            <span class="num">3</span>
+            <h3>Direct it, then ship</h3>
+            <p>Tweak anything on a real timeline — every edit is instant — then export vertical for Reels, TikTok and Shorts.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- REAL PRODUCT UI -->
+    <section id="real-app">
+      <div class="wrap">
+        <div class="section-head center reveal">
+          <span class="eyebrow">Real product UI</span>
+          <h2>This is the actual app.</h2>
+          <p>The hero is a recreation. Here's the real thing running on a Mac — Mission Control, where the agent does the work, and the editor, where you take over.</p>
+        </div>
+        <div class="shots-2up reveal">
+          <figure class="app-shot">
+            <div class="as-bar" aria-hidden="true"><i></i><i></i><i></i><span>OpenNolan — Mission Control</span></div>
+            <picture>
+              <source srcset="assets/gallery/app-screenshot-1.webp" type="image/webp" />
+              <img src="assets/gallery/app-screenshot-1.webp" loading="lazy" decoding="async" width="1800" height="1139" alt="OpenNolan Mission Control: the agent log on the left, a pipeline checklist (idea, script, research, edit, compose, publish) in the middle, and rendered asset thumbnails on the right." />
+            </picture>
+            <figcaption>Mission Control — watch the agent work: idea → script → research → edit → render.</figcaption>
+          </figure>
+          <figure class="app-shot">
+            <div class="as-bar" aria-hidden="true"><i></i><i></i><i></i><span>OpenNolan — Editor</span></div>
+            <picture>
+              <source srcset="assets/gallery/app-screenshot-2.webp" type="image/webp" />
+              <img src="assets/gallery/app-screenshot-2.webp" loading="lazy" decoding="async" width="1800" height="1245" alt="The OpenNolan editor: a vertical 9:16 preview on a dark canvas, a clip inspector on the right, and a timeline of colored clip blocks along the bottom." />
+            </picture>
+            <figcaption>The editor — every cut, clip and caption is yours to tweak.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- FEATURES GALLERY -->
+    <section id="features">
+      <div class="wrap">
+        <div class="section-head center reveal">
+          <span class="eyebrow">Everything in the box</span>
+          <h2>A whole content studio. Watch it work.</h2>
+          <p>Click any tool to see a real example — pulled from videos actually made with OpenNolan.</p>
+        </div>
+
+        <div class="gallery-shell reveal">
+          <!-- LEFT: feature list -->
+          <div class="gallery-list" role="tablist" aria-label="Features">
+            <button class="gx active" role="tab" data-feat="hooks-cuts" aria-selected="true">
+              <span class="gic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></span>
+              <span class="gtxt"><h3>Trending hooks &amp; fast cuts</h3><p>Stop the scroll in the first second, then cut fast to hold it.</p></span>
+            </button>
+            <button class="gx" role="tab" data-feat="explainer" aria-selected="false">
+              <span class="gic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg></span>
+              <span class="gtxt"><h3>Explainer animations</h3><p>Turn a concept into a clean animated explainer (Remotion / HyperFrames).</p></span>
+            </button>
+            <button class="gx" role="tab" data-feat="proof" aria-selected="false">
+              <span class="gic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 4h16v12H4z"/><path d="M7 9h7M7 12h5"/><path d="m15 14 2 2 4-4"/></svg></span>
+              <span class="gtxt"><h3>Screenshot proof</h3><p>Drop in real article screenshots and auto-highlight the receipt.</p></span>
+            </button>
+            <button class="gx" role="tab" data-feat="ai-video" aria-selected="false">
+              <span class="gic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m13 2-1.5 5L7 8.5 11.5 10 13 15l1.5-5L19 8.5 14.5 7z"/><circle cx="6" cy="17" r="2"/><circle cx="18" cy="18" r="1.5"/></svg></span>
+              <span class="gtxt"><h3>AI-generated video</h3><p>Need a shot you don't have? Generate cinematic B-roll on demand.</p></span>
+            </button>
+            <button class="gx" role="tab" data-feat="avatar" aria-selected="false">
+              <span class="gic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg></span>
+              <span class="gtxt"><h3>Avatar &amp; talking-head</h3><p>Put a face on it — talking-head with clean background removal.</p></span>
+            </button>
+            <button class="gx" role="tab" data-feat="music-sfx" aria-selected="false">
+              <span class="gic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+              <span class="gtxt"><h3>Music &amp; sound effects</h3><p>ElevenLabs sound design and music, dropped in with a click.</p></span>
+            </button>
+            <button class="gx" role="tab" data-feat="keyframe" aria-selected="false">
+              <span class="gic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 5 12l7 9 7-9z"/></svg></span>
+              <span class="gtxt"><h3>Keyframe animations</h3><p>Animate anything — position, scale, opacity — with real keyframes.</p></span>
+            </button>
+            <button class="gx" role="tab" data-feat="stickers" aria-selected="false">
+              <span class="gic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8l8-8V5a2 2 0 0 0-2-2z"/><path d="M13 21v-6a2 2 0 0 1 2-2h6"/></svg></span>
+              <span class="gtxt"><h3>Trending stickers &amp; GIFs</h3><p>Search trending GIFs, stickers and memes — drop them on the beat.</p></span>
+            </button>
+          </div>
+
+          <!-- RIGHT: stage -->
+          <div class="gallery-stage">
+            <div class="stage-media">
+              <div class="gpanel active" data-feat="hooks-cuts">
+                <video src="assets/gallery/hooks-cuts.mp4" poster="assets/gallery/hooks-cuts.jpg" muted loop playsinline preload="none"></video>
+              </div>
+              <div class="gpanel" data-feat="explainer">
+                <video src="assets/gallery/explainer.mp4" poster="assets/gallery/explainer.jpg" muted loop playsinline preload="none"></video>
+              </div>
+              <div class="gpanel" data-feat="proof">
+                <video class="landscape" src="assets/gallery/proof.mp4" poster="assets/gallery/proof.jpg" muted loop playsinline preload="none"></video>
+              </div>
+              <div class="gpanel" data-feat="ai-video">
+                <video src="assets/gallery/ai-video.mp4" poster="assets/gallery/ai-video.jpg" muted loop playsinline preload="none"></video>
+              </div>
+              <div class="gpanel" data-feat="avatar">
+                <video src="assets/gallery/avatar.mp4" poster="assets/gallery/avatar.jpg" muted loop playsinline preload="none"></video>
+              </div>
+              <div class="gpanel" data-feat="music-sfx">
+                <div class="sfx-panel">
+                  <div class="sfx-visual" aria-hidden="true">
+                    <span style="animation-delay:0s"></span><span style="animation-delay:.12s"></span><span style="animation-delay:.24s"></span><span style="animation-delay:.36s"></span><span style="animation-delay:.18s"></span><span style="animation-delay:.30s"></span><span style="animation-delay:.06s"></span><span style="animation-delay:.42s"></span><span style="animation-delay:.22s"></span><span style="animation-delay:.10s"></span><span style="animation-delay:.34s"></span><span style="animation-delay:.16s"></span>
+                  </div>
+                  <div class="sfx-chips">
+                    <button class="sfx-chip" data-sfx="assets/sfx/impact-cinematic.mp3"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg> Cinematic impact</button>
+                    <button class="sfx-chip" data-sfx="assets/sfx/sparkle-magic.mp3"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg> Sparkle</button>
+                    <button class="sfx-chip" data-sfx="assets/sfx/notification-chime.mp3"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg> Chime</button>
+                    <button class="sfx-chip" data-sfx="assets/sfx/click-soft.mp3"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg> UI click</button>
+                    <button class="sfx-chip" data-sfx="assets/sfx/music-bed.mp3"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg> Music bed</button>
+                  </div>
+                </div>
+              </div>
+              <div class="gpanel" data-feat="keyframe">
+                <video src="assets/gallery/keyframe.mp4" poster="assets/gallery/keyframe.jpg" muted loop playsinline preload="none"></video>
+              </div>
+              <div class="gpanel" data-feat="stickers">
+                <div class="stk">
+                  <div class="stk-search">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg>
+                    Search trending GIFs &amp; stickers…
+                  </div>
+                  <div class="stk-grid">
+                    <div class="stk-tile hot">🤯</div><div class="stk-tile">✨</div><div class="stk-tile hot">🚀</div><div class="stk-tile">👀</div>
+                    <div class="stk-tile">🔥</div><div class="stk-tile hot">💸</div><div class="stk-tile">📈</div><div class="stk-tile">🤝</div>
+                    <div class="stk-tile">😅</div><div class="stk-tile hot">🎯</div><div class="stk-tile">💡</div><div class="stk-tile">⚡</div>
+                  </div>
+                  <p class="stk-cap">Representative mock — trending sticker / GIF search</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="stage-cap">
+              <div>
+                <div class="ct" data-cap-title>Trending hooks &amp; fast cuts</div>
+                <div class="cd" data-cap-desc>A real vertical reel cut in OpenNolan — opening hook, hard cuts, burned-in captions and keyframed overlays.</div>
+              </div>
+              <span class="real-badge" data-cap-badge><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Real example</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TRUST -->
+    <section style="padding-top:0;">
+      <div class="wrap">
+        <div class="section-head center reveal" style="margin-bottom:34px;">
+          <span class="eyebrow">And it's all yours</span>
+          <h2>Studio power, none of the lock-in.</h2>
+        </div>
+        <div class="trust-inner reveal">
+          <div class="trust-item"><div class="big"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg> Runs on your Mac</div><div class="sub">Local-first, your files stay put</div></div>
+          <div class="trust-item"><div class="big"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="8" cy="14" r="6"/><path d="m12.5 9.5 8-8M18 4l3 3"/></svg> Bring your own key</div><div class="sub">Pay providers directly, no markup</div></div>
+          <div class="trust-item"><div class="big"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg> Edit, instantly</div><div class="sub">Render once — every edit is cheap</div></div>
+          <div class="trust-item"><div class="big"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg> Open source</div><div class="sub">No black box, no subscription</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FINAL CTA -->
+    <section class="cta-final" id="waitlist">
+      <div class="wrap">
+        <div class="cta-card reveal">
+          <span class="eyebrow center" style="display:flex;justify-content:center;">Coming soon to Mac</span>
+          <h2>Be first to make content that gets seen.</h2>
+          <p>Join the waitlist and we'll let you know the moment OpenNolan is ready — so your next launch actually breaks through the scroll.</p>
+          <form class="waitlist-form" novalidate>
+            <div class="field-row">
+              <input type="email" name="email" placeholder="you@startup.com" autocomplete="email" required aria-label="Email address" />
+              <input type="text" name="company" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+              <button type="submit" class="btn btn-primary">Join the waitlist</button>
+            </div>
+            <p class="form-note" style="justify-content:center;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              We'll only email you about the launch. Unsubscribe anytime.
+            </p>
+            <p class="form-status" role="status" aria-live="polite"></p>
+          </form>
+          <div class="form-success-card" role="status">
+            <h4>You're on the list 🎬</h4>
+            <p>Check your inbox — we just sent a confirmation. We'll email you again the moment OpenNolan is ready to download.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="foot-grid">
+        <div class="foot-brand">
+          <a href="#top" class="brand" style="font-size:20px;">
+            <svg class="mark" viewBox="0 0 32 32" aria-hidden="true" style="width:28px;height:28px;"><rect width="32" height="32" rx="9" fill="#D9694A"/><path d="M13 10.2l9.2 5.8-9.2 5.8z" fill="#FBF8F1"/></svg>
+            OpenNolan
+          </a>
+          <p>The open-source, local-first content studio that turns your product into scroll-stopping short-form video.</p>
+          <span class="badge-progress" style="margin-top:16px;"><span class="dot-live"></span> In active development</span>
+        </div>
+        <div class="foot-cols">
+          <div class="foot-col">
+            <h5>Product</h5>
+            <a href="#problem">Why OpenNolan</a>
+            <a href="#playbook">The playbook</a>
+            <a href="#features">Features</a>
+            <a href="#waitlist">Join the waitlist</a>
+          </div>
+          <div class="foot-col">
+            <h5>Project</h5>
+            <a href="#" data-github hidden>GitHub</a>
+            <a href="#waitlist">Get launch updates</a>
+          </div>
+        </div>
+      </div>
+      <div class="foot-bottom">
+        <span>© <span id="year">2026</span> OpenNolan. Open source.</span>
+        <span>The Mac app is in active development — join the waitlist for launch.</span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const CONFIG = { githubUrl: "" }; // set when the public repo goes live
+
+    document.querySelectorAll('[data-github]').forEach((el) => {
+      if (CONFIG.githubUrl) { el.href = CONFIG.githubUrl; el.hidden = false; el.target = "_blank"; el.rel = "noopener"; }
+      else { el.hidden = true; }
+    });
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    const nav = document.getElementById('nav');
+    const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 8);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+    document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+
+    /* ---------- Features gallery ---------- */
+    const CAPS = {
+      'hooks-cuts': { t: 'Trending hooks & fast cuts', d: 'A real vertical reel cut in OpenNolan — opening hook, hard cuts, burned-in captions and keyframed overlays.', real: true },
+      'explainer':  { t: 'Explainer animations', d: 'A concept turned into a clean animated explainer, built with Remotion / HyperFrames.', real: true },
+      'proof':      { t: 'Screenshot proof', d: 'Real article screenshots dropped in and auto-highlighted to back up your claim.', real: true },
+      'ai-video':   { t: 'AI-generated video', d: 'Cinematic B-roll generated on demand when you don’t have the shot you need.', real: true },
+      'avatar':     { t: 'Avatar & talking-head', d: 'Talking-head footage with clean AI background removal, ready to composite.', real: true },
+      'music-sfx':  { t: 'Music & sound effects', d: 'ElevenLabs-generated SFX and music — tap a chip to hear a real one from the library.', real: true },
+      'keyframe':   { t: 'Keyframe animations', d: 'Keyframed motion — position, scale and opacity — built with HyperFrames.', real: true },
+      'stickers':   { t: 'Trending stickers & GIFs', d: 'Search trending GIFs, stickers and memes and drop them on the beat. (Preview is a mock.)', real: false },
+    };
+    const tabs = Array.from(document.querySelectorAll('.gx'));
+    const panels = Array.from(document.querySelectorAll('.gpanel'));
+    const capTitle = document.querySelector('[data-cap-title]');
+    const capDesc = document.querySelector('[data-cap-desc]');
+    const capBadge = document.querySelector('[data-cap-badge]');
+
+    function activate(feat) {
+      tabs.forEach((t) => { const on = t.dataset.feat === feat; t.classList.toggle('active', on); t.setAttribute('aria-selected', on ? 'true' : 'false'); });
+      panels.forEach((p) => {
+        const on = p.dataset.feat === feat;
+        p.classList.toggle('active', on);
+        const v = p.querySelector('video');
+        if (v) { if (on && !reduceMotion) { v.play().catch(() => {}); } else { v.pause(); } }
+        if (!on) p.querySelectorAll('audio').forEach((a) => { a.pause(); });
+      });
+      const c = CAPS[feat];
+      if (c) {
+        capTitle.textContent = c.t;
+        capDesc.textContent = c.d;
+        capBadge.className = 'real-badge' + (c.real ? '' : ' mock');
+        capBadge.innerHTML = c.real
+          ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Real example'
+          : 'Representative mock';
+      }
+    }
+    tabs.forEach((t) => {
+      t.addEventListener('click', () => activate(t.dataset.feat));
+      t.addEventListener('keydown', (e) => {
+        const i = tabs.indexOf(t);
+        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); const n = tabs[(i + 1) % tabs.length]; n.focus(); activate(n.dataset.feat); }
+        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); const n = tabs[(i - 1 + tabs.length) % tabs.length]; n.focus(); activate(n.dataset.feat); }
+      });
+    });
+    activate('hooks-cuts');
+
+    /* SFX chips */
+    let sfxAudio = null, sfxEl = null;
+    document.querySelectorAll('.sfx-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        if (sfxAudio) { sfxAudio.pause(); }
+        if (sfxEl) sfxEl.classList.remove('playing');
+        sfxAudio = new Audio(chip.dataset.sfx);
+        sfxEl = chip;
+        chip.classList.add('playing');
+        sfxAudio.play().catch(() => {});
+        sfxAudio.onended = () => chip.classList.remove('playing');
+      });
+    });
+
+    /* ---------- Hero: the OpenNolan editor assembling a cut ---------- */
+    (function () {
+      const win = document.getElementById('edWindow');
+      if (!win) return;
+      const video = document.getElementById('edVideo');
+      const statusLabel = document.getElementById('esLabel');
+      const hud = document.getElementById('cvHud');
+      const playhead = document.getElementById('tlPlayhead');
+      const cursor = document.getElementById('edCursor');
+      const feed = document.getElementById('agFeed');
+      const zoom = document.getElementById('tlZoom');
+      const inClip = document.getElementById('inClip');
+      const inOut = document.getElementById('inOut');
+      const LOOP_MS = 14000, SWEEP_START = 1700, SWEEP_END = 11300, TL_RIGHT = 0.99;
+      let trackW = 0;
+
+      const q = (s) => win.querySelector(s);
+      const clip = (name) => win.querySelector('.clip[data-clip="' + name + '"]');
+
+      const wave = win.querySelector('.wave');
+      if (wave && !wave.childElementCount) {
+        for (let i = 0; i < 38; i++) { const b = document.createElement('i'); b.style.animationDelay = (i * 0.04) + 's'; wave.appendChild(b); }
+      }
+
+      function measure() { const t = q('#trkVideo'); trackW = t ? t.offsetWidth : 0; }
+      function moveCursor(target, dx, dy) {
+        if (!target) return;
+        const w = win.getBoundingClientRect(), t = target.getBoundingClientRect();
+        cursor.style.transform = 'translate(' + (t.left - w.left + (dx || 0)) + 'px,' + (t.top - w.top + (dy || 0)) + 'px)';
+      }
+      function press(sel) { const el = q(sel); if (!el) return; el.classList.add('pressed'); setTimeout(() => el.classList.remove('pressed'), 460); }
+      function swapText(el, txt) { if (!el) return; el.classList.remove('swap'); void el.offsetWidth; el.textContent = txt; el.classList.add('swap'); }
+      function say(t) { swapText(statusLabel, t); }
+      function pp(stage, state) { const el = win.querySelector('.pp[data-pp="' + stage + '"]'); if (!el) return; if (state === 'busy') { el.classList.add('busy'); } else { el.classList.remove('busy'); el.classList.add('done'); } }
+      function pushCard(icon, text) {
+        if (!feed) return;
+        feed.querySelectorAll('.ag-card').forEach((c) => c.classList.add('faded'));
+        const li = document.createElement('li');
+        li.className = 'ag-card show';
+        li.innerHTML = '<i class="ag-ic"></i><span></span><b class="ag-bar"></b>';
+        li.querySelector('.ag-ic').textContent = icon;
+        li.querySelector('span').textContent = text;
+        feed.appendChild(li);
+        while (feed.children.length > 3) feed.removeChild(feed.firstElementChild);
+      }
+      function typeQuery(str) {
+        const el = q('#csQuery'); if (!el) return;
+        el.textContent = ''; let i = 0;
+        (function step() { if (i <= str.length) { el.textContent = str.slice(0, i++); setTimeout(step, 36); } })();
+      }
+
+      function reset() {
+        win.querySelectorAll('.clip').forEach((c) => c.classList.remove('placed', 'trim'));
+        q('#trkAudio').classList.remove('show');
+        q('#cvPlay').classList.remove('gone');
+        ['#cvShot', '#cvSearch', '#cvCap', '#edToast'].forEach((s) => q(s).classList.remove('show'));
+        q('#edInspector').classList.remove('lit');
+        q('#tbRender').classList.remove('pulsing', 'done');
+        if (zoom) zoom.classList.remove('fit');
+        win.querySelectorAll('.pp').forEach((p) => p.classList.remove('busy', 'done'));
+        inOut.textContent = '2.64';
+        inClip.textContent = 'c01_th_hook';
+        if (feed) feed.innerHTML = '';
+        cursor.style.transform = 'translate(14px,' + (win.offsetHeight - 38) + 'px)';
+        pushCard('📋', 'Reading the brief');
+        say('Reading the brief…');
+      }
+
+      const BEATS = [
+        { t: 0,     fn: reset },
+        { t: 700,   fn: () => { clip('hook').classList.add('placed'); moveCursor(clip('hook'), 6, -16); q('#edInspector').classList.add('lit'); swapText(inClip, 'c01_th_hook'); pp('research', 'busy'); say('Placing the hook cut…'); pushCard('✂️', 'Placing the hook cut'); } },
+        { t: 1700,  fn: () => { q('#cvPlay').classList.add('gone'); pp('research', 'done'); say('Previewing the open…'); } },
+        { t: 2500,  fn: () => { clip('thesis').classList.add('placed'); moveCursor(clip('thesis'), 6, -16); press('[data-tb="split"]'); swapText(inClip, 'anim_b2_thesis'); pp('edit', 'busy'); say('Cutting the thesis beat…'); pushCard('🎬', 'B2 — the thesis beat'); } },
+        { t: 3700,  fn: () => { clip('title').classList.add('placed'); moveCursor(clip('title'), 6, -16); if (zoom) zoom.classList.add('fit'); swapText(inClip, 'claim_b3_opener_title'); say('Adding the claim title…'); pushCard('🏷️', 'claim_b3_opener_title'); } },
+        { t: 4900,  fn: () => { const c = clip('thesis'); c.classList.add('trim'); moveCursor(c, c.offsetWidth - 8, -10); swapText(inOut, '6.40'); say('Trimming the dead air…'); } },
+        { t: 6100,  fn: () => { q('#trkAudio').classList.add('show'); clip('music').classList.add('placed'); moveCursor(q('#trkAudio'), 18, 4); say('Adding a music track…'); pushCard('🔊', 'track_warm_pulse.mp3'); } },
+        { t: 7400,  fn: () => { press('[data-tb="image"]'); moveCursor(q('[data-tb="image"]'), 4, 16); q('#cvShot').classList.add('show'); clip('shot').classList.add('placed'); pp('edit', 'done'); pp('compose', 'busy'); say('Dropping in a screenshot…'); pushCard('🖼️', 'dashboard.png'); } },
+        { t: 8700,  fn: () => { q('#cvSearch').classList.add('show'); typeQuery('founder b-roll · product demo'); moveCursor(q('#cvSearch'), 28, 10); say('Searching the web for B-roll…'); pushCard('🔎', 'searching trends'); setTimeout(() => { const s = q('#cvSearch'); if (s) s.classList.remove('show'); }, 1200); } },
+        { t: 10000, fn: () => { q('#cvCap').classList.add('show'); say('Writing captions…'); pushCard('💬', 'make people STOP'); } },
+        { t: 11300, fn: () => { const r = q('#tbRender'); moveCursor(r, 12, 8); r.classList.add('pulsing', 'done'); pp('compose', 'done'); pp('publish', 'busy'); say('Rendering the cut…'); } },
+        { t: 12200, fn: () => { q('#cvShot').classList.remove('show'); q('#edToast').classList.add('show'); pp('publish', 'done'); say('Done — your turn to tweak.'); pushCard('✅', 'Rendered · 1:20.9'); } },
+      ];
+
+      if (reduceMotion) {
+        win.querySelectorAll('.clip').forEach((c) => c.classList.add('placed'));
+        clip('thesis').classList.add('trim');
+        q('#trkAudio').classList.add('show');
+        q('#cvPlay').classList.add('gone');
+        q('#cvCap').classList.add('show');
+        q('#edToast').classList.add('show');
+        q('#edInspector').classList.add('lit');
+        q('#tbRender').classList.add('done');
+        win.querySelectorAll('.pp').forEach((p) => p.classList.add('done'));
+        inOut.textContent = '6.40';
+        hud.textContent = 'src 0:02.6 · timeline 1:20.9 / 1:20.9';
+        if (zoom) zoom.classList.add('fit');
+        measure(); if (playhead) playhead.style.transform = 'translateX(' + (trackW * TL_RIGHT) + 'px)';
+        cursor.style.display = 'none';
+        if (feed) { feed.innerHTML = ''; pushCard('✅', 'Rendered · 1:20.9'); }
+        say('Done — your turn to tweak.');
+        return; /* reduced motion: rely on the poster; don't autoplay/loop the video */
+      }
+
+      let loopStart = 0, lastFired = -1, running = false, raf = 0, lastHud = '';
+      function frame(now) {
+        if (!loopStart) loopStart = now;
+        let el = now - loopStart;
+        if (el >= LOOP_MS) { loopStart = now; el = 0; lastFired = -1; }
+        for (let i = 0; i < BEATS.length; i++) { if (BEATS[i].t <= el && i > lastFired) { BEATS[i].fn(); lastFired = i; } }
+        const p = Math.min(Math.max((el - SWEEP_START) / (SWEEP_END - SWEEP_START), 0), 1);
+        if (playhead) playhead.style.transform = 'translateX(' + (p * trackW * TL_RIGHT) + 'px)';
+        const secs = p * 14;
+        const hudStr = 'src 0:00.0 · timeline 0:' + String(Math.floor(secs)).padStart(2, '0') + '.' + Math.floor((secs * 10) % 10) + ' / 1:20.0';
+        if (hudStr !== lastHud) { hud.textContent = hudStr; lastHud = hudStr; }
+        raf = requestAnimationFrame(frame);
+      }
+      function startLoop() { if (running) return; running = true; measure(); loopStart = 0; lastFired = -1; raf = requestAnimationFrame(frame); }
+      function stopLoop() { running = false; cancelAnimationFrame(raf); }
+
+      measure(); reset();
+      window.addEventListener('resize', measure, { passive: true });
+
+      new IntersectionObserver((es) => {
+        es.forEach((e) => {
+          if (e.isIntersecting) { startLoop(); if (video) video.play().catch(() => {}); }
+          else { stopLoop(); if (video) video.pause(); }
+        });
+      }, { threshold: 0.15 }).observe(win);
+    })();
+
+    /* ---------- Waitlist form ---------- */
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    function setStatus(form, msg, type) { const s = form.querySelector('.form-status'); if (!s) return; s.textContent = msg || ''; s.className = 'form-status' + (type ? ' ' + type : ''); }
+    function showSuccess(form) {
+      const card = form.nextElementSibling && form.nextElementSibling.classList.contains('form-success-card') ? form.nextElementSibling : null;
+      if (card) { form.style.display = 'none'; card.classList.add('show'); }
+      else { setStatus(form, "You're on the list 🎬 We'll email you at launch.", 'success'); }
+    }
+    document.querySelectorAll('.waitlist-form').forEach((form) => {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const emailInput = form.querySelector('input[name="email"]');
+        const honeypot = form.querySelector('input[name="company"]');
+        const btn = form.querySelector('button[type="submit"]');
+        const email = (emailInput.value || '').trim().toLowerCase();
+        if (!EMAIL_RE.test(email)) { setStatus(form, 'Please enter a valid email address.', 'error'); emailInput.focus(); return; }
+        const original = btn.textContent;
+        btn.disabled = true; btn.textContent = 'Joining…'; setStatus(form, '', '');
+        try {
+          const res = await fetch('/api/waitlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, company: honeypot ? honeypot.value : '', ref: location.pathname }) });
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            if (data.alreadyJoined) { setStatus(form, "You're already on the list — see you at launch! 🎬", 'success'); }
+            else { showSuccess(form); }
+          } else {
+            const data = await res.json().catch(() => ({}));
+            setStatus(form, data.error || 'Something went wrong. Please try again.', 'error');
+            btn.disabled = false; btn.textContent = original;
+          }
+        } catch (err) {
+          setStatus(form, 'Network error — please try again in a moment.', 'error');
+          btn.disabled = false; btn.textContent = original;
+        }
+      });
+    });
+  </script>
+</body>
+</html>

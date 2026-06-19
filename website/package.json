@@ -1,0 +1,12 @@
+{
+  "name": "opennolan-website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Landing page + waitlist for the OpenNolan Mac app",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel deploy --prod"
+  },
+  "dependencies": {}
+}
