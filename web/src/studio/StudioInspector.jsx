@@ -4,8 +4,9 @@
 // not per keystroke) through the schema-safe interp mutators passed from Studio.
 
 import { useEffect, useState } from 'react'
-import { TRANSITIONS, TEXT_ANCHORS, overlayKind, anchorToXY } from './model.js'
+import { TRANSITIONS, TEXT_ANCHORS, SPEED_PRESETS, overlayKind, anchorToXY } from './model.js'
 import StudioKeyframes from './StudioKeyframes.jsx'
+import StudioAssets from './StudioAssets.jsx'
 
 // ── tiny fields (commit on blur / Enter) ────────────────────────────────────
 function NumField({ label, value, onCommit, step = 0.1, min, max, suffix }) {
@@ -57,14 +58,11 @@ function SelectField({ label, value, options, onCommit }) {
 }
 
 export default function StudioInspector({
-  doc, canvas, ffmpeg, selCut, selOverlayIndex, playhead, assets, sourceMetas,
-  onUpdateCut, onUpdateOverlay, onSetKeyframes, onUpsertKeyframe, onRemoveKeyframe,
+  projectId, doc, canvas, ffmpeg, selCut, selOverlayIndex, selAudio, selAudioObj, playhead, assets, sourceMetas,
+  onUpdateCut, onUpdateOverlay, onUpdateAudio, onSetKeyframes, onUpsertKeyframe, onRemoveKeyframe,
+  onAddImage, onAddClip, onAddSfx, onSetMusic,
 }) {
   const selOverlay = selOverlayIndex >= 0 ? (doc?.overlays || [])[selOverlayIndex] : null
-
-  if (!selCut && !selOverlay) {
-    return <aside className="st-inspector"><div className="st-insp-empty">Select a clip or overlay to edit it.</div></aside>
-  }
 
   if (selCut) return (
     <aside className="st-inspector">
@@ -76,7 +74,7 @@ export default function StudioInspector({
     </aside>
   )
 
-  return (
+  if (selOverlay) return (
     <aside className="st-inspector">
       <OverlayInspector
         ov={selOverlay} index={selOverlayIndex} canvas={canvas} ffmpeg={ffmpeg} assets={assets} playhead={playhead}
@@ -85,6 +83,74 @@ export default function StudioInspector({
         NumField={NumField} TextField={TextField} SelectField={SelectField}
       />
     </aside>
+  )
+
+  if (selAudioObj) return (
+    <aside className="st-inspector">
+      <AudioInspector
+        obj={selAudioObj} kind={selAudio.audioKind} assets={assets}
+        onUpdate={onUpdateAudio} NumField={NumField} SelectField={SelectField}
+      />
+    </aside>
+  )
+
+  // Nothing selected → the Assets tab (feat 4): clicking outside any clip shows assets, not a blank panel.
+  return (
+    <StudioAssets
+      projectId={projectId} assets={assets}
+      onAddImage={onAddImage} onAddClip={onAddClip} onAddSfx={onAddSfx} onSetMusic={onSetMusic}
+    />
+  )
+}
+
+// ── audio (music bed / narration segment / sfx) ──────────────────────────────
+function AudioInspector({ obj, kind, assets, onUpdate, NumField, SelectField }) {
+  const music = assets?.kinds?.music || []
+  const audio = assets?.kinds?.audio || []
+  const pool = kind === 'music' ? [...music, ...audio] : [...audio, ...music]
+  const assetOpts = [
+    ...(pool.some(a => a.path === obj.asset_id) || !obj.asset_id ? [] : [{ value: obj.asset_id, label: `${obj.asset_id} (current)` }]),
+    ...pool.map(a => ({ value: a.path, label: a.name })),
+  ]
+  const title = kind === 'music' ? 'Music bed' : kind === 'narration' ? 'Narration' : 'Sound effect'
+
+  return (
+    <>
+      <h3 className="st-insp-head">{title}</h3>
+      <section className="st-sec">
+        <div className="st-sec-h">Asset</div>
+        <SelectField label="File" value={obj.asset_id ?? ''} options={assetOpts} onCommit={(v) => onUpdate({ asset_id: v })} />
+      </section>
+
+      {kind === 'music' ? (
+        <section className="st-sec">
+          <div className="st-sec-h">Levels</div>
+          <NumField label="Volume" value={obj.volume ?? 1} step={0.05} min={0} max={1} onCommit={(v) => onUpdate({ volume: v })} />
+          <div className="st-row">
+            <NumField label="Fade in" suffix="s" value={obj.fade_in_seconds ?? 0} step={0.1} min={0} onCommit={(v) => onUpdate({ fade_in_seconds: v })} />
+            <NumField label="Fade out" suffix="s" value={obj.fade_out_seconds ?? 0} step={0.1} min={0} onCommit={(v) => onUpdate({ fade_out_seconds: v })} />
+          </div>
+          <div className="st-hint">plays under the whole timeline (trimmed to the video length on render)</div>
+        </section>
+      ) : kind === 'narration' ? (
+        <section className="st-sec">
+          <div className="st-sec-h">Timing</div>
+          <div className="st-row">
+            <NumField label="Start" suffix="s" value={obj.start_seconds ?? 0} min={0} onCommit={(v) => onUpdate({ start_seconds: v })} />
+            <NumField label="End" suffix="s" value={obj.end_seconds ?? 0} min={0} onCommit={(v) => onUpdate({ end_seconds: v })} />
+          </div>
+        </section>
+      ) : (
+        <section className="st-sec">
+          <div className="st-sec-h">Timing &amp; level</div>
+          <NumField label="Start" suffix="s" value={obj.start_seconds ?? 0} min={0} onCommit={(v) => onUpdate({ start_seconds: v })} />
+          <NumField label="Volume" value={obj.volume ?? 1} step={0.05} min={0} max={1} onCommit={(v) => onUpdate({ volume: v })} />
+          <div className="st-hint">plays once from the start point</div>
+        </section>
+      )}
+
+      <div className="st-hint">Delete with the 🗑 button in the timeline toolbar (⌫).</div>
+    </>
   )
 }
 
@@ -127,6 +193,16 @@ function CutInspector({ cut, canvas, ffmpeg, assets, meta, onUpdate, NumField, T
           <NumField label="Out" suffix="s" value={cut.out_seconds} min={0} onCommit={(v) => onUpdate({ out_seconds: v })} />
         </div>
         <NumField label="Speed" suffix="×" value={cut.speed ?? 1} step={0.1} min={0.1} onCommit={(v) => onUpdate({ speed: v })} />
+        <div className="st-speed">
+          {SPEED_PRESETS.map(s => (
+            <button
+              key={s}
+              className={`st-chip ${(Number(cut.speed) || 1) === s ? 'on' : ''}`}
+              onClick={() => onUpdate({ speed: s })}
+              title={`${s}× speed`}
+            >{s}×</button>
+          ))}
+        </div>
       </section>
 
       <section className="st-sec">

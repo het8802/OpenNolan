@@ -19,6 +19,10 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
   const sourceTime = hit?.sourceTime || 0
   const dur = interp.timelineDuration(doc)
 
+  // Latest render values for the rAF clock to read without re-subscribing every frame.
+  const liveRef = useRef(null)
+  liveRef.current = { doc, hit, previewMode, dur, onScrub, onPlayingChange }
+
   // When playing reaches a cut's out-point, jump to the next cut (or stop at the end).
   const advanceSource = (v) => {
     const cut = hit?.cut
@@ -84,17 +88,48 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
     if (v.paused && Math.abs(v.currentTime - playhead) > 0.25) { try { v.currentTime = playhead } catch {} }
   }, [previewMode, playhead])
 
-  const onSrcTime = (e) => {
-    const v = e.target
+  // SMOOTH PLAYHEAD (feat 6): while playing, drive the playhead from the video clock every
+  // animation frame (~60fps) instead of coarse 'timeupdate' events (~4-15fps). In source mode
+  // it also advances to the next cut at the out-point. Reads liveRef so it never re-subscribes
+  // per frame; the only effect dep is `playing`.
+  useEffect(() => {
     if (!playing) return
-    const cut = hit?.cut
-    if (!cut) return
-    const inS = Number(cut.in_seconds) || 0
-    const outS = Number(cut.out_seconds) || 0
-    const speed = Number(cut.speed) || 1
-    if (v.currentTime >= outS - 0.02) { advanceSource(v); return }
-    onScrub(hit.start + (v.currentTime - inS) / speed)
-  }
+    let raf = 0
+    const tick = () => {
+      const st = liveRef.current
+      if (st.previewMode === 'source') {
+        const v = srcRef.current
+        const cut = st.hit?.cut
+        if (v && cut) {
+          const inS = Number(cut.in_seconds) || 0
+          const outS = Number(cut.out_seconds) || 0
+          const speed = Number(cut.speed) || 1
+          if (v.currentTime >= outS - 0.02) {
+            const cuts = st.doc.cuts || []
+            const ni = st.hit.index + 1
+            if (ni < cuts.length) {
+              const next = cuts[ni]
+              st.onScrub(st.hit.start + interp.cutDuration(cut) + 1e-3) // → next cut
+              if (next.source === cut.source) { // same element keeps playing — reseek to its in-point
+                try { v.currentTime = Number(next.in_seconds) || 0 } catch { /* not ready */ }
+                v.playbackRate = Number(next.speed) || 1
+              }
+            } else {
+              st.onScrub(st.dur); st.onPlayingChange(false); try { v.pause() } catch { /* noop */ }
+            }
+          } else {
+            st.onScrub(st.hit.start + (v.currentTime - inS) / speed)
+          }
+        }
+      } else {
+        const v = renRef.current
+        if (v && !v.paused) st.onScrub(v.currentTime)
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [playing])
 
   return (
     <div className="st-stage">
@@ -109,7 +144,6 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
               preload="auto"
               playsInline
               onClick={() => onPlayingChange(!playing)}
-              onTimeUpdate={onSrcTime}
               onEnded={(e) => { if (playing) advanceSource(e.target) }}
             />
             {!playing && (

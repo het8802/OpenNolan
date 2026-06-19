@@ -4,7 +4,8 @@ import {
   upsertKeyframe, removeKeyframe, scaffoldEditDecisions, timelineDuration,
   cutDuration, cutStarts, cutAtTime, trimCut, splitCutAtPlayhead, MIN_SOURCE_SPAN,
   removeCut, duplicateCut, reorderCut, addCut, addOverlay, removeOverlay,
-  setCanvas, canvasOf,
+  setCanvas, canvasOf, audioClips,
+  setMusic, updateMusic, removeMusic, addSfx, updateSfx, removeSfx, updateNarration, removeNarration,
 } from './interp.js'
 
 describe('interpolateAt (mirrors FFmpeg _piecewise_linear_expr)', () => {
@@ -316,5 +317,139 @@ describe('structural mutators (studio editor)', () => {
     const d = setCanvas(doc(), { width: 1080, height: 1920 })
     expect(d.metadata.compose_target).toEqual({ width: 1080, height: 1920 })
     expect(canvasOf(setCanvas(d, { fps: 24 }))).toEqual({ width: 1080, height: 1920, fps: 24 })
+  })
+})
+
+describe('audioClips (timeline audio lane projection)', () => {
+  it('returns [] for a doc with no audio', () => {
+    expect(audioClips({ cuts: [] })).toEqual([])
+    expect(audioClips({})).toEqual([])
+    expect(audioClips(null)).toEqual([])
+  })
+  it('draws music as a single bed spanning [0, timelineDuration]', () => {
+    const doc = {
+      cuts: [{ in_seconds: 0, out_seconds: 4 }, { in_seconds: 0, out_seconds: 2 }], // concat => 6s
+      audio: { music: { asset_id: 'song.mp3', volume: 0.6 } },
+    }
+    expect(audioClips(doc)).toEqual([
+      { kind: 'music', index: null, asset_id: 'song.mp3', start_seconds: 0, end_seconds: 6, point: false },
+    ])
+  })
+  it('prefers audio.music over the legacy top-level music', () => {
+    const doc = {
+      cuts: [{ in_seconds: 0, out_seconds: 3 }],
+      audio: { music: { asset_id: 'new.mp3' } },
+      music: { asset_id: 'legacy.mp3' },
+    }
+    expect(audioClips(doc)[0].asset_id).toBe('new.mp3')
+  })
+  it('falls back to legacy top-level music when audio.music is absent', () => {
+    const doc = { cuts: [{ in_seconds: 0, out_seconds: 3 }], music: { asset_id: 'legacy.mp3' } }
+    expect(audioClips(doc)).toEqual([
+      { kind: 'music', index: null, asset_id: 'legacy.mp3', start_seconds: 0, end_seconds: 3, point: false },
+    ])
+  })
+  it('skips music with no asset_id (nothing to draw)', () => {
+    expect(audioClips({ cuts: [{ in_seconds: 0, out_seconds: 3 }], audio: { music: { volume: 0.5 } } })).toEqual([])
+  })
+  it('maps narration segments to start→end blocks and sfx to point markers', () => {
+    const doc = {
+      cuts: [{ in_seconds: 0, out_seconds: 10 }],
+      audio: {
+        narration: { segments: [{ asset_id: 'vo1.mp3', start_seconds: 1, end_seconds: 4 }] },
+        sfx: [{ asset_id: 'whoosh.mp3', start_seconds: 6, volume: 0.8 }],
+      },
+    }
+    const clips = audioClips(doc)
+    const vo = clips.find(c => c.kind === 'narration')
+    const fx = clips.find(c => c.kind === 'sfx')
+    expect(vo).toEqual({ kind: 'narration', index: 0, asset_id: 'vo1.mp3', start_seconds: 1, end_seconds: 4, point: false })
+    expect(fx).toEqual({ kind: 'sfx', index: 0, asset_id: 'whoosh.mp3', start_seconds: 6, end_seconds: 6, point: true })
+  })
+  it('defaults a narration segment with no end to a zero-length block, and skips entries with no asset_id', () => {
+    const doc = {
+      cuts: [{ in_seconds: 0, out_seconds: 10 }],
+      audio: {
+        narration: { segments: [{ asset_id: 'vo.mp3', start_seconds: 2 }, { start_seconds: 3 }] },
+        sfx: [{ start_seconds: 5 }], // no asset_id
+      },
+    }
+    const clips = audioClips(doc)
+    expect(clips).toHaveLength(1)
+    expect(clips[0]).toEqual({ kind: 'narration', index: 0, asset_id: 'vo.mp3', start_seconds: 2, end_seconds: 2, point: false })
+  })
+  it('clamps an inverted narration segment (end < start) to a zero-length block, not negative', () => {
+    const doc = {
+      cuts: [{ in_seconds: 0, out_seconds: 10 }],
+      audio: { narration: { segments: [{ asset_id: 'vo.mp3', start_seconds: 4, end_seconds: 1 }] } },
+    }
+    const seg = audioClips(doc)[0]
+    expect(seg.start_seconds).toBe(4)
+    expect(seg.end_seconds).toBe(4)      // Math.max(start, end) → never draws a negative width
+  })
+  it('returns items sorted by start time across kinds', () => {
+    const doc = {
+      cuts: [{ in_seconds: 0, out_seconds: 10 }],
+      audio: {
+        music: { asset_id: 'm.mp3' },               // start 0
+        narration: { segments: [{ asset_id: 'v.mp3', start_seconds: 7, end_seconds: 9 }] },
+        sfx: [{ asset_id: 's.mp3', start_seconds: 3 }],
+      },
+    }
+    expect(audioClips(doc).map(c => c.start_seconds)).toEqual([0, 3, 7])
+  })
+})
+
+describe('audio mutators (music bed / narration / sfx)', () => {
+  it('setMusic sets the bed; updateMusic merges + clamps volume; removeMusic clears it', () => {
+    let d = setMusic({}, 'song.mp3')
+    expect(d.audio.music).toEqual({ asset_id: 'song.mp3' })
+    d = updateMusic(d, { volume: 5, fade_in_seconds: 1 })   // volume clamps to [0,1]
+    expect(d.audio.music).toEqual({ asset_id: 'song.mp3', volume: 1, fade_in_seconds: 1 })
+    expect(removeMusic(d).audio.music).toBeUndefined()
+    expect(removeMusic({})).toEqual({})                      // no-op when there is no music
+  })
+  it('removeMusic also clears a legacy top-level music', () => {
+    expect(removeMusic({ music: { asset_id: 'legacy.mp3' } }).music).toBeUndefined()
+  })
+  it('addSfx appends a clamped point; updateSfx merges by index; removeSfx drops by index', () => {
+    let d = addSfx({}, 'a.mp3', -3)                          // start clamps to >= 0
+    d = addSfx(d, 'b.mp3', 4)
+    expect(d.audio.sfx).toEqual([{ asset_id: 'a.mp3', start_seconds: 0 }, { asset_id: 'b.mp3', start_seconds: 4 }])
+    d = updateSfx(d, 1, { volume: 9 })                       // volume clamps to [0,1]
+    expect(d.audio.sfx[1]).toEqual({ asset_id: 'b.mp3', start_seconds: 4, volume: 1 })
+    expect(updateSfx(d, 9, { volume: 0.5 })).toBe(d)         // out-of-range no-op (same ref)
+    expect(removeSfx(d, 0).audio.sfx).toEqual([{ asset_id: 'b.mp3', start_seconds: 4, volume: 1 }])
+  })
+  it('updateNarration/removeNarration edit segments by index, immutably', () => {
+    const d0 = { audio: { narration: { segments: [
+      { asset_id: 'v1.mp3', start_seconds: 0, end_seconds: 2 },
+      { asset_id: 'v2.mp3', start_seconds: 2, end_seconds: 4 },
+    ] } } }
+    const d1 = updateNarration(d0, 1, { end_seconds: 5 })
+    expect(d1.audio.narration.segments[1]).toEqual({ asset_id: 'v2.mp3', start_seconds: 2, end_seconds: 5 })
+    expect(d0.audio.narration.segments[1].end_seconds).toBe(4)  // original untouched
+    expect(updateNarration(d0, 9, { end_seconds: 5 })).toBe(d0) // out-of-range no-op
+    expect(removeNarration(d0, 0).audio.narration.segments.map(s => s.asset_id)).toEqual(['v2.mp3'])
+  })
+  it('audio mutators drop fields the schema does not allow (whitelist)', () => {
+    const d = updateSfx({ audio: { sfx: [{ asset_id: 'a.mp3', start_seconds: 1 }] } }, 0, { hacker: true, volume: 0.5 })
+    expect(d.audio.sfx[0]).toEqual({ asset_id: 'a.mp3', start_seconds: 1, volume: 0.5 })
+  })
+})
+
+describe('interpolateAt + cutAtTime edge cases (placement seams)', () => {
+  it('sorts unsorted keyframes before interpolating', () => {
+    const unsorted = [{ t: 2, x: 100 }, { t: 0, x: 0 }, { t: 1, x: 50 }]
+    expect(interpolateAt(unsorted, 'x', 1)).toBe(50)
+    expect(interpolateAt(unsorted, 'x', 0.5)).toBe(25)
+  })
+  it('maps a time exactly on a cut seam to the LATER cut (half-open intervals)', () => {
+    const doc = { cuts: [
+      { id: 'a', source: 'A', in_seconds: 0, out_seconds: 3 }, // project [0,3)
+      { id: 'b', source: 'B', in_seconds: 0, out_seconds: 4 }, // project [3,7)
+    ] }
+    expect(cutAtTime(doc, 3).index).toBe(1)      // seam belongs to cut b
+    expect(cutAtTime(doc, 2.999).index).toBe(0)
   })
 })

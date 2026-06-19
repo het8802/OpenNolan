@@ -1,16 +1,14 @@
-// Studio toolbar — the action buttons. Global actions (undo/redo, add, canvas, save,
-// render, preview mode) are always present; clip/overlay actions appear when something
-// is selected. Only tools the FFmpeg render path actually renders get a button.
+// Studio project toolbar — global, non-transport actions only. Transport (play/pause) and
+// clip ops (split/duplicate/delete) live in the TIMELINE toolbar (StudioTimeline.jsx); image
+// adding moved to the Assets tab (StudioInspector.jsx). This bar keeps: undo/redo, +Text,
+// canvas size, preview-mode toggle, Save, Render. Only tools the FFmpeg path renders appear.
 
-import { SPEED_PRESETS, CANVAS_PRESETS } from './model.js'
+import { CANVAS_PRESETS } from './model.js'
 
 export default function StudioToolbar({
-  doc, canvas, ffmpeg, selCut, selOverlayIndex,
-  canUndo, canRedo, dirty, rendering, hasRender, previewMode, playing, assets,
-  onUndo, onRedo, onSave, onRender, onTogglePlay, onPreviewMode,
-  onSplit, onDuplicate, onDelete, onSpeed, onAddText, onAddImage, onCanvas,
+  doc, canvas, ffmpeg, canUndo, canRedo, dirty, rendering, hasRender, previewMode,
+  onUndo, onRedo, onSave, onRender, onPreviewMode, onAddText, onCanvas,
 }) {
-  const images = assets?.kinds?.images || []
   const curCanvas = `${canvas.width}×${canvas.height}`
 
   return (
@@ -22,17 +20,6 @@ export default function StudioToolbar({
 
       <div className="st-grp">
         <button className="st-btn" onClick={onAddText} title="Add a text overlay">＋ Text</button>
-        <label className="st-btn st-select-btn" title="Add an image overlay">
-          ＋ Image
-          <select
-            value=""
-            onChange={(e) => { if (e.target.value) onAddImage(e.target.value) }}
-            disabled={!images.length}
-          >
-            <option value="">{images.length ? 'pick an image…' : 'no images uploaded'}</option>
-            {images.map(im => <option key={im.path} value={im.path}>{im.name}</option>)}
-          </select>
-        </label>
       </div>
 
       <div className="st-grp">
@@ -53,36 +40,7 @@ export default function StudioToolbar({
         </label>
       </div>
 
-      {/* contextual: a clip is selected */}
-      {selCut && (
-        <div className="st-grp st-grp-ctx">
-          <button className="st-btn" onClick={onSplit} title="Split at playhead (S)">✂ Split</button>
-          <button className="st-btn" onClick={onDuplicate} title="Duplicate clip">⧉ Duplicate</button>
-          <button className="st-btn st-danger" onClick={onDelete} title="Delete clip (⌫)">🗑 Delete</button>
-          <span className="st-speed">
-            {SPEED_PRESETS.map(s => (
-              <button
-                key={s}
-                className={`st-chip ${(Number(selCut.speed) || 1) === s ? 'on' : ''}`}
-                onClick={() => onSpeed(s)}
-                title={`${s}× speed`}
-              >{s}×</button>
-            ))}
-          </span>
-        </div>
-      )}
-
-      {/* contextual: an overlay is selected */}
-      {selOverlayIndex >= 0 && (
-        <div className="st-grp st-grp-ctx">
-          <button className="st-btn st-danger" onClick={onDelete} title="Delete overlay (⌫)">🗑 Delete overlay</button>
-        </div>
-      )}
-
       <div className="st-grp st-grp-right">
-        <button className="st-play" onClick={onTogglePlay} title="Play / pause (Space)" aria-label={playing ? 'Pause' : 'Play'}>
-          {playing ? '⏸' : '▶'}
-        </button>
         <span className="st-toggle">
           <button className={`st-seg ${previewMode === 'source' ? 'on' : ''}`} onClick={() => onPreviewMode('source')} title="Live source scrub">Source</button>
           <button className={`st-seg ${previewMode === 'render' ? 'on' : ''}`} onClick={() => onPreviewMode('render')} disabled={!hasRender} title="Composed render">Render</button>

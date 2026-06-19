@@ -339,3 +339,127 @@ export function canvasOf(doc) {
     fps: Number(ct.fps) || 30,
   }
 }
+
+/**
+ * Read-only projection of the schema's audio model into items the timeline can DRAW on an
+ * audio lane (music / narration / sfx). This is NOT a render contract — the FFmpeg path owns
+ * mixing; this only places blocks so the user can SEE what audio sits where. Placement is
+ * absolute project time (same axis as overlays), and — like overlay/cut placement — it is
+ * DERIVED, never stored. Returns a flat array sorted by start, each:
+ *   { kind:'music'|'narration'|'sfx', asset_id, start_seconds, end_seconds, point }
+ *  - music: a single bed spanning [0, timelineDuration]. The FFmpeg amix uses duration=first,
+ *    so the bed is cut to the base (video) length — we draw it that way too (preview==export).
+ *    Reads doc.audio.music first, then legacy top-level doc.music. Skipped without an asset_id.
+ *  - narration: doc.audio.narration.segments[] → start→end blocks (end defaults to start).
+ *  - sfx: doc.audio.sfx[] → point markers (point:true, end_seconds === start_seconds).
+ * Items with no asset_id are skipped — there's nothing to show.
+ */
+// Audio field whitelists + value coercion (keep in sync with edit_decisions.schema.json audio.*).
+const MUSIC_FIELDS = ['asset_id', 'volume', 'fade_in_seconds', 'fade_out_seconds', 'ducking']
+const NARRATION_FIELDS = ['asset_id', 'start_seconds', 'end_seconds']
+const SFX_FIELDS = ['asset_id', 'start_seconds', 'volume']
+
+function cleanMusic(m) {
+  const o = pick(m, MUSIC_FIELDS)
+  if (o.volume != null) o.volume = Math.max(0, Math.min(1, Number(o.volume)))
+  if (o.fade_in_seconds != null) o.fade_in_seconds = Math.max(0, Number(o.fade_in_seconds))
+  if (o.fade_out_seconds != null) o.fade_out_seconds = Math.max(0, Number(o.fade_out_seconds))
+  return o
+}
+function cleanNarration(s) {
+  const o = pick(s, NARRATION_FIELDS)
+  if (o.start_seconds != null) o.start_seconds = round3(Math.max(0, Number(o.start_seconds)))
+  if (o.end_seconds != null) o.end_seconds = round3(Math.max(0, Number(o.end_seconds)))
+  return o
+}
+function cleanSfx(s) {
+  const o = pick(s, SFX_FIELDS)
+  if (o.start_seconds != null) o.start_seconds = round3(Math.max(0, Number(o.start_seconds)))
+  if (o.volume != null) o.volume = Math.max(0, Math.min(1, Number(o.volume)))
+  return o
+}
+
+/** Set the single music bed (audio.music.asset_id), preserving any other valid music fields. */
+export function setMusic(doc, assetId) {
+  const audio = { ...(doc?.audio || {}) }
+  audio.music = cleanMusic({ ...(audio.music || {}), asset_id: assetId })
+  return { ...doc, audio }
+}
+
+/** Merge a patch into the music bed. */
+export function updateMusic(doc, patch) {
+  const audio = { ...(doc?.audio || {}) }
+  audio.music = cleanMusic({ ...(audio.music || {}), ...patch })
+  return { ...doc, audio }
+}
+
+/** Remove the music bed (both audio.music and the legacy top-level music). No-op if absent. */
+export function removeMusic(doc) {
+  const hasA = doc?.audio?.music !== undefined
+  const hasLegacy = doc?.music !== undefined
+  if (!hasA && !hasLegacy) return doc
+  const next = { ...doc }
+  if (hasA) { next.audio = { ...doc.audio }; delete next.audio.music }
+  if (hasLegacy) delete next.music
+  return next
+}
+
+/** Append a point SFX (audio.sfx[]) at project time `start`. */
+export function addSfx(doc, assetId, start = 0) {
+  const audio = { ...(doc?.audio || {}) }
+  audio.sfx = [...(audio.sfx || []), cleanSfx({ asset_id: assetId, start_seconds: start })]
+  return { ...doc, audio }
+}
+
+/** Merge a patch into a narration segment by index. No-op (same doc) if out of range. */
+export function updateNarration(doc, index, patch) {
+  const segs = doc?.audio?.narration?.segments || []
+  if (index < 0 || index >= segs.length) return doc
+  const segments = segs.map((s, i) => (i === index ? cleanNarration({ ...s, ...patch }) : s))
+  return { ...doc, audio: { ...(doc.audio || {}), narration: { ...(doc.audio?.narration || {}), segments } } }
+}
+
+/** Remove a narration segment by index. No-op (same doc) if out of range. */
+export function removeNarration(doc, index) {
+  const segs = doc?.audio?.narration?.segments || []
+  if (index < 0 || index >= segs.length) return doc
+  const segments = segs.filter((_, i) => i !== index)
+  return { ...doc, audio: { ...(doc.audio || {}), narration: { ...(doc.audio?.narration || {}), segments } } }
+}
+
+/** Merge a patch into an SFX by index. No-op (same doc) if out of range. */
+export function updateSfx(doc, index, patch) {
+  const sfx = doc?.audio?.sfx || []
+  if (index < 0 || index >= sfx.length) return doc
+  const next = sfx.map((s, i) => (i === index ? cleanSfx({ ...s, ...patch }) : s))
+  return { ...doc, audio: { ...(doc.audio || {}), sfx: next } }
+}
+
+/** Remove an SFX by index. No-op (same doc) if out of range. */
+export function removeSfx(doc, index) {
+  const sfx = doc?.audio?.sfx || []
+  if (index < 0 || index >= sfx.length) return doc
+  const next = sfx.filter((_, i) => i !== index)
+  return { ...doc, audio: { ...(doc.audio || {}), sfx: next } }
+}
+
+export function audioClips(doc) {
+  const out = []
+  const a = doc?.audio || {}
+  const music = a.music || doc?.music // prefer audio.music; fall back to the legacy top-level
+  if (music && music.asset_id) {
+    out.push({ kind: 'music', index: null, asset_id: music.asset_id, start_seconds: 0, end_seconds: timelineDuration(doc), point: false })
+  }
+  ;(a.narration?.segments || []).forEach((seg, i) => {
+    if (!seg || !seg.asset_id) return
+    const s = Math.max(0, Number(seg.start_seconds) || 0)
+    const e = seg.end_seconds != null ? Math.max(s, Number(seg.end_seconds)) : s
+    out.push({ kind: 'narration', index: i, asset_id: seg.asset_id, start_seconds: round3(s), end_seconds: round3(e), point: false })
+  })
+  ;(a.sfx || []).forEach((fx, i) => {
+    if (!fx || !fx.asset_id) return
+    const s = round3(Math.max(0, Number(fx.start_seconds) || 0))
+    out.push({ kind: 'sfx', index: i, asset_id: fx.asset_id, start_seconds: s, end_seconds: s, point: true })
+  })
+  return out.sort((x, y) => x.start_seconds - y.start_seconds)
+}

@@ -20,6 +20,13 @@ import StudioPreview from './StudioPreview.jsx'
 const POLL_MS = 500
 const POLL_MAX = 600 // ~5 min ceiling
 
+// Resizable-panel layout (feat 1). Single threshold per panel: drag below it → collapse.
+const PANELS_KEY = 'st.panels.v1'
+const INSPECTOR_MIN = 240   // also the collapse threshold: drag narrower than this → hide
+const INSPECTOR_MAX = 560
+const TIMELINE_MIN = 150     // collapse threshold for the timeline height
+const TIMELINE_MAX_FRAC = 0.6 // timeline may take at most 60% of the body (keeps preview visible)
+
 export default function Studio({ projectId, state, onClose }) {
   const [doc, setDoc] = useState(null)
   const docRef = useRef(null) // mirror of `doc` so handlers read the latest synchronously
@@ -38,6 +45,16 @@ export default function Studio({ projectId, state, onClose }) {
   const [assets, setAssets] = useState({ kinds: { images: [], video: [], audio: [], music: [] }, renders: [] })
   const [sourceMetas, setSourceMetas] = useState({}) // ref -> {duration,width,height}
   const [zoom, setZoom] = useState(80) // px per second
+
+  // ── resizable panels (feat 1): inspector width + timeline height, collapse past a threshold,
+  // persisted to localStorage. Layout is view state — NEVER written to the doc. ──
+  const [panels, setPanels] = useState(() => {
+    const base = { inspectorW: 320, timelineH: 280, inspectorOpen: true, timelineOpen: true }
+    try { return { ...base, ...JSON.parse(localStorage.getItem(PANELS_KEY) || '{}') } } catch { return base }
+  })
+  useEffect(() => { try { localStorage.setItem(PANELS_KEY, JSON.stringify(panels)) } catch { /* ignore */ } }, [panels])
+  const panelDrag = useRef(null)
+  useEffect(() => () => { if (panelDrag.current) panelDrag.current() }, []) // never leak a splitter drag
 
   const [rendering, setRendering] = useState(false)
   const [renderPath, setRenderPath] = useState(null)
@@ -192,6 +209,11 @@ export default function Studio({ projectId, state, onClose }) {
   // ── selection-aware edit handlers ──────────────────────────────────────────
   const selCut = selection?.kind === 'cut' ? (doc?.cuts || []).find(c => c.id === selection.id) : null
   const selOverlayIndex = selection?.kind === 'overlay' ? selection.index : -1
+  const selAudio = selection?.kind === 'audio' ? selection : null // {audioKind:'music'|'narration'|'sfx', index}
+  const selAudioObj = !selAudio ? null
+    : selAudio.audioKind === 'music' ? (doc?.audio?.music || doc?.music || null)
+      : selAudio.audioKind === 'narration' ? (doc?.audio?.narration?.segments?.[selAudio.index] || null)
+        : (doc?.audio?.sfx?.[selAudio.index] || null)
 
   // Trim runs per pointermove → use `live` (no history); onTrimBegin snapshots once at
   // pointerdown so a whole drag is one undo step (not one per frame).
@@ -216,22 +238,70 @@ export default function Studio({ projectId, state, onClose }) {
     } else if (selOverlayIndex >= 0) {
       commit(d => interp.removeOverlay(d, selOverlayIndex))
       setSelection(null)
+    } else if (selAudio) {
+      if (selAudio.audioKind === 'music') commit(d => interp.removeMusic(d))
+      else if (selAudio.audioKind === 'narration') commit(d => interp.removeNarration(d, selAudio.index))
+      else commit(d => interp.removeSfx(d, selAudio.index))
+      setSelection(null)
     }
-  }, [selCut, selOverlayIndex, doc, commit, flash])
+  }, [selCut, selOverlayIndex, selAudio, doc, commit, flash])
 
   const onDuplicate = useCallback(() => {
     if (!selCut) return
     commit(d => interp.duplicateCut(d, selCut.id))
   }, [selCut, commit])
 
-  const onSpeed = useCallback((speed) => {
-    if (!selCut) return
-    commit(d => interp.updateCut(d, selCut.id, { speed }))
-  }, [selCut, commit])
-
   const onReorder = useCallback((from, to) => {
     commit(d => interp.reorderCut(d, from, to))
   }, [commit])
+
+  // Assets-tab adds (feat 4): each kind drops in the way that fits it.
+  const onAddClip = useCallback((path) => {
+    const meta = sourceMetas[path]
+    const out = meta?.duration ? Math.min(meta.duration, 8) : 5
+    commit(d => interp.addCut(d, { source: path, in_seconds: 0, out_seconds: out }))
+  }, [commit, sourceMetas])
+  const onSetMusic = useCallback((path) => { commit(d => interp.setMusic(d, path)); flash('ok', 'Music set') }, [commit, flash])
+  const onAddSfx = useCallback((path) => { commit(d => interp.addSfx(d, path, playhead)) }, [commit, playhead])
+
+  // Edit the selected audio item (music bed / narration segment / sfx) from the properties panel.
+  const onUpdateAudio = useCallback((patch) => {
+    if (!selAudio) return
+    if (selAudio.audioKind === 'music') commit(d => interp.updateMusic(d, patch))
+    else if (selAudio.audioKind === 'narration') commit(d => interp.updateNarration(d, selAudio.index, patch))
+    else commit(d => interp.updateSfx(d, selAudio.index, patch))
+  }, [selAudio, commit])
+
+  // Splitter drag (feat 1): 'x' resizes the inspector width, 'y' the timeline height. Below the
+  // per-panel threshold → collapse. One pointerdown→window move/up model (same as the timeline).
+  const beginPanelDrag = useCallback((e, axis) => {
+    e.preventDefault()
+    const startX = e.clientX, startY = e.clientY
+    const startW = panels.inspectorW, startH = panels.timelineH
+    const bodyH = e.currentTarget.closest('.st-body')?.clientHeight || 800
+    const teardown = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', teardown)
+      window.removeEventListener('pointercancel', teardown)
+      panelDrag.current = null
+    }
+    const onMove = (ev) => {
+      if (axis === 'x') {
+        const w = startW + (startX - ev.clientX) // drag the handle left → wider inspector
+        if (w < INSPECTOR_MIN) setPanels(p => ({ ...p, inspectorOpen: false }))
+        else setPanels(p => ({ ...p, inspectorOpen: true, inspectorW: Math.min(INSPECTOR_MAX, w) }))
+      } else {
+        const h = startH + (startY - ev.clientY) // drag the handle up → taller timeline
+        const max = Math.max(TIMELINE_MIN, bodyH * TIMELINE_MAX_FRAC)
+        if (h < TIMELINE_MIN) setPanels(p => ({ ...p, timelineOpen: false }))
+        else setPanels(p => ({ ...p, timelineOpen: true, timelineH: Math.min(max, h) }))
+      }
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', teardown)
+    window.addEventListener('pointercancel', teardown)
+    panelDrag.current = teardown
+  }, [panels])
 
   const onAddText = useCallback(() => {
     const start = Math.min(playhead, Math.max(0, interp.timelineDuration(doc) - 1))
@@ -257,11 +327,17 @@ export default function Studio({ projectId, state, onClose }) {
   const onUpsertKeyframe = useCallback((index, kf) => commit(d => interp.upsertKeyframe(d, index, kf)), [commit])
   const onRemoveKeyframe = useCallback((index, ki) => commit(d => interp.removeKeyframe(d, index, ki)), [commit])
 
-  // Clear an overlay selection that went out of range (e.g. after undo/redo/delete) so the
-  // inspector doesn't edit a phantom index (which would no-op-but-dirty the doc).
+  // Clear a selection that went out of range (e.g. after undo/redo/delete) so the inspector
+  // doesn't edit a phantom index (which would no-op-but-dirty the doc).
   useEffect(() => {
     if (selection?.kind === 'overlay' && selection.index >= (doc?.overlays || []).length) {
       setSelection(null)
+    } else if (selection?.kind === 'audio') {
+      const a = doc?.audio || {}
+      const exists = selection.audioKind === 'music' ? !!(a.music?.asset_id || doc?.music?.asset_id)
+        : selection.audioKind === 'narration' ? !!(a.narration?.segments?.[selection.index])
+          : !!(a.sfx?.[selection.index])
+      if (!exists) setSelection(null)
     }
   }, [doc, selection])
 
@@ -271,6 +347,7 @@ export default function Studio({ projectId, state, onClose }) {
       const t = e.target
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
       if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); setPlaying(p => !p); return } // space = play/pause
+      if (e.key === 'Escape') { setSelection(null); return } // deselect → Assets tab
       const mod = e.metaKey || e.ctrlKey
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return }
       if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(); return }
@@ -304,14 +381,10 @@ export default function Studio({ projectId, state, onClose }) {
         </div>
         <StudioToolbar
           doc={doc} canvas={canvas} ffmpeg={ffmpeg}
-          selCut={selCut} selOverlayIndex={selOverlayIndex}
           canUndo={past.length > 0} canRedo={future.length > 0}
           dirty={dirty} rendering={rendering} hasRender={!!renderPath} previewMode={previewMode}
-          playing={playing} assets={assets}
           onUndo={undo} onRedo={redo} onSave={save} onRender={render}
-          onTogglePlay={togglePlay} onPreviewMode={changePreviewMode}
-          onSplit={onSplit} onDuplicate={onDuplicate} onDelete={onDelete} onSpeed={onSpeed}
-          onAddText={onAddText} onAddImage={onAddImage} onCanvas={onCanvas}
+          onPreviewMode={changePreviewMode} onAddText={onAddText} onCanvas={onCanvas}
         />
       </div>
 
@@ -324,24 +397,52 @@ export default function Studio({ projectId, state, onClose }) {
       {notice && <div className={`st-notice ${notice.kind}`}>{notice.msg}</div>}
 
       <div className="st-body">
-        <StudioPreview
-          projectId={projectId} doc={doc} playhead={playhead}
-          previewMode={previewMode} renderPath={renderPath} renderVersion={renderVersion}
-          playing={playing} onScrub={setPlayhead} onPlayingChange={setPlaying}
-        />
-        <StudioInspector
-          projectId={projectId} doc={doc} canvas={canvas} ffmpeg={ffmpeg}
-          selCut={selCut} selOverlayIndex={selOverlayIndex} playhead={playhead}
-          assets={assets} sourceMetas={sourceMetas}
-          onUpdateCut={onUpdateCut} onUpdateOverlay={onUpdateOverlay}
-          onSetKeyframes={onSetKeyframes} onUpsertKeyframe={onUpsertKeyframe} onRemoveKeyframe={onRemoveKeyframe}
-        />
-        <StudioTimeline
-          projectId={projectId} doc={doc} dur={dur} zoom={zoom} playhead={playhead}
-          selection={selection} sourceMetas={sourceMetas}
-          onSeek={seekFromUser} onSelect={setSelection} onTrim={onTrim} onTrimBegin={onTrimBegin}
-          onReorder={onReorder} onZoom={setZoom}
-        />
+        <div className="st-body-top">
+          <StudioPreview
+            projectId={projectId} doc={doc} playhead={playhead}
+            previewMode={previewMode} renderPath={renderPath} renderVersion={renderVersion}
+            playing={playing} onScrub={setPlayhead} onPlayingChange={setPlaying}
+          />
+          {panels.inspectorOpen ? (
+            <>
+              <div className="st-vsplit" onPointerDown={(e) => beginPanelDrag(e, 'x')}
+                title="Drag to resize · drag fully right to hide" />
+              <div className="st-inspector-wrap" style={{ width: panels.inspectorW }}>
+                <StudioInspector
+                  projectId={projectId} doc={doc} canvas={canvas} ffmpeg={ffmpeg}
+                  selCut={selCut} selOverlayIndex={selOverlayIndex} playhead={playhead}
+                  selAudio={selAudio} selAudioObj={selAudioObj}
+                  assets={assets} sourceMetas={sourceMetas}
+                  onUpdateCut={onUpdateCut} onUpdateOverlay={onUpdateOverlay} onUpdateAudio={onUpdateAudio}
+                  onSetKeyframes={onSetKeyframes} onUpsertKeyframe={onUpsertKeyframe} onRemoveKeyframe={onRemoveKeyframe}
+                  onAddImage={onAddImage} onAddClip={onAddClip} onAddSfx={onAddSfx} onSetMusic={onSetMusic}
+                />
+              </div>
+            </>
+          ) : (
+            <button className="st-reopen st-reopen-v" title="Show properties panel"
+              onClick={() => setPanels(p => ({ ...p, inspectorOpen: true, inspectorW: Math.max(INSPECTOR_MIN, p.inspectorW) }))}>‹</button>
+          )}
+        </div>
+
+        {panels.timelineOpen ? (
+          <>
+            <div className="st-hsplit" onPointerDown={(e) => beginPanelDrag(e, 'y')}
+              title="Drag to resize · drag fully down to hide" />
+            <div className="st-timeline-wrap" style={{ height: panels.timelineH }}>
+              <StudioTimeline
+                projectId={projectId} doc={doc} dur={dur} zoom={zoom} playhead={playhead}
+                selection={selection} sourceMetas={sourceMetas} playing={playing}
+                onSeek={seekFromUser} onSelect={setSelection} onTrim={onTrim} onTrimBegin={onTrimBegin}
+                onReorder={onReorder} onZoom={setZoom}
+                onTogglePlay={togglePlay} onSplit={onSplit} onDuplicate={onDuplicate} onDelete={onDelete}
+              />
+            </div>
+          </>
+        ) : (
+          <button className="st-reopen st-reopen-h" title="Show timeline"
+            onClick={() => setPanels(p => ({ ...p, timelineOpen: true, timelineH: Math.max(TIMELINE_MIN, p.timelineH) }))}>Timeline ▴</button>
+        )}
       </div>
     </div>
   )
