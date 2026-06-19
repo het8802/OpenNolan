@@ -1,0 +1,198 @@
+// Component tests for the timeline RENDER CONTRACT: one block per cut/overlay/audio item,
+// at the DERIVED pixel position (LANE_PAD + time*zoom). jsdom has no layout engine, so the
+// pointer-driven interactions (scrub / trim / drag-reorder) are covered by E2E, not here —
+// these assert the structure the FFmpeg-faithful placement math produces.
+
+import { describe, it, expect, vi } from 'vitest'
+import { render, fireEvent } from '@testing-library/react'
+import StudioTimeline from './StudioTimeline.jsx'
+
+const LANE_PAD = 12
+const ZOOM = 80
+
+const noop = () => {}
+const baseProps = {
+  zoom: ZOOM, playhead: 2, selection: null, sourceMetas: {}, playing: false,
+  onSeek: noop, onSelect: noop, onTrim: noop, onTrimBegin: noop, onReorder: noop, onZoom: noop,
+  onTogglePlay: noop, onSplit: noop, onDuplicate: noop, onDelete: noop,
+}
+
+function renderTimeline(doc, dur) {
+  return render(<StudioTimeline doc={doc} dur={dur} {...baseProps} />)
+}
+
+const fullDoc = {
+  cuts: [
+    { id: 'a', source: 'clips/intro.mp4', in_seconds: 0, out_seconds: 4 },            // 4s @ [0,4)
+    { id: 'b', source: 'clips/body.mp4', in_seconds: 0, out_seconds: 2, speed: 2 },   // 1s @ [4,5)
+  ],
+  overlays: [{ type: 'text', text: 'Hello world this is long', start_seconds: 1, end_seconds: 3 }],
+  audio: {
+    music: { asset_id: 'music/bed.mp3' },
+    narration: { segments: [{ asset_id: 'vo/line1.mp3', start_seconds: 0.5, end_seconds: 2 }] },
+    sfx: [{ asset_id: 'sfx/whoosh.mp3', start_seconds: 3 }],
+  },
+}
+
+describe('clips lane', () => {
+  it('renders one clip per cut, labelled by source basename, with a speed suffix', () => {
+    const { container } = renderTimeline(fullDoc, 5)
+    const clips = container.querySelectorAll('.st-clip')
+    expect(clips).toHaveLength(2)
+    expect(clips[0].textContent).toContain('intro.mp4')
+    expect(clips[1].textContent).toContain('body.mp4')
+    expect(clips[1].textContent).toContain('2×')           // non-1 speed is surfaced
+  })
+  it('places each clip at the DERIVED concat position (LANE_PAD + start*zoom)', () => {
+    const { container } = renderTimeline(fullDoc, 5)
+    const [a, b] = container.querySelectorAll('.st-clip')
+    expect(a.style.left).toBe(`${LANE_PAD}px`)              // first cut at the gutter
+    expect(a.style.width).toBe(`${4 * ZOOM}px`)            // 4 project seconds wide
+    expect(b.style.left).toBe(`${LANE_PAD + 4 * ZOOM}px`)  // concatenated after cut a
+    expect(b.style.width).toBe(`${1 * ZOOM}px`)            // 2s @2x = 1 project second
+  })
+  it('marks the selected clip', () => {
+    const { container } = render(
+      <StudioTimeline doc={fullDoc} dur={5} {...baseProps} selection={{ kind: 'cut', id: 'b' }} />)
+    const clips = container.querySelectorAll('.st-clip')
+    expect(clips[0].className).not.toContain('sel')
+    expect(clips[1].className).toContain('sel')
+  })
+})
+
+describe('overlays lane', () => {
+  it('renders a TEXT overlay block at absolute start time, truncated to 18 chars in curly quotes', () => {
+    const { container } = renderTimeline(fullDoc, 5)
+    const ovs = container.querySelectorAll('.st-ov')
+    expect(ovs).toHaveLength(1)
+    expect(ovs[0].textContent).toBe('“Hello world this i”')    // slice(0,18) of the text, quoted
+    expect(ovs[0].style.left).toBe(`${LANE_PAD + 1 * ZOOM}px`) // start_seconds = 1
+    expect(ovs[0].style.width).toBe(`${2 * ZOOM}px`)           // 3 - 1 = 2s
+  })
+  it('labels an IMAGE overlay by asset basename (no quotes)', () => {
+    const doc = { cuts: fullDoc.cuts, overlays: [{ type: 'image', asset_id: 'images/logo.png', start_seconds: 0, end_seconds: 2, position: { x: 0, y: 0, width: 100 } }] }
+    const { container } = renderTimeline(doc, 5)
+    const ov = container.querySelector('.st-ov')
+    expect(ov.textContent).toBe('logo.png')
+    expect(ov.textContent).not.toContain('“')
+  })
+  it('shows the empty hint when there are no overlays', () => {
+    const { container } = renderTimeline({ cuts: fullDoc.cuts }, 5)
+    expect(container.querySelectorAll('.st-ov')).toHaveLength(0)
+    expect(container.querySelector('.st-lane-ov .st-lane-empty')).toBeInTheDocument()
+  })
+})
+
+describe('audio lane (feature: SFX / music / narration visible on the timeline)', () => {
+  it('renders music as a full-timeline bed, narration as a block, sfx as a point marker', () => {
+    // dur prop = 8 but timelineDuration(doc) = 5 (cuts concat to 5). The bed width must follow
+    // the DERIVED timelineDuration (5), not the prop (8) — proving it's render-faithful, not a
+    // coincidence of the prop. (FFmpeg amix duration=first cuts the bed to the base length.)
+    const { container } = renderTimeline(fullDoc, 8)
+    const auds = container.querySelectorAll('.st-aud')
+    expect(auds).toHaveLength(3)
+
+    const music = container.querySelector('.st-aud-music')
+    expect(music.style.left).toBe(`${LANE_PAD}px`)
+    expect(music.style.width).toBe(`${5 * ZOOM}px`)            // = timelineDuration(doc), NOT dur=8
+    expect(music.textContent).toContain('bed.mp3')
+
+    const vo = container.querySelector('.st-aud-narration')
+    expect(vo.style.left).toBe(`${LANE_PAD + 0.5 * ZOOM}px`)
+    expect(vo.style.width).toBe(`${1.5 * ZOOM}px`)             // 2 - 0.5
+    expect(vo.textContent).toContain('line1.mp3')
+
+    const fx = container.querySelector('.st-aud-sfx')
+    expect(fx.className).toContain('pt')                        // point marker
+    expect(fx.style.left).toBe(`${LANE_PAD + 3 * ZOOM}px`)
+    expect(fx.style.width).toBe('12px')
+  })
+  it('sorts audio items by start time across kinds', () => {
+    const { container } = renderTimeline(fullDoc, 5)
+    const auds = [...container.querySelectorAll('.st-aud')]
+    expect(auds.map(a => parseFloat(a.style.left))).toEqual([
+      LANE_PAD,              // music @0
+      LANE_PAD + 0.5 * ZOOM, // narration @0.5
+      LANE_PAD + 3 * ZOOM,   // sfx @3
+    ])
+  })
+  it('shows the empty hint when there is no audio', () => {
+    const { container } = renderTimeline({ cuts: fullDoc.cuts }, 5)
+    expect(container.querySelectorAll('.st-aud')).toHaveLength(0)
+    expect(container.querySelector('.st-lane-audio .st-lane-empty')).toBeInTheDocument()
+  })
+})
+
+describe('audio lane is selectable + deselect-on-empty (the two reported bugs)', () => {
+  it('clicking an audio item selects it with kind + doc index', () => {
+    const onSelect = vi.fn()
+    const { container } = render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} onSelect={onSelect} />)
+    fireEvent.click(container.querySelector('.st-aud-music'))
+    expect(onSelect).toHaveBeenCalledWith({ kind: 'audio', audioKind: 'music', index: null })
+    fireEvent.click(container.querySelector('.st-aud-sfx'))
+    expect(onSelect).toHaveBeenCalledWith({ kind: 'audio', audioKind: 'sfx', index: 0 })
+  })
+  it('marks the selected audio item', () => {
+    const { container } = render(
+      <StudioTimeline doc={fullDoc} dur={5} {...baseProps} selection={{ kind: 'audio', audioKind: 'music', index: null }} />)
+    expect(container.querySelector('.st-aud-music').className).toContain('sel')
+  })
+  it('clicking empty timeline background deselects (→ Assets tab)', () => {
+    const onSelect = vi.fn()
+    const { container } = render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} onSelect={onSelect} />)
+    fireEvent.pointerDown(container.querySelector('.st-lane-cuts'))   // empty lane area
+    fireEvent.pointerDown(container.querySelector('.st-tl-content'))  // content background
+    expect(onSelect).toHaveBeenCalledWith(null)
+    expect(onSelect).toHaveBeenCalledTimes(2)
+  })
+  it('clicking a clip or the ruler does NOT deselect (so scrub/select keep working)', () => {
+    const onSelect = vi.fn()
+    const { container } = render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} onSelect={onSelect} />)
+    fireEvent.pointerDown(container.querySelector('.st-clip'))
+    fireEvent.pointerDown(container.querySelector('.st-ruler'))
+    expect(onSelect).not.toHaveBeenCalledWith(null)
+  })
+})
+
+describe('timeline toolbar (feat 2 + 5: transport + clip ops live here now)', () => {
+  function renderTL(extra = {}) {
+    const handlers = { onTogglePlay: vi.fn(), onSplit: vi.fn(), onDuplicate: vi.fn(), onDelete: vi.fn() }
+    return { ...render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} {...handlers} {...extra} />), handlers }
+  }
+  it('shows play/pause and toggles it', () => {
+    const { getByRole, handlers } = renderTL({ playing: false })
+    const play = getByRole('button', { name: 'Play' })
+    fireEvent.click(play)
+    expect(handlers.onTogglePlay).toHaveBeenCalledOnce()
+  })
+  it('reflects the playing state on the transport button', () => {
+    const { getByRole } = renderTL({ playing: true })
+    expect(getByRole('button', { name: 'Pause' }).textContent).toContain('⏸')
+  })
+  it('split always fires; duplicate needs a selected cut; delete needs any selection', () => {
+    const none = renderTL({ selection: null })
+    fireEvent.click(none.getByRole('button', { name: /split/i }))
+    expect(none.handlers.onSplit).toHaveBeenCalledOnce()
+    expect(none.getByRole('button', { name: /duplicate/i })).toBeDisabled()
+    expect(none.getByRole('button', { name: /delete/i })).toBeDisabled()
+    none.unmount()
+
+    const sel = renderTL({ selection: { kind: 'cut', id: 'a' } })
+    fireEvent.click(sel.getByRole('button', { name: /duplicate/i }))
+    fireEvent.click(sel.getByRole('button', { name: /delete/i }))
+    expect(sel.handlers.onDuplicate).toHaveBeenCalledOnce()
+    expect(sel.handlers.onDelete).toHaveBeenCalledOnce()
+  })
+})
+
+describe('ruler + playhead', () => {
+  it('positions the playhead at LANE_PAD + playhead*zoom', () => {
+    const { container } = renderTimeline(fullDoc, 5)
+    expect(container.querySelector('.st-playhead').style.left).toBe(`${LANE_PAD + 2 * ZOOM}px`)
+  })
+  it('shows the total duration and a ruler of ticks', () => {
+    const { container } = renderTimeline(fullDoc, 5)
+    expect(container.querySelector('.st-tl-dur').textContent).toContain('0:05.0')
+    expect(container.querySelectorAll('.st-tick').length).toBeGreaterThan(0)
+  })
+})
