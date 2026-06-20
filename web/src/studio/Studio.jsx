@@ -255,14 +255,20 @@ export default function Studio({ projectId, state, onClose }) {
     commit(d => interp.reorderCut(d, from, to))
   }, [commit])
 
-  // Assets-tab adds (feat 4): each kind drops in the way that fits it.
-  const onAddClip = useCallback((path) => {
+  // Assets-tab adds (feat 4) + drag-drop (atTime present on a drop): each kind drops in the
+  // way that fits it. Click → at the playhead; drag-drop → at the dropped project time.
+  const onAddClip = useCallback((path, atTime) => {
     const meta = sourceMetas[path]
     const out = meta?.duration ? Math.min(meta.duration, 8) : 5
-    commit(d => interp.addCut(d, { source: path, in_seconds: 0, out_seconds: out }))
+    let atIndex
+    if (atTime != null) {
+      const h = interp.cutAtTime(docRef.current, atTime) // insert before/after the cut under the drop
+      if (h) atIndex = atTime >= h.start + interp.cutDuration(h.cut) / 2 ? h.index + 1 : h.index
+    }
+    commit(d => interp.addCut(d, { source: path, in_seconds: 0, out_seconds: out }, atIndex))
   }, [commit, sourceMetas])
   const onSetMusic = useCallback((path) => { commit(d => interp.setMusic(d, path)); flash('ok', 'Music set') }, [commit, flash])
-  const onAddSfx = useCallback((path) => { commit(d => interp.addSfx(d, path, playhead)) }, [commit, playhead])
+  const onAddSfx = useCallback((path, atTime) => { commit(d => interp.addSfx(d, path, atTime != null ? atTime : playhead)) }, [commit, playhead])
 
   // Edit the selected audio item (music bed / narration segment / sfx) from the properties panel.
   const onUpdateAudio = useCallback((patch) => {
@@ -310,12 +316,22 @@ export default function Studio({ projectId, state, onClose }) {
     setSelection({ kind: 'overlay', index: at })
   }, [playhead, doc, commit])
 
-  const onAddImage = useCallback((assetId) => {
-    const start = Math.min(playhead, Math.max(0, interp.timelineDuration(doc) - 1))
+  const onAddImage = useCallback((assetId, atTime) => {
+    const start = atTime != null ? Math.max(0, atTime) : Math.min(playhead, Math.max(0, interp.timelineDuration(doc) - 1))
     const at = (doc?.overlays || []).length
     commit(d => interp.addOverlay(d, newImageOverlay({ assetId, start, end: start + 3, canvas: interp.canvasOf(d) })))
     setSelection({ kind: 'overlay', index: at })
   }, [playhead, doc, commit])
+
+  // Drop an asset from the Assets tab onto the timeline at project time `t`. Declared AFTER the
+  // add-handlers it depends on so they aren't read in their temporal dead zone (a TDZ
+  // ReferenceError here crashes the whole editor on mount, which the build can't catch).
+  const onAssetDrop = useCallback((kind, path, t) => {
+    if (kind === 'images') onAddImage(path, t)
+    else if (kind === 'video') onAddClip(path, t)
+    else if (kind === 'music') onSetMusic(path)
+    else onAddSfx(path, t)
+  }, [onAddImage, onAddClip, onSetMusic, onAddSfx])
 
   const onCanvas = useCallback(({ width, height }) => {
     commit(d => interp.setCanvas(d, { width, height }))
@@ -434,7 +450,7 @@ export default function Studio({ projectId, state, onClose }) {
                 projectId={projectId} doc={doc} dur={dur} zoom={zoom} playhead={playhead}
                 selection={selection} sourceMetas={sourceMetas} playing={playing}
                 onSeek={seekFromUser} onSelect={setSelection} onTrim={onTrim} onTrimBegin={onTrimBegin}
-                onReorder={onReorder} onZoom={setZoom}
+                onReorder={onReorder} onZoom={setZoom} onAssetDrop={onAssetDrop}
                 onTogglePlay={togglePlay} onSplit={onSplit} onDuplicate={onDuplicate} onDelete={onDelete}
               />
             </div>

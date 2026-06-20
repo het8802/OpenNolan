@@ -1,3 +1,11 @@
+# GOAL
+
+The main purpose of this desktop app is to create vertical format content, which creates scroll stopping content.
+
+The current focus for this app is the following:
+1. Create a desktop app, which is a hybrid of AI agents editing and human editing. The AI agent would start the project, create composition, edits, etc. and then the human reviewer can edit the clips as they like.
+2. The goal for creating this app is to create a mac app, which has all the features from instagram edits app (for editing timelines, etc.), but add an ai agent, which can help with the editing part like placing clips, adding music, sound effects, etc.
+
 # RULES — Desktop Editing App
 
 Coding contract for the from-scratch editing UI (`web/src/studio/`) on top of the pure,
@@ -48,8 +56,10 @@ short — add a pointer, not an essay.
   FFmpeg path renders (`TRANSITIONS`, `KF_DIMS_*`); interpolation is linear, so preview linearly.
   The audio lane is selectable/editable (asset, timing, levels) but not yet drag-positioned, and
   FFmpeg still owns mixing.
-- **Pointer events, not HTML5 DnD.** Scrub/trim/reorder/resize share one `pointerdown → window
-  move/up/cancel` model. Always tear down window listeners on pointerup AND on unmount.
+- **Pointer events for in-timeline manipulation.** Scrub/trim/reorder/resize share one
+  `pointerdown → window move/up/cancel` model; always tear down window listeners on pointerup AND
+  on unmount. (Exception: cross-panel **asset drag from the Assets tab onto the timeline** uses
+  HTML5 DnD — `dataTransfer` type `application/x-opennolan-asset`, dropped via `xToTime`.)
 - **CSS namespace `st-`.** Keep new studio styles prefixed and co-located in `styles.css`.
 
 ### Editor feature conventions
@@ -62,7 +72,8 @@ short — add a pointer, not an essay.
 - **Audio on the timeline (feat 3):** derive blocks from `interp.audioClips(doc)` (carries the
   doc `index`) — never re-read the schema in the component. Music spans the whole timeline; sfx
   are point markers. Items are selectable (`{kind:'audio', audioKind, index}`) and edited via the
-  audio mutators (`updateMusic`/`updateNarration`/`updateSfx` + `remove*`).
+  audio mutators (`updateMusic`/`updateNarration`/`updateSfx` + `remove*`). The source preview
+  plays them too: `model.previewAudioTracks(doc)` → hidden `<audio>` synced to the rAF playhead.
 - **Properties panel = selection or assets (feat 4):** show the clip / overlay / **audio** editor
   for the current selection, else the **Assets tab** (same kinds as the agent window: images /
   video / audio / music). Deselect = click the timeline background (a single handler on

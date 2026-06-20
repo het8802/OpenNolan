@@ -185,6 +185,23 @@ describe('timeline toolbar (feat 2 + 5: transport + clip ops live here now)', ()
   })
 })
 
+describe('asset drag-and-drop onto the timeline', () => {
+  const DND = 'application/x-opennolan-asset'
+  it('dropping an asset calls onAssetDrop with kind, path, and a drop time', () => {
+    const onAssetDrop = vi.fn()
+    const { container } = render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} onAssetDrop={onAssetDrop} />)
+    const scroll = container.querySelector('.st-tl-scroll')
+    fireEvent.drop(scroll, { dataTransfer: { getData: () => JSON.stringify({ kind: 'images', path: 'images/logo.png' }), types: [DND] } })
+    expect(onAssetDrop).toHaveBeenCalledWith('images', 'images/logo.png', expect.any(Number))
+  })
+  it('shows a drop affordance while an asset is dragged over', () => {
+    const { container } = render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} onAssetDrop={vi.fn()} />)
+    const scroll = container.querySelector('.st-tl-scroll')
+    fireEvent.dragOver(scroll, { dataTransfer: { types: [DND], dropEffect: '' } })
+    expect(scroll.className).toContain('drop')
+  })
+})
+
 describe('ruler + playhead', () => {
   it('positions the playhead at LANE_PAD + playhead*zoom', () => {
     const { container } = renderTimeline(fullDoc, 5)

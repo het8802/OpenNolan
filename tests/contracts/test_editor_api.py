@@ -279,6 +279,23 @@ def test_source_resolves_asset_id_via_manifest(tmp_path):
     assert r.content == b"abc"
 
 
+def test_source_serves_shared_repo_asset_library(tmp_path):
+    """SFX/kit audio lives in the repo's shared `assets/` (outside any project) and the renderer
+    reads it from repo-root cwd; the preview must serve it too, or SFX play in the export but are
+    silent in the editor. (Regression: the music bed — a project file — resolved, SFX did not.)"""
+    client, projects = _client(tmp_path)
+    pid = _seed(projects)
+    shared = projects.parent / "assets" / "sfx" / "whoosh.wav"  # <repo>/assets/sfx/whoosh.wav
+    shared.parent.mkdir(parents=True, exist_ok=True)
+    shared.write_bytes(b"WAVE")
+    man = projects / pid / "artifacts" / "asset_manifest.json"
+    man.parent.mkdir(parents=True, exist_ok=True)
+    man.write_text(json.dumps({"assets": [{"id": "sfx_whoosh", "path": "assets/sfx/whoosh.wav"}]}))
+    r = client.get(f"/api/projects/{pid}/source", params={"ref": "sfx_whoosh"})
+    assert r.status_code == 200, r.text
+    assert r.content == b"WAVE"
+
+
 def test_source_blocks_escape_outside_project(tmp_path):
     """A ref that resolves outside the project dir (traversal or absolute) is rejected."""
     client, projects = _client(tmp_path)

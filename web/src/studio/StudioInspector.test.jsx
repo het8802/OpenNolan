@@ -26,6 +26,17 @@ describe('selection routing', () => {
     expect(getByRole('button', { name: /music/i })).toBeInTheDocument()
   })
 
+  it('Assets-tab items are draggable and carry their kind + path', () => {
+    const { container } = setup({
+      assets: { kinds: { images: [{ path: 'images/logo.png', name: 'logo.png' }], video: [], audio: [], music: [] } },
+    })
+    const item = container.querySelector('.st-asset-item')
+    expect(item).toHaveAttribute('draggable')
+    const setData = vi.fn()
+    fireEvent.dragStart(item, { dataTransfer: { setData } })
+    expect(setData).toHaveBeenCalledWith('application/x-opennolan-asset', JSON.stringify({ kind: 'images', path: 'images/logo.png' }))
+  })
+
   it('shows the clip inspector for a selected cut', () => {
     const selCut = { id: 'c1', source: 'a.mp4', in_seconds: 0, out_seconds: 4, speed: 1 }
     const { getByText } = setup({ selCut })
