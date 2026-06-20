@@ -46,7 +46,17 @@ export default function StudioAssets({ projectId, assets, onAddImage, onAddClip,
       ) : (
         <div className="st-asset-grid">
           {files.map(f => (
-            <button key={f.path} className={`st-asset-item k-${kind}`} title={f.name} onClick={() => onPick(f.path)}>
+            <button
+              key={f.path}
+              className={`st-asset-item k-${kind}`}
+              title={`${f.name} — click or drag onto the timeline`}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('application/x-opennolan-asset', JSON.stringify({ kind, path: f.path }))
+                e.dataTransfer.effectAllowed = 'copy'
+              }}
+              onClick={() => onPick(f.path)}
+            >
               {kind === 'images' && <img src={api.fileUrl(projectId, f.path, f.mtime)} alt={f.name} loading="lazy" />}
               {kind === 'video' && (
                 <span className="st-asset-thumb">

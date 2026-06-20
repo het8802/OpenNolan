@@ -7,7 +7,7 @@ import {
   TRANSITIONS, SPEED_PRESETS, CANVAS_PRESETS, TEXT_ANCHORS, EASINGS,
   KF_DIMS_IMAGE, KF_DIMS_TEXT,
   overlayKind, kfDimsFor, newTextOverlay, newImageOverlay, presetKeyframes,
-  isFfmpeg, anchorToXY, fmtTime, round3, clamp,
+  isFfmpeg, anchorToXY, fmtTime, round3, clamp, previewAudioTracks,
 } from './model.js'
 import { sanitizeOverlay } from '../editor/interp.js'
 
@@ -156,6 +156,31 @@ describe('fmtTime (mm:ss.c)', () => {
     // rolling to the next minute — pinned so a future ruler change is a deliberate decision.
     expect(fmtTime(9.99)).toBe('0:10.0')
     expect(fmtTime(59.96)).toBe('0:60.0')
+  })
+})
+
+describe('previewAudioTracks (source-preview <audio> elements)', () => {
+  it('returns [] when there is no audio', () => {
+    expect(previewAudioTracks({})).toEqual([])
+    expect(previewAudioTracks(null)).toEqual([])
+  })
+  it('builds music / narration / sfx with volume and open-ended windows', () => {
+    const doc = { audio: {
+      music: { asset_id: 'bed.mp3', volume: 0.6 },
+      narration: { segments: [{ asset_id: 'vo.mp3', start_seconds: 1, end_seconds: 4 }] },
+      sfx: [{ asset_id: 'whoosh.mp3', start_seconds: 6, volume: 0.5 }],
+    } }
+    expect(previewAudioTracks(doc)).toEqual([
+      { key: 'music', kind: 'music', src: 'bed.mp3', start: 0, end: Infinity, volume: 0.6 },
+      { key: 'n0', kind: 'narration', src: 'vo.mp3', start: 1, end: 4, volume: 1 },
+      { key: 's0', kind: 'sfx', src: 'whoosh.mp3', start: 6, end: Infinity, volume: 0.5 },
+    ])
+  })
+  it('defaults volume to 1, uses legacy top-level music, and skips items with no asset_id', () => {
+    expect(previewAudioTracks({ music: { asset_id: 'legacy.mp3' } })[0])
+      .toEqual({ key: 'music', kind: 'music', src: 'legacy.mp3', start: 0, end: Infinity, volume: 1 })
+    const doc = { audio: { sfx: [{ start_seconds: 2 }, { asset_id: 'x.mp3', start_seconds: 3 }] } }
+    expect(previewAudioTracks(doc).map(t => t.src)).toEqual(['x.mp3']) // the no-asset sfx is skipped
   })
 })
 

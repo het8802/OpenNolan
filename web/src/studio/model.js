@@ -120,6 +120,26 @@ export function isFfmpeg(doc) {
   return (doc?.render_runtime || 'ffmpeg') === 'ffmpeg'
 }
 
+/**
+ * Audio tracks for the SOURCE preview's hidden <audio> elements: the music bed + narration
+ * segments + SFX, each with a stable `key`, the `src` asset id, its window [start,end], and
+ * volume. Like `audioClips` but carries volume and uses OPEN-ENDED windows (music/sfx stop at
+ * their own asset end, which only the loaded element knows). Items with no asset_id are skipped.
+ */
+export function previewAudioTracks(doc) {
+  const a = doc?.audio || {}
+  const list = []
+  const music = a.music || doc?.music
+  if (music?.asset_id) list.push({ key: 'music', kind: 'music', src: music.asset_id, start: 0, end: Infinity, volume: music.volume ?? 1 })
+  ;(a.narration?.segments || []).forEach((s, i) => {
+    if (s?.asset_id) list.push({ key: `n${i}`, kind: 'narration', src: s.asset_id, start: Math.max(0, Number(s.start_seconds) || 0), end: s.end_seconds != null ? Number(s.end_seconds) : Infinity, volume: 1 })
+  })
+  ;(a.sfx || []).forEach((s, i) => {
+    if (s?.asset_id) list.push({ key: `s${i}`, kind: 'sfx', src: s.asset_id, start: Math.max(0, Number(s.start_seconds) || 0), end: Infinity, volume: s.volume ?? 1 })
+  })
+  return list
+}
+
 /** Convert a named anchor (text-overlay form) to an {x,y,width} object — image/video
  * overlays MUST carry an object position (the renderer rejects a string anchor for them). */
 export function anchorToXY(anchor, canvas) {

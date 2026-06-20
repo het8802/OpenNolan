@@ -73,13 +73,18 @@ def resolve_source_path(
     path. Cut sources are stored repo-root-relative (e.g. `projects/<id>/assets/video/x.mp4`),
     so we try that first, then project-relative, then projects-dir-relative.
 
-    Returns None if nothing resolves to a file, OR if the resolved file escapes the project
-    directory (path-traversal / absolute-path containment guard) — the editor must never
-    serve bytes from outside the project it's editing.
+    Returns None if nothing resolves to a file, OR if the resolved file escapes the allowed
+    roots (path-traversal / absolute-path containment guard). Allowed roots are the project
+    directory AND the repo's shared, checked-in asset libraries under `<repo>/assets/` (e.g.
+    `assets/sfx/`, the greg kit). The renderer reads those from repo-root cwd, so the preview
+    must serve them too or SFX/kit audio is silent in the editor but present in the export.
+    Arbitrary out-of-project user files are still refused.
     """
     if not ref:
         return None
     proj = (Path(projects_dir) / project_id).resolve()
+    # Curated, in-repo asset libraries the renderer uses (parent of projects_dir is the repo).
+    shared_root = (Path(projects_dir).parent / "assets").resolve()
     manifest = read_asset_manifest(projects_dir, project_id)
     lookup = {
         a.get("id"): a
@@ -108,7 +113,7 @@ def resolve_source_path(
             rc = c.resolve()
         except OSError:
             continue
-        if rc.is_file() and (rc == proj or proj in rc.parents):
+        if rc.is_file() and (rc == proj or proj in rc.parents or shared_root in rc.parents):
             return rc
     return None
 

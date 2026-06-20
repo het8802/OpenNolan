@@ -4,16 +4,60 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OpenNolan — Make content people actually stop for</title>
-  <meta name="description" content="OpenNolan turns your product into scroll-stopping Reels and TikToks — finding the trending hooks, memes, sounds and fast cuts that vertical video needs to win attention. Local-first, on your Mac, with your own key. Join the waitlist." />
+  <meta name="description" content="OpenNolan turns your product into scroll-stopping Reels and TikToks — a local-first short-form video editor for Mac. Join the waitlist." />
+  <link rel="canonical" href="https://www.opennolan.com/" />
+  <meta name="robots" content="index, follow" />
 
   <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.opennolan.com/" />
   <meta property="og:title" content="OpenNolan — Make content people actually stop for" />
   <meta property="og:description" content="Turn your product into scroll-stopping short-form content. Trending hooks, memes, sound, fast cuts — assembled for you. Join the waitlist." />
   <meta property="og:site_name" content="OpenNolan" />
+  <meta property="og:image" content="https://www.opennolan.com/assets/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="OpenNolan — the Mac editor that turns your product into scroll-stopping Reels and TikToks." />
   <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="OpenNolan — Make content people actually stop for" />
+  <meta name="twitter:description" content="Turn your product into scroll-stopping short-form content. Trending hooks, memes, sound, fast cuts — assembled for you. Join the waitlist." />
+  <meta name="twitter:image" content="https://www.opennolan.com/assets/og-image.png" />
   <meta name="theme-color" content="#FBF8F1" />
 
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23D9694A'/%3E%3Cpath d='M13 10.5l9 5.5-9 5.5z' fill='%23FBF8F1'/%3E%3C/svg%3E" />
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://www.opennolan.com/#org",
+        "name": "OpenNolan",
+        "url": "https://www.opennolan.com/",
+        "logo": "https://www.opennolan.com/assets/logo.png",
+        "description": "Maker of OpenNolan, a local-first Mac app for turning products into scroll-stopping short-form video."
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://www.opennolan.com/#website",
+        "name": "OpenNolan",
+        "url": "https://www.opennolan.com/",
+        "publisher": { "@id": "https://www.opennolan.com/#org" }
+      },
+      {
+        "@type": "SoftwareApplication",
+        "name": "OpenNolan",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "macOS",
+        "description": "A local-first Mac app that turns your product into scroll-stopping short-form video — finding the trending hooks, cuts, sounds and captions vertical video needs to win attention. Bring your own key.",
+        "url": "https://www.opennolan.com/",
+        "image": "https://www.opennolan.com/assets/og-image.png",
+        "publisher": { "@id": "https://www.opennolan.com/#org" },
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    ]
+  }
+  </script>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1104,7 +1148,10 @@
           if (res.ok) {
             const data = await res.json().catch(() => ({}));
             if (data.alreadyJoined) { setStatus(form, "You're already on the list — see you at launch! 🎬", 'success'); }
-            else { showSuccess(form); }
+            else {
+              showSuccess(form);
+              if (window.va) { window.va('event', { name: 'waitlist_signup', data: { placement: form.classList.contains('hero-form') ? 'hero' : 'cta' } }); }
+            }
           } else {
             const data = await res.json().catch(() => ({}));
             setStatus(form, data.error || 'Something went wrong. Please try again.', 'error');
@@ -1117,5 +1164,7 @@
       });
     });
   </script>
+  <!-- Vercel Web Analytics (cookieless). Requires Web Analytics enabled for this project in the Vercel dashboard. -->
+  <script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>

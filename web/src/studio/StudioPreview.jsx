@@ -5,10 +5,33 @@
 //    two never fight. A rough pre-render preview (no overlays/transitions).
 //  • RENDER: plays the composed MP4 (preview == export); playback drives the playhead.
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import * as api from '../api.js'
 import * as interp from '../editor/interp.js'
-import { fmtTime } from './model.js'
+import { fmtTime, previewAudioTracks } from './model.js'
+
+// Drive the music/narration/sfx <audio> elements to project time `t`. Each track is audible
+// for t inside its window (music = whole timeline; narration = [start,end]; sfx = start →
+// asset end). `local` is the offset into the asset. Mirrors the FFmpeg mix enough to preview:
+// the clip's own audio comes from the <video>, these add the bed + voice + effects on top.
+function syncAudioEls(els, tracks, t, active) {
+  for (const tr of tracks) {
+    const el = els.get(tr.key)
+    if (!el) continue
+    const local = t - tr.start
+    const assetDur = Number.isFinite(el.duration) ? el.duration : Infinity
+    const windowEnd = tr.kind === 'narration' ? Math.min(tr.end - tr.start, assetDur) : assetDur
+    const audible = active && local >= -0.05 && local < windowEnd
+    if (audible) {
+      el.volume = Math.max(0, Math.min(1, tr.volume))
+      const target = Math.max(0, local)
+      if (Math.abs(el.currentTime - target) > 0.3) { try { el.currentTime = target } catch { /* not ready */ } }
+      if (el.paused) el.play().catch(() => {})
+    } else if (!el.paused) {
+      try { el.pause() } catch { /* noop */ }
+    }
+  }
+}
 
 export default function StudioPreview({ projectId, doc, playhead, previewMode, renderPath, renderVersion, playing, onScrub, onPlayingChange }) {
   const srcRef = useRef(null)
@@ -19,9 +42,13 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
   const sourceTime = hit?.sourceTime || 0
   const dur = interp.timelineDuration(doc)
 
+  // Audio to play alongside the source clip: music bed + narration + SFX, each a hidden <audio>.
+  const audioTracks = useMemo(() => previewAudioTracks(doc), [doc])
+  const audioEls = useRef(new Map())
+
   // Latest render values for the rAF clock to read without re-subscribing every frame.
   const liveRef = useRef(null)
-  liveRef.current = { doc, hit, previewMode, dur, onScrub, onPlayingChange }
+  liveRef.current = { doc, hit, previewMode, dur, onScrub, onPlayingChange, audioTracks }
 
   // When playing reaches a cut's out-point, jump to the next cut (or stop at the end).
   const advanceSource = (v) => {
@@ -104,22 +131,27 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
           const inS = Number(cut.in_seconds) || 0
           const outS = Number(cut.out_seconds) || 0
           const speed = Number(cut.speed) || 1
+          let t
           if (v.currentTime >= outS - 0.02) {
             const cuts = st.doc.cuts || []
             const ni = st.hit.index + 1
             if (ni < cuts.length) {
               const next = cuts[ni]
-              st.onScrub(st.hit.start + interp.cutDuration(cut) + 1e-3) // → next cut
+              t = st.hit.start + interp.cutDuration(cut) + 1e-3
+              st.onScrub(t) // → next cut
               if (next.source === cut.source) { // same element keeps playing — reseek to its in-point
                 try { v.currentTime = Number(next.in_seconds) || 0 } catch { /* not ready */ }
                 v.playbackRate = Number(next.speed) || 1
               }
             } else {
-              st.onScrub(st.dur); st.onPlayingChange(false); try { v.pause() } catch { /* noop */ }
+              t = st.dur
+              st.onScrub(t); st.onPlayingChange(false); try { v.pause() } catch { /* noop */ }
             }
           } else {
-            st.onScrub(st.hit.start + (v.currentTime - inS) / speed)
+            t = st.hit.start + (v.currentTime - inS) / speed
+            st.onScrub(t)
           }
+          syncAudioEls(audioEls.current, st.audioTracks, t, true) // music / narration / sfx
         }
       } else {
         const v = renRef.current
@@ -131,8 +163,24 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
     return () => cancelAnimationFrame(raf)
   }, [playing])
 
+  // Pause every audio track whenever we're not actively playing the source preview — when
+  // paused/scrubbing, or in render mode (the composed MP4 carries its own mixed audio).
+  useEffect(() => {
+    if (playing && previewMode === 'source') return
+    for (const el of audioEls.current.values()) { try { el.pause() } catch { /* noop */ } }
+  }, [playing, previewMode])
+
   return (
     <div className="st-stage">
+      {/* hidden audio tracks (music / narration / sfx) — synced to the playhead by the rAF clock */}
+      {audioTracks.map(tr => (
+        <audio
+          key={tr.key}
+          src={api.sourceUrl(projectId, tr.src)}
+          preload="auto"
+          ref={(el) => { const m = audioEls.current; if (el) m.set(tr.key, el); else m.delete(tr.key) }}
+        />
+      ))}
       {previewMode === 'source' ? (
         sourceRef != null ? (
           <>

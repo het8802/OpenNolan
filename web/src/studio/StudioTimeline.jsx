@@ -4,9 +4,11 @@
 // listeners are attached synchronously on pointerdown and torn down on pointerup. All
 // clamping/structure lives in interp.js — this file is just pointer math + layout.
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as interp from '../editor/interp.js'
 import { fmtTime } from './model.js'
+
+const ASSET_DND = 'application/x-opennolan-asset'
 
 const LANE_PAD = 12          // px gutter at the left of the lanes
 const DRAG_THRESHOLD = 4     // px before a press becomes a reorder drag
@@ -21,13 +23,14 @@ const baseName = (p) => String(p || '').split('/').pop() || p
 
 export default function StudioTimeline({
   doc, dur, zoom, playhead, selection, sourceMetas, playing,
-  onSeek, onSelect, onTrim, onTrimBegin, onReorder, onZoom,
+  onSeek, onSelect, onTrim, onTrimBegin, onReorder, onZoom, onAssetDrop,
   onTogglePlay, onSplit, onDuplicate, onDelete,
 }) {
   const hasCut = selection?.kind === 'cut'
   const hasSel = !!selection
   const scrollRef = useRef(null)
   const dragCleanup = useRef(null) // teardown for an in-flight drag (also runs on unmount)
+  const [dropping, setDropping] = useState(false) // asset drag hovering the timeline
 
   // Never leak window listeners if Studio unmounts (or the timeline remounts) mid-drag.
   useEffect(() => () => { if (dragCleanup.current) dragCleanup.current() }, [])
@@ -126,8 +129,20 @@ export default function StudioTimeline({
       {/* Click anywhere in the timeline that ISN'T a clip/overlay/audio block (or the ruler,
           which scrubs) → deselect, so the properties panel falls through to the Assets tab.
           A single handler on the scroll viewport is robust even when clips fill every lane. */}
-      <div className="st-tl-scroll" ref={scrollRef}
-        onPointerDown={(e) => { if (!e.target.closest('.st-clip, .st-ov, .st-aud, .st-ruler')) onSelect(null) }}>
+      <div className={`st-tl-scroll${dropping ? ' drop' : ''}`} ref={scrollRef}
+        onPointerDown={(e) => { if (!e.target.closest('.st-clip, .st-ov, .st-aud, .st-ruler')) onSelect(null) }}
+        onDragOver={(e) => {
+          if (!onAssetDrop || !e.dataTransfer.types.includes(ASSET_DND)) return
+          e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (!dropping) setDropping(true)
+        }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false) }}
+        onDrop={(e) => {
+          setDropping(false)
+          const data = e.dataTransfer.getData(ASSET_DND)
+          if (!data || !onAssetDrop) return
+          e.preventDefault()
+          try { const { kind, path } = JSON.parse(data); onAssetDrop(kind, path, xToTime(e.clientX)) } catch { /* ignore bad payload */ }
+        }}>
         <div className="st-tl-content" style={{ width: contentW }}>
           {/* ruler — click/drag to scrub */}
           <div className="st-ruler" onPointerDown={(e) => { onSeek(xToTime(e.clientX)); beginDrag(e, { mode: 'scrub' }) }}>

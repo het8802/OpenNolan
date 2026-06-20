@@ -828,6 +828,7 @@ select { cursor: pointer; }
 .st-zoom { display: inline-flex; align-items: center; gap: 0.3rem; }
 .st-zoom input[type=range] { width: 130px; }
 .st-tl-scroll { flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; }
+.st-tl-scroll.drop { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-soft); }
 .st-tl-content { position: relative; }
 .st-ruler { position: relative; height: 22px; border-bottom: 1px solid var(--line); cursor: ew-resize; user-select: none; }
 .st-tick { position: absolute; top: 3px; transform: translateX(-2px); font-size: 0.64rem; color: var(--muted);

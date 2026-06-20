@@ -398,7 +398,11 @@ def create_app(
         target = editor_mod.resolve_source_path(pdir, project_id, ref)
         if target is None:
             raise HTTPException(status_code=404, detail="source not found within project")
-        rel = str(target.relative_to((pdir / project_id).resolve()))
+        try:
+            rel = str(target.relative_to((pdir / project_id).resolve()))
+        except ValueError:
+            rel = str(target)  # a shared in-repo asset (sfx/kit) resolved outside the project
+
         meta: dict[str, Any] = {
             "project_id": project_id, "ref": ref, "path": rel,
             "duration": None, "width": None, "height": None,
