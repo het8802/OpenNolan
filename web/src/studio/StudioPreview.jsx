@@ -113,9 +113,9 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
       last = ts
 
       const t = playheadRef.current + dt
-      if (t >= st.dur) { // reached the end — stop cleanly
-        playheadRef.current = st.dur
-        st.onScrub(st.dur); st.onPlayingChange(false)
+      if (t >= st.dur) { // reached the end — stop cleanly (idempotent: never re-fire the scrub)
+        if (playheadRef.current < st.dur) { playheadRef.current = st.dur; st.onScrub(st.dur) }
+        st.onPlayingChange(false)
         const v = srcRef.current; if (v) { try { v.pause() } catch { /* noop */ } }
         pauseAllAudio(audioEls.current)
         return // no next frame
@@ -129,8 +129,8 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
       const h = interp.cutAtTime(st.doc, t)
       const v = srcRef.current
       if (v && h) {
-        const speed = Number(h.cut.speed) || 1
-        if (v.playbackRate !== speed) v.playbackRate = speed
+        const speed = Math.max(0.0625, Number(h.cut.speed) || 1) // clamp to a browser-playable rate
+        if (Math.abs(v.playbackRate - speed) > 0.01) v.playbackRate = speed // tolerance: don't churn on float noise
         if (v.readyState >= 1 && !v.seeking && Math.abs(v.currentTime - h.sourceTime) > 0.34) {
           try { v.currentTime = h.sourceTime } catch { /* not ready */ }
         }
@@ -150,6 +150,13 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
     if (playing && previewMode === 'source') return
     pauseAllAudio(audioEls.current)
   }, [playing, previewMode])
+
+  // On unmount (e.g. closing the editor mid-playback) pause the video + all audio — a detached
+  // media element keeps its audio going until GC, so never leave one playing.
+  useEffect(() => () => {
+    const v = srcRef.current; if (v) { try { v.pause() } catch { /* noop */ } }
+    pauseAllAudio(audioEls.current)
+  }, [])
 
   return (
     <div className="st-stage">
