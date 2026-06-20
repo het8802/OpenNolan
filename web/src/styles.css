@@ -772,7 +772,10 @@ select { cursor: pointer; }
 /* body — resizable flex (feat 1): top row [stage | splitter | inspector], then [splitter | timeline] */
 .st-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .st-body-top { flex: 1 1 auto; min-height: 220px; display: flex; min-width: 0; overflow: hidden; }
-.st-inspector-wrap { flex: 0 0 auto; display: flex; min-width: 0; overflow: hidden; }
+/* side panels keep their drag width when there's room (only the stage grows), but stay
+   flex-SHRINKABLE so a narrow window compresses them instead of clipping a panel off-screen
+   (with the agent + inspector both open the row's natural floor exceeds the stack breakpoint). */
+.st-inspector-wrap { flex: 0 1 auto; display: flex; min-width: 0; overflow: hidden; }
 .st-timeline-wrap { flex: 0 0 auto; display: flex; min-height: 0; overflow: hidden; }
 
 /* splitters — drag to resize, drag past the threshold to collapse the panel */
@@ -784,6 +787,14 @@ select { cursor: pointer; }
 .st-reopen-v { width: 18px; align-self: stretch; border-top: none; border-bottom: none; border-right: none; }
 .st-reopen-h { height: 22px; border-left: none; border-right: none; border-bottom: none; }
 .st-reopen:hover { color: var(--ink); background: var(--accent-soft); }
+/* the agent panel sits on the LEFT, so its re-open tab hugs the left edge (flip the borders) */
+.st-reopen-v.st-reopen-agent { border-left: none; border-right: 1px solid var(--line); }
+
+/* agent panel — left of the preview, resizable + collapsible like the inspector (feat 1).
+   flex-shrinkable for the same reason as the inspector wrap (see above). */
+.st-agent-wrap { flex: 0 1 auto; display: flex; min-width: 0; overflow: hidden; }
+.st-agent-wrap .chat.st-agent { flex: 1 1 auto; min-width: 0; border: none;
+  border-right: 1px solid var(--line); border-radius: 0; padding: 0.7rem 0.8rem; }
 
 /* preview stage */
 .st-stage { flex: 1 1 auto; min-width: 360px; position: relative; display: flex; align-items: center; justify-content: center;
@@ -887,4 +898,6 @@ select { cursor: pointer; }
   .st-body-top { flex-direction: column; min-height: 0; }
   .st-stage { min-width: 0; min-height: 200px; }
   .st-vsplit { display: none; }
+  /* stacked vertically — let the agent panel span the full width instead of its drag width */
+  .st-agent-wrap { width: auto !important; max-height: 40vh; }
 }

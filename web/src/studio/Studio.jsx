@@ -16,6 +16,7 @@ import StudioToolbar from './StudioToolbar.jsx'
 import StudioTimeline from './StudioTimeline.jsx'
 import StudioInspector from './StudioInspector.jsx'
 import StudioPreview from './StudioPreview.jsx'
+import ChatPanel from '../chat/ChatPanel.jsx'
 
 const POLL_MS = 500
 const POLL_MAX = 600 // ~5 min ceiling
@@ -26,8 +27,10 @@ const INSPECTOR_MIN = 240   // also the collapse threshold: drag narrower than t
 const INSPECTOR_MAX = 560
 const TIMELINE_MIN = 150     // collapse threshold for the timeline height
 const TIMELINE_MAX_FRAC = 0.6 // timeline may take at most 60% of the body (keeps preview visible)
+const AGENT_MIN = 260       // collapse threshold for the agent panel: drag narrower than this → hide
+const AGENT_MAX = 520
 
-export default function Studio({ projectId, state, onClose }) {
+export default function Studio({ projectId, state, onClose, chat }) {
   const [doc, setDoc] = useState(null)
   const docRef = useRef(null) // mirror of `doc` so handlers read the latest synchronously
   const [past, setPast] = useState([])
@@ -49,7 +52,7 @@ export default function Studio({ projectId, state, onClose }) {
   // ── resizable panels (feat 1): inspector width + timeline height, collapse past a threshold,
   // persisted to localStorage. Layout is view state — NEVER written to the doc. ──
   const [panels, setPanels] = useState(() => {
-    const base = { inspectorW: 320, timelineH: 280, inspectorOpen: true, timelineOpen: true }
+    const base = { inspectorW: 320, timelineH: 280, agentW: 340, inspectorOpen: true, timelineOpen: true, agentOpen: true }
     try { return { ...base, ...JSON.parse(localStorage.getItem(PANELS_KEY) || '{}') } } catch { return base }
   })
   useEffect(() => { try { localStorage.setItem(PANELS_KEY, JSON.stringify(panels)) } catch { /* ignore */ } }, [panels])
@@ -62,6 +65,12 @@ export default function Studio({ projectId, state, onClose }) {
   const jobRef = useRef(0) // supersede in-flight poll loops
 
   const savedRef = useRef('') // JSON of last-saved doc (dirty compare)
+  const dirtyRef = useRef(false) // mirror of `dirty` for the agent-sync effect's closure
+  useEffect(() => { dirtyRef.current = dirty }, [dirty])
+  // The in-editor agent panel shares the project's conversation, so the agent can rewrite
+  // edit_decisions.json on disk while the editor holds an open-time snapshot. This ref tracks
+  // whether the agent is mid-turn so Save/Render can refuse to clobber an in-progress write.
+  const agentBusyRef = useRef(false)
   const canvas = useMemo(() => interp.canvasOf(doc), [doc])
   const ffmpeg = isFfmpeg(doc)
 
@@ -163,6 +172,10 @@ export default function Studio({ projectId, state, onClose }) {
   // ── save / render ─────────────────────────────────────────────────────────
   const save = useCallback(async () => {
     if (!doc) return null
+    if (agentBusyRef.current) {
+      flash('warn', 'Agent is editing — wait for its turn to finish before saving')
+      return null
+    }
     try {
       await api.saveEditDecisions(projectId, doc)
       savedRef.current = JSON.stringify(doc)
@@ -205,6 +218,33 @@ export default function Studio({ projectId, state, onClose }) {
       if (jobRef.current === myJob) setRendering(false)
     }
   }, [rendering, save, projectId, flash])
+
+  // When the in-editor agent finishes a turn (busy true→false), it may have rewritten
+  // edit_decisions.json on disk. Re-sync so the editor isn't holding a stale doc that a later
+  // Save would use to clobber the agent's work. If the disk changed and we have NO unsaved local
+  // edits, adopt the agent's version; if we DO have local edits, warn (don't silently discard
+  // either side). `agentBusyRef` doubles as the previous-busy tracker AND the save-guard mirror.
+  useEffect(() => {
+    const was = agentBusyRef.current
+    const now = !!(chat && chat.busy)
+    agentBusyRef.current = now
+    if (!(was && !now) || !projectId) return // only act on a turn that just ended
+    let alive = true
+    api.getEditDecisions(projectId)
+      .then(({ content }) => {
+        if (!alive || !content) return
+        const incoming = JSON.stringify(content)
+        if (incoming === savedRef.current) return // disk matches our last save — nothing changed
+        if (dirtyRef.current) {
+          flash('warn', 'Agent changed this timeline on disk — saving will overwrite its edits. Reopen the editor to load them.')
+        } else {
+          docRef.current = content; setDoc(content); savedRef.current = incoming; setDirty(false)
+          flash('ok', 'Timeline updated by the agent')
+        }
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [chat && chat.busy, projectId, flash])
 
   // ── selection-aware edit handlers ──────────────────────────────────────────
   const selCut = selection?.kind === 'cut' ? (doc?.cuts || []).find(c => c.id === selection.id) : null
@@ -283,7 +323,7 @@ export default function Studio({ projectId, state, onClose }) {
   const beginPanelDrag = useCallback((e, axis) => {
     e.preventDefault()
     const startX = e.clientX, startY = e.clientY
-    const startW = panels.inspectorW, startH = panels.timelineH
+    const startW = panels.inspectorW, startH = panels.timelineH, startAW = panels.agentW
     const bodyH = e.currentTarget.closest('.st-body')?.clientHeight || 800
     const teardown = () => {
       window.removeEventListener('pointermove', onMove)
@@ -292,7 +332,11 @@ export default function Studio({ projectId, state, onClose }) {
       panelDrag.current = null
     }
     const onMove = (ev) => {
-      if (axis === 'x') {
+      if (axis === 'agent') {
+        const w = startAW + (ev.clientX - startX) // handle sits right of the agent → drag right = wider
+        if (w < AGENT_MIN) setPanels(p => ({ ...p, agentOpen: false }))
+        else setPanels(p => ({ ...p, agentOpen: true, agentW: Math.min(AGENT_MAX, w) }))
+      } else if (axis === 'x') {
         const w = startW + (startX - ev.clientX) // drag the handle left → wider inspector
         if (w < INSPECTOR_MIN) setPanels(p => ({ ...p, inspectorOpen: false }))
         else setPanels(p => ({ ...p, inspectorOpen: true, inspectorW: Math.min(INSPECTOR_MAX, w) }))
@@ -414,6 +458,18 @@ export default function Studio({ projectId, state, onClose }) {
 
       <div className="st-body">
         <div className="st-body-top">
+          {chat && (panels.agentOpen ? (
+            <>
+              <div className="st-agent-wrap" style={{ width: panels.agentW }}>
+                <ChatPanel chat={chat} disabled={!projectId} className="st-agent" />
+              </div>
+              <div className="st-vsplit" onPointerDown={(e) => beginPanelDrag(e, 'agent')}
+                title="Drag to resize · drag fully left to hide" />
+            </>
+          ) : (
+            <button className="st-reopen st-reopen-v st-reopen-agent" title="Show agent panel"
+              onClick={() => setPanels(p => ({ ...p, agentOpen: true, agentW: Math.max(AGENT_MIN, p.agentW) }))}>›</button>
+          ))}
           <StudioPreview
             projectId={projectId} doc={doc} playhead={playhead}
             previewMode={previewMode} renderPath={renderPath} renderVersion={renderVersion}
