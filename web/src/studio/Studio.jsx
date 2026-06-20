@@ -68,9 +68,13 @@ export default function Studio({ projectId, state, onClose, chat }) {
   const dirtyRef = useRef(false) // mirror of `dirty` for the agent-sync effect's closure
   useEffect(() => { dirtyRef.current = dirty }, [dirty])
   // The in-editor agent panel shares the project's conversation, so the agent can rewrite
-  // edit_decisions.json on disk while the editor holds an open-time snapshot. This ref tracks
-  // whether the agent is mid-turn so Save/Render can refuse to clobber an in-progress write.
+  // edit_decisions.json on disk while the editor holds an open-time snapshot. `agentBusyRef`
+  // tracks whether the agent is mid-turn, and `reconcilingRef` covers the brief window after a
+  // turn while we re-fetch the disk doc — Save/Render refuse during either so they can't clobber
+  // an in-progress write or race the re-sync.
   const agentBusyRef = useRef(false)
+  const reconcilingRef = useRef(false)
+  const chatBusy = !!(chat && chat.busy)
   const canvas = useMemo(() => interp.canvasOf(doc), [doc])
   const ffmpeg = isFfmpeg(doc)
 
@@ -172,7 +176,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
   // ── save / render ─────────────────────────────────────────────────────────
   const save = useCallback(async () => {
     if (!doc) return null
-    if (agentBusyRef.current) {
+    if (agentBusyRef.current || reconcilingRef.current) {
       flash('warn', 'Agent is editing — wait for its turn to finish before saving')
       return null
     }
@@ -223,13 +227,14 @@ export default function Studio({ projectId, state, onClose, chat }) {
   // edit_decisions.json on disk. Re-sync so the editor isn't holding a stale doc that a later
   // Save would use to clobber the agent's work. If the disk changed and we have NO unsaved local
   // edits, adopt the agent's version; if we DO have local edits, warn (don't silently discard
-  // either side). `agentBusyRef` doubles as the previous-busy tracker AND the save-guard mirror.
+  // either side). `agentBusyRef` doubles as the previous-busy tracker AND the save-guard mirror;
+  // `reconcilingRef` holds the Save guard open across the async re-fetch so a Save can't race it.
   useEffect(() => {
     const was = agentBusyRef.current
-    const now = !!(chat && chat.busy)
-    agentBusyRef.current = now
-    if (!(was && !now) || !projectId) return // only act on a turn that just ended
+    agentBusyRef.current = chatBusy
+    if (!(was && !chatBusy) || !projectId) return // only act on a turn that just ended
     let alive = true
+    reconcilingRef.current = true
     api.getEditDecisions(projectId)
       .then(({ content }) => {
         if (!alive || !content) return
@@ -243,8 +248,9 @@ export default function Studio({ projectId, state, onClose, chat }) {
         }
       })
       .catch(() => {})
+      .finally(() => { reconcilingRef.current = false })
     return () => { alive = false }
-  }, [chat && chat.busy, projectId, flash])
+  }, [chatBusy, projectId, flash])
 
   // ── selection-aware edit handlers ──────────────────────────────────────────
   const selCut = selection?.kind === 'cut' ? (doc?.cuts || []).find(c => c.id === selection.id) : null
