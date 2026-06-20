@@ -1,0 +1,1059 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenNolan — Backend, Explained</title>
+<style>
+  :root{
+    --bg:#FBF7F0; --surface:#FFFFFF; --surface-2:#F4EDE2; --ink:#2A2521; --ink-soft:#6B6258;
+    --line:#E6DCCB; --line-strong:#D8CBB4;
+    --terra:#C4543A; --terra-soft:#E08A6E; --coral:#E2725B;
+    --sage:#5E7355; --gold:#C99A3A; --blue:#3F6E8C; --plum:#7A5570;
+    --code-bg:#2B2722; --code-ink:#EDE3D2;
+    --radius:14px; --radius-sm:9px;
+    --shadow:0 1px 2px rgba(42,37,33,.05), 0 8px 28px rgba(42,37,33,.07);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.62;font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--terra);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.86em;background:var(--surface-2);padding:.1em .38em;border-radius:5px;border:1px solid var(--line)}
+  pre{margin:0}
+  pre code{display:block;background:var(--code-bg);color:var(--code-ink);border:none;padding:16px 18px;border-radius:var(--radius-sm);overflow-x:auto;font-size:13px;line-height:1.6;white-space:pre}
+  h1,h2,h3,h4{line-height:1.25;letter-spacing:-.01em}
+  h2{font-size:1.7rem;margin:0 0 .3em}
+  h3{font-size:1.22rem;margin:2em 0 .5em}
+  h4{font-size:1rem;margin:1.4em 0 .4em;color:var(--ink)}
+  p{margin:.7em 0}
+
+  /* layout */
+  .wrap{display:grid;grid-template-columns:268px minmax(0,1fr);gap:0;max-width:1280px;margin:0 auto}
+  nav.toc{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:26px 20px 60px;border-right:1px solid var(--line);background:linear-gradient(180deg,#FBF7F0,#F7F0E5)}
+  nav.toc .brand{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+  nav.toc .brand .dot{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--terra),var(--gold));display:grid;place-items:center;color:#fff;font-weight:800;font-size:15px;box-shadow:var(--shadow)}
+  nav.toc .brand b{font-size:15px}
+  nav.toc .brand span{display:block;font-size:11.5px;color:var(--ink-soft);font-weight:500}
+  nav.toc a{display:block;color:var(--ink-soft);font-size:13.5px;padding:5px 10px;border-radius:7px;margin:1px 0;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--surface-2);text-decoration:none;color:var(--ink)}
+  nav.toc a.active{color:var(--terra);background:#FBEFE9;border-left-color:var(--terra);font-weight:600}
+  nav.toc .grp{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--line-strong);margin:16px 10px 4px;font-weight:700}
+  main{padding:42px 52px 120px;min-width:0}
+
+  .hero{margin-bottom:10px}
+  .hero .eyebrow{color:var(--terra);font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:12.5px}
+  .hero h1{font-size:2.7rem;margin:.15em 0 .25em;letter-spacing:-.02em}
+  .hero .sub{font-size:1.12rem;color:var(--ink-soft);max-width:60ch}
+
+  section{scroll-margin-top:20px;padding:30px 0;border-top:1px solid var(--line)}
+  section:first-of-type{border-top:none}
+  .lead{font-size:1.05rem;color:var(--ink-soft)}
+
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow);margin:16px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr}}
+
+  .callout{border-radius:var(--radius);padding:16px 20px;margin:18px 0;border:1px solid;display:flex;gap:13px;align-items:flex-start}
+  .callout .ic{font-size:20px;line-height:1.3;flex:none}
+  .callout.key{background:#FBEEE8;border-color:var(--terra-soft)}
+  .callout.note{background:#EEF3F1;border-color:#BFD3C7}
+  .callout.warn{background:#FBF3E0;border-color:#E6CE94}
+  .callout b{color:var(--ink)}
+
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;letter-spacing:.02em;vertical-align:middle}
+  .rt-LOCAL{background:#E7F0E8;color:#3f6043}
+  .rt-LOCAL_GPU{background:#EDE6F1;color:#6a4a78}
+  .rt-API{background:#FBE6DF;color:#b14328}
+  .rt-HYBRID{background:#E4EEF3;color:#356176}
+  .rt-{background:#ECE5D7;color:#7a6f5c}
+
+  /* step flow */
+  .flow{display:flex;flex-direction:column;gap:0;margin:18px 0}
+  .step{display:grid;grid-template-columns:40px 1fr;gap:16px;position:relative;padding-bottom:20px}
+  .step:not(:last-child)::before{content:"";position:absolute;left:19px;top:38px;bottom:-2px;width:2px;background:var(--line-strong)}
+  .step .n{width:38px;height:38px;border-radius:50%;background:var(--terra);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px;z-index:1;box-shadow:var(--shadow)}
+  .step .body{padding-top:5px}
+  .step .body h4{margin:.1em 0 .3em}
+
+  /* arch diagram */
+  .diagram{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:8px;box-shadow:var(--shadow);overflow-x:auto}
+  .layer{display:flex;gap:10px;align-items:stretch;padding:9px;flex-wrap:wrap}
+  .box{border-radius:10px;padding:11px 14px;border:1.5px solid;flex:1;min-width:150px}
+  .box .t{font-weight:700;font-size:13.5px}
+  .box .d{font-size:11.5px;color:var(--ink-soft);margin-top:2px}
+  .box .f{font-family:var(--mono);font-size:10.5px;color:var(--ink-soft);margin-top:5px}
+  .b-elec{background:#EEF3F1;border-color:#BFD3C7}
+  .b-srv{background:#FBF3E0;border-color:#E6CE94}
+  .b-agent{background:#FBEEE8;border-color:var(--terra-soft)}
+  .b-tools{background:#EDE6F1;border-color:#cdb9d8}
+  .b-data{background:#E4EEF3;border-color:#b8d0dc}
+  .arrow{text-align:center;color:var(--line-strong);font-size:18px;padding:1px 0;font-weight:700}
+  .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-soft);font-weight:700;padding:2px 9px 0}
+
+  /* tool catalog */
+  .catalog-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:16px 0 12px}
+  #toolSearch{flex:1;min-width:200px;padding:10px 14px;border:1px solid var(--line-strong);border-radius:10px;font-size:14px;background:var(--surface);font-family:var(--sans)}
+  #toolSearch:focus{outline:2px solid var(--terra-soft);border-color:var(--terra)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{cursor:pointer;font-size:12px;font-weight:600;padding:5px 11px;border-radius:999px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink-soft);user-select:none}
+  .chip:hover{border-color:var(--terra)}
+  .chip.on{background:var(--terra);color:#fff;border-color:var(--terra)}
+  .count{font-size:12.5px;color:var(--ink-soft);margin-left:auto}
+  table.tools{width:100%;border-collapse:collapse;font-size:13.5px}
+  table.tools th{text-align:left;padding:9px 10px;border-bottom:2px solid var(--line-strong);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);position:sticky;top:0;background:var(--bg)}
+  table.tools td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.tools tr:hover td{background:var(--surface-2)}
+  table.tools .nm{font-family:var(--mono);font-size:12.5px;font-weight:600;color:var(--ink);white-space:nowrap}
+  table.tools .cap{font-family:var(--mono);font-size:11.5px;color:var(--blue)}
+  table.tools .pv{color:var(--ink-soft);font-size:12.5px}
+  .tbl-scroll{max-height:560px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+
+  /* accordions */
+  details.acc{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);margin:8px 0;overflow:hidden}
+  details.acc>summary{cursor:pointer;padding:13px 18px;font-weight:600;list-style:none;display:flex;align-items:center;gap:10px}
+  details.acc>summary::-webkit-details-marker{display:none}
+  details.acc>summary::before{content:"▸";color:var(--terra);font-size:13px;transition:transform .15s}
+  details.acc[open]>summary::before{transform:rotate(90deg)}
+  details.acc>summary code{margin-left:auto;font-size:11.5px}
+  details.acc .inner{padding:2px 18px 16px 18px;border-top:1px solid var(--line);color:var(--ink-soft);font-size:14.5px}
+  details.acc .inner b{color:var(--ink)}
+
+  /* tabs */
+  .tabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin:16px 0 0}
+  .tab{cursor:pointer;padding:9px 16px;font-weight:600;font-size:14px;color:var(--ink-soft);border-bottom:2px solid transparent;margin-bottom:-2px}
+  .tab.on{color:var(--terra);border-bottom-color:var(--terra)}
+  .tabpane{display:none;animation:fade .2s}
+  .tabpane.on{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1}}
+
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:13.5px;margin:8px 0}
+  .kv dt{font-family:var(--mono);font-size:12px;color:var(--terra);font-weight:600}
+  .kv dd{margin:0;color:var(--ink-soft)}
+
+  ul.tight{margin:.5em 0;padding-left:1.25em}
+  ul.tight li{margin:.3em 0}
+  .fp{font-family:var(--mono);font-size:12.5px;background:#F2E9DA;padding:1px 6px;border-radius:5px;color:#7a5a2e;border:1px solid var(--line)}
+  .tag{font-size:11px;font-weight:700;color:#fff;background:var(--sage);padding:1px 7px;border-radius:5px}
+  hr.soft{border:none;border-top:1px dashed var(--line-strong);margin:22px 0}
+  .footer{color:var(--ink-soft);font-size:13px;text-align:center;padding:40px 0 0}
+  .mini{font-size:12.5px;color:var(--ink-soft)}
+  @media(max-width:760px){
+    .wrap{grid-template-columns:1fr}
+    nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}
+    main{padding:24px 18px 80px}
+    .hero h1{font-size:2rem}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="toc">
+  <div class="brand">
+    <div class="dot">ON</div>
+    <div><b>OpenNolan</b><span>Backend, explained</span></div>
+  </div>
+  <a href="#tldr">TL;DR — the one idea</a>
+  <a href="#arch">The 30,000-ft picture</a>
+
+  <div class="grp">Entry points</div>
+  <a href="#boot">Desktop app boot</a>
+  <a href="#agent-entry">The agent: two ways in</a>
+
+  <div class="grp">Tools & discovery</div>
+  <a href="#discovery">How the agent calls tools</a>
+  <a href="#registry">The Tool Registry</a>
+  <a href="#basetool">The BaseTool contract</a>
+  <a href="#catalog">Tool catalog (searchable)</a>
+  <a href="#archetypes">Anatomy of a tool</a>
+  <a href="#selectors">Selectors & scoring</a>
+
+  <div class="grp">Rendering</div>
+  <a href="#compose">video_compose engine</a>
+  <a href="#renderonce">Render-once, edit-cheap</a>
+
+  <div class="grp">Orchestration</div>
+  <a href="#pipelines">Pipelines & checkpoints</a>
+  <a href="#server">FastAPI server</a>
+  <a href="#runner">Agent runner internals</a>
+  <a href="#web">The web editor</a>
+
+  <div class="grp">Reference</div>
+  <a href="#files">File-by-file</a>
+  <a href="#lifecycle">End-to-end lifecycle</a>
+</nav>
+
+<main>
+
+<div class="hero" id="top">
+  <div class="eyebrow">Architecture deep-dive</div>
+  <h1>How the OpenNolan backend works</h1>
+  <p class="sub">A guided tour of the desktop app, the AI agent, and the ~100 production tools it drives — how tools are discovered, registered, and run, and which file does what.</p>
+</div>
+
+<!-- ───────────────────────── TL;DR ───────────────────────── -->
+<section id="tldr">
+  <h2>TL;DR — the one idea that makes everything click</h2>
+  <div class="callout key">
+    <div class="ic">🔑</div>
+    <div>
+      <p style="margin-top:0"><b>The agent does <u>not</u> register OpenNolan's tools as native LLM tools.</b> The agent is a normal <b>Claude Code</b> session. Its real tools are the Claude Code built-ins — <code>Read</code>, <code>Write</code>, <code>Edit</code>, <code>Bash</code>, <code>Glob</code>, <code>Grep</code>, <code>Skill</code>, <code>WebSearch</code>, <code>WebFetch</code> — plus one tiny in-process tool, <code>ask_user</code>.</p>
+      <p style="margin-bottom:0">OpenNolan's ~100 production tools (<code>motion_ops</code>, <code>keyframe_animate</code>, <code>video_compose</code>, every TTS/image/video provider…) are plain <b>Python classes</b>. The agent runs them <b>as Python through the <code>Bash</code> tool</b>:</p>
+    </div>
+  </div>
+
+<pre><code># This is literally how the agent "calls" a tool — it writes Python and runs it via Bash:
+python -c "
+from tools.video.motion_ops import MotionOps
+r = MotionOps().execute({'operation':'pan_zoom','input_path':'clip.mp4','preset':'punch_in'})
+print(r.success, r.data)
+"</code></pre>
+
+  <p>So there are <b>two different meanings of "tool"</b> in this repo, and keeping them apart is the whole game:</p>
+  <div class="grid2">
+    <div class="card" style="border-left:4px solid var(--terra)">
+      <h4 style="margin-top:0">1. Agent tools (LLM-facing)</h4>
+      <p class="mini">The handful of capabilities the language model can invoke directly. Defined by the Claude Agent SDK, gated by a permission policy in <span class="fp">server/agent_runner.py</span>. The only custom one is <code>ask_user</code>.</p>
+    </div>
+    <div class="card" style="border-left:4px solid var(--plum)">
+      <h4 style="margin-top:0">2. OpenNolan tools (Python)</h4>
+      <p class="mini">~100 <code>BaseTool</code> subclasses under <span class="fp">tools/</span>. Each has an <code>execute(inputs) → ToolResult</code>. The agent reaches them only by writing Python and running it through <code>Bash</code>. The <b>Tool Registry</b> exists to <i>describe</i> these so the agent knows what's available — not to expose them to the model.</p>
+    </div>
+  </div>
+  <div class="callout note">
+    <div class="ic">💡</div>
+    <div><b>Why this design?</b> A tool-name allowlist is useless when every tool runs as a Bash <code>python -c "…"</code> string — so the safety layer inspects the <i>command string</i> for destructive patterns instead. It also means <b>adding a new tool is just adding a Python file</b>; the agent discovers it through the registry, no SDK plumbing, no restart.</div>
+  </div>
+</section>
+
+<!-- ───────────────────────── ARCH ───────────────────────── -->
+<section id="arch">
+  <h2>The 30,000-ft picture</h2>
+  <p class="lead">Five layers. The user talks to a React UI; an Electron shell hosts it and a local Python backend; the backend embeds an AI agent; the agent drives Python tools; the tools read/write a project folder on disk.</p>
+
+  <div class="diagram">
+    <div class="lbl">User-facing</div>
+    <div class="layer">
+      <div class="box b-elec"><div class="t">⚛️ Electron shell</div><div class="d">Native Mac window. Spawns the backend, loads the UI over http.</div><div class="f">desktop/main.js</div></div>
+      <div class="box b-elec"><div class="t">⚛️ React UI</div><div class="d">Mission Control + the Studio NLE editor.</div><div class="f">web/src/ (App.jsx, studio/)</div></div>
+    </div>
+    <div class="arrow">▼ &nbsp; spawns <code>uvicorn</code> · loads <code>http://127.0.0.1:PORT</code> &nbsp; ▼</div>
+    <div class="lbl">Backend (FastAPI / Python)</div>
+    <div class="layer">
+      <div class="box b-srv"><div class="t">🌐 FastAPI app</div><div class="d">REST + SSE. Projects, assets, artifacts, editor, render jobs, chat.</div><div class="f">server/app.py</div></div>
+      <div class="box b-agent"><div class="t">🤖 Agent runner</div><div class="d">Wraps the Claude Agent SDK. Permission gate + ask_user + session resume.</div><div class="f">server/agent_runner.py</div></div>
+    </div>
+    <div class="arrow">▼ &nbsp; the agent IS a Claude Code session (drives the <code>claude</code> CLI subprocess) &nbsp; ▼</div>
+    <div class="lbl">The agent's tools</div>
+    <div class="layer">
+      <div class="box b-agent" style="flex:2"><div class="t">🛠️ Claude Code built-ins</div><div class="d">Read · Write · Edit · <b>Bash</b> · Glob · Grep · Skill · WebSearch · WebFetch · ask_user</div></div>
+    </div>
+    <div class="arrow">▼ &nbsp; runs <code>python -c "from tools… import X; X().execute({…})"</code> &nbsp; ▼</div>
+    <div class="lbl">OpenNolan Python tools</div>
+    <div class="layer">
+      <div class="box b-tools"><div class="t">🎬 video / audio / image</div><div class="d">~100 BaseTool classes, auto-discovered by the registry.</div><div class="f">tools/**.py</div></div>
+      <div class="box b-tools"><div class="t">🧭 lib / pipelines</div><div class="d">Pipeline manifests, checkpoints, scoring, project mgmt.</div><div class="f">lib/ · pipeline_defs/</div></div>
+    </div>
+    <div class="arrow">▼ &nbsp; read source assets · write artifacts, derived clips, renders &nbsp; ▼</div>
+    <div class="lbl">State on disk</div>
+    <div class="layer">
+      <div class="box b-data"><div class="t">📁 projects/&lt;id&gt;/</div><div class="d">assets/ · artifacts/ · checkpoints/ · renders/ · edit_decisions.json · .mc/activity.jsonl</div></div>
+    </div>
+  </div>
+
+  <p class="mini" style="margin-top:14px">Everything is <b>local and BYOK</b> (bring-your-own-keys). The only network calls are (a) the agent talking to Anthropic, and (b) whichever provider tools you've configured with API keys.</p>
+</section>
+
+<!-- ───────────────────────── BOOT ───────────────────────── -->
+<section id="boot">
+  <h2>Entry point #1 — the desktop app boots</h2>
+  <p>You run <span class="fp">./run-desktop</span> (or <code>./run-desktop --dev</code>). That bash script installs node deps if missing, sanity-checks Python, warns if no Anthropic key, then launches Electron. From there:</p>
+
+  <div class="flow">
+    <div class="step"><div class="n">1</div><div class="body"><h4>Electron main process starts</h4><p class="mini"><span class="fp">desktop/main.js</span> → <code>app.whenReady().then(boot)</code>. In prod it grabs a free port; in dev it targets <code>:8000</code> and Vite's <code>:5173</code>.</p></div></div>
+    <div class="step"><div class="n">2</div><div class="body"><h4>It spawns the Python backend as a child process</h4><pre><code>spawn(pythonBin(), ['-m','uvicorn','server.app:app',
+      '--host','127.0.0.1','--port', PORT],
+      { cwd: REPO_ROOT,                       // so `lib.*`, `server.*`, `tools.*` import
+        env: { ...process.env, OPENNOLAN_PROJECTS_DIR } })</code></pre><p class="mini">Python is resolved as <code>OPENNOLAN_PYTHON</code> → repo <code>.venv/bin/python</code> → <code>python3</code>.</p></div></div>
+    <div class="step"><div class="n">3</div><div class="body"><h4>It polls <code>/api/health</code> until the backend is alive</h4><p class="mini"><code>waitForHealth()</code> hits <code>GET /api/health</code> every 300 ms (30 s budget). If the child dies first, it shows the last 20 lines of backend stderr in a dialog.</p></div></div>
+    <div class="step"><div class="n">4</div><div class="body"><h4>It opens a <code>BrowserWindow</code> pointed at the backend</h4><p class="mini">Prod loads <code>http://127.0.0.1:PORT</code> — <b>same-origin</b> with the API, so the UI's relative <code>/api/...</code> calls work with no CORS. The window is sandboxed (<code>contextIsolation</code>, <code>nodeIntegration:false</code>) with a strict CSP; external links open in the system browser.</p></div></div>
+    <div class="step"><div class="n">5</div><div class="body"><h4>FastAPI serves both the API and the built UI</h4><p class="mini"><span class="fp">server/app.py</span> mounts <code>web/dist</code> as static files at <code>/</code> — but only <b>after</b> every <code>/api/*</code> route, so the API always wins. In dev, Vite serves the SPA and proxies <code>/api</code> to <code>:8000</code> instead.</p></div></div>
+  </div>
+  <div class="callout note"><div class="ic">🔌</div><div>The backend is the whole product; Electron is a thin shell. You can ignore Electron entirely and run <code>uvicorn server.app:app</code> + the Vite dev server to get the same app in a browser. The <code>run-dev</code> script does exactly that.</div></div>
+</section>
+
+<!-- ───────────────────────── AGENT ENTRY ───────────────────────── -->
+<section id="agent-entry">
+  <h2>Entry point #2 — the agent</h2>
+  <p>There are <b>two ways</b> the same AI agent runs against this repo. Both obey the identical contract (<span class="fp">CLAUDE.md</span> → <span class="fp">AGENT_GUIDE.md</span>), because both load the project's <code>CLAUDE.md</code>.</p>
+  <div class="grid2">
+    <div class="card">
+      <h4 style="margin-top:0">A · Headless, inside the app</h4>
+      <p class="mini">When you chat in Mission Control, <code>POST /api/projects/&lt;id&gt;/chat</code> streams a turn. The <code>AgentRunner</code> (<span class="fp">server/agent_runner.py</span>) starts a <b>Claude Agent SDK</b> session — which itself drives the local <code>claude</code> CLI as a subprocess — with a system prompt that re-asserts the contract.</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0">B · A human in a terminal</h4>
+      <p class="mini">A developer runs <code>claude</code> in the repo root. It reads <code>CLAUDE.md</code> (which forces a read of <code>AGENT_GUIDE.md</code> / <code>RULES.md</code>) and behaves like the same production agent. The behavioral spikes that validated the headless runner were first proven this way.</p>
+    </div>
+  </div>
+
+  <h3>Auth (BYOK)</h3>
+  <p>The SDK reads credentials from the environment, in this order of preference:</p>
+  <dl class="kv">
+    <dt>CLAUDE_CODE_OAUTH_TOKEN</dt><dd>From <code>claude setup-token</code> — uses your Claude subscription (no per-token billing). Preferred.</dd>
+    <dt>ANTHROPIC_API_KEY</dt><dd>Per-token API billing. Takes precedence if set, so the docs tell you to unset it when using the OAuth token.</dd>
+    <dt>(neither)</dt><dd><code>auth_configured()</code> also returns true if a logged-in <code>claude</code> CLI is resolvable — it self-authenticates from its own stored login. So a machine already logged into Claude Code needs no env var at all.</dd>
+  </dl>
+  <p class="mini">If none of these is available, the chat endpoint returns <b>503</b> with setup guidance instead of failing silently. Read/write/render all still work — only chat is gated.</p>
+</section>
+
+<!-- ───────────────────────── DISCOVERY ───────────────────────── -->
+<section id="discovery">
+  <h2>How the agent discovers &amp; calls tools</h2>
+  <p class="lead">Discovery happens in <b>two phases</b>: first the agent learns <i>what's possible</i> (the capability menu), then it invokes a specific tool by writing Python.</p>
+
+  <h3>Phase 1 — Preflight: "what can I do?"</h3>
+  <p>Before any creative work, <span class="fp">AGENT_GUIDE.md</span> tells the agent to run a one-liner that asks the registry for a human-ready capability rollup:</p>
+<pre><code>python -c "
+from tools.tool_registry import registry
+import json
+registry.discover()                              # import + register every tool
+print(json.dumps(registry.provider_menu_summary(), indent=2))
+"</code></pre>
+  <p>That returns four fields the agent paraphrases for you: <code>composition_runtimes</code> (ffmpeg / remotion / hyperframes booleans), <code>capabilities[]</code> ("10 of 16 video providers configured" + provider lists), <code>setup_offers[]</code> (one-env-var fixes), and <code>runtime_warnings[]</code>. The backend runs the very same call once for <code>GET /api/capabilities</code> and caches it.</p>
+
+  <h3>Phase 2 — Invocation: run the chosen tool</h3>
+  <p>Having picked a tool, the agent writes Python that imports the class and calls <code>.execute(params)</code>, then runs it through <code>Bash</code>. The uniform return type is <code>ToolResult</code> (<code>.success</code>, <code>.data</code>, <code>.error</code>, <code>.artifacts</code>, <code>.cost_usd</code>).</p>
+  <div class="callout warn"><div class="ic">⚠️</div><div>Naming convention the agent must respect: classes are <b>PascalCase with no "Tool" suffix</b> — <code>tools.video.video_compose</code> → class <code>VideoCompose</code>; <code>tools.audio.music_gen</code> → <code>MusicGen</code>. And it's always <code>.execute(dict)</code>, never <code>.run()</code>.</div></div>
+
+  <h3>When does registration happen? (your specific question)</h3>
+  <div class="callout key"><div class="ic">⏱️</div><div>
+    <p style="margin-top:0"><b>Not at install time. Not at "downloading dependencies". At runtime, on first use, by reflection.</b></p>
+    <p style="margin-bottom:0">There is no build step, no generated manifest, no decorator side-effect at import. Registration is a <b>live filesystem walk</b> of the <code>tools/</code> package that runs the first time someone asks the registry a question — typically the agent's preflight, or the backend's first <code>/api/capabilities</code> request. It's memoized after that (<code>ensure_discovered()</code> only walks once).</p>
+  </div></div>
+</section>
+
+<!-- ───────────────────────── REGISTRY ───────────────────────── -->
+<section id="registry">
+  <h2>The Tool Registry — <span class="fp">tools/tool_registry.py</span></h2>
+  <p>A single global <code>registry = ToolRegistry()</code> instance. Its job: find every tool, report availability, and group capabilities for the agent. Here's the discovery engine, the heart of "registration":</p>
+<pre><code>def discover(self, package_name="tools"):
+    self._load_dotenv()                          # so env: deps resolve during status checks
+    package = importlib.import_module(package_name)
+    for module_info in pkgutil.walk_packages(package.__path__, "tools."):
+        if module_info.name.endswith((".base_tool", ".tool_registry")):
+            continue
+        module = importlib.import_module(module_info.name)   # importing the file…
+        self.register_module(module)                          # …then reflect on it
+
+def register_module(self, module):
+    for _, cls in inspect.getmembers(module, inspect.isclass):
+        if cls is BaseTool or not issubclass(cls, BaseTool):  continue
+        if cls.__module__ != module.__name__ or inspect.isabstract(cls): continue
+        self.register(cls())                      # instantiate + index by tool.name</code></pre>
+
+  <h4>What that means, step by step</h4>
+  <ul class="tight">
+    <li><b>Walk</b> — <code>pkgutil.walk_packages</code> recurses the <code>tools/</code> tree and imports every <code>.py</code> file (skipping the base class and the registry itself).</li>
+    <li><b>Reflect</b> — for each imported module, <code>inspect.getmembers</code> finds every class that (a) subclasses <code>BaseTool</code>, (b) is defined <i>in that module</i> (not imported into it), and (c) isn't abstract.</li>
+    <li><b>Instantiate &amp; index</b> — each qualifying class is <i>constructed into an instance</i> (<code>tool = cls()</code>) and stored in the registry's dict keyed by its <code>name</code>. That's the entire "registration."</li>
+  </ul>
+  <div class="callout key"><div class="ic">🗂️</div><div>
+    <p style="margin-top:0"><b>The dictionary is <code>self._tools</code></b> on the <code>ToolRegistry</code> instance — and since the module exposes a singleton, you reach it as <code>registry._tools</code>. It's declared <code>self._tools: dict[str, BaseTool] = {}</code>.</p>
+    <p style="margin-bottom:0"><b>The value is a live instance, not the class.</b> <code>register()</code> does <code>self._tools[tool.name] = tool</code>, where <code>tool = cls()</code>. So the key is the string <code>tool.name</code> and the value is a constructed object the registry can call methods on (<code>.get_status()</code>, <code>.get_info()</code>, <code>.execute()</code>) — impossible on a bare class.</p>
+  </div></div>
+<pre><code>&gt;&gt;&gt; registry._tools                       # the dict itself
+&lt;class 'dict'&gt;  (size: 103)
+{
+  'audio_energy'          : &lt;tools.analysis.audio_energy.AudioEnergy object at 0x103b5bc80&gt;,
+  'audio_probe'           : &lt;tools.analysis.audio_probe.AudioProbe object at 0x103d116a0&gt;,
+  'composition_validator' : &lt;tools.analysis.composition_validator.CompositionValidator object at 0x103d12570&gt;,
+  ...                     # one entry per discovered tool
+}
+#  ▲ key = tool.name (str)   ▲ value = a BaseTool INSTANCE (not the class)</code></pre>
+  <div class="callout note"><div class="ic">➕</div><div><b>Adding a tool = adding a file.</b> Drop a <code>BaseTool</code> subclass anywhere under <code>tools/</code>, give it a <code>name</code> and a <code>capability</code>, and it shows up in the menu and through the relevant selector automatically. No registration call, no list to edit.</div></div>
+
+  <h4>What the registry gives the agent</h4>
+  <p class="mini">Each method below shows the exact <code>Bash</code> command the agent runs and a real (trimmed) sample of what comes back — captured from this machine, so the available/unavailable split reflects the keys actually in <code>.env</code>. Click to expand.</p>
+
+  <details class="acc"><summary>provider_menu_summary() <span class="tag">primary</span> <code>the preflight menu</code></summary><div class="inner">
+    <p style="margin-top:0">Compact "N of M configured" rollup. The agent paraphrases this into the capability menu it shows you. Four keys: <code>composition_runtimes</code>, <code>capabilities[]</code>, <code>setup_offers[]</code>, <code>runtime_warnings[]</code>.</p>
+    <p style="margin:8px 0 4px"><b>Agent runs:</b></p>
+<pre><code>python -c "from tools.tool_registry import registry; import json; \
+registry.discover(); print(json.dumps(registry.provider_menu_summary(), indent=2))"</code></pre>
+    <p style="margin:10px 0 4px"><b>Returns</b> (trimmed to first item of each list):</p>
+<pre><code>{
+  "composition_runtimes": { "ffmpeg": true, "remotion": true, "hyperframes": true },
+  "capabilities": [
+    { "capability": "analysis", "configured": 8, "total": 11,
+      "available_providers":   ["ffmpeg","ffprobe","local","multi","whisperx"],
+      "unavailable_providers": ["mediapipe","transformers","youtube-transcript-api"] },
+    ...  // one entry per capability family
+  ],
+  "setup_offers": [
+    { "capability": "avatar", "tool": "talking_head", "provider": "sadtalker",
+      "install_instructions": "Clone https://github.com/OpenTalker/SadTalker and set SADTALKER_PATH ..." },
+    ...  // unavailable tools that are a quick fix
+  ],
+  "runtime_warnings": []   // e.g. "hyperframes: npm package not resolvable"
+}</code></pre>
+  </div></details>
+
+  <details class="acc"><summary>provider_menu() <code>per-capability buckets</code></summary><div class="inner">
+    <p style="margin-top:0">The fuller version of the summary: every capability split into <code>available</code> / <code>unavailable</code> tool entries, each with <code>best_for</code> + <code>install_instructions</code>.</p>
+    <p style="margin:8px 0 4px"><b>Agent runs:</b></p>
+<pre><code>python -c "from tools.tool_registry import registry; import json; \
+registry.discover(); print(json.dumps(registry.provider_menu()['tts'], indent=2))"</code></pre>
+    <p style="margin:10px 0 4px"><b>Returns</b> (the <code>tts</code> bucket, 1 entry shown):</p>
+<pre><code>{
+  "total": 5,
+  "configured": 5,
+  "available": [
+    { "name": "doubao_tts", "provider": "doubao", "runtime": "api",
+      "best_for": ["natural Mandarin narration", "Chinese explainer voiceovers ...", ...],
+      "install_instructions": "Set DOUBAO_SPEECH_API_KEY to a Volcengine Doubao Speech API Key. ...",
+      "status": "available", "provider_matrix": {} },
+    ...  // one per available provider
+  ],
+  "unavailable": []   // each would carry its own install_instructions
+}</code></pre>
+  </div></details>
+
+  <details class="acc"><summary>support_envelope() <code>every tool's full contract — the firehose</code></summary><div class="inner">
+    <p style="margin-top:0">A dict of <b>every</b> tool → its complete <code>get_info()</code> contract (schemas, resources, deps, side-effects…). Megabytes on a configured machine — used for debugging, never pasted into chat. Address one tool to keep it sane:</p>
+    <p style="margin:8px 0 4px"><b>Agent runs:</b></p>
+<pre><code>python -c "from tools.tool_registry import registry; import json; \
+registry.discover(); print(json.dumps(registry.support_envelope()['motion_ops'], indent=2))"</code></pre>
+    <p style="margin:10px 0 4px"><b>Returns</b> (one tool; input/output schemas omitted here):</p>
+<pre><code>{
+  "name": "motion_ops", "version": "0.1.0", "tier": "core",
+  "capability": "video_post", "provider": "ffmpeg",
+  "stability": "experimental", "status": "available",
+  "runtime": "local", "execution_mode": "sync", "determinism": "deterministic",
+  "module_path": "tools.video.motion_ops",
+  "usage_location": ".../tools/video/motion_ops.py",
+  "dependencies": ["cmd:ffmpeg"],
+  "install_instructions": "Install FFmpeg: https://ffmpeg.org/download.html",
+  "capabilities": ["freeze","reverse","speed","segment_volume","volume_boost","pan_zoom","clip_fx","flip"],
+  "best_for": ["freeze-frame on a punchline ...", "punch-in zoom / Ken Burns ...", ...],
+  "not_good_for": ["HDR sources — output is 8-bit SDR ...", ...],
+  "resource_profile": {"cpu_cores":2,"ram_mb":1024,"vram_mb":0,"disk_mb":1024,"network_required":false},
+  "side_effects": ["writes a derived video file","may append to an asset_manifest"],
+  "fallback": null, "fallback_tools": [],
+  "agent_skills": ["ffmpeg"], "related_skills": ["ffmpeg"],
+  "user_visible_verification": ["Play the derived clip; confirm the motion/audio change is correct"],
+  "quality_score": null, "historical_success_rate": null, "latency_p50_seconds": null
+}</code></pre>
+  </div></details>
+
+  <details class="acc"><summary>capability_catalog() <code>tools grouped by capability</code></summary><div class="inner">
+    <p style="margin-top:0">A dict keyed by <code>capability</code> (tts, video_generation, analysis…); each value is a list of that family's tool contracts, sorted by provider.</p>
+    <p style="margin:8px 0 4px"><b>Agent runs:</b></p>
+<pre><code>python -c "from tools.tool_registry import registry; import json; \
+registry.discover(); print(json.dumps(registry.capability_catalog()['tts'], indent=2))"</code></pre>
+    <p style="margin:10px 0 4px"><b>Returns</b> (the <code>tts</code> list, fields trimmed):</p>
+<pre><code>[
+  { "name": "doubao_tts",     "provider": "doubao",     "status": "available", "runtime": "api" },
+  { "name": "elevenlabs_tts", "provider": "elevenlabs", "status": "available", "runtime": "api" },
+  { "name": "google_tts",     "provider": "google_tts", "status": "available", "runtime": "api" },
+  ...   // each entry is a full get_info() dict; trimmed to 4 fields here
+]</code></pre>
+  </div></details>
+
+  <details class="acc"><summary>provider_catalog() <code>tools grouped by provider</code></summary><div class="inner">
+    <p style="margin-top:0">Same data, pivoted by <code>provider</code> (ffmpeg, elevenlabs, fal…) — handy to see everything one backend powers.</p>
+    <p style="margin:8px 0 4px"><b>Agent runs:</b></p>
+<pre><code>python -c "from tools.tool_registry import registry; import json; \
+registry.discover(); print(json.dumps(registry.provider_catalog()['ffmpeg'], indent=2))"</code></pre>
+    <p style="margin:10px 0 4px"><b>Returns</b> (the <code>ffmpeg</code> list, fields trimmed):</p>
+<pre><code>[
+  { "name": "audio_energy",  "capability": "analysis",   "status": "available" },
+  { "name": "frame_sampler", "capability": "analysis",   "status": "available" },
+  { "name": "scene_detect",  "capability": "analysis",   "status": "available" },
+  { "name": "motion_ops",    "capability": "video_post", "status": "available" },
+  ...   // every tool whose provider == "ffmpeg"
+]</code></pre>
+  </div></details>
+
+  <details class="acc"><summary>get_by_capability(c) <code>list of live instances — what selectors use</code></summary><div class="inner">
+    <p style="margin-top:0">Unlike the catalog methods (which return JSON dicts), this returns the actual <b>tool objects</b> from <code>self._tools</code> — the selectors call <code>.execute()</code> on the winner. Note the result includes the selector itself, which selectors filter out by name.</p>
+    <p style="margin:8px 0 4px"><b>Agent runs:</b></p>
+<pre><code>python -c "from tools.tool_registry import registry; \
+registry.ensure_discovered(); \
+print([(t.name, t.get_status().value) for t in registry.get_by_capability('tts')])"</code></pre>
+    <p style="margin:10px 0 4px"><b>Returns</b> a <code>list[BaseTool]</code>. Printing it (here projected to name+status):</p>
+<pre><code>[('doubao_tts', 'available'), ('elevenlabs_tts', 'available'),
+ ('google_tts', 'available'), ('openai_tts', 'available'),
+ ('piper_tts', 'available'), ('tts_selector', 'available')]
+
+# the raw objects look like:
+#   &lt;tools.audio.elevenlabs_tts.ElevenLabsTTS object at 0x103db3980&gt;
+# so a selector can do:  best.execute({"text": "...", "voice_id": "..."})</code></pre>
+  </div></details>
+
+  <details class="acc"><summary>find_fallback(name) <code>first AVAILABLE declared fallback</code></summary><div class="inner">
+    <p style="margin-top:0">Looks up a tool's <code>fallback_tools</code> / <code>fallback</code> and returns the first one whose <code>get_status()</code> is <code>AVAILABLE</code> — or <code>None</code> if the tool has no usable fallback. Returns an instance, not a name.</p>
+    <p style="margin:8px 0 4px"><b>Agent runs:</b></p>
+<pre><code>python -c "from tools.tool_registry import registry; \
+registry.ensure_discovered(); \
+fb = registry.find_fallback('transcript_fetcher'); print(fb.name if fb else None)"</code></pre>
+    <p style="margin:10px 0 4px"><b>Returns:</b></p>
+<pre><code># transcript_fetcher declares fallbacks: ['transcriber']
+transcriber
+#  ↳ the actual object: &lt;tools.analysis.transcriber.Transcriber object at 0x103d51430&gt;
+#  ↳ if every declared fallback were UNAVAILABLE, you'd get: None</code></pre>
+  </div></details>
+
+  <p class="mini" style="margin-top:14px">Across all of these, <b>availability is computed live</b> by <code>tool.get_status()</code> → <code>check_dependencies()</code> — so a tool flips to <code>"available"</code> the moment you add its API key to <code>.env</code>, with no code change and no re-registration.</p>
+</section>
+
+<!-- ───────────────────────── BASETOOL ───────────────────────── -->
+<section id="basetool">
+  <h2>The BaseTool contract — <span class="fp">tools/base_tool.py</span></h2>
+  <p>Every tool inherits one abstract base. It enforces a uniform shape for discovery, dependency-checking, cost estimation, idempotency, and execution. The two methods that matter most:</p>
+  <div class="grid2">
+    <div class="card">
+      <h4 style="margin-top:0"><code>execute(inputs) → ToolResult</code></h4>
+      <p class="mini">The only abstract method. Takes a params dict, returns a <code>ToolResult</code> dataclass: <code>success</code>, <code>data</code>, <code>artifacts</code> (file paths produced), <code>error</code>, <code>cost_usd</code>, <code>duration_seconds</code>, <code>seed</code>, <code>model</code>.</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0"><code>check_dependencies()</code> → status</h4>
+      <p class="mini">Reads the <code>dependencies</code> list and verifies each. Three prefixes:<br>
+      <code>cmd:ffmpeg</code> → must be on PATH · <code>env:FAL_KEY</code> → env var must be set · <code>python:torch</code> → module must import. Missing → tool reports <span class="pill rt-API">UNAVAILABLE</span>.</p>
+    </div>
+  </div>
+
+  <h4>The metadata every tool declares (this is what the menu reads)</h4>
+  <dl class="kv">
+    <dt>name</dt><dd>Unique key the registry indexes by, e.g. <code>"motion_ops"</code>.</dd>
+    <dt>capability</dt><dd>The family — <code>video_post</code>, <code>tts</code>, <code>image_generation</code>, <code>analysis</code>… Selectors route on this.</dd>
+    <dt>provider</dt><dd>The backend — <code>ffmpeg</code>, <code>elevenlabs</code>, <code>fal</code>, <code>selector</code>…</dd>
+    <dt>runtime</dt><dd><span class="pill rt-LOCAL">LOCAL</span> free/offline · <span class="pill rt-LOCAL_GPU">LOCAL_GPU</span> needs VRAM · <span class="pill rt-API">API</span> costs money · <span class="pill rt-HYBRID">HYBRID</span> either.</dd>
+    <dt>dependencies</dt><dd>The <code>cmd:/env:/python:</code> list that drives availability.</dd>
+    <dt>best_for / not_good_for</dt><dd>Plain-language guidance the agent reads instead of guessing.</dd>
+    <dt>fallback_tools</dt><dd>What to try if this tool is unavailable.</dd>
+    <dt>input_schema</dt><dd>JSON-schema of accepted params (also used to validate &amp; document).</dd>
+    <dt>agent_skills</dt><dd>Names of <code>.agents/skills/</code> the agent should read before using this tool.</dd>
+    <dt>idempotency_key_fields</dt><dd>Which inputs form the cache key (so repeated calls are cheap).</dd>
+  </dl>
+  <p class="mini">Note: <code>_load_dotenv()</code> runs at <i>import</i> time in this file too, so API keys are in <code>os.environ</code> before any tool is even instantiated.</p>
+</section>
+
+<!-- ───────────────────────── CATALOG ───────────────────────── -->
+<section id="catalog">
+  <h2>The full tool catalog</h2>
+  <p class="lead">Every <code>BaseTool</code> in the repo. Search by name, or filter by capability and runtime. This is exactly the set the registry discovers.</p>
+
+  <div class="catalog-controls">
+    <input id="toolSearch" type="search" placeholder="Search tools — try “tts”, “zoom”, “heygen”, “caption”…">
+    <span class="count" id="toolCount"></span>
+  </div>
+  <div class="chips" id="capChips" style="margin-bottom:8px"></div>
+  <div class="chips" id="rtChips" style="margin-bottom:4px"></div>
+
+  <div class="tbl-scroll">
+    <table class="tools">
+      <thead><tr><th>Tool</th><th>Capability</th><th>Provider</th><th>Runtime</th><th>What it does</th></tr></thead>
+      <tbody id="toolBody"></tbody>
+    </table>
+  </div>
+  <p class="mini" id="catalogNote" style="margin-top:10px"></p>
+</section>
+
+<!-- ───────────────────────── ARCHETYPES ───────────────────────── -->
+<section id="archetypes">
+  <h2>Anatomy of a tool — two archetypes</h2>
+  <p>You asked specifically about <b>motion ops</b> and <b>keyframe animations</b>. They're the perfect pair, because they represent the two fundamentally different kinds of tool in this codebase.</p>
+
+  <div class="tabs" id="archTabs">
+    <div class="tab on" data-t="bake">🎞️ Pixel-baker · <code>motion_ops</code></div>
+    <div class="tab" data-t="spec">📝 Spec-emitter · <code>keyframe_animate</code></div>
+  </div>
+
+  <div class="tabpane on" id="pane-bake">
+    <div class="card">
+      <p style="margin-top:0"><b>A pixel-baker reads a clip, runs FFmpeg, and writes a NEW derived clip.</b> The output becomes a <code>cuts[].source</code> at the edit stage. <span class="fp">tools/video/motion_ops.py</span> (788 lines, <code>capability=video_post</code>, <code>provider=ffmpeg</code>, <span class="pill rt-LOCAL">LOCAL</span>).</p>
+      <p>One tool, eight operations dispatched in <code>execute()</code>:</p>
+<pre><code>def execute(self, inputs):
+    op = inputs["operation"]            # freeze | reverse | speed | segment_volume |
+                                        # volume_boost | pan_zoom | clip_fx | flip
+    if   op == "reverse":  err = self._reverse(src, out, has_audio)
+    elif op == "speed":    err = self._speed(src, out, inputs, has_audio)
+    elif op == "pan_zoom": err = self._pan_zoom(src, out, inputs, has_audio)
+    # … each builds an ffmpeg command list and runs it
+    probed = self._probe(out)           # re-probe! freeze/speed change duration; rotate swaps WxH
+    return ToolResult(success=True, data={"output_path": str(out),
+                      "duration_seconds": probed["duration_seconds"], ...},
+                      artifacts=[str(out)])</code></pre>
+      <p class="mini">Each op is just a carefully-built FFmpeg invocation. <code>_reverse</code> → <code>-vf reverse -af areverse</code>. <code>_speed</code> → <code>setpts=PTS/factor</code> + a chained <code>atempo</code> (atempo only spans 0.5–2.0, so it chains to cover 0.5–4.0×). <code>pan_zoom</code> pre-upscales ~4× before <code>zoompan</code> so slow zooms don't stair-step on the integer pixel grid. It can optionally register the derived clip into an <code>asset_manifest</code> with provenance.</p>
+    </div>
+    <div class="callout note"><div class="ic">🎯</div><div>Mental model: a pixel-baker is <b>expensive and irreversible</b> — it produces real new bytes. Other bakers: <code>auto_reframe</code>, <code>silence_cutter</code>, <code>color_grade</code>, <code>object_cutout</code>, <code>green_screen_processor</code>.</div></div>
+  </div>
+
+  <div class="tabpane" id="pane-spec">
+    <div class="card">
+      <p style="margin-top:0"><b>A spec-emitter writes a small piece of JSON into the edit plan and renders nothing.</b> <span class="fp">tools/video/keyframe_animate.py</span> (316 lines, <code>capability=video_post</code>, <code>provider=keyframes</code>, <span class="pill rt-LOCAL">LOCAL</span>, <b>no FFmpeg dependency</b>).</p>
+      <p>Its whole job is to produce the <code>keyframes</code> list that lives inside an <code>overlays[]</code> item in <code>edit_decisions.json</code>:</p>
+<pre><code>def execute(self, inputs):
+    overlay = inputs["overlay"]              # must have asset_id, start/end_seconds, position
+    if preset:  keyframes = self._expand_preset(preset, overlay, params)  # "slide_in_left" → frames
+    else:       keyframes = self._normalize_keyframes(raw)                # validate raw [{t,x,y,scale,opacity,...}]
+    animated = {**overlay, "keyframes": keyframes}
+    self._validate_overlay(animated)         # embed in a throwaway edit_decisions, run the REAL schema validator
+    # optionally merge straight into an existing edit_decisions.json (validate-before-write)
+    return ToolResult(success=True, data={"overlay": animated, "keyframes": keyframes})</code></pre>
+      <p class="mini">A <code>preset</code> like <code>slide_in_left</code>, <code>fade_in</code>, <code>pop</code>, or <code>ken_burns</code> expands into keyframes relative to the overlay's own position/timing — so the agent can say "slide the logo in from the left over 0.5 s" without hand-authoring frames. The keyframes are <b>interpreted later</b> by the renderer (<code>video_compose</code>'s overlay path renders position/scale/opacity; rotation is dropped on the FFmpeg path with a warning and routed to Remotion/HyperFrames).</p>
+    </div>
+    <div class="callout note"><div class="ic">🎯</div><div>Mental model: a spec-emitter is <b>cheap and reversible</b> — it just edits the plan. This is the foundation of "render-once, edit-cheap": describe the edit now, render once at the end.</div></div>
+  </div>
+
+  <h3>The document they both revolve around: <code>edit_decisions.json</code></h3>
+  <p>This schema-validated file (<span class="fp">schemas/artifacts/edit_decisions.schema.json</span>) is the single source of truth for an edit: a list of <code>cuts[]</code> (source clip + in/out + speed + transform + transitions), <code>overlays[]</code> (text/image/cutout with position, opacity, and <b>keyframes</b>), an <code>audio</code> block (music/narration/sfx), and a locked <code>render_runtime</code>. Spec-emitters write into it; the renderer reads it; the manual editor and the agent both edit it through the same schema gate.</p>
+</section>
+
+<!-- ───────────────────────── SELECTORS ───────────────────────── -->
+<section id="selectors">
+  <h2>Selectors &amp; scoring — picking a provider</h2>
+  <p>For capabilities with many interchangeable providers (TTS, image, video, web-image-search, screen-capture), a <b>selector</b> tool sits in front. Selectors auto-discover providers and rank them, so <i>adding a provider needs zero selector changes</i>.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4 style="margin-top:0">Discovery — from the registry</h4>
+<pre><code># tools/audio/tts_selector.py
+def _providers(self):
+    from tools.tool_registry import registry
+    registry.ensure_discovered()
+    return [t for t in registry.get_by_capability("tts")
+            if t.name != self.name]</code></pre>
+      <p class="mini">Drop in <code>tools/audio/whatever_tts.py</code> with <code>capability="tts"</code> and it appears here instantly.</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0">Routing — score, then delegate</h4>
+<pre><code>def execute(self, inputs):
+    candidates = self._providers()
+    tool, score = self._select_best_tool(inputs, candidates, ctx)
+    result = tool.execute(inputs)         # delegate to the winner
+    result.data["selected_provider"] = tool.provider
+    result.data["selection_reason"]  = score.explain()
+    return result</code></pre>
+      <p class="mini">Order: explicit <code>preferred_provider</code> → highest score among <b>available</b> providers. An <code>operation:"rank"</code> mode returns the scoreboard without generating.</p>
+    </div>
+  </div>
+
+  <h4>The scoring engine — <span class="fp">lib/scoring.py</span></h4>
+  <p><code>rank_providers(tools, task_context)</code> returns a sorted list of <code>ProviderScore</code> objects. The weighted formula: <b>30% task-fit · 20% quality · 15% control · 15% reliability · 10% cost · 5% latency · 5% continuity</b>. It pulls each tool's <code>quality_score</code> / <code>historical_success_rate</code> when set, else falls back to stability-based heuristics. Every score carries an <code>.explain()</code> so the agent can tell you <i>why</i> it picked a provider.</p>
+  <p class="mini">The three selectors: <code>tts_selector</code>, <code>image_selector</code>, <code>video_selector</code> (plus <code>web_image_search</code> and <code>screen_capture_selector</code>). All <code>provider="selector"</code>, and the registry deliberately excludes selectors from the provider menu so they don't double-count.</p>
+</section>
+
+<!-- ───────────────────────── COMPOSE ───────────────────────── -->
+<section id="compose">
+  <h2>The render engine — <span class="fp">tools/video/video_compose.py</span></h2>
+  <p>The biggest tool in the repo (~4,100 lines). It's the one that turns an <code>edit_decisions.json</code> into a finished video. <code>execute()</code> is an operation switch:</p>
+<pre><code>def execute(self, inputs):
+    op = inputs["operation"]
+    if   op == "compose":        return self._compose(inputs)
+    elif op == "render":         return self._render(inputs)            # full timeline → final mp4
+    elif op == "render_proxies": return self._render_proxies(inputs)    # render-once: per-scene cache
+    elif op == "remotion_render":return self._remotion_render(inputs)
+    elif op == "burn_subtitles": return self._burn_subtitles(inputs)
+    elif op == "overlay":        return self._overlay(inputs)          # keyframed overlays
+    elif op == "encode":         return self._encode(inputs)</code></pre>
+
+  <h3>Three render engines, one tool</h3>
+  <p>The <code>render_runtime</code> field (locked at the proposal stage, carried unchanged through <code>edit_decisions</code>) decides which engine runs. <b>Silent swaps are forbidden</b> — if the locked runtime is unavailable, the agent must escalate, not quietly fall back.</p>
+  <div class="grid3">
+    <div class="card"><h4 style="margin-top:0">FFmpeg</h4><p class="mini">Footage-led edits: cuts, concat, trim, xfade transitions, keyframed/text overlays, PiP, crop, custom canvas, subtitle burn. Always available (just needs the <code>ffmpeg</code> binary). <b>Video sources only</b> — a still image in <code>cuts[]</code> is rejected and routed to Remotion.</p></div>
+    <div class="card"><h4 style="margin-top:0">Remotion</h4><p class="mini">React-based: still images → animated scenes, text/stat cards, charts, callouts, spring transitions, word-level captions, TalkingHead. Needs Node + <code>remotion-composer/</code> + <code>node_modules</code>.</p></div>
+    <div class="card"><h4 style="margin-top:0">HyperFrames</h4><p class="mini">HTML/CSS/GSAP: kinetic typography, product promos, launch reels, website-to-video, SVG rigs. Needs Node ≥ 22 + FFmpeg + <code>npx hyperframes</code>.</p></div>
+  </div>
+  <p class="mini">Routing is automatic (<code>_render_via_ffmpeg</code> / <code>_remotion_render</code> / <code>_render_via_hyperframes</code>), but the agent is required to know all three exist at <i>proposal</i> time so it designs the visual treatment intentionally. There's also a HARD RULE never to silently tonemap HDR footage to SDR — detected via <code>is_hdr_source()</code> in <span class="fp">tools/video/_shared.py</span>.</p>
+</section>
+
+<!-- ───────────────────────── RENDER ONCE ───────────────────────── -->
+<section id="renderonce">
+  <h2>"Render-once, edit-cheap" — the NLE model</h2>
+  <p class="lead">Rendering a scene is expensive; rearranging an edit (order, transitions, audio, trims) is cheap. So OpenNolan renders each <b>scene once</b>, caches it by its content identity, and reuses it across edits. Only a scene whose pixels actually change misses the cache.</p>
+
+  <h4>The content-addressed cache — <span class="fp">tools/video/render_cache.py</span></h4>
+<pre><code>class ProxyCache:                       # ~/.cache/opennolan/proxies/&lt;sha256&gt;.json
+    @staticmethod
+    def key(identity):                  # sha256 over a canonical identity dict
+        return sha256(json.dumps(identity, sort_keys=True))
+    def get(self, key):                 # HIT only if the record AND its clip file still exist
+    def put(self, key, record):         # atomic temp→os.replace; cross-process flock</code></pre>
+  <div class="callout warn"><div class="ic">🧬</div><div><b>The identity must fold in the <u>content hash</u> of each source file</b> (<code>file_content_hash()</code>), not just its path/id. A regenerated upstream asset keeps its id but changes pixels — keying on the id alone would serve a stale proxy. Descriptive fields (labels, "reason") are excluded so cosmetic edits don't cause false cache misses.</div></div>
+
+  <h4>How an edit re-renders</h4>
+  <div class="flow">
+    <div class="step"><div class="n">1</div><div class="body"><h4>You edit the timeline &amp; hit Render</h4><p class="mini">The Studio UI <code>PUT</code>s the new <code>edit_decisions.json</code> (schema-gated), then <code>POST /api/projects/&lt;id&gt;/render</code>.</p></div></div>
+    <div class="step"><div class="n">2</div><div class="body"><h4>A background job runs <code>render_proxies</code></h4><p class="mini"><span class="fp">server/render_jobs.py</span> → <code>RenderJobStore</code> resolves project-relative paths to absolute, then calls <code>video_compose.execute({operation:"render_proxies", …})</code> on a daemon thread. The UI polls <code>GET …/render/&lt;job_id&gt;</code>.</p></div></div>
+    <div class="step"><div class="n">3</div><div class="body"><h4>Each scene is hashed → cache hit or re-render</h4><p class="mini">Unchanged scene → reuse its cached proxy clip. Changed scene → re-render just that one. This is why a small tweak to scene 3 doesn't re-render scenes 1, 2, 4, 5.</p></div></div>
+    <div class="step"><div class="n">4</div><div class="body"><h4>Cheap FFmpeg concat → final mp4</h4><p class="mini">The proxies are concatenated (cheap) into <code>projects/&lt;id&gt;/renders/editor_preview_&lt;job&gt;.mp4</code>. The manual editor reuses the <b>exact same</b> <code>video_compose</code> path the agent's compose stage uses, so <b>preview == export</b>.</p></div></div>
+  </div>
+</section>
+
+<!-- ───────────────────────── PIPELINES ───────────────────────── -->
+<section id="pipelines">
+  <h2>Pipelines, checkpoints &amp; stage status — <span class="fp">lib/</span></h2>
+  <p>Above the tools sits a thin orchestration layer. The agent follows a <b>pipeline</b> (an ordered list of stages); it records progress as <b>checkpoints</b>; the UI stepper reads those checkpoints live.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4 style="margin-top:0">Pipelines — <span class="fp">lib/pipeline_loader.py</span> + <span class="fp">pipeline_defs/*.yaml</span></h4>
+      <p class="mini">Each YAML manifest (e.g. <code>talking-head.yaml</code>, <code>instagram-reels-studio.yaml</code>) declares ordered <b>stages</b>, each with: a director <b>skill</b> to read, <code>required_tools</code> / <code>optional_tools</code>, expected <b>artifacts</b>, a checkpoint policy, and <b>human-approval gates</b>. <code>load_pipeline()</code> / <code>get_stage_order()</code> parse them; <code>list_pipelines()</code> backs <code>GET /api/pipelines</code>.</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0">Projects — <span class="fp">lib/project.py</span></h4>
+      <p class="mini"><code>create_project()</code> scaffolds <code>projects/&lt;id&gt;/</code> with <code>assets/</code> subdirs (images/video/audio/music) and a <code>project.json</code> manifest that carries the chosen <code>pipeline_type</code>. <code>list_projects()</code>, <code>get_project_record()</code>, <code>sanitize_filename()</code> guard the API's write paths.</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0">Checkpoints — <span class="fp">lib/checkpoint.py</span></h4>
+      <p class="mini">The source of truth for progress. <code>write_checkpoint()</code> atomically records a stage's status (+ validates its artifacts against schemas). <code>get_completed_stages()</code> / <code>get_next_stage()</code> let a fresh or resumed agent pick up exactly where the last one stopped.</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0">The stepper bridge — <span class="fp">scripts/update_stage.py</span></h4>
+      <p class="mini">The one-liner the agent shells out to so the UI updates in real time:<br><code>python scripts/update_stage.py &lt;id&gt; &lt;stage&gt; in_progress|completed|awaiting_human &lt;pipeline&gt;</code>. It just calls <code>write_checkpoint()</code>. The backend's <code>FileStateSource</code> (<span class="fp">server/state.py</span>) reads those files for <code>GET …/state</code>.</p>
+    </div>
+  </div>
+
+  <div class="callout note"><div class="ic">🧰</div><div><b>Other lib helpers:</b> <code>env_loader.py</code> (loads <code>.env</code>; the inline-comment-stripping footgun lives here), <code>config_model.py</code> (typed <code>config.yaml</code>: model, budget, paths), <code>scoring.py</code> (provider ranking), <code>delivery_promise.py</code> (classifies a brief as motion-led / source-led / avatar so the agent can't silently downgrade), <code>corpus.py</code> + <code>clip_embedder.py</code> (vector clip search for documentary/montage), <code>template_loader.py</code>, <code>playbook_generator.py</code>, <code>checkpoint.py</code>, <code>atomic_io.py</code> (the temp→fsync→replace primitive everything writes through).</div></div>
+</section>
+
+<!-- ───────────────────────── SERVER ───────────────────────── -->
+<section id="server">
+  <h2>The FastAPI server — <span class="fp">server/</span></h2>
+  <p><code>create_app()</code> in <span class="fp">server/app.py</span> wires everything. The route map, grouped by concern:</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4 style="margin-top:0">Read layer</h4>
+      <dl class="kv">
+        <dt>GET /api/health</dt><dd>Liveness (Electron polls this).</dd>
+        <dt>GET /api/capabilities</dt><dd>The cached provider menu — runs <code>registry.discover()</code> once.</dd>
+        <dt>GET /api/pipelines[/{n}]</dt><dd>Available pipelines + manifests.</dd>
+        <dt>GET /api/projects</dt><dd>Project list.</dd>
+        <dt>…/state</dt><dd>Per-stage status (via <code>FileStateSource</code>).</dd>
+        <dt>…/artifacts[/{key}]</dt><dd>Artifact manifest + single artifact (<span class="fp">artifacts.py</span>).</dd>
+        <dt>…/activity</dt><dd>"How this was made" log (<span class="fp">activity.py</span>).</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0">Write &amp; media</h4>
+      <dl class="kv">
+        <dt>POST /api/projects</dt><dd>Create a project (pipeline optional — agent picks).</dd>
+        <dt>…/assets</dt><dd>Upload / list assets (path-traversal-guarded).</dd>
+        <dt>…/file · /source · /frame</dt><dd>Serve assets / a cut's source / an extracted still for scrubbing.</dd>
+        <dt>GET·PUT …/edit_decisions</dt><dd>Read / schema-validate-and-write the timeline (<span class="fp">editor.py</span>).</dd>
+        <dt>POST …/render → /render/{job}</dt><dd>Start + poll a render-once job (<span class="fp">render_jobs.py</span>).</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="card">
+    <h4 style="margin-top:0">The agent channel (Server-Sent Events)</h4>
+    <dl class="kv">
+      <dt>POST …/chat</dt><dd>Streams one agent turn as SSE. Each SDK message becomes a <code>data: {json}</code> line. Gated by <code>auth_configured()</code> (503 otherwise).</dd>
+      <dt>POST …/agent/confirm</dt><dd>Resolves a paused <code>confirm_request</code> (destructive-Bash approval).</dd>
+      <dt>POST …/agent/answer</dt><dd>Resolves an <code>ask_user</code> question with the user's pick.</dd>
+      <dt>POST …/agent/stop</dt><dd>Interrupts mid-turn; context survives, next message resumes.</dd>
+      <dt>…/threads[/{id}]</dt><dd>Chat-thread persistence so a conversation can be reopened with its session.</dd>
+    </dl>
+  </div>
+  <p class="mini">The chat handler bridges the SDK's async stream into an <code>asyncio.Queue</code> drained as SSE — and every <code>tool_use</code> event is persisted via <code>record_tool_use()</code> so the Activity tab can show what the agent touched, even across restarts.</p>
+</section>
+
+<!-- ───────────────────────── RUNNER ───────────────────────── -->
+<section id="runner">
+  <h2>Agent runner internals — <span class="fp">server/agent_runner.py</span></h2>
+  <p>This is the safety + lifecycle layer around the Claude Agent SDK. Four things worth understanding:</p>
+
+  <h4>1 · The permission gate (<code>decide_tool</code> → <code>can_use_tool</code>)</h4>
+  <p>Since tools run as Bash strings, a tool-name allowlist can't capture the risk. So:</p>
+  <ul class="tight">
+    <li><b>Safe tools</b> (<code>Read</code>, <code>Glob</code>, <code>Grep</code>, <code>WebSearch</code>…) and <b>write tools</b> (<code>Write</code>, <code>Edit</code>) → allowed automatically.</li>
+    <li><b>Bash</b> → the <i>command string</i> is regex-scanned for ~14 destructive/exfil patterns (<code>rm -rf</code>, <code>sudo</code>, <code>git push</code>, <code>curl … | sh</code>, fork bombs, raw <code>dd</code>, network uploads…). A match → a UI <code>confirm_request</code>; clean → allowed.</li>
+    <li><b>Unknown/MCP tools</b> → conservatively routed to confirm.</li>
+  </ul>
+  <p class="mini">With no confirm handler (fully unattended), flagged calls are <b>denied</b> — the safe default. A hard <code>max_budget_usd</code> ceiling (default $15) is enforced SDK-natively.</p>
+
+  <h4>2 · <code>ask_user</code> — the one custom tool</h4>
+  <p>Registered as an in-process MCP server (<code>create_sdk_mcp_server("mc", …)</code>). When the agent calls it, the runner emits a <code>question</code> SSE event and <b>blocks on a future</b> until <code>POST …/agent/answer</code> resolves it. The built-in <code>AskUserQuestion</code> is <i>disallowed</i> so the agent uses this controllable round-trip instead.</p>
+
+  <h4>3 · Per-project sessions &amp; resume</h4>
+  <p>One persistent SDK client per project (lazy, reused) so conversation context survives across turns and the awaiting-human → approve → resume flow works. If a session dies (budget ceiling, transport crash), the next turn rebuilds <i>with</i> the prior <code>session_id</code> so the agent comes back with its full context on a fresh budget. A <b>first-turn preamble</b> also grounds it in on-disk checkpoints/artifacts — so even after a cold backend restart it resumes instead of redoing work.</p>
+
+  <h4>4 · The system prompt</h4>
+  <p class="mini">Re-asserts the contract every headless run: read <code>CLAUDE.md</code> → <code>AGENT_GUIDE.md</code>, read the per-stage skill, checkpoints live under <code>projects/</code>, present <i>both</i> Remotion and HyperFrames runtimes, announce cost before paid generation, stop at approval gates. <code>setting_sources=["project"]</code> is what makes the SDK load <code>CLAUDE.md</code> in the first place.</p>
+</section>
+
+<!-- ───────────────────────── WEB ───────────────────────── -->
+<section id="web">
+  <h2>The web editor — <span class="fp">web/src/</span></h2>
+  <p>A Vite + React SPA. Two halves: Mission Control (chat + pipeline + assets) and the from-scratch Studio NLE.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4 style="margin-top:0">The API client — <span class="fp">api.js</span></h4>
+      <p class="mini">Thin <code>fetch</code> wrappers for every endpoint, plus <code>chatStream()</code> — an async generator that parses the SSE stream into <code>assistant</code> / <code>result</code> / <code>confirm_request</code> / <code>question</code> / <code>error</code> events for <code>App.jsx</code> to render.</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0">The pure core — <span class="fp">editor/interp.js</span></h4>
+      <p class="mini">Zero-DOM, fully unit-tested timeline logic. All mutators are <b>immutable</b> (return a new doc; a no-op returns the same ref, for undo/dirty detection). Key fns: <code>cutStarts</code>, <code>cutAtTime</code>, <code>timelineDuration</code>, <code>interpolateAt</code> (linear, matching FFmpeg), and <code>sanitizeCut</code>/<code>sanitizeOverlay</code> (whitelist fields so a Save can never 422).</p>
+    </div>
+  </div>
+
+  <h4>Studio components (RULES.md: components stay thin, logic lives in interp.js)</h4>
+  <dl class="kv">
+    <dt>Studio.jsx</dt><dd>Owns the doc, undo/redo stacks, selection, playhead, save→render→poll loop.</dd>
+    <dt>StudioTimeline.jsx</dt><dd>Clip lanes (drag-reorder, edge-trim), overlays, audio; playhead + transport.</dd>
+    <dt>StudioPreview.jsx</dt><dd>Source scrub (pre-render) vs. render playback; rAF-driven playhead.</dd>
+    <dt>StudioInspector.jsx</dt><dd>Properties panel — cut/overlay/audio editors, or the Assets tab when nothing's selected.</dd>
+    <dt>StudioKeyframes.jsx</dt><dd>Overlay keyframe curve editor (the UI twin of <code>keyframe_animate</code>).</dd>
+    <dt>StudioToolbar.jsx / StudioAssets.jsx</dt><dd>Undo/redo/canvas/preview/Save/Render · asset browser with drag-to-timeline.</dd>
+    <dt>studio/model.js</dt><dd>UI vocab: <code>TRANSITIONS</code>, <code>CANVAS_PRESETS</code>, keyframe dims, overlay factories, <code>presetKeyframes</code>.</dd>
+  </dl>
+</section>
+
+<!-- ───────────────────────── FILES ───────────────────────── -->
+<section id="files">
+  <h2>File-by-file reference</h2>
+  <p class="lead">The files that matter for tool calling, the agent, and rendering. Click to expand.</p>
+
+  <h3>Entry points &amp; shell</h3>
+  <details class="acc"><summary>run-desktop · run-dev <code>bash</code></summary><div class="inner">Launchers. <code>run-desktop</code> installs node deps, sanity-checks Python, then starts Electron (prod builds the UI first; <code>--dev</code> uses Vite + HMR). <code>run-dev</code> runs the backend + Vite without Electron.</div></details>
+  <details class="acc"><summary>desktop/main.js <code>electron</code></summary><div class="inner">The native shell. Spawns <code>uvicorn server.app:app</code>, waits on <code>/api/health</code>, opens a sandboxed <code>BrowserWindow</code> over http (same-origin with the API). Owns backend lifecycle + a prod CSP. <b>preload.js</b> is the (minimal) isolated bridge.</div></details>
+
+  <h3>Backend</h3>
+  <details class="acc"><summary>server/app.py <code>fastapi</code> <code>~580 lines</code></summary><div class="inner">The whole HTTP surface: <code>create_app()</code> + every route (health, capabilities, projects, assets, artifacts, state, activity, edit_decisions, render jobs, chat SSE, threads). Mounts <code>web/dist</code> last so the API wins. The default <code>app = create_app()</code> is what uvicorn imports.</div></details>
+  <details class="acc"><summary>server/agent_runner.py <code>agent</code> <code>~710 lines</code></summary><div class="inner">Wraps the Claude Agent SDK. <code>decide_tool</code>/<code>make_can_use_tool</code> (permission policy), <code>ask_user</code> MCP tool, <code>AgentRunner</code> (per-project sessions, resume, interrupt, confirm/answer futures, the system prompt, <code>event_of()</code> SSE normalization). <code>auth_configured()</code> gates chat.</div></details>
+  <details class="acc"><summary>server/render_jobs.py · editor.py · state.py <code>render+editor</code></summary><div class="inner"><b>render_jobs.py</b> — <code>RenderJobStore</code>: threaded render-once jobs calling <code>video_compose render_proxies</code>. <b>editor.py</b> — schema-gated <code>read/write_edit_decisions</code> + <code>resolve_source_path</code> (mirrors the renderer so preview==export). <b>state.py</b> — <code>FileStateSource</code> derives stage status from checkpoints; <code>detect_runtime</code>.</div></details>
+  <details class="acc"><summary>server/artifacts.py · activity.py · threads.py <code>read/log</code></summary><div class="inner"><b>artifacts.py</b> — group artifacts by stage, read one by safe key. <b>activity.py</b> — append-only <code>.mc/activity.jsonl</code> of every tool_use → "how it was made" summary. <b>threads.py</b> — chat-thread persistence (frontend is sole writer; backend reads <code>session_id</code> to resume).</div></details>
+
+  <h3>Tools core</h3>
+  <details class="acc"><summary>tools/base_tool.py <code>contract</code></summary><div class="inner">The <code>BaseTool</code> ABC + <code>ToolResult</code>, the enums (<code>ToolTier</code>, <code>ToolStatus</code>, <code>ToolRuntime</code>, <code>Determinism</code>…), <code>ResourceProfile</code>, <code>RetryPolicy</code>. Defines <code>execute()</code> (abstract), <code>check_dependencies()</code>, <code>get_info()</code>, <code>estimate_cost()</code>, <code>idempotency_key()</code>. Loads <code>.env</code> at import.</div></details>
+  <details class="acc"><summary>tools/tool_registry.py <code>discovery</code></summary><div class="inner">The global <code>registry</code>. <code>discover()</code> walks the package tree and registers concrete tools by reflection; <code>ensure_discovered()</code> memoizes. The menu/catalog methods (<code>provider_menu_summary</code>, <code>capability_catalog</code>, <code>support_envelope</code>…). This is "how tools get registered."</div></details>
+  <details class="acc"><summary>tools/video/video_compose.py <code>renderer</code> <code>~4100 lines</code></summary><div class="inner">The render engine. Operation switch (<code>compose/render/render_proxies/remotion_render/overlay/encode/burn_subtitles</code>); routes on <code>render_runtime</code> to FFmpeg / Remotion / HyperFrames; keyframe-overlay interpretation; HDR rules; canvas/transition vocab.</div></details>
+  <details class="acc"><summary>tools/video/render_cache.py · clip_cache.py <code>cache</code></summary><div class="inner"><code>ProxyCache</code> — content-addressed per-scene render cache (the "render-once" mechanism), keyed on source <b>content hashes</b>. <code>clip_cache.py</code> caches downloaded/derived source clips similarly.</div></details>
+  <details class="acc"><summary>tools/video/_shared.py <code>helpers</code></summary><div class="inner">Cross-tool helpers: <code>probe_output()</code> (ffprobe duration/dims/fps), <code>is_hdr_source()</code> (HLG/PQ detection — the HDR guard), local-diffusion + provider plumbing (<code>generate_local_video</code>, <code>generate_heygen_video</code>, <code>poll_heygen</code>, fal/heygen uploads), quality/cost/runtime estimators.</div></details>
+  <details class="acc"><summary>tools/video/motion_ops.py · keyframe_animate.py <code>the two archetypes</code></summary><div class="inner"><b>motion_ops</b> — pixel-baker: freeze/reverse/speed/pan_zoom/clip_fx/flip/volume via FFmpeg → new derived clips. <b>keyframe_animate</b> — spec-emitter: builds <code>overlays[].keyframes</code> (raw or presets) and validates/merges into <code>edit_decisions</code>; renders nothing.</div></details>
+  <details class="acc"><summary>tools/*/…_selector.py <code>routers</code></summary><div class="inner"><code>tts_selector</code>, <code>image_selector</code>, <code>video_selector</code>, <code>web_image_search</code>, <code>screen_capture_selector</code> — discover providers via <code>registry.get_by_capability()</code>, rank via <code>lib.scoring</code>, delegate to the winner. Add a provider file → it's routable instantly.</div></details>
+  <details class="acc"><summary>tools/video/stock_sources/ <code>~16 providers</code></summary><div class="inner">Royalty-free clip sources (NASA, NOAA, Pexels, Wikimedia, Coverr, Archive.org…). These subclass a <code>StockSource</code> base (<code>base.py</code>), not <code>BaseTool</code> — they're aggregated by the clip-search tools, so they don't appear in the agent's tool registry directly.</div></details>
+
+  <h3>Orchestration &amp; schemas</h3>
+  <details class="acc"><summary>lib/ <code>pipeline · project · checkpoint · scoring · env</code></summary><div class="inner"><code>pipeline_loader</code> (YAML manifests), <code>project</code> (workspaces), <code>checkpoint</code> (stage status, resume), <code>scoring</code> (provider ranking), <code>env_loader</code> (.env), <code>config_model</code> (config.yaml), <code>delivery_promise</code>, <code>corpus</code>+<code>clip_embedder</code>, <code>template_loader</code>, <code>atomic_io</code>.</div></details>
+  <details class="acc"><summary>pipeline_defs/*.yaml · schemas/artifacts/*.json <code>contracts</code></summary><div class="inner">~18 pipeline manifests (stages, required/fallback tools, approval gates). The artifact JSON-schemas — <b><code>edit_decisions.schema.json</code></b> is the central one — gate every write the agent and the editor make.</div></details>
+  <details class="acc"><summary>scripts/update_stage.py <code>UI bridge</code></summary><div class="inner">The one command the agent runs to move the pipeline stepper: writes a checkpoint via <code>lib.checkpoint.write_checkpoint</code>. The UI reads it back through <code>server/state.py</code>.</div></details>
+  <details class="acc"><summary>CLAUDE.md · AGENT_GUIDE.md · RULES.md <code>the contract</code></summary><div class="inner"><code>CLAUDE.md</code> forces the agent to read the other two. <code>AGENT_GUIDE.md</code> governs the production <i>pipeline</i> (preflight, provider menu, runtime rules). <code>RULES.md</code> governs the desktop editor conventions (the pure-core / thin-component split).</div></details>
+</section>
+
+<!-- ───────────────────────── LIFECYCLE ───────────────────────── -->
+<section id="lifecycle">
+  <h2>End-to-end: "make me a 30-second reel"</h2>
+  <p class="lead">Putting it all together — one request, traced through every layer.</p>
+  <div class="flow">
+    <div class="step"><div class="n">1</div><div class="body"><h4>UI → backend</h4><p class="mini">You create a project and type a brief. <code>App.jsx</code> opens an SSE stream to <code>POST …/chat</code>; <code>AgentRunner</code> starts/continues the project's SDK session with a project-binding preamble.</p></div></div>
+    <div class="step"><div class="n">2</div><div class="body"><h4>Agent preflight</h4><p class="mini">The agent reads <code>CLAUDE.md</code> → <code>AGENT_GUIDE.md</code>, then runs (via Bash) <code>registry.discover(); registry.provider_menu_summary()</code> to learn what's configured, and presents the "N of M" capability menu.</p></div></div>
+    <div class="step"><div class="n">3</div><div class="body"><h4>Plan &amp; pick a pipeline</h4><p class="mini">It reads a <code>pipeline_defs/*.yaml</code>, proposes concepts, and (via <code>ask_user</code>) asks you to choose. It locks a <code>render_runtime</code>. It marks stages with <code>scripts/update_stage.py</code> → the UI stepper moves.</p></div></div>
+    <div class="step"><div class="n">4</div><div class="body"><h4>Generate &amp; process (Python tools via Bash)</h4><p class="mini">It calls provider tools through selectors — <code>tts_selector.execute(...)</code>, <code>video_selector.execute(...)</code>, <code>music_gen</code>, <code>motion_ops</code> for camera moves, <code>keyframe_animate</code> for overlay motion. Each is a Bash <code>python -c</code> running <code>.execute()</code>. Paid calls announce cost; destructive Bash pauses for your confirm.</p></div></div>
+    <div class="step"><div class="n">5</div><div class="body"><h4>Assemble the edit</h4><p class="mini">All choices land in <code>edit_decisions.json</code> (schema-validated). <code>video_compose</code> renders it — each scene cached by content hash, then concatenated. Output to <code>renders/</code>; a checkpoint marks the stage complete; the Activity log records every tool touched.</p></div></div>
+    <div class="step"><div class="n">6</div><div class="body"><h4>You take over in the Studio editor</h4><p class="mini">Open the timeline, trim/reorder/keyframe by hand. Each Save re-validates through the same schema; each Render reuses cached scenes (render-once) so iterating is fast. Preview == export, because the editor calls the very same <code>video_compose</code> path.</p></div></div>
+  </div>
+  <div class="callout key"><div class="ic">🎬</div><div>That's the whole system: <b>a Claude Code agent that drives ~100 Python tools via Bash, records its work as checkpoints + a schema-gated edit plan, renders once and caches, and hands you a real NLE to finish by hand</b> — all inside a local Electron + FastAPI app you bring your own keys to.</div></div>
+</section>
+
+<div class="footer">
+  Generated for <b>OpenNolan</b> · backend deep-dive · open this file anytime at <span class="fp">docs/backend-explained.html</span>
+</div>
+
+</main>
+</div>
+
+<script>
+// ---------- Tool catalog data (every BaseTool discovered under tools/) ----------
+const TOOLS = [
+  // analysis
+  ["audio_energy","analysis","ffmpeg","LOCAL","Loudness/energy envelope of an audio track (beat & emphasis cues)"],
+  ["audio_probe","analysis","ffprobe","LOCAL","Probe audio stream metadata (codec, duration, channels)"],
+  ["composition_validator","analysis","local","LOCAL","Validate an edit_decisions composition for structural problems"],
+  ["content_signal","scoring","meta-tribev2","API","Advisory short-form virality score (never blocks publish)"],
+  ["face_tracker","analysis","mediapipe","LOCAL","Track faces over a clip (for auto-reframe / crop targeting)"],
+  ["frame_sampler","analysis","ffmpeg","LOCAL","Extract representative still frames from a video"],
+  ["scene_detect","analysis","ffmpeg","LOCAL","Detect shot/scene cut boundaries"],
+  ["transcriber","analysis","whisperx","LOCAL","Speech-to-text with word-level timestamps (WhisperX)"],
+  ["transcript_fetcher","analysis","youtube-transcript-api","LOCAL","Fetch an existing YouTube transcript"],
+  ["video_analyzer","analysis","multi","LOCAL","High-level multi-signal analysis of a video"],
+  ["video_downloader","source_ingest","yt-dlp","LOCAL","Download a source video (yt-dlp)"],
+  ["video_understand","analysis","transformers","LOCAL_GPU","Local vision-LM understanding of video content"],
+  ["visual_qa","analysis","ffmpeg","LOCAL","Frame-based visual QA checks on a render"],
+  // audio
+  ["audio_enhance","audio_processing","ffmpeg","HYBRID","Clean/enhance an audio track (denoise, normalize)"],
+  ["audio_mixer","audio_processing","ffmpeg","LOCAL","Mix narration + music + sfx with levels/ducking"],
+  ["doubao_tts","tts","doubao","API","Text-to-speech (Doubao)"],
+  ["elevenlabs_tts","tts","elevenlabs","API","Text-to-speech (ElevenLabs) — expressive voices"],
+  ["freesound_music","music_search","freesound","API","Search Freesound for music/sfx"],
+  ["google_tts","tts","google_tts","API","Text-to-speech (Google Cloud TTS)"],
+  ["music_gen","music_generation","elevenlabs","API","Generate original music from a prompt"],
+  ["openai_tts","tts","openai","API","Text-to-speech (OpenAI)"],
+  ["piper_tts","tts","piper","LOCAL","Offline text-to-speech (Piper) — free, local"],
+  ["pixabay_music","music_search","pixabay_music","API","Search Pixabay for royalty-free music"],
+  ["sfx_kit","music_generation","elevenlabs","HYBRID","Generate/assemble a sound-effects kit"],
+  ["suno_music","music_generation","suno","API","Generate songs with vocals/lyrics (Suno)"],
+  ["tts_selector","tts","selector","HYBRID","Auto-route to the best available TTS provider"],
+  ["voice_ops","audio_processing","ffmpeg","LOCAL","Voice-track operations (trim, pad, pace)"],
+  // avatar
+  ["lip_sync","avatar","wav2lip","LOCAL_GPU","Lip-sync a face video to audio (Wav2Lip)"],
+  ["lip_sync_photo","avatar","replicate","API","Animate a still photo lip-synced to audio"],
+  ["talking_head","avatar","sadtalker","LOCAL_GPU","Generate a talking-head from a photo (SadTalker)"],
+  // capture
+  ["cap_recorder","screen_capture","cap","LOCAL","Screen recording via the Cap app"],
+  ["screen_capture_selector","screen_capture","selector","HYBRID","Route to the best screen-capture backend"],
+  ["screen_recorder","screen_capture","ffmpeg","LOCAL","Screen recording via FFmpeg"],
+  // character
+  ["character_spec_generator","character_animation","opennolan","LOCAL","Generate a rigged-character spec / pose library"],
+  // enhancement
+  ["bg_remove","enhancement","rembg","HYBRID","Remove image background (rembg)"],
+  ["color_grade","enhancement","ffmpeg","LOCAL","Color-grade a clip (LUT / curves)"],
+  ["eye_enhance","enhancement","mediapipe","LOCAL","Enhance/brighten eyes (face beautify)"],
+  ["face_enhance","enhancement","ffmpeg","LOCAL","Light face enhancement via FFmpeg filters"],
+  ["face_restore","enhancement","codeformer","LOCAL_GPU","Restore/upscale faces (CodeFormer)"],
+  ["object_cutout","segmentation","meta-sam2","API","Segment & cut out an object/person (SAM2)"],
+  ["upscale","enhancement","realesrgan","LOCAL_GPU","Upscale images/video (Real-ESRGAN)"],
+  // graphics
+  ["code_snippet","graphics","pygments","LOCAL","Render syntax-highlighted code cards"],
+  ["diagram_gen","graphics","mermaid","LOCAL","Render Mermaid diagrams to images"],
+  ["flux_image","image_generation","flux","API","Image generation (FLUX)"],
+  ["google_imagen","image_generation","google_imagen","API","Image generation (Google Imagen)"],
+  ["grok_image","image_generation","grok","API","Image generation (Grok)"],
+  ["image_gen","image_generation","multi","HYBRID","General image generation (multi-backend)"],
+  ["image_selector","image_generation","selector","HYBRID","Auto-route to the best image generator"],
+  ["local_diffusion","image_generation","local_diffusion","LOCAL_GPU","Local Stable-Diffusion image generation"],
+  ["math_animate","graphics","manim","LOCAL","Animated math/explainer graphics (Manim)"],
+  ["openai_image","image_generation","openai","API","Image generation (OpenAI / DALL·E)"],
+  ["pexels_image","image_generation","pexels","API","Stock photos from Pexels"],
+  ["pixabay_image","image_generation","pixabay","API","Stock photos from Pixabay"],
+  ["recraft_image","image_generation","recraft","API","Image generation (Recraft — vector/brand)"],
+  ["text_card_gen","graphics","pillow","LOCAL","Render styled text cards (Pillow)"],
+  // search
+  ["duckduckgo_image_search","web_image_search","duckduckgo","API","Free web image search (DuckDuckGo)"],
+  ["firecrawl_image_search","web_image_search","firecrawl","API","HD web image search (Firecrawl)"],
+  ["sticker_search","sticker_search","giphy_tenor","API","Search stickers/GIFs (Giphy/Tenor)"],
+  ["web_image_search","web_image_search","selector","HYBRID","Route web image search (DDG → Firecrawl)"],
+  ["webpage_screenshot","webpage_screenshot","firecrawl","API","Full-page screenshot of any URL (Firecrawl)"],
+  // subtitle
+  ["subtitle_gen","subtitle","opennolan","LOCAL","Generate subtitle/caption files from a transcript"],
+  // video — generation
+  ["cogvideo_video","video_generation","cogvideo","LOCAL_GPU","Text/image→video (CogVideo, local GPU)"],
+  ["grok_video","video_generation","grok","API","Text→video (Grok)"],
+  ["heygen_video","video_generation","heygen","API","Avatar/spokesperson video (HeyGen)"],
+  ["higgsfield_video","video_generation","higgsfield","API","Cinematic text→video (Higgsfield)"],
+  ["hunyuan_video","video_generation","hunyuan","LOCAL_GPU","Text→video (Hunyuan, local GPU)"],
+  ["kling_video","video_generation","kling","API","Text/image→video (Kling)"],
+  ["ltx_video_local","video_generation","ltx","LOCAL_GPU","Text→video (LTX, local GPU)"],
+  ["ltx_video_modal","video_generation","ltx-modal","API","Text→video (LTX on Modal cloud GPU)"],
+  ["minimax_video","video_generation","minimax","API","Text/image→video (MiniMax)"],
+  ["pexels_video","video_generation","pexels","API","Stock video from Pexels"],
+  ["pixabay_video","video_generation","pixabay","API","Stock video from Pixabay"],
+  ["restyle_video","video_generation","luma","API","Restyle existing video (Luma)"],
+  ["runway_video","video_generation","runway","API","Text/image→video (Runway)"],
+  ["seedance_replicate","video_generation","seedance","API","Text→video (Seedance via Replicate)"],
+  ["seedance_video","video_generation","seedance","API","Text→video (Seedance native)"],
+  ["veo_video","video_generation","veo","API","Text→video (Google Veo)"],
+  ["wan_video","video_generation","wan","LOCAL_GPU","Text→video (Wan, local GPU)"],
+  // video — post / compose
+  ["auto_reframe","video_post","ffmpeg","LOCAL","Reframe to a new aspect (track subject), bake a new clip"],
+  ["beat_cutter","video_post","librosa","LOCAL","Cut clips to musical beats (librosa onset detection)"],
+  ["clip_search","clip_retrieval","opennolan","LOCAL","Search the local clip corpus by embedding"],
+  ["corpus_builder","corpus_population","opennolan","HYBRID","Populate the local clip corpus from sources"],
+  ["direct_clip_search","clip_acquisition","opennolan","HYBRID","Search + fetch clips directly from stock sources"],
+  ["fuse_transition","video_post","seedance","API","AI-generated transition between two clips"],
+  ["green_screen_composite","video_post","ffmpeg","LOCAL","Composite a chroma-keyed subject over a background"],
+  ["green_screen_processor","video_post","ffmpeg","LOCAL","Key/clean a green-screen clip"],
+  ["hyperframes_compose","video_post","hyperframes","LOCAL","Render HTML/CSS/GSAP scenes via HyperFrames"],
+  ["keyframe_animate","video_post","keyframes","LOCAL","Emit overlay keyframes (spec-emitter, no render)"],
+  ["mask_ops","video_post","ffmpeg","LOCAL","Masking operations on a clip"],
+  ["motion_ops","video_post","ffmpeg","LOCAL","Freeze/reverse/speed/pan-zoom/fx/flip → derived clips"],
+  ["remotion_caption_burn","subtitle","remotion","LOCAL","Word-level animated caption burn (Remotion)"],
+  ["showcase_card","video_post","ffmpeg","LOCAL","Render a product/showcase card clip"],
+  ["silence_cutter","video_post","ffmpeg","LOCAL","Auto-remove silent gaps from a clip"],
+  ["template_apply","video_post","opennolan","LOCAL","Apply a parametrized reel template"],
+  ["video_compose","video_post","ffmpeg","LOCAL","The render engine — edit_decisions → final video"],
+  ["video_selector","video_generation","selector","HYBRID","Auto-route to the best video generator"],
+  ["video_stitch","video_post","ffmpeg","LOCAL","Concatenate clips into one timeline"],
+  ["video_trimmer","video_post","ffmpeg","LOCAL","Trim a clip to in/out points"],
+];
+
+const RT_ORDER = ["LOCAL","LOCAL_GPU","API","HYBRID"];
+const body = document.getElementById('toolBody');
+const search = document.getElementById('toolSearch');
+const countEl = document.getElementById('toolCount');
+const capChipsEl = document.getElementById('capChips');
+const rtChipsEl = document.getElementById('rtChips');
+
+let activeCap = null, activeRt = null;
+
+const caps = [...new Set(TOOLS.map(t=>t[1]))].sort();
+capChipsEl.innerHTML = '<span class="chip on" data-cap="">All capabilities</span>' +
+  caps.map(c=>`<span class="chip" data-cap="${c}">${c}</span>`).join('');
+rtChipsEl.innerHTML = '<span class="chip on" data-rt="">Any runtime</span>' +
+  RT_ORDER.map(r=>`<span class="chip" data-rt="${r}">${r}</span>`).join('');
+
+function render(){
+  const q = (search.value||'').toLowerCase().trim();
+  const rows = TOOLS.filter(([n,c,p,r,d])=>{
+    if(activeCap && c!==activeCap) return false;
+    if(activeRt && r!==activeRt) return false;
+    if(q && !(n+' '+c+' '+p+' '+d).toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a,b)=> a[1]===b[1] ? a[0].localeCompare(b[0]) : a[1].localeCompare(b[1]));
+  body.innerHTML = rows.map(([n,c,p,r,d])=>
+    `<tr><td class="nm">${n}</td><td class="cap">${c}</td><td class="pv">${p}</td>`+
+    `<td><span class="pill rt-${r}">${r||'—'}</span></td><td>${d}</td></tr>`).join('')
+    || `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--ink-soft)">No tools match.</td></tr>`;
+  countEl.textContent = `${rows.length} / ${TOOLS.length} tools`;
+}
+
+capChipsEl.addEventListener('click', e=>{
+  const c = e.target.closest('.chip'); if(!c) return;
+  activeCap = c.dataset.cap || null;
+  [...capChipsEl.children].forEach(x=>x.classList.toggle('on', x===c));
+  render();
+});
+rtChipsEl.addEventListener('click', e=>{
+  const c = e.target.closest('.chip'); if(!c) return;
+  activeRt = c.dataset.rt || null;
+  [...rtChipsEl.children].forEach(x=>x.classList.toggle('on', x===c));
+  render();
+});
+search.addEventListener('input', render);
+render();
+document.getElementById('catalogNote').textContent =
+  `${TOOLS.length} BaseTool classes across ${caps.length} capabilities. (Stock-source providers like NASA/Pexels are aggregated by clip-search tools and not listed here.)`;
+
+// ---------- tabs ----------
+document.getElementById('archTabs').addEventListener('click', e=>{
+  const t = e.target.closest('.tab'); if(!t) return;
+  document.querySelectorAll('#archTabs .tab').forEach(x=>x.classList.toggle('on', x===t));
+  const key = t.dataset.t;
+  document.getElementById('pane-bake').classList.toggle('on', key==='bake');
+  document.getElementById('pane-spec').classList.toggle('on', key==='spec');
+});
+
+// ---------- scroll-spy ----------
+const links = [...document.querySelectorAll('nav.toc a')];
+const map = new Map(links.map(a=>[a.getAttribute('href').slice(1), a]));
+const obs = new IntersectionObserver((entries)=>{
+  entries.forEach(en=>{
+    if(en.isIntersecting){
+      links.forEach(l=>l.classList.remove('active'));
+      const a = map.get(en.target.id); if(a) a.classList.add('active');
+    }
+  });
+}, {rootMargin:'-10% 0px -80% 0px', threshold:0});
+document.querySelectorAll('section[id]').forEach(s=>obs.observe(s));
+</script>
+</body>
+</html>

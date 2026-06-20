@@ -1,11 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { marked } from 'marked'
+import { useEffect, useRef, useState } from 'react'
 import * as api from './api.js'
 import { LineChart } from './components/LineChart.jsx'
 import Studio from './studio/Studio.jsx'
-
-// Configure marked for safe, compact output
-marked.setOptions({ breaks: true, gfm: true })
+import ChatPanel from './chat/ChatPanel.jsx'
+import { useAgentChat } from './chat/useAgentChat.js'
 
 const STATUS_LABEL = {
   pending: 'pending',
@@ -18,56 +16,18 @@ const STATUS_LABEL = {
 
 const ASSET_KINDS = ['images', 'video', 'audio', 'music']
 
-const TOOL_ICON = {
-  Read: '📄',
-  Write: '✏️',
-  Edit: '✏️',
-  MultiEdit: '✏️',
-  Bash: '⌨️',
-  Glob: '🔍',
-  Grep: '🔍',
-  WebSearch: '🌐',
-  WebFetch: '🌐',
-  Skill: '🛠',
-  TodoWrite: '📋',
-}
-
-// Detect render-in-progress from a tool_use event
-function isRenderCommand(item) {
-  if (item.kind !== 'tool_use' || item.name !== 'Bash') return false
-  const d = (item.detail || '').toLowerCase()
-  return d.includes('npx remotion') || d.includes('ffmpeg') || d.includes('npm run render') || d.includes('hyperframes render')
-}
-
 export default function App() {
   const [pipelines, setPipelines] = useState([])
   const [projects, setProjects] = useState([])
   const [selected, setSelected] = useState(null)
   const [state, setState] = useState(null)
-  const [messages, setMessages] = useState([])
-  const [pendingConfirm, setPendingConfirm] = useState(null)
-  const [pendingQuestion, setPendingQuestion] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [input, setInput] = useState('')
   const [toast, setToast] = useState(null)
-  const [renderingStage, setRenderingStage] = useState(null) // tool_use id of in-flight render
-  const [toolResults, setToolResults] = useState({})          // tool_use_id -> result, for expansion
   const [uploadTick, setUploadTick] = useState(0)             // bump to refresh asset listing
-  const [threads, setThreads] = useState([])                  // chat threads for the project
-  const [activeThread, setActiveThread] = useState(null)      // current thread id
   const [editing, setEditing] = useState(false)               // manual editor open (full-screen)
-  const messagesRef = useRef([])                              // latest messages, for thread persistence
-  const sessionIdRef = useRef(null)                           // latest agent session_id
-  const abortRef = useRef(null)                               // aborts the in-flight chat stream (Stop)
-  useEffect(() => { messagesRef.current = messages }, [messages])
 
-  // Persist the active thread continuously (debounced), not just at turn end —
-  // so reloading mid-turn (a full pipeline can run for minutes) keeps the chat.
-  useEffect(() => {
-    if (!selected || !activeThread || messages.length === 0) return
-    const t = setTimeout(() => persistThread(activeThread), 700)
-    return () => clearTimeout(t)
-  }, [messages, selected, activeThread])
+  // All agent-chat state + handlers live in one hook so the pipeline window and the editor
+  // share a single conversation (revived from disk whenever `selected` changes).
+  const chat = useAgentChat(selected, { onError: showError })
 
   useEffect(() => {
     api.getPipelines().then(d => setPipelines(d.pipelines || [])).catch(showError)
@@ -100,160 +60,9 @@ export default function App() {
     return api.getProjects().then(d => setProjects(d.projects || [])).catch(showError)
   }
 
-  function refreshThreads(projectId) {
-    const id = projectId || selected
-    if (!id) return Promise.resolve()
-    return api.listThreads(id).then(d => setThreads(d.threads || [])).catch(() => {})
-  }
-
-  function clearChat() {
-    setMessages([])
-    setPendingConfirm(null)
-    setPendingQuestion(null)
-    setRenderingStage(null)
-    setToolResults({})
-    setInput('')
-    sessionIdRef.current = null
-  }
-
-  // '+' new chat: start a fresh thread (created lazily on first message).
-  function newChat() {
-    clearChat()
-    setActiveThread(null)
-  }
-
-  async function loadThread(tid, projectId = selected) {
-    if (!projectId || !tid) return
-    try {
-      const rec = await api.getThread(projectId, tid)
-      clearChat()
-      setMessages(rec.messages || [])
-      sessionIdRef.current = rec.session_id || null
-      setActiveThread(tid)
-    } catch (e) { showError(e) }
-  }
-
-  // Open a project and revive its most recent conversation, so a reload lands
-  // you back in the chat you were in (not a blank one).
-  async function openProject(id) {
+  // Open a project; the chat hook revives its most recent conversation from disk.
+  function openProject(id) {
     setSelected(id)
-    clearChat()
-    setActiveThread(null)
-    try {
-      const d = await api.listThreads(id)              // newest-updated first
-      setThreads(d.threads || [])
-      const latest = (d.threads || []).find(t => (t.message_count || 0) > 0)
-      if (latest) loadThread(latest.thread_id, id)
-    } catch { setThreads([]) }
-  }
-
-  function deriveTitle(msgs) {
-    const firstUser = (msgs || []).find(m => m.role === 'user')
-    const t = (firstUser?.text || 'New chat').trim().replace(/\s+/g, ' ')
-    return t.length > 48 ? t.slice(0, 48) + '…' : t
-  }
-
-  function persistThread(tid) {
-    if (!selected || !tid) return
-    api.saveThread(selected, tid, {
-      messages: messagesRef.current,
-      session_id: sessionIdRef.current,
-      title: deriveTitle(messagesRef.current),
-    }).then(() => refreshThreads()).catch(() => {})
-  }
-
-  const send = useCallback(async (text) => {
-    const message = (text || input).trim()
-    if (!message || !selected || busy) return
-    setInput('')
-    setMessages(m => [...m, { role: 'user', text: message }])
-    setBusy(true)
-    // Ensure a thread exists to persist this conversation into.
-    let tid = activeThread
-    if (!tid) {
-      try {
-        const rec = await api.createThread(selected, deriveTitle([{ role: 'user', text: message }]))
-        tid = rec.thread_id
-        setActiveThread(tid)
-      } catch { /* persistence is best-effort; continue the chat regardless */ }
-    }
-    const controller = new AbortController()
-    abortRef.current = controller
-    try {
-      for await (const evt of api.chatStream(selected, message, tid, controller.signal)) {
-        if (evt.type === 'assistant') {
-          setMessages(m => {
-            const last = m[m.length - 1]
-            // If last message is assistant, merge items into it for streaming effect
-            if (last?.role === 'assistant_stream') {
-              return [...m.slice(0, -1), { ...last, items: [...(last.items || []), ...evt.items] }]
-            }
-            return [...m, { role: 'assistant_stream', items: evt.items }]
-          })
-          // Capture render state + pair tool results to their tool_use by id
-          for (const it of evt.items || []) {
-            if (isRenderCommand(it)) setRenderingStage(it.id)
-            if (it.kind === 'tool_result') {
-              setToolResults(prev => ({ ...prev, [it.tool_use_id]: it }))
-              if (it.tool_use_id === renderingStage) setRenderingStage(null)
-            }
-          }
-        } else if (evt.type === 'result') {
-          setRenderingStage(null)
-          if (evt.session_id) sessionIdRef.current = evt.session_id
-          setMessages(m => {
-            // Finalize the last assistant_stream -> assistant (KEEP its text),
-            // then append the result line.
-            const last = m[m.length - 1]
-            if (last?.role === 'assistant_stream') {
-              const finalized = { ...last, role: 'assistant' }
-              return [...m.slice(0, -1), finalized, { role: 'result', ...evt }]
-            }
-            return [...m, { role: 'result', ...evt }]
-          })
-        } else if (evt.type === 'confirm_request') {
-          setPendingConfirm(evt)
-        } else if (evt.type === 'question') {
-          setPendingQuestion(evt)
-        } else if (evt.type === 'error') {
-          setMessages(m => [...m, { role: 'error', text: evt.detail }])
-        }
-      }
-    } catch (e) {
-      if (e.name === 'AbortError' || controller.signal.aborted) {
-        setRenderingStage(null)
-        setMessages(m => [...m, { role: 'note', text: '■ Stopped. Your next message resumes this session with its context.' }])
-      } else {
-        setMessages(m => [...m, { role: 'error', text: String(e.message || e) }])
-      }
-    } finally {
-      abortRef.current = null
-      setBusy(false)
-      // Persist the conversation (messages + session_id) so the thread is revivable.
-      if (tid) setTimeout(() => persistThread(tid), 0)
-    }
-  }, [input, selected, busy, renderingStage, activeThread])
-
-  async function stop() {
-    if (!selected) return
-    // Interrupt the agent server-side (context preserved), then stop reading.
-    try { await api.stopAgent(selected) } catch { /* best effort */ }
-    abortRef.current?.abort()
-  }
-
-  async function resolveConfirm(approved) {
-    if (!pendingConfirm || !selected) return
-    try { await api.confirmTool(selected, pendingConfirm.confirm_id, approved) }
-    catch (e) { showError(e) }
-    finally { setPendingConfirm(null) }
-  }
-
-  async function answerQuestion(answer) {
-    if (!pendingQuestion || !selected) return
-    setMessages(m => [...m, { role: 'user', text: answer }])  // show the choice in the chat
-    try { await api.answerQuestion(selected, pendingQuestion.question_id, answer) }
-    catch (e) { showError(e) }
-    finally { setPendingQuestion(null) }
   }
 
   if (!selected) {
@@ -266,9 +75,7 @@ export default function App() {
           onCreate={async (name, pipeline) => {
             const m = await api.createProject(name, pipeline)
             await refreshProjects()
-            setSelected(m.project_id)
-            newChat()
-            refreshThreads(m.project_id)
+            setSelected(m.project_id)   // chat hook starts a fresh conversation for the new project
             showOk(`Created "${m.name}"`)
           }}
         />
@@ -280,7 +87,7 @@ export default function App() {
   if (editing) {
     return (
       <div className="app">
-        <Studio projectId={selected} state={state} onClose={() => setEditing(false)} />
+        <Studio projectId={selected} state={state} onClose={() => setEditing(false)} chat={chat} />
         {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
       </div>
     )
@@ -291,18 +98,10 @@ export default function App() {
       <ProjectBar
         state={state} projects={projects} selected={selected}
         onEdit={() => setEditing(true)}
-        onBack={() => { setSelected(null); clearChat(); setActiveThread(null); setEditing(false) }}
+        onBack={() => { setSelected(null); setEditing(false) }}
       />
       <main className="grid">
-        <ChatPanel
-          messages={messages} input={input} setInput={setInput}
-          onSend={send} onNewChat={newChat} onStop={stop}
-          busy={busy} disabled={!selected}
-          pendingConfirm={pendingConfirm} onConfirm={resolveConfirm}
-          pendingQuestion={pendingQuestion} onAnswer={answerQuestion}
-          renderingStage={renderingStage} toolResults={toolResults}
-          threads={threads} activeThread={activeThread} onLoadThread={loadThread}
-        />
+        <ChatPanel chat={chat} disabled={!selected} />
         <WorkPanel state={state} selected={selected} />
         <AssetPanel
           selected={selected}
@@ -445,227 +244,6 @@ function ProjectBar({ state, projects, selected, onBack, onEdit }) {
         {onEdit && <button className="editor-open-btn" onClick={onEdit} title="Hand-edit this project's timeline">✎ Edit</button>}
       </div>
     </header>
-  )
-}
-
-// ─── Chat Panel ───────────────────────────────────────────────────────────────
-
-function ChatPanel({ messages, input, setInput, onSend, onNewChat, onStop, busy, disabled, pendingConfirm, onConfirm, pendingQuestion, onAnswer, renderingStage, toolResults, threads, activeThread, onLoadThread }) {
-  const endRef = useRef(null)
-  const msgsRef = useRef(null)
-  const stickRef = useRef(true)        // auto-scroll only while parked at the bottom
-  const taRef = useRef(null)
-
-  // Auto-scroll to the newest message, but ONLY if the user hasn't scrolled up
-  // to read history. Scrolling up parks them there until they return to bottom.
-  useEffect(() => {
-    if (stickRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, pendingConfirm, pendingQuestion, renderingStage])
-
-  function onMessagesScroll() {
-    const el = msgsRef.current
-    if (!el) return
-    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-  }
-
-  // Grow the composer with its content, up to ~10 lines, then scroll inside it.
-  useEffect(() => {
-    const el = taRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 220) + 'px'
-  }, [input])
-
-  return (
-    <section className="panel chat">
-      <div className="chat-header">
-        <h2>Agent</h2>
-        <div className="chat-header-actions">
-          {threads && threads.length > 0 && (
-            <select
-              className="thread-select"
-              value={activeThread || ''}
-              onChange={e => e.target.value && onLoadThread(e.target.value)}
-              disabled={busy}
-              title="Chat history"
-            >
-              <option value="">{activeThread ? 'Switch thread…' : 'History…'}</option>
-              {threads.map(t => (
-                <option key={t.thread_id} value={t.thread_id}>{t.title}</option>
-              ))}
-            </select>
-          )}
-          <button className="new-chat-btn" onClick={onNewChat} title="New chat" disabled={busy}>＋</button>
-        </div>
-      </div>
-      <div className="messages" ref={msgsRef} onScroll={onMessagesScroll}>
-        {messages.length === 0 && (
-          <p className="empty">{disabled ? 'Select or create a project to start.' : 'Tell the agent what to make.'}</p>
-        )}
-        {messages.map((m, i) => <Message key={i} m={m} toolResults={toolResults} />)}
-        {renderingStage && <RenderProgress />}
-        {pendingConfirm && (
-          <div className="confirm-card">
-            <div className="confirm-title">⚠ Confirm command</div>
-            <div className="confirm-reason">{pendingConfirm.reason}</div>
-            <pre className="confirm-cmd">{pendingConfirm.input?.command || JSON.stringify(pendingConfirm.input)}</pre>
-            <div className="confirm-actions">
-              <button className="approve" onClick={() => onConfirm(true)}>Allow</button>
-              <button className="deny" onClick={() => onConfirm(false)}>Block</button>
-            </div>
-          </div>
-        )}
-        <div ref={endRef} />
-      </div>
-      {pendingQuestion && <QuestionCard q={pendingQuestion} onAnswer={onAnswer} />}
-      <form className="composer" onSubmit={e => { e.preventDefault(); onSend() }}>
-        <textarea
-          ref={taRef}
-          className="composer-input"
-          rows={1}
-          placeholder={busy ? 'Agent is working…' : 'Message the agent…  (Enter to send, Shift+Enter for newline)'}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              onSend()
-            }
-          }}
-          disabled={disabled || busy}
-        />
-        {busy
-          ? <button type="button" className="stop-btn" onClick={onStop} title="Stop the agent">■ Stop</button>
-          : <button type="submit" disabled={disabled || !input.trim()}>Send</button>}
-      </form>
-    </section>
-  )
-}
-
-function RenderProgress() {
-  const [pct, setPct] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setPct(p => Math.min(p + 1.5, 90)), 400)
-    return () => clearInterval(id)
-  }, [])
-  return (
-    <div className="render-progress">
-      <div className="rp-label">🎬 Rendering…</div>
-      <div className="rp-bar"><div className="rp-fill" style={{ width: `${pct}%` }} /></div>
-      <div className="rp-pct">{Math.round(pct)}%</div>
-    </div>
-  )
-}
-
-// ─── Question Card (agent asked a clarifying question) ──────────────────────────
-
-function QuestionCard({ q, onAnswer }) {
-  return (
-    <div className="question-card">
-      {q.header && <div className="q-header">{q.header}</div>}
-      <div className="q-body md-body" dangerouslySetInnerHTML={{ __html: marked.parse(q.question || '') }} />
-      <div className="q-options">
-        {(q.options || []).map((opt, i) => (
-          <button
-            key={i}
-            className="q-option"
-            onClick={() => onAnswer(opt)}
-            dangerouslySetInnerHTML={{ __html: marked.parseInline(opt) }}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ─── Message ─────────────────────────────────────────────────────────────────
-
-function Message({ m, toolResults }) {
-  if (m.role === 'user') return <div className="msg user">{m.text}</div>
-  if (m.role === 'error') return <div className="msg error">⚠ {m.text}</div>
-  if (m.role === 'note') return <div className="msg note">{m.text}</div>
-  if (m.role === 'result') {
-    return (
-      <div className="msg result">
-        {m.is_error ? '⚠ Turn ended — your next message resumes this session with its context.' : 'Turn complete.'}
-        {m.total_cost_usd != null && <span className="cost"> ${m.total_cost_usd.toFixed(3)}</span>}
-        {m.num_turns != null && <span className="muted"> · {m.num_turns} steps</span>}
-      </div>
-    )
-  }
-  // assistant / assistant_stream — render items in the ORDER they happened so
-  // tool calls and text stay interleaved (text → tool → text → …), not all
-  // tool calls hoisted above all text. Consecutive text items are merged so a
-  // paragraph split across stream chunks renders as one markdown block.
-  const items = m.items || []
-  const nodes = []
-  let buf = []
-  const flush = (key) => {
-    if (!buf.length) return
-    nodes.push(
-      <div key={`t-${key}`} className="md-body"
-        dangerouslySetInnerHTML={{ __html: marked.parse(buf.join('')) }} />
-    )
-    buf = []
-  }
-  items.forEach((it, i) => {
-    if (it.kind === 'text') { buf.push(it.text); return }
-    if (it.kind === 'tool_use' || it.kind === 'thinking') {
-      flush(i)
-      nodes.push(<ActivityChip key={`a-${i}`} item={it} result={it.id ? toolResults?.[it.id] : null} />)
-    }
-  })
-  flush('end')
-
-  return <div className="msg assistant">{nodes}</div>
-}
-
-function formatToolInput(item) {
-  const inp = item.input || {}
-  if (item.name === 'Bash') return inp.command || ''
-  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(item.name)) {
-    const path = inp.file_path || inp.path || ''
-    if (inp.content != null) return `${path}\n\n${inp.content}`
-    if (inp.old_string != null || inp.new_string != null) {
-      return `${path}\n\n- - - old - - -\n${inp.old_string || ''}\n\n+ + + new + + +\n${inp.new_string || ''}`
-    }
-    return path
-  }
-  return JSON.stringify(inp, null, 2)
-}
-
-function ActivityChip({ item, result }) {
-  const [open, setOpen] = useState(false)
-  if (item.kind === 'thinking') return <span className="activity-chip thinking">💭 thinking…</span>
-
-  const icon = TOOL_ICON[item.name] || '🔧'
-  const hasResult = result != null
-  const resultErr = hasResult && result.is_error
-  return (
-    <div className={`tool-block ${open ? 'open' : ''}`}>
-      <button className={`activity-chip tool clickable ${resultErr ? 'tool-err' : ''}`} onClick={() => setOpen(o => !o)}>
-        <span className="tc-caret">{open ? '▾' : '▸'}</span>
-        <span className="tc-icon">{icon}</span>
-        <span className="tc-name">{item.name}</span>
-        {item.detail && <span className="tc-detail">{item.detail}</span>}
-        {resultErr && <span className="tc-badge err">error</span>}
-      </button>
-      {open && (
-        <div className="tool-expand">
-          <div className="te-label">input</div>
-          <pre className="te-pre">{formatToolInput(item)}</pre>
-          {hasResult && (
-            <>
-              <div className={`te-label ${resultErr ? 'err' : ''}`}>{resultErr ? 'error' : 'output'}</div>
-              <pre className={`te-pre ${resultErr ? 'err' : ''}`}>
-                {typeof result.content === 'string' ? result.content : JSON.stringify(result.content, null, 2)}
-              </pre>
-            </>
-          )}
-          {!hasResult && <div className="te-pending">awaiting result…</div>}
-        </div>
-      )}
-    </div>
   )
 }
 

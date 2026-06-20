@@ -4,4 +4,9 @@ import '@testing-library/jest-dom/vitest'
 import { afterEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 
+// jsdom doesn't implement scrollIntoView; the chat view auto-scrolls to the newest message.
+if (!window.HTMLElement.prototype.scrollIntoView) {
+  window.HTMLElement.prototype.scrollIntoView = () => {}
+}
+
 afterEach(() => cleanup())

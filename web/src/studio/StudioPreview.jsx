@@ -1,8 +1,10 @@
 // Studio preview — two modes, with a real transport (play/pause).
-//  • SOURCE: the clip under the playhead plays at its edited speed; on reaching the cut's
-//    out-point the playhead jumps to the next cut (which loads the next source). The playhead
-//    is DERIVED from playback while playing, and DRIVES the seek while paused/scrubbing — the
-//    two never fight. A rough pre-render preview (no overlays/transitions).
+//  • SOURCE: a rough pre-render preview (no overlays/transitions). The PLAYHEAD is the master
+//    clock: while playing it advances by wall-clock time, and a SINGLE persistent <video> is
+//    SLAVED to it (its src follows the cut under the playhead; its currentTime is corrected only
+//    when it drifts, so within a cut it plays smoothly and at boundaries it re-seeks). One element
+//    is reused for every cut — we never mount a per-source element, so no detached <video> is left
+//    playing audio after a cut change, and pause stops everything.
 //  • RENDER: plays the composed MP4 (preview == export); playback drives the playhead.
 
 import { useEffect, useMemo, useRef } from 'react'
@@ -33,6 +35,11 @@ function syncAudioEls(els, tracks, t, active) {
   }
 }
 
+// Pause + rewind every hidden audio track (used on stop / mode switch).
+function pauseAllAudio(els) {
+  for (const el of els.values()) { try { el.pause() } catch { /* noop */ } }
+}
+
 export default function StudioPreview({ projectId, doc, playhead, previewMode, renderPath, renderVersion, playing, onScrub, onPlayingChange }) {
   const srcRef = useRef(null)
   const renRef = useRef(null)
@@ -46,58 +53,28 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
   const audioTracks = useMemo(() => previewAudioTracks(doc), [doc])
   const audioEls = useRef(new Map())
 
-  // Latest render values for the rAF clock to read without re-subscribing every frame.
+  // Mirror the playhead so the rAF clock (master) can read+advance it without re-subscribing.
+  const playheadRef = useRef(playhead)
+  playheadRef.current = playhead
+
+  // Latest values for the rAF clock to read without re-subscribing every frame.
   const liveRef = useRef(null)
-  liveRef.current = { doc, hit, previewMode, dur, onScrub, onPlayingChange, audioTracks }
+  liveRef.current = { doc, previewMode, dur, onScrub, onPlayingChange, audioTracks }
 
-  // When playing reaches a cut's out-point, jump to the next cut (or stop at the end).
-  const advanceSource = (v) => {
-    const cut = hit?.cut
-    if (!cut) { onPlayingChange(false); return }
-    const cuts = doc.cuts || []
-    const ni = hit.index + 1
-    if (ni < cuts.length) {
-      const next = cuts[ni]
-      onScrub(hit.start + interp.cutDuration(cut) + 1e-3) // → re-render picks the next cut
-      if (next.source === cut.source) { // same element keeps playing — reseek to its in-point
-        try { v.currentTime = Number(next.in_seconds) || 0 } catch {}
-        v.playbackRate = Number(next.speed) || 1
-      }
-    } else {
-      onScrub(dur); onPlayingChange(false)
-      try { v.pause() } catch {}
-    }
-  }
-
-  // SOURCE: seek from the playhead ONLY when paused (while playing, playback owns the time).
+  // SOURCE: while paused (or scrubbing), the playhead drives the frame — keep the <video> paused
+  // and seeked to the playhead's source time. The loadedmetadata listener is cleaned up so a
+  // pause that lands mid-load can never leave a stale handler that resumes playback.
   useEffect(() => {
     if (previewMode !== 'source' || playing) return
     const v = srcRef.current
-    if (!v || sourceRef == null) return
-    const seek = () => { if (Math.abs(v.currentTime - sourceTime) > 0.05) { try { v.currentTime = sourceTime } catch {} } }
-    if (v.readyState >= 1) seek()
-    else v.addEventListener('loadedmetadata', seek, { once: true })
+    if (!v) return
+    try { v.pause() } catch { /* noop */ }
+    if (sourceRef == null) return
+    const seek = () => { if (Math.abs(v.currentTime - sourceTime) > 0.05) { try { v.currentTime = sourceTime } catch { /* not ready */ } } }
+    if (v.readyState >= 1) { seek(); return }
+    v.addEventListener('loadedmetadata', seek, { once: true })
+    return () => v.removeEventListener('loadedmetadata', seek)
   }, [previewMode, sourceRef, sourceTime, playing])
-
-  // SOURCE: play/pause + edited-speed playback. Re-runs when the clip changes (sourceRef) so
-  // advancing to a new source resumes playback; NOT on every playhead tick.
-  useEffect(() => {
-    if (previewMode !== 'source') return
-    const v = srcRef.current
-    if (!v || sourceRef == null) return
-    v.playbackRate = Number(hit?.cut?.speed) || 1
-    if (playing) {
-      const begin = () => {
-        if (Math.abs(v.currentTime - sourceTime) > 0.3) { try { v.currentTime = sourceTime } catch {} }
-        v.play().catch(() => {})
-      }
-      if (v.readyState >= 1) begin()
-      else v.addEventListener('loadedmetadata', begin, { once: true })
-    } else {
-      v.pause()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewMode, playing, sourceRef])
 
   // RENDER: play/pause the composed video from the transport.
   useEffect(() => {
@@ -112,51 +89,55 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
     if (previewMode !== 'render') return
     const v = renRef.current
     if (!v) return
-    if (v.paused && Math.abs(v.currentTime - playhead) > 0.25) { try { v.currentTime = playhead } catch {} }
+    if (v.paused && Math.abs(v.currentTime - playhead) > 0.25) { try { v.currentTime = playhead } catch { /* noop */ } }
   }, [previewMode, playhead])
 
-  // SMOOTH PLAYHEAD (feat 6): while playing, drive the playhead from the video clock every
-  // animation frame (~60fps) instead of coarse 'timeupdate' events (~4-15fps). In source mode
-  // it also advances to the next cut at the out-point. Reads liveRef so it never re-subscribes
-  // per frame; the only effect dep is `playing`.
+  // MASTER CLOCK (feat 6): while playing, advance the PLAYHEAD by real wall-clock time and slave
+  // the media to it. The playhead — not the <video> — is authoritative, so a cut boundary (even a
+  // jump-cut or a source swap) just re-seeks/loads the one video element rather than letting it run
+  // away or reset. Reads liveRef/playheadRef so it never re-subscribes per frame (dep = `playing`).
   useEffect(() => {
     if (!playing) return
     let raf = 0
-    const tick = () => {
+    let last = 0
+    const tick = (ts) => {
       const st = liveRef.current
-      if (st.previewMode === 'source') {
-        const v = srcRef.current
-        const cut = st.hit?.cut
-        if (v && cut) {
-          const inS = Number(cut.in_seconds) || 0
-          const outS = Number(cut.out_seconds) || 0
-          const speed = Number(cut.speed) || 1
-          let t
-          if (v.currentTime >= outS - 0.02) {
-            const cuts = st.doc.cuts || []
-            const ni = st.hit.index + 1
-            if (ni < cuts.length) {
-              const next = cuts[ni]
-              t = st.hit.start + interp.cutDuration(cut) + 1e-3
-              st.onScrub(t) // → next cut
-              if (next.source === cut.source) { // same element keeps playing — reseek to its in-point
-                try { v.currentTime = Number(next.in_seconds) || 0 } catch { /* not ready */ }
-                v.playbackRate = Number(next.speed) || 1
-              }
-            } else {
-              t = st.dur
-              st.onScrub(t); st.onPlayingChange(false); try { v.pause() } catch { /* noop */ }
-            }
-          } else {
-            t = st.hit.start + (v.currentTime - inS) / speed
-            st.onScrub(t)
-          }
-          syncAudioEls(audioEls.current, st.audioTracks, t, true) // music / narration / sfx
-        }
-      } else {
+      if (st.previewMode === 'render') {
         const v = renRef.current
         if (v && !v.paused) st.onScrub(v.currentTime)
+        raf = requestAnimationFrame(tick)
+        return
       }
+      if (!last) { last = ts; raf = requestAnimationFrame(tick); return } // first frame: just seed the clock
+      const dt = Math.min(0.05, (ts - last) / 1000) // seconds; clamp tab-switch / GC gaps
+      last = ts
+
+      const t = playheadRef.current + dt
+      if (t >= st.dur) { // reached the end — stop cleanly
+        playheadRef.current = st.dur
+        st.onScrub(st.dur); st.onPlayingChange(false)
+        const v = srcRef.current; if (v) { try { v.pause() } catch { /* noop */ } }
+        pauseAllAudio(audioEls.current)
+        return // no next frame
+      }
+      playheadRef.current = t
+      st.onScrub(t)
+
+      // Slave the single <video> to the playhead: match speed, correct large drift (boundaries),
+      // and keep it rolling. Within a cut, video time and source time advance together so no
+      // re-seek happens and playback stays smooth.
+      const h = interp.cutAtTime(st.doc, t)
+      const v = srcRef.current
+      if (v && h) {
+        const speed = Number(h.cut.speed) || 1
+        if (v.playbackRate !== speed) v.playbackRate = speed
+        if (v.readyState >= 1 && !v.seeking && Math.abs(v.currentTime - h.sourceTime) > 0.34) {
+          try { v.currentTime = h.sourceTime } catch { /* not ready */ }
+        }
+        if (v.paused && v.readyState >= 2) v.play().catch(() => {})
+      }
+      syncAudioEls(audioEls.current, st.audioTracks, t, true) // music / narration / sfx
+
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -167,7 +148,7 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
   // paused/scrubbing, or in render mode (the composed MP4 carries its own mixed audio).
   useEffect(() => {
     if (playing && previewMode === 'source') return
-    for (const el of audioEls.current.values()) { try { el.pause() } catch { /* noop */ } }
+    pauseAllAudio(audioEls.current)
   }, [playing, previewMode])
 
   return (
@@ -184,15 +165,15 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
       {previewMode === 'source' ? (
         sourceRef != null ? (
           <>
+            {/* ONE persistent element for every cut — src follows the playhead. No `key`, so React
+                reuses it across cuts instead of mounting a fresh (and detached, still-audible) one. */}
             <video
               ref={srcRef}
-              key={sourceRef}
               className="st-video"
               src={api.sourceUrl(projectId, sourceRef)}
               preload="auto"
               playsInline
               onClick={() => onPlayingChange(!playing)}
-              onEnded={(e) => { if (playing) advanceSource(e.target) }}
             />
             {!playing && (
               <button className="st-stage-play" onClick={() => onPlayingChange(true)} aria-label="Play">▶</button>
