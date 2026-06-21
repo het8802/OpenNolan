@@ -800,7 +800,21 @@ select { cursor: pointer; }
 .st-stage { flex: 1 1 auto; min-width: 360px; position: relative; display: flex; align-items: center; justify-content: center;
   background: #15120e; overflow: hidden; }
 .st-video { max-width: 100%; max-height: 100%; background: #000; border-radius: 6px; }
-.st-stage-empty { color: #b9b0a4; font-size: 0.86rem; }
+.st-stage-empty { color: #b9b0a4; font-size: 0.86rem; display: flex; align-items: center; justify-content: center; height: 100%; }
+
+/* WYSIWYG safe frame (feat 4) — the OUTPUT canvas (e.g. 1080×1920) fit inside the stage; overlays
+   are positioned in canvas coords mapped to this frame, so what you see is what renders. */
+.st-safe-frame { position: relative; max-width: 100%; max-height: 100%; background: #000;
+  border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.st-frame-media { width: 100%; height: 100%; object-fit: contain; display: block; }
+.st-ov-layer { position: absolute; inset: 0; pointer-events: none; }
+.st-ov-canvas { pointer-events: auto; cursor: grab; user-select: none; touch-action: none;
+  outline: 1px dashed transparent; }
+.st-ov-canvas:hover { outline-color: #ffffff66; }
+.st-ov-canvas.sel { outline: 1.5px solid var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.st-ov-canvas img, .st-ov-canvas video { width: 100%; height: auto; display: block; pointer-events: none; }
+.st-ov-text { display: inline-block; line-height: 1.15; font-weight: 700; white-space: pre-wrap;
+  font-family: system-ui, sans-serif; }
 .st-stage-tc { position: absolute; bottom: 8px; right: 12px; font-size: 0.72rem; color: #d8d0c4;
   background: #0007; padding: 0.15rem 0.45rem; border-radius: 6px; font-variant-numeric: tabular-nums; }
 
@@ -845,10 +859,11 @@ select { cursor: pointer; }
 .st-tick { position: absolute; top: 3px; transform: translateX(-2px); font-size: 0.64rem; color: var(--muted);
   border-left: 1px solid var(--line); padding-left: 3px; font-variant-numeric: tabular-nums; }
 .st-lane { position: relative; border-bottom: 1px solid var(--line); }
-.st-lane-cuts { height: 58px; }
-.st-lane-ov { height: 34px; }
+.st-lane-cuts { height: 58px; background: #fbf7f0; }
+.st-lane-ov { height: 28px; } /* one overlay TRACK row; height also set inline (OV_LANE_H) */
+.st-lane-ov-new { background: repeating-linear-gradient(45deg, transparent, transparent 6px, #00000008 6px, #00000008 12px); }
 .st-lane-audio { height: 30px; }
-.st-lane-empty { position: absolute; left: 16px; top: 9px; font-size: 0.7rem; color: var(--muted); }
+.st-lane-empty { position: absolute; left: 16px; top: 7px; font-size: 0.68rem; color: var(--muted); pointer-events: none; }
 
 .st-clip { position: absolute; top: 6px; height: 46px; background: var(--blue-soft); border: 1px solid var(--blue);
   border-radius: 7px; overflow: hidden; cursor: grab; display: flex; flex-direction: column; justify-content: center;
@@ -860,11 +875,13 @@ select { cursor: pointer; }
 .st-trim-l { left: 0; } .st-trim-r { right: 0; }
 .st-clip:hover .st-trim { background: linear-gradient(var(--blue), var(--blue)); opacity: 0.35; }
 
-.st-ov { position: absolute; top: 6px; height: 22px; background: var(--green-soft); border: 1px solid var(--green);
-  border-radius: 6px; font-size: 0.66rem; color: var(--ink); padding: 0 6px; white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; cursor: pointer; }
+.st-ov { position: absolute; top: 3px; height: 22px; background: var(--green-soft); border: 1px solid var(--green);
+  border-radius: 6px; font-size: 0.66rem; color: var(--ink); overflow: hidden; cursor: grab;
+  display: flex; align-items: center; user-select: none; touch-action: none; }
+.st-ov-label { flex: 1; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .st-ov.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .st-ov.kf { border-style: dashed; }
+.st-ov:hover .st-trim { background: linear-gradient(var(--green), var(--green)); opacity: 0.4; }
 
 /* audio lane (music / narration / sfx). Warm, distinct from blue cuts/green overlays. Clickable. */
 .st-aud { position: absolute; top: 5px; height: 20px; border-radius: 6px; font: inherit; font-size: 0.64rem; color: var(--ink);

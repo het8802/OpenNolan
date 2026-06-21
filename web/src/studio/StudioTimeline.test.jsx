@@ -61,25 +61,47 @@ describe('clips lane', () => {
 })
 
 describe('overlays lane', () => {
-  it('renders a TEXT overlay block at absolute start time, truncated to 18 chars in curly quotes', () => {
+  it('renders a TEXT overlay block at absolute start time, label truncated to 18 chars in curly quotes', () => {
     const { container } = renderTimeline(fullDoc, 5)
     const ovs = container.querySelectorAll('.st-ov')
     expect(ovs).toHaveLength(1)
-    expect(ovs[0].textContent).toBe('“Hello world this i”')    // slice(0,18) of the text, quoted
+    expect(ovs[0].querySelector('.st-ov-label').textContent).toContain('“Hello world this i”') // slice(0,18), quoted
     expect(ovs[0].style.left).toBe(`${LANE_PAD + 1 * ZOOM}px`) // start_seconds = 1
     expect(ovs[0].style.width).toBe(`${2 * ZOOM}px`)           // 3 - 1 = 2s
   })
   it('labels an IMAGE overlay by asset basename (no quotes)', () => {
     const doc = { cuts: fullDoc.cuts, overlays: [{ type: 'image', asset_id: 'images/logo.png', start_seconds: 0, end_seconds: 2, position: { x: 0, y: 0, width: 100 } }] }
     const { container } = renderTimeline(doc, 5)
-    const ov = container.querySelector('.st-ov')
-    expect(ov.textContent).toBe('logo.png')
-    expect(ov.textContent).not.toContain('“')
+    const label = container.querySelector('.st-ov .st-ov-label')
+    expect(label.textContent).toContain('logo.png')
+    expect(label.textContent).not.toContain('“')
   })
   it('shows the empty hint when there are no overlays', () => {
     const { container } = renderTimeline({ cuts: fullDoc.cuts }, 5)
     expect(container.querySelectorAll('.st-ov')).toHaveLength(0)
     expect(container.querySelector('.st-lane-ov .st-lane-empty')).toBeInTheDocument()
+  })
+})
+
+describe('overlay tracks (multi-lane, feat 1)', () => {
+  const doc = {
+    cuts: fullDoc.cuts,
+    overlays: [
+      { type: 'text', text: 'low', start_seconds: 0, end_seconds: 2, track: 0 },
+      { type: 'image', asset_id: 'top.png', start_seconds: 0, end_seconds: 2, track: 2 },
+    ],
+  }
+  it('renders a lane per track (0..max) PLUS one empty new-track lane on top', () => {
+    const { container } = renderTimeline(doc, 5)
+    // tracks 0,1,2 = 3 lanes + 1 empty new-track lane = 4
+    expect(container.querySelectorAll('.st-lane-ov')).toHaveLength(4)
+    expect(container.querySelector('.st-lane-ov-new')).toBeInTheDocument()
+  })
+  it('renders each overlay block in its own track lane', () => {
+    const { container } = renderTimeline(doc, 5)
+    expect(container.querySelectorAll('.st-ov')).toHaveLength(2)
+    // the empty new-track lane is the FIRST rendered (highest track on top)
+    expect(container.querySelectorAll('.st-lane-ov')[0].className).toContain('st-lane-ov-new')
   })
 })
 
@@ -187,12 +209,20 @@ describe('timeline toolbar (feat 2 + 5: transport + clip ops live here now)', ()
 
 describe('asset drag-and-drop onto the timeline', () => {
   const DND = 'application/x-opennolan-asset'
-  it('dropping an asset calls onAssetDrop with kind, path, and a drop time', () => {
+  it('dropping an asset on a lane calls onAssetDrop with kind, path, drop time, and the target lane', () => {
     const onAssetDrop = vi.fn()
     const { container } = render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} onAssetDrop={onAssetDrop} />)
-    const scroll = container.querySelector('.st-tl-scroll')
-    fireEvent.drop(scroll, { dataTransfer: { getData: () => JSON.stringify({ kind: 'images', path: 'images/logo.png' }), types: [DND] } })
-    expect(onAssetDrop).toHaveBeenCalledWith('images', 'images/logo.png', expect.any(Number))
+    // drop on the main cuts lane → target.lane === 'cuts' (becomes a main-timeline clip)
+    const cutsLane = container.querySelector('.st-lane-cuts')
+    fireEvent.drop(cutsLane, { dataTransfer: { getData: () => JSON.stringify({ kind: 'images', path: 'images/logo.png' }), types: [DND] } })
+    expect(onAssetDrop).toHaveBeenCalledWith('images', 'images/logo.png', expect.any(Number), expect.objectContaining({ lane: 'cuts' }))
+  })
+  it('dropping on an overlay track lane targets that track', () => {
+    const onAssetDrop = vi.fn()
+    const { container } = render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} onAssetDrop={onAssetDrop} />)
+    const ovLane = container.querySelector('.st-lane-ov') // first rendered = the top (new) track
+    fireEvent.drop(ovLane, { dataTransfer: { getData: () => JSON.stringify({ kind: 'images', path: 'images/logo.png' }), types: [DND] } })
+    expect(onAssetDrop).toHaveBeenCalledWith('images', 'images/logo.png', expect.any(Number), expect.objectContaining({ lane: 'overlay', track: expect.any(Number) }))
   })
   it('shows a drop affordance while an asset is dragged over', () => {
     const { container } = render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} onAssetDrop={vi.fn()} />)

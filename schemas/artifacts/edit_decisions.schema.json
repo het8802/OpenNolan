@@ -130,6 +130,12 @@
           },
           "animation": { "type": "string" },
           "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+          "track": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Overlay track / z-layer. Overlays composite in ascending track order, so a HIGHER track lands on top (rendered later); within one track, array order breaks ties. Default 0 reproduces legacy array-order z-stacking — older docs without this field are unaffected."
+          },
           "audio_mix": {
             "type": "object",
             "description": "Mix the overlay source's own audio into the base track. FFmpeg path: trimmed to the overlay window, delayed to start_seconds, amix duration=first (base length wins). Skipped with a warning when the source has no audio stream.",

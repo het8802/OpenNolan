@@ -17,6 +17,10 @@ export const KEYFRAME_DIMS = ['x', 'y', 'scale', 'rotation', 'opacity']
 // producing zero/negative-length cuts that the schema (out > in) or renderer would reject.
 export const MIN_SOURCE_SPAN = 0.1
 
+// Shortest allowed overlay span, in PROJECT seconds. Keeps an overlay drag/trim from
+// collapsing to zero/negative length (which the schema would still accept but is useless).
+export const MIN_OVERLAY_SPAN = 0.1
+
 const round3 = (x) => Math.round(Number(x) * 1000) / 1000
 
 // Schema field whitelists (keep in sync with schemas/artifacts/edit_decisions.schema.json).
@@ -27,7 +31,7 @@ const CUT_FIELDS = ['id', 'source', 'in_seconds', 'out_seconds', 'speed', 'layer
 // only the asset fields, which silently dropped text/box/audio_mix on save; the studio editor
 // edits those, so they must survive sanitization.
 const OVERLAY_FIELDS = ['type', 'asset_id', 'text', 'font_path', 'font_size', 'color', 'box',
-  'start_seconds', 'end_seconds', 'position', 'animation', 'opacity', 'audio_mix', 'keyframes']
+  'start_seconds', 'end_seconds', 'position', 'animation', 'opacity', 'track', 'audio_mix', 'keyframes']
 const POSITION_FIELDS = ['x', 'y', 'width', 'height']
 const BOX_FIELDS = ['color', 'opacity', 'padding']
 const AUDIO_MIX_FIELDS = ['enabled', 'volume']
@@ -74,6 +78,7 @@ export function sanitizeOverlay(ov) {
   if (o.audio_mix && typeof o.audio_mix === 'object') o.audio_mix = pick(o.audio_mix, AUDIO_MIX_FIELDS)
   if (o.font_size != null) o.font_size = Math.round(Number(o.font_size))
   if (o.box && o.box.padding != null) o.box.padding = Math.round(Number(o.box.padding))
+  if (o.track != null) o.track = Math.max(0, Math.round(Number(o.track) || 0)) // z-layer (non-negative int)
   if (Array.isArray(o.keyframes)) o.keyframes = o.keyframes.map(cleanKeyframe)
   return o
 }
@@ -319,6 +324,74 @@ export function removeOverlay(doc, index) {
   return { ...doc, overlays }
 }
 
+/**
+ * Overlay track usage — the z-layers in play. `max` is the highest track index any overlay
+ * sits on (0 when there are none); `count` = max+1 lanes to draw. The UI renders one lane per
+ * track (highest on top, matching the renderer's ascending-track = on-top z-order) plus an
+ * empty lane above for adding. Track is the ONLY stored field; lane pixel rows are derived.
+ */
+export function overlayTracks(doc) {
+  let max = 0
+  for (const o of (doc?.overlays || [])) max = Math.max(max, Math.max(0, Math.round(Number(o?.track) || 0)))
+  return { max, count: max + 1 }
+}
+
+/**
+ * Move an overlay in ABSOLUTE project time and/or change its track (z-layer). `start` sets the
+ * new start (end follows, preserving duration; start clamped >= 0). `track` sets the z-layer
+ * (clamped to a non-negative int). Pass either or both. No-op (same doc ref) if out of range or
+ * nothing changes — so a coalesced drag that lands where it began adds no history/dirty entry.
+ * Overlays sit on absolute time (unlike cuts, which concatenate), so there's no cutStarts math.
+ */
+export function moveOverlay(doc, index, { start, track } = {}) {
+  const overlays = doc?.overlays || []
+  if (index < 0 || index >= overlays.length) return doc
+  const ov = overlays[index]
+  const patch = {}
+  if (start != null) {
+    const s = Number(ov.start_seconds) || 0
+    const e = Number(ov.end_seconds) || s
+    const dur = Math.max(0, e - s)
+    const ns = Math.max(0, round3(Number(start)))
+    if (ns !== round3(s)) { // value-compare so a wiggle-and-return drag is a true no-op (same ref)
+      patch.start_seconds = ns
+      patch.end_seconds = round3(ns + dur)
+      // Keyframe `t` is ABSOLUTE project time (same axis as start_seconds), so authored
+      // motion/fades must travel WITH the clip — shift every keyframe by the SAME (clamped)
+      // delta, else a time-move silently desyncs the animation from its new window.
+      const delta = ns - s
+      if (Array.isArray(ov.keyframes) && ov.keyframes.length) {
+        patch.keyframes = ov.keyframes.map(k =>
+          (k && k.t != null ? { ...k, t: Math.max(0, round3(Number(k.t) + delta)) } : k))
+      }
+    }
+  }
+  if (track != null) {
+    const nt = Math.max(0, Math.round(Number(track)))
+    if (nt !== Math.max(0, Math.round(Number(ov.track) || 0))) patch.track = nt
+  }
+  if (patch.start_seconds == null && patch.track == null) return doc
+  return updateOverlay(doc, index, patch)
+}
+
+/**
+ * Trim an overlay's start/end edge (drag-a-handle), on absolute project time. The moved edge is
+ * clamped so start >= 0 and the two edges never cross within MIN_OVERLAY_SPAN. No-op if out of
+ * range. (Unlike `trimCut`, there's no source window — an overlay can run as long as you like.)
+ */
+export function trimOverlay(doc, index, patch) {
+  const overlays = doc?.overlays || []
+  if (index < 0 || index >= overlays.length) return doc
+  const ov = overlays[index]
+  let s = patch.start_seconds != null ? Number(patch.start_seconds) : (Number(ov.start_seconds) || 0)
+  let e = patch.end_seconds != null ? Number(patch.end_seconds) : (Number(ov.end_seconds) || 0)
+  s = Math.max(0, s)
+  if (patch.start_seconds != null) s = Math.min(s, e - MIN_OVERLAY_SPAN)
+  if (patch.end_seconds != null) e = Math.max(e, s + MIN_OVERLAY_SPAN)
+  s = Math.max(0, s)
+  return updateOverlay(doc, index, { start_seconds: round3(s), end_seconds: round3(e) })
+}
+
 /** Set the output canvas (metadata.compose_target). Merges so unspecified dims are kept. */
 export function setCanvas(doc, { width, height, fps } = {}) {
   const meta = { ...(doc.metadata || {}) }
@@ -379,18 +452,26 @@ function cleanSfx(s) {
   return o
 }
 
+// Seed the bed from audio.music, FALLING BACK to the legacy top-level doc.music, so editing a
+// legacy-shaped bed doesn't drop its asset_id (audioClips reads either shape). Collapse the legacy
+// field afterward so there's one source of truth.
+function _withMusic(doc, fields) {
+  const audio = { ...(doc?.audio || {}) }
+  const base = audio.music || doc?.music || {}
+  audio.music = cleanMusic({ ...base, ...fields })
+  const next = { ...doc, audio }
+  if (next.music !== undefined) delete next.music
+  return next
+}
+
 /** Set the single music bed (audio.music.asset_id), preserving any other valid music fields. */
 export function setMusic(doc, assetId) {
-  const audio = { ...(doc?.audio || {}) }
-  audio.music = cleanMusic({ ...(audio.music || {}), asset_id: assetId })
-  return { ...doc, audio }
+  return _withMusic(doc, { asset_id: assetId })
 }
 
 /** Merge a patch into the music bed. */
 export function updateMusic(doc, patch) {
-  const audio = { ...(doc?.audio || {}) }
-  audio.music = cleanMusic({ ...(audio.music || {}), ...patch })
-  return { ...doc, audio }
+  return _withMusic(doc, patch)
 }
 
 /** Remove the music bed (both audio.music and the legacy top-level music). No-op if absent. */

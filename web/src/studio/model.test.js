@@ -6,8 +6,8 @@ import { describe, it, expect } from 'vitest'
 import {
   TRANSITIONS, SPEED_PRESETS, CANVAS_PRESETS, TEXT_ANCHORS, EASINGS,
   KF_DIMS_IMAGE, KF_DIMS_TEXT,
-  overlayKind, kfDimsFor, newTextOverlay, newImageOverlay, presetKeyframes,
-  isFfmpeg, anchorToXY, fmtTime, round3, clamp, previewAudioTracks,
+  overlayKind, overlayType, kfDimsFor, newTextOverlay, newImageOverlay, newVideoOverlay, presetKeyframes,
+  isFfmpeg, anchorToXY, fmtTime, round3, clamp, previewAudioTracks, isImageSource, clipType,
 } from './model.js'
 import { sanitizeOverlay } from '../editor/interp.js'
 
@@ -66,25 +66,68 @@ describe('overlayKind / kfDimsFor', () => {
 })
 
 describe('factories emit schema-valid fragments (survive sanitizeOverlay unchanged)', () => {
-  it('newTextOverlay is a complete text overlay and round-trips through the sanitizer', () => {
+  it('newTextOverlay is a complete text overlay, CENTERED, and round-trips through the sanitizer', () => {
     const ov = newTextOverlay({ start: 1, end: 4 })
-    expect(ov).toMatchObject({ type: 'text', text: expect.any(String), start_seconds: 1, end_seconds: 4 })
-    expect(ov.position).toBe('bottom-center')
+    expect(ov).toMatchObject({ type: 'text', text: expect.any(String), start_seconds: 1, end_seconds: 4, track: 0 })
+    expect(ov.position).toBe('center') // new overlays land in the center (feat 4)
     expect(overlayKind(ov)).toBe('text')
-    // sanitizer must not strip any field the factory emits
+    // sanitizer must not strip any field the factory emits (incl. track)
     expect(sanitizeOverlay(ov)).toEqual(ov)
   })
-  it('newImageOverlay carries an OBJECT position sized from the canvas (renderer rejects string anchors for images)', () => {
+  it('newImageOverlay carries a CENTERED OBJECT position sized from the canvas', () => {
     const ov = newImageOverlay({ assetId: 'logo.png', start: 0, end: 3, canvas: { width: 1000, height: 2000 } })
     expect(ov.type).toBe('image')
     expect(typeof ov.position).toBe('object')
-    expect(ov.position).toMatchObject({ x: 50, y: 100, width: 250 }) // 5%/5%/25% of canvas
+    // width = 30% of canvas (300); centered: x=(1000-300)/2, y=(2000-300)/2
+    expect(ov.position).toMatchObject({ x: 350, y: 850, width: 300 })
+    expect(ov.track).toBe(0)
     expect(overlayKind(ov)).toBe('image')
     expect(sanitizeOverlay(ov)).toEqual(ov)
   })
   it('newImageOverlay defaults to 1920x1080 when no canvas is given', () => {
     const ov = newImageOverlay({ assetId: 'x', start: 0, end: 1 })
-    expect(ov.position).toMatchObject({ x: 96, y: 54, width: 480 })
+    // width = round(1920*0.3) = 576; centered on 1920x1080
+    expect(ov.position).toMatchObject({ x: 672, y: 252, width: 576 })
+  })
+  it('newVideoOverlay is a centered video overlay (type=video)', () => {
+    const ov = newVideoOverlay({ assetId: 'clip.mp4', start: 0, end: 4, canvas: { width: 1080, height: 1920 }, track: 2 })
+    expect(ov.type).toBe('video')
+    expect(ov.track).toBe(2)
+    // width = round(1080*0.4) = 432; centered horizontally
+    expect(ov.position).toMatchObject({ x: 324, width: 432 })
+    expect(sanitizeOverlay(ov)).toEqual(ov)
+  })
+})
+
+describe('type detection (clipType / isImageSource / overlayType)', () => {
+  it('isImageSource matches still-image extensions only (not .mp4/.gif)', () => {
+    expect(isImageSource('assets/image/logo.PNG')).toBe(true)
+    expect(isImageSource('a.jpg')).toBe(true)
+    expect(isImageSource('a.webp')).toBe(true)
+    expect(isImageSource('clip.mp4')).toBe(false)
+    expect(isImageSource('anim.gif')).toBe(false) // gifs are video-like on both paths
+    expect(isImageSource('')).toBe(false)
+  })
+  it('overlayType is a three-way split text|image|video', () => {
+    expect(overlayType({ type: 'text', text: 'a' })).toBe('text')
+    expect(overlayType({ type: 'video', asset_id: 'a' })).toBe('video')
+    expect(overlayType({ type: 'image', asset_id: 'a' })).toBe('image')
+    expect(overlayType({ asset_id: 'a' })).toBe('image') // legacy default
+    expect(overlayType({ text: 'a' })).toBe('text')      // legacy text
+  })
+  it('clipType maps a selection + doc to one of the 7 (+narration) keys', () => {
+    const doc = {
+      cuts: [{ id: 'v', source: 'a.mp4' }, { id: 'i', source: 'p.png' }],
+      overlays: [{ type: 'text', text: 'x' }, { type: 'video', asset_id: 'p.mp4' }, { type: 'image', asset_id: 'p.png' }],
+    }
+    expect(clipType({ kind: 'cut', id: 'v' }, doc)).toBe('video_main')
+    expect(clipType({ kind: 'cut', id: 'i' }, doc)).toBe('image_main')
+    expect(clipType({ kind: 'overlay', index: 0 }, doc)).toBe('text')
+    expect(clipType({ kind: 'overlay', index: 1 }, doc)).toBe('video_overlay')
+    expect(clipType({ kind: 'overlay', index: 2 }, doc)).toBe('image_overlay')
+    expect(clipType({ kind: 'audio', audioKind: 'music' }, doc)).toBe('music')
+    expect(clipType({ kind: 'audio', audioKind: 'sfx', index: 0 }, doc)).toBe('sfx')
+    expect(clipType(null, doc)).toBeNull()
   })
 })
 
