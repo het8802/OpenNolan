@@ -877,12 +877,13 @@ select { cursor: pointer; }
   color: var(--ink); font-size: 0.8rem; cursor: ew-resize; user-select: none; overflow: hidden; touch-action: none; }
 .st-scrub:hover { border-color: var(--accent); }
 .st-scrub:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-/* No pointer-events:none on the children: the browser would hit-test THROUGH them to the parent on
-   every mousemove, and that fall-through is recomputed each frame — flashing the default cursor before
-   it resolves back to ew-resize. As normal hover targets they inherit the parent's ew-resize cursor
-   (cursor is inherited), so the whole bar reads one steady cursor. pointerdown still bubbles to .st-scrub. */
-.st-scrub-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-soft); }
-.st-scrub-val { position: relative; font-variant-numeric: tabular-nums; }
+/* The bar's children are pointer-events:none so the ENTIRE bar hit-tests to ONE element (.st-scrub).
+   Otherwise moving across a bar changes the hit element (fill → bar → value), and macOS re-asserts
+   the cursor on every hit-element change — briefly flashing the default arrow = the cursor flicker
+   over the pad (worst on bounded fields, whose fill sits mid-bar). One stable hit element → the
+   ew-resize cursor never flickers. pointerdown still lands on .st-scrub (children don't intercept). */
+.st-scrub-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-soft); pointer-events: none; }
+.st-scrub-val { position: relative; font-variant-numeric: tabular-nums; pointer-events: none; }
 .st-scrub-auto { color: var(--muted); }
 /* The bar is a thin 30px target; its caption sits right above it and there's a gap below. If only
    the bar carried ew-resize, moving the mouse a few px up into the caption (default) or down across
