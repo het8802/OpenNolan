@@ -901,6 +901,19 @@ class VideoCompose(BaseTool):
                 solo_cut["in_seconds"] = 0.0
                 solo_cut["out_seconds"] = dur
 
+            # Bake CROP into the proxy (ffmpeg path). Crop is in SOURCE pixels, so it can only be
+            # applied at the native source resolution — re-applying it at the assemble layer runs it
+            # against the canvas-sized proxy and goes out of bounds (crop W/H can exceed the proxy's
+            # W/H), which is the `crop=1440:2560 on a 1080x1920 proxy → exit 234` failure. Baking it
+            # here makes crop part of the proxy's content identity (a crop edit re-renders just this
+            # scene); _build_assemble_edl drops crop from the assemble so it isn't applied twice.
+            # Other transform fields (scale/position) are PiP-only and never reach this path
+            # (layer='overlay' is rejected above), so crop is the only transform the proxy carries.
+            if render_runtime == "ffmpeg":
+                _crop = (cut.get("transform") or {}).get("crop")
+                if _crop:
+                    solo_cut["transform"] = {"crop": _crop}
+
             identity = {
                 "v": 2,
                 "render_runtime": render_runtime,
@@ -1078,7 +1091,15 @@ class VideoCompose(BaseTool):
             }
             for k in ("speed", "transform", "transition_in", "transition_out", "transition_duration"):
                 if k in oc:
-                    cut[k] = oc[k]
+                    if k == "transform":
+                        # CROP is already baked into the proxy (it's source-px and can't run on the
+                        # canvas-sized proxy) — carry only any NON-crop transform so it isn't applied
+                        # twice. On the ffmpeg proxy path nothing else lives in transform today.
+                        t = {tk: tv for tk, tv in (oc["transform"] or {}).items() if tk != "crop"}
+                        if t:
+                            cut[k] = t
+                    else:
+                        cut[k] = oc[k]
             assemble_cuts.append(cut)
 
         assembled: dict[str, Any] = {

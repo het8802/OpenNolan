@@ -126,6 +126,38 @@ def test_render_proxies_one_call_with_an_image_cut(vc, tmp_path):
     assert min(r, g, b) > 200, "image-cut proxy should show the white still"
 
 
+# ── crop baked into the proxy (regression: source-px crop > canvas crashed at assemble) ──
+@needs_ffmpeg
+def test_render_proxies_bakes_sourcepx_crop_larger_than_canvas(vc, tmp_path):
+    """A cut whose SOURCE-pixel crop is larger than the output canvas must render. Before the fix,
+    crop was re-applied at the assemble layer on the canvas-sized proxy → `crop=1440x2560 on a
+    1080x1920 proxy` → ffmpeg exit 234. Now crop bakes into the proxy at native resolution."""
+    big = tmp_path / "big.mp4"   # 1600x2400 source, larger than the 1080x1920 canvas
+    out = tmp_path / "final.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=1600x2400:d=2:r=30",
+         "-pix_fmt", "yuv420p", str(big)],
+        capture_output=True, check=True,
+    )
+    vc._run_final_review = lambda *a, **k: {"status": "pass", "issues_found": []}
+    res = vc.execute({
+        "operation": "render_proxies",
+        "edit_decisions": {
+            "version": "1.0", "render_runtime": "ffmpeg", "renderer_family": "social-reel",
+            "metadata": {"compose_target": {"width": 1080, "height": 1920, "fps": 30}},
+            "cuts": [{
+                "id": "c1", "source": str(big), "in_seconds": 0, "out_seconds": 2, "speed": 1.5,
+                "transform": {"crop": {"x": 100, "y": 0, "width": 1440, "height": 2400}},
+            }],
+        },
+        "asset_manifest": {"assets": []},
+        "output_path": str(out),
+        "proxies_dir": str(tmp_path / "proxies"),
+    })
+    assert res.success, res.error
+    assert out.exists() and out.stat().st_size > 0
+
+
 # ── overlay track z-order ─────────────────────────────────────────────────────
 @needs_ffmpeg
 def test_overlay_track_controls_zorder_regardless_of_array_order(vc, tmp_path):
