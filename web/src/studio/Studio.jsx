@@ -359,17 +359,23 @@ export default function Studio({ projectId, state, onClose, chat }) {
     panelDrag.current = teardown
   }, [panels])
 
+  // Each overlay add auto-picks a track via interval-partitioning (interp.placeOverlayTrack): if it
+  // would overlap an overlay already on the preferred track, it lands on its own lane (a new track
+  // is created when needed) so both stay visible. `track` is the PREFERRED track (0 for toolbar/
+  // Assets-click; the dropped lane for a timeline drop).
   const onAddText = useCallback(() => {
     const start = Math.min(playhead, Math.max(0, interp.timelineDuration(doc) - 1))
+    const end = start + 2.5
     const at = (doc?.overlays || []).length
-    commit(d => interp.addOverlay(d, newTextOverlay({ start, end: start + 2.5 })))
+    commit(d => interp.addOverlay(d, newTextOverlay({ start, end, track: interp.placeOverlayTrack(d, start, end, 0) })))
     setSelection({ kind: 'overlay', index: at })
   }, [playhead, doc, commit])
 
   const onAddImage = useCallback((assetId, atTime, track = 0) => {
     const start = atTime != null ? Math.max(0, atTime) : Math.min(playhead, Math.max(0, interp.timelineDuration(doc) - 1))
+    const end = start + 3
     const at = (doc?.overlays || []).length
-    commit(d => interp.addOverlay(d, newImageOverlay({ assetId, start, end: start + 3, canvas: interp.canvasOf(d), track })))
+    commit(d => interp.addOverlay(d, newImageOverlay({ assetId, start, end, canvas: interp.canvasOf(d), track: interp.placeOverlayTrack(d, start, end, track) })))
     setSelection({ kind: 'overlay', index: at })
   }, [playhead, doc, commit])
 
@@ -377,10 +383,19 @@ export default function Studio({ projectId, state, onClose, chat }) {
     const start = atTime != null ? Math.max(0, atTime) : Math.min(playhead, Math.max(0, interp.timelineDuration(doc) - 1))
     const meta = sourceMetas[assetId]
     const len = meta?.duration ? Math.min(meta.duration, 6) : 4
+    const end = start + len
     const at = (doc?.overlays || []).length
-    commit(d => interp.addOverlay(d, newVideoOverlay({ assetId, start, end: start + len, canvas: interp.canvasOf(d), track })))
+    commit(d => interp.addOverlay(d, newVideoOverlay({ assetId, start, end, canvas: interp.canvasOf(d), track: interp.placeOverlayTrack(d, start, end, track) })))
     setSelection({ kind: 'overlay', index: at })
   }, [playhead, doc, commit, sourceMetas])
+
+  // Re-pack ALL overlays into the fewest non-overlapping tracks (greedy interval partitioning) —
+  // for an existing doc where overlapping overlays are piled on one lane. No-op if already arranged.
+  const onAutoArrange = useCallback(() => {
+    const nd = interp.autoArrangeOverlays(docRef.current)
+    if (nd === docRef.current) { flash('ok', 'Overlays already arranged'); return }
+    commit(nd)
+  }, [commit, flash])
 
   // Drop an asset from the Assets tab onto the timeline at project time `t`. The drop TARGET
   // ({lane, track}) decides MAIN vs OVERLAY: a drop on the cuts lane becomes a main-timeline clip
@@ -554,6 +569,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
                 onReorder={onReorder} onZoom={setZoom} onAssetDrop={onAssetDrop}
                 onOverlayMove={onOverlayMove} onOverlayTrim={onOverlayTrim} onOverlayDragBegin={onOverlayDragBegin}
                 onTogglePlay={togglePlay} onSplit={onSplit} onDuplicate={onDuplicate} onDelete={onDelete}
+                onAutoArrange={onAutoArrange}
               />
             </div>
           </>

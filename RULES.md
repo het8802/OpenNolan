@@ -100,6 +100,13 @@ short — add a pointer, not an essay.
   lane per track (highest on top) plus an empty top lane for adding; placement is **derived** from
   `interp.overlayTracks(doc)`, never stored. Drop target decides main-vs-overlay: cuts lane → a
   main clip, overlay track lane → an overlay at that track.
+- **Auto-track-stacking (greedy interval partitioning):** every overlay ADD runs
+  `interp.placeOverlayTrack(doc, start, end, preferredTrack)` — the lowest track ≥ preferred with no
+  TIME overlap, else a fresh track on top — so a new overlapping overlay auto-lands on its own lane
+  (both stay visible), NLE-style. The `⇅ Arrange` toolbar button runs `interp.autoArrangeOverlays`
+  (the calendar/Gantt "lane assignment" algorithm: sort by start, drop each on the first lane whose
+  last item ended, else a new lane) to re-pack an existing doc into the fewest non-overlapping
+  tracks. Manual drag is always respected — only Add and the explicit button assign tracks.
 - **Draggable overlays:** overlays move on **absolute** project time (`interp.moveOverlay` — start
   preserves duration AND shifts keyframe `t` by the same delta; vertical drag sets `track`) and
   edge-trim (`interp.trimOverlay`). Same pointer model as cuts; snapshot **lazily on first move**

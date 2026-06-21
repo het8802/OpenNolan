@@ -7,6 +7,7 @@ import {
   setCanvas, canvasOf, audioClips,
   setMusic, updateMusic, removeMusic, addSfx, updateSfx, removeSfx, updateNarration, removeNarration,
   overlayTracks, moveOverlay, trimOverlay, MIN_OVERLAY_SPAN,
+  placeOverlayTrack, autoArrangeOverlays,
 } from './interp.js'
 
 describe('interpolateAt (mirrors FFmpeg _piecewise_linear_expr)', () => {
@@ -503,6 +504,63 @@ describe('moveOverlay (absolute time + track)', () => {
     const back = moveOverlay(kfDoc, 0, { start: -1 }) // clamps to 0, delta = -2
     expect(back.overlays[0].start_seconds).toBe(0)
     expect(back.overlays[0].keyframes.map(k => k.t)).toEqual([0, 0.5, 3])
+  })
+})
+
+describe('placeOverlayTrack (auto-create a track on add when overlapping)', () => {
+  const doc = { overlays: [
+    { type: 'text', text: 'a', start_seconds: 0, end_seconds: 3, track: 0 },
+    { type: 'text', text: 'b', start_seconds: 0, end_seconds: 3, track: 1 },
+  ] }
+  it('empty timeline → track 0', () => {
+    expect(placeOverlayTrack({ overlays: [] }, 0, 3, 0)).toBe(0)
+  })
+  it('overlapping both existing tracks → a NEW track on top', () => {
+    expect(placeOverlayTrack(doc, 1, 2, 0)).toBe(2) // overlaps track 0 AND track 1 → track 2
+  })
+  it('reuses the lowest track with a free gap (no overlap)', () => {
+    expect(placeOverlayTrack(doc, 3, 5, 0)).toBe(0) // starts at 3 = both existing end → no overlap → track 0
+  })
+  it('honors the preferred (dropped) track as the floor', () => {
+    // dropping on track 1 where [4,6] doesn't overlap → stays on track 1
+    expect(placeOverlayTrack(doc, 4, 6, 1)).toBe(1)
+    // dropping on track 0 where [1,2] overlaps → bumps to the first free >= 0 → track 2
+    expect(placeOverlayTrack(doc, 1, 2, 0)).toBe(2)
+  })
+})
+
+describe('autoArrangeOverlays (greedy interval partitioning / lane assignment)', () => {
+  it('separates two overlapping overlays piled on one track into two lanes', () => {
+    const doc = { overlays: [
+      { type: 'text', text: 'a', start_seconds: 0, end_seconds: 4, track: 0 },
+      { type: 'image', asset_id: 'x', start_seconds: 2, end_seconds: 6, position: { x: 0, y: 0 }, track: 0 },
+    ] }
+    const nd = autoArrangeOverlays(doc)
+    expect(nd.overlays.map(o => o.track)).toEqual([0, 1]) // earlier-start lane 0, overlapping → lane 1
+  })
+  it('packs non-overlapping overlays onto a single track (minimum lanes)', () => {
+    const doc = { overlays: [
+      { type: 'text', text: 'a', start_seconds: 0, end_seconds: 2, track: 3 },
+      { type: 'text', text: 'b', start_seconds: 2, end_seconds: 4, track: 1 },
+    ] }
+    expect(autoArrangeOverlays(doc).overlays.map(o => o.track)).toEqual([0, 0]) // touching, no overlap → both lane 0
+  })
+  it('three mutually-overlapping overlays → three lanes', () => {
+    const doc = { overlays: [
+      { type: 'text', text: 'a', start_seconds: 0, end_seconds: 5, track: 0 },
+      { type: 'text', text: 'b', start_seconds: 1, end_seconds: 6, track: 0 },
+      { type: 'text', text: 'c', start_seconds: 2, end_seconds: 7, track: 0 },
+    ] }
+    expect(autoArrangeOverlays(doc).overlays.map(o => o.track)).toEqual([0, 1, 2])
+  })
+  it('is a same-ref no-op when already arranged / < 2 overlays', () => {
+    const arranged = { overlays: [
+      { type: 'text', text: 'a', start_seconds: 0, end_seconds: 4, track: 0 },
+      { type: 'text', text: 'b', start_seconds: 2, end_seconds: 6, track: 1 },
+    ] }
+    expect(autoArrangeOverlays(arranged)).toBe(arranged)
+    const one = { overlays: [{ type: 'text', text: 'a', start_seconds: 0, end_seconds: 2, track: 0 }] }
+    expect(autoArrangeOverlays(one)).toBe(one)
   })
 })
 
