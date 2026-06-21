@@ -84,6 +84,37 @@ describe('overlays lane', () => {
   })
 })
 
+describe('timeline clip labels carry NO icon/emoji (removed)', () => {
+  it('an overlay block label is just its text/name — no T/▦/🖼 prefix', () => {
+    const doc = {
+      cuts: fullDoc.cuts,
+      overlays: [
+        { type: 'text', text: 'Caption', start_seconds: 0, end_seconds: 2, track: 0 },
+        { type: 'image', asset_id: 'images/logo.png', start_seconds: 0, end_seconds: 2, position: { x: 0, y: 0, width: 100 }, track: 1 },
+        { type: 'video', asset_id: 'clips/pip.mp4', start_seconds: 0, end_seconds: 2, position: { x: 0, y: 0, width: 100 }, track: 2 },
+      ],
+    }
+    const { container } = renderTimeline(doc, 5)
+    const labels = [...container.querySelectorAll('.st-ov-label')].map(l => l.textContent)
+    const all = labels.join(' ')
+    for (const glyph of ['🖼', '▦']) expect(all).not.toContain(glyph)
+    // the image/video labels are exactly the basename (no leading glyph + space)
+    expect(labels).toContain('logo.png')
+    expect(labels).toContain('pip.mp4')
+    // the text label is the quoted text with no 'T ' prefix
+    expect(labels.some(l => l.startsWith('“'))).toBe(true)
+    expect(labels.some(l => l.startsWith('T '))).toBe(false)
+  })
+  it('audio blocks show only the name (no ♫ / 🎙 / ♪) and the SFX point marker has no glyph', () => {
+    const { container } = renderTimeline(fullDoc, 5)
+    expect(container.querySelector('.st-aud-music').textContent).toBe('bed.mp3')
+    expect(container.querySelector('.st-aud-narration').textContent).toBe('line1.mp3')
+    expect(container.querySelector('.st-aud-sfx').textContent).toBe('') // point marker = empty dot
+    const audioText = [...container.querySelectorAll('.st-aud')].map(a => a.textContent).join(' ')
+    for (const glyph of ['♫', '🎙', '♪']) expect(audioText).not.toContain(glyph)
+  })
+})
+
 describe('overlay tracks (multi-lane, feat 1)', () => {
   const doc = {
     cuts: fullDoc.cuts,

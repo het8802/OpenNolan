@@ -51,7 +51,7 @@ const TRANSITIONS_SECTION = {
   fields: [
     { key: 'tin', label: 'In', control: 'select', path: 'transition_in', optionsFrom: 'transitions' },
     { key: 'tout', label: 'Out', control: 'select', path: 'transition_out', optionsFrom: 'transitions' },
-    { key: 'tdur', label: 'Duration', control: 'number', path: 'transition_duration', step: 0.1, min: 0.1, max: 2, default: 0.5, suffix: 's' },
+    { key: 'tdur', label: 'Transition length', control: 'number', path: 'transition_duration', step: 0.1, min: 0.1, max: 2, default: 0.5, suffix: 's' },
   ],
 }
 

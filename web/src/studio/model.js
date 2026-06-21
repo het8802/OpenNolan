@@ -239,3 +239,44 @@ export function round3(x) {
 export function clamp(x, lo, hi) {
   return Math.max(lo, Math.min(hi, Number(x)))
 }
+
+// ── Drag-to-scrub number fields (inspector) ──────────────────────────────────
+// The properties panel lets you DRAG a number to change it (After-Effects/CapCut style) AND
+// still type it manually. The drag→value math is pure + testable here; the component only does
+// pointer plumbing. Each 1px of horizontal drag ≈ one `step`; holding Shift (`fine`) moves 5×
+// slower for precision. The result is snapped to the increment grid + clamped to [min,max].
+
+/** Decimal places implied by a step (0.05 → 2, 1 → 0), capped at 6 to avoid float noise. */
+export function decimalsOf(step) {
+  if (!Number.isFinite(step) || step <= 0) return 0
+  const s = String(step)
+  const i = s.indexOf('.')
+  return i < 0 ? 0 : Math.min(6, s.length - i - 1)
+}
+
+/** Round x to the decimal precision implied by `step` (kills 0.1+0.2 float artifacts). */
+export function roundTo(x, step) {
+  return Number((Number(x) || 0).toFixed(decimalsOf(step)))
+}
+
+/**
+ * New value for a scrub drag: `start` (value at pointer-down) + `dx` px of drag, at `step` per px
+ * (Shift = `fine`, 5× slower). Snapped to the increment grid and clamped to [min,max] when finite.
+ */
+export function scrubValue({ start, dx, step = 1, min, max, fine = false } = {}) {
+  const s = Number.isFinite(step) && step > 0 ? step : 1
+  const per = fine ? s / 5 : s
+  let v = (Number(start) || 0) + (Number(dx) || 0) * per
+  v = Math.round(v / per) * per                       // snap to the (fine-aware) increment grid
+  if (Number.isFinite(min)) v = Math.max(min, v)
+  if (Number.isFinite(max)) v = Math.min(max, v)
+  return roundTo(v, per)
+}
+
+/** Compact display for a scrub value: drops trailing zeros, '' for non-numbers (= unset/auto). */
+export function fmtScrub(v) {
+  if (v === '' || v == null) return ''
+  const n = Number(v)
+  if (!Number.isFinite(n)) return ''
+  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(3)))
+}

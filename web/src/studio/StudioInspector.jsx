@@ -3,13 +3,15 @@
 // (video_main/image_main/video_overlay/image_overlay/text/music/sfx, + narration); the schema
 // for that type drives which sections/fields appear. Plain inputs (number/text/color/select)
 // bind to a dotted path via getAtPath/buildPatch; SPECIAL controls (speed presets, crop,
-// audio-mix, keyframes, text position) render bespoke sub-UI. Every field commits on blur/Enter
-// (one history step per edit) through the schema-safe interp mutators passed from Studio, so a
-// Save can never 422. When nothing is selected the panel falls through to the Assets tab.
+// audio-mix, keyframes, text position) render bespoke sub-UI. Numeric fields are scrub bars —
+// DRAG to adjust (live, one undo step per drag) or CLICK to type an exact value (one commit);
+// text/select fields commit on blur/Enter. All writes flow through the schema-safe interp mutators
+// passed from Studio, so a Save can never 422. Nothing selected → the panel falls to the Assets tab.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   TRANSITIONS, TEXT_ANCHORS, SPEED_PRESETS, anchorToXY, overlayKind, overlayType, isImageSource,
+  scrubValue, roundTo, fmtScrub,
 } from './model.js'
 import { PROPERTY_SCHEMA, PROPERTY_TITLES, getAtPath, buildPatch } from './propertySchema.js'
 import StudioKeyframes from './StudioKeyframes.jsx'
@@ -17,24 +19,122 @@ import StudioAssets from './StudioAssets.jsx'
 
 const baseName = (p) => String(p || '').split('/').pop() || p
 
-// ── tiny fields (commit on blur / Enter) ────────────────────────────────────
-function NumField({ label, value, onCommit, step = 0.1, min, max, suffix }) {
-  const [v, setV] = useState(value ?? '')
-  useEffect(() => { setV(value ?? '') }, [value])
-  const commit = () => {
-    if (v === '' || v == null) return
-    let n = Number(v)
-    if (Number.isNaN(n)) { setV(value ?? ''); return }
-    if (min != null) n = Math.max(min, n)
-    if (max != null) n = Math.min(max, n)
-    onCommit(n)
+const SCRUB_THRESHOLD = 3 // px of horizontal movement before a press becomes a drag (vs a click-to-type)
+
+// ── scrubbable number field (drag to adjust · click to type) ─────────────────
+// A draggable value-bar (After-Effects / CapCut style): drag horizontally to change the number
+// (1px ≈ one `step`; hold Shift for fine control), or click it to type an exact value. Bounded
+// fields (finite min AND max — opacity, volume, …) show a fill bar for the value's position in
+// range. A drag goes through `onLive` (no per-frame history) after one `onScrubBegin` snapshot, so
+// the whole drag is a single undo step; typing goes through `onCommit` (one step); a held-arrow run
+// coalesces the same way a drag does (snapshot once, live per repeat).
+function ScrubField({ label, value, onScrubBegin, onLive, onCommit, step = 0.1, min, max, suffix }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const inputRef = useRef(null)
+  const cancelRef = useRef(false)   // Escape cancels the pending typed value
+  const cleanupRef = useRef(null)   // tears down an in-flight drag (also on unmount)
+  const keyScrubRef = useRef(false) // a held-arrow run = ONE undo step (snapshot once, live per repeat)
+
+  useEffect(() => { if (editing && inputRef.current) { inputRef.current.focus(); inputRef.current.select() } }, [editing])
+  useEffect(() => () => { if (cleanupRef.current) cleanupRef.current() }, [])
+
+  const num = Number(value)
+  const hasNum = value !== '' && value != null && Number.isFinite(num)
+  const bounded = Number.isFinite(min) && Number.isFinite(max) && max > min
+  const fill = bounded && hasNum ? Math.max(0, Math.min(1, (num - min) / (max - min))) : null
+
+  const bound = (n) => {
+    if (Number.isFinite(min)) n = Math.max(min, n)
+    if (Number.isFinite(max)) n = Math.min(max, n)
+    return n
+  }
+  const startFrom = () => (hasNum ? num : (Number.isFinite(min) ? min : 0))
+  const beginEdit = () => { cancelRef.current = false; setDraft(hasNum ? fmtScrub(num) : ''); setEditing(true) }
+  // Typed entry preserves precision (clamp + 3dp float-cleanup, matching the doc's round3) instead of
+  // snapping to the drag `step`, and is a no-op when unchanged — so retyping the same value never pushes
+  // a dead undo step or wipes the redo stack.
+  const commitTyped = () => {
+    if (cancelRef.current) { cancelRef.current = false; setEditing(false); return }
+    setEditing(false)
+    if (draft === '' || draft == null) return
+    const n = Number(draft)
+    if (Number.isNaN(n)) return
+    const cn = roundTo(bound(n), 0.001)
+    if (hasNum && cn === num) return
+    onCommit(cn)
+  }
+
+  // Drag = scrub; a press that never crosses the threshold = click-to-type. Snapshot lazily on the
+  // first real move so a bare click never pushes an undo step. Window listeners (no pointer capture,
+  // matching the timeline), torn down on up/cancel/unmount.
+  const onDown = (e) => {
+    if (e.button != null && e.button !== 0) return
+    e.preventDefault()
+    const startX = e.clientX
+    const startVal = startFrom()
+    let moved = false
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX
+      if (!moved && Math.abs(dx) < SCRUB_THRESHOLD) return
+      if (!moved) { onScrubBegin?.(); document.body.classList.add('st-scrubbing'); moved = true }
+      onLive?.(scrubValue({ start: startVal, dx, step, min, max, fine: ev.shiftKey }))
+    }
+    const teardown = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', teardown)
+      document.body.classList.remove('st-scrubbing')
+      cleanupRef.current = null
+    }
+    const onUp = () => { const wasDrag = moved; teardown(); if (!wasDrag) beginEdit() }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', teardown)
+    cleanupRef.current = teardown
+  }
+
+  // Arrow keys nudge the value. A HELD key (OS key-repeat) coalesces into ONE undo step the same way a
+  // drag does — snapshot once on the first press, then live per repeat; keyup/blur ends the run. A press
+  // that can't change the value (already at a bound) is a pure no-op (no snapshot, no history flood).
+  // e.stopPropagation keeps Space/Escape/arrows/Delete from also firing the editor's global shortcuts.
+  const onKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); beginEdit(); return }
+    const dir = (e.key === 'ArrowUp' || e.key === 'ArrowRight') ? 1
+      : (e.key === 'ArrowDown' || e.key === 'ArrowLeft') ? -1 : 0
+    if (!dir) return
+    e.preventDefault(); e.stopPropagation()
+    const base = startFrom()
+    const nv = scrubValue({ start: base, dx: dir * (e.shiftKey ? 10 : 1), step, min, max })
+    if (nv === base) return
+    if (!keyScrubRef.current) { onScrubBegin?.(); keyScrubRef.current = true }
+    onLive?.(nv)
+  }
+  const endKeyScrub = () => { keyScrubRef.current = false }
+
+  if (editing) {
+    return (
+      <label className="st-f st-f-scrub">
+        <span>{label}</span>
+        <input ref={inputRef} type="number" step={step} min={min} max={max} value={draft}
+          onChange={(e) => setDraft(e.target.value)} onBlur={commitTyped}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); else if (e.key === 'Escape') { cancelRef.current = true; e.target.blur() } }} />
+      </label>
+    )
   }
   return (
-    <label className="st-f">
-      <span>{label}{suffix ? ` (${suffix})` : ''}</span>
-      <input type="number" step={step} min={min} max={max} value={v}
-        onChange={(e) => setV(e.target.value)} onBlur={commit}
-        onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur() }} />
+    <label className="st-f st-f-scrub">
+      <span>{label}</span>
+      <div className="st-scrub" role="slider" tabIndex={0}
+        aria-label={label} aria-valuenow={hasNum ? num : startFrom()} aria-valuemin={min} aria-valuemax={max}
+        aria-valuetext={hasNum ? `${fmtScrub(num)}${suffix || ''}` : 'auto'}
+        title="Drag to adjust · click to type"
+        onPointerDown={onDown} onKeyDown={onKey} onKeyUp={endKeyScrub} onBlur={endKeyScrub} onDoubleClick={beginEdit}>
+        {fill != null && <span className="st-scrub-fill" style={{ width: `${fill * 100}%` }} />}
+        <span className="st-scrub-val">
+          {hasNum ? `${fmtScrub(num)}${suffix || ''}` : <span className="st-scrub-auto">auto</span>}
+        </span>
+      </div>
     </label>
   )
 }
@@ -100,30 +200,32 @@ function SpeedPresets({ value, onCommit }) {
 }
 
 // Crop is in SOURCE pixels, so seed defaults from the clip's real dims (ffprobe), not the canvas.
-function CropControl({ cut, canvas, meta, onUpdate }) {
+function CropControl({ cut, canvas, meta, onUpdate, live, onScrubBegin }) {
   const sw = meta?.width || canvas.width
   const sh = meta?.height || canvas.height
   const crop = cut.transform?.crop || null
-  const setCrop = (patch) => onUpdate({ transform: { ...(cut.transform || {}), crop: { ...(crop || {}), ...patch } } })
+  const cropPatch = (patch) => ({ transform: { ...(cut.transform || {}), crop: { ...(crop || {}), ...patch } } })
   const clearCrop = () => { const t = { ...(cut.transform || {}) }; delete t.crop; onUpdate({ transform: t }) }
-  if (!crop) return <button className="st-link" onClick={() => setCrop({ x: 0, y: 0, width: sw, height: sh })}>+ add crop</button>
+  if (!crop) return <button className="st-link" onClick={() => onUpdate(cropPatch({ x: 0, y: 0, width: sw, height: sh }))}>+ add crop</button>
+  const scrub = (key) => ({ onScrubBegin, onLive: (v) => live?.(cropPatch({ [key]: v })), onCommit: (v) => onUpdate(cropPatch({ [key]: v })) })
   return (
     <>
       <button className="st-link" onClick={clearCrop}>remove crop</button>
       <div className="st-row">
-        <NumField label="X" suffix="px" value={crop.x ?? 0} step={1} min={0} onCommit={(v) => setCrop({ x: v })} />
-        <NumField label="Y" suffix="px" value={crop.y ?? 0} step={1} min={0} onCommit={(v) => setCrop({ y: v })} />
+        <ScrubField label="X" suffix="px" value={crop.x ?? 0} step={1} min={0} {...scrub('x')} />
+        <ScrubField label="Y" suffix="px" value={crop.y ?? 0} step={1} min={0} {...scrub('y')} />
       </div>
       <div className="st-row">
-        <NumField label="W" suffix="px" value={crop.width ?? sw} step={1} min={1} onCommit={(v) => setCrop({ width: v })} />
-        <NumField label="H" suffix="px" value={crop.height ?? sh} step={1} min={1} onCommit={(v) => setCrop({ height: v })} />
+        <ScrubField label="W" suffix="px" value={crop.width ?? sw} step={1} min={1} {...scrub('width')} />
+        <ScrubField label="H" suffix="px" value={crop.height ?? sh} step={1} min={1} {...scrub('height')} />
       </div>
       <div className="st-hint">source pixels, applied before scaling to canvas</div>
     </>
   )
 }
 
-function AudioMixControl({ ov, onUpdate }) {
+function AudioMixControl({ ov, onUpdate, live, onScrubBegin }) {
+  const mixPatch = (patch) => ({ audio_mix: { ...(ov.audio_mix || {}), ...patch } })
   return (
     <>
       <label className="st-check">
@@ -132,16 +234,17 @@ function AudioMixControl({ ov, onUpdate }) {
         mix this clip’s audio into the timeline
       </label>
       {ov.audio_mix?.enabled &&
-        <NumField label="Volume" value={ov.audio_mix?.volume ?? 1} step={0.1} min={0} max={2}
-          onCommit={(v) => onUpdate({ audio_mix: { ...(ov.audio_mix || {}), volume: v } })} />}
+        <ScrubField label="Volume" value={ov.audio_mix?.volume ?? 1} step={0.1} min={0} max={2}
+          onScrubBegin={onScrubBegin} onLive={(v) => live?.(mixPatch({ volume: v }))} onCommit={(v) => onUpdate(mixPatch({ volume: v }))} />}
     </>
   )
 }
 
 // Text position is polymorphic: a named anchor (string) OR a free {x,y} (after a canvas drag).
-function TextPositionControl({ ov, canvas, onUpdate }) {
+function TextPositionControl({ ov, canvas, onUpdate, live, onScrubBegin }) {
   const pos = ov.position
   const isAnchor = typeof pos === 'string' || pos == null
+  const posPatch = (patch) => ({ position: { ...(typeof pos === 'object' && pos ? pos : {}), ...patch } })
   return (
     <>
       <SelectField label="Position" value={isAnchor ? (pos || 'center') : '__xy__'}
@@ -149,8 +252,10 @@ function TextPositionControl({ ov, canvas, onUpdate }) {
         onCommit={(v) => onUpdate({ position: v === '__xy__' ? anchorToXY(typeof pos === 'string' ? pos : 'center', canvas) : v })} />
       {!isAnchor && (
         <div className="st-row">
-          <NumField label="X" suffix="px" value={pos?.x ?? 0} step={1} onCommit={(v) => onUpdate({ position: { ...pos, x: v } })} />
-          <NumField label="Y" suffix="px" value={pos?.y ?? 0} step={1} onCommit={(v) => onUpdate({ position: { ...pos, y: v } })} />
+          <ScrubField label="X" suffix="px" value={pos?.x ?? 0} step={1}
+            onScrubBegin={onScrubBegin} onLive={(v) => live?.(posPatch({ x: v }))} onCommit={(v) => onUpdate(posPatch({ x: v }))} />
+          <ScrubField label="Y" suffix="px" value={pos?.y ?? 0} step={1}
+            onScrubBegin={onScrubBegin} onLive={(v) => live?.(posPatch({ y: v }))} onCommit={(v) => onUpdate(posPatch({ y: v }))} />
         </div>
       )}
       <div className="st-hint">drag the text on the canvas to position it freely</div>
@@ -162,9 +267,11 @@ function TextPositionControl({ ov, canvas, onUpdate }) {
 function Field({ field, obj, onUpdate, ctx }) {
   const value = getAtPath(obj, field.path)
   const commit = (v) => onUpdate(buildPatch(obj, field.path, v))
+  const live = (v) => ctx.live?.(buildPatch(obj, field.path, v))
   switch (field.control) {
     case 'number':
-      return <NumField label={field.label} value={value ?? field.default ?? ''} step={field.step} min={field.min} max={field.max} suffix={field.suffix} onCommit={commit} />
+      return <ScrubField label={field.label} value={value ?? field.default ?? ''} step={field.step} min={field.min} max={field.max} suffix={field.suffix}
+        onScrubBegin={ctx.snapshot} onLive={live} onCommit={commit} />
     case 'text':
       return <TextField label={field.label} value={value ?? ''} onCommit={field.required ? (v) => { if (v.trim() !== '') commit(v) } : commit} />
     case 'color':
@@ -187,11 +294,11 @@ function Field({ field, obj, onUpdate, ctx }) {
     case 'speedPresets':
       return <SpeedPresets value={value} onCommit={commit} />
     case 'crop':
-      return <CropControl cut={obj} canvas={ctx.canvas} meta={ctx.meta} onUpdate={onUpdate} />
+      return <CropControl cut={obj} canvas={ctx.canvas} meta={ctx.meta} onUpdate={onUpdate} live={ctx.live} onScrubBegin={ctx.snapshot} />
     case 'audioMix':
-      return <AudioMixControl ov={obj} onUpdate={onUpdate} />
+      return <AudioMixControl ov={obj} onUpdate={onUpdate} live={ctx.live} onScrubBegin={ctx.snapshot} />
     case 'textPosition':
-      return <TextPositionControl ov={obj} canvas={ctx.canvas} onUpdate={onUpdate} />
+      return <TextPositionControl ov={obj} canvas={ctx.canvas} onUpdate={onUpdate} live={ctx.live} onScrubBegin={ctx.snapshot} />
     case 'keyframes':
       return (
         <StudioKeyframes
@@ -225,6 +332,7 @@ function SchemaForm({ type, obj, onUpdate, ctx }) {
 export default function StudioInspector({
   projectId, doc, canvas, ffmpeg, selCut, selOverlayIndex, selAudio, selAudioObj, playhead, assets, sourceMetas,
   onUpdateCut, onUpdateOverlay, onNormalizeOverlay, onUpdateAudio, onSetKeyframes, onUpsertKeyframe, onRemoveKeyframe,
+  onLiveUpdateCut, onLiveUpdateOverlay, onLiveUpdateAudio, onScrubBegin,
   onAddImage, onAddClip, onAddSfx, onSetMusic,
 }) {
   const selOverlay = selOverlayIndex >= 0 ? (doc?.overlays || [])[selOverlayIndex] : null
@@ -249,7 +357,10 @@ export default function StudioInspector({
       <aside className="st-inspector">
         <SchemaForm type={type} obj={selCut}
           onUpdate={(patch) => onUpdateCut(selCut.id, patch)}
-          ctx={{ canvas, ffmpeg, assets, meta: sourceMetas[selCut.source], idLabel: selCut.id }} />
+          ctx={{
+            canvas, ffmpeg, assets, meta: sourceMetas[selCut.source], idLabel: selCut.id,
+            live: (patch) => onLiveUpdateCut?.(selCut.id, patch), snapshot: onScrubBegin,
+          }} />
       </aside>
     )
   }
@@ -264,6 +375,7 @@ export default function StudioInspector({
           ctx={{
             canvas, ffmpeg, assets, playhead, overlayIndex: selOverlayIndex,
             onSetKeyframes, onUpsertKeyframe, onRemoveKeyframe,
+            live: (patch) => onLiveUpdateOverlay?.(selOverlayIndex, patch), snapshot: onScrubBegin,
           }} />
       </aside>
     )
@@ -273,7 +385,8 @@ export default function StudioInspector({
     const type = selAudio.audioKind === 'music' ? 'music' : selAudio.audioKind === 'narration' ? 'narration' : 'sfx'
     return (
       <aside className="st-inspector">
-        <SchemaForm type={type} obj={selAudioObj} onUpdate={onUpdateAudio} ctx={{ canvas, assets }} />
+        <SchemaForm type={type} obj={selAudioObj} onUpdate={onUpdateAudio}
+          ctx={{ canvas, assets, live: onLiveUpdateAudio, snapshot: onScrubBegin }} />
         <div className="st-hint">Delete with the 🗑 button in the timeline toolbar (⌫).</div>
       </aside>
     )
