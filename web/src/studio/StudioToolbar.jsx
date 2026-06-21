@@ -4,6 +4,7 @@
 // canvas size, preview-mode toggle, Save, Render. Only tools the FFmpeg path renders appear.
 
 import { CANVAS_PRESETS } from './model.js'
+import { IconUndo, IconRedo } from '../components/icons.jsx'
 
 export default function StudioToolbar({
   doc, canvas, ffmpeg, canUndo, canRedo, dirty, rendering, hasRender, previewMode,
@@ -14,8 +15,8 @@ export default function StudioToolbar({
   return (
     <div className="st-tools">
       <div className="st-grp">
-        <button className="st-ico" onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)">↶</button>
-        <button className="st-ico" onClick={onRedo} disabled={!canRedo} title="Redo (⇧⌘Z)">↷</button>
+        <button className="st-ico" onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)" aria-label="Undo"><IconUndo /></button>
+        <button className="st-ico" onClick={onRedo} disabled={!canRedo} title="Redo (⇧⌘Z)" aria-label="Redo"><IconRedo /></button>
       </div>
 
       <div className="st-grp">

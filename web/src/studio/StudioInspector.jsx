@@ -155,6 +155,48 @@ function TextField({ label, value, onCommit, area }) {
   )
 }
 
+// Resolve any CSS/ffmpeg color (name or hex) to a #rrggbb the native swatch can show. Returns a
+// sensible default for unknown/empty values (or in jsdom, where canvas has no 2d context).
+function cssColorToHex(color) {
+  const c = String(color || '').trim()
+  if (/^#[0-9a-fA-F]{6}$/.test(c)) return c.toLowerCase()
+  if (/^#[0-9a-fA-F]{3}$/.test(c)) return '#' + c.slice(1).split('').map(x => x + x).join('').toLowerCase()
+  if (typeof document !== 'undefined') {
+    try {
+      const ctx = document.createElement('canvas').getContext('2d')
+      if (ctx) { ctx.fillStyle = '#000000'; ctx.fillStyle = c; if (/^#[0-9a-f]{6}$/i.test(ctx.fillStyle)) return ctx.fillStyle.toLowerCase() }
+    } catch { /* no canvas (jsdom) */ }
+  }
+  return '#ffffff'
+}
+
+// Color field: a native swatch picker + a text input (so named ffmpeg colors like "white" still
+// work). Dragging in the swatch is coalesced into ONE undo step (snapshot once, live per change),
+// like the scrub fields; typing commits on blur. The renderer accepts names and #RRGGBB.
+function ColorField({ label, value, onScrubBegin, onLive, onCommit }) {
+  const [text, setText] = useState(value ?? '')
+  const snapped = useRef(false)
+  useEffect(() => { setText(value ?? '') }, [value])
+  return (
+    <label className="st-f">
+      <span>{label}</span>
+      <div className="st-color">
+        <input type="color" className="st-color-swatch" value={cssColorToHex(value)} aria-label={`${label} swatch`}
+          onChange={(e) => {
+            if (!snapped.current) { onScrubBegin?.(); snapped.current = true }
+            setText(e.target.value); onLive?.(e.target.value)
+          }}
+          onBlur={() => { snapped.current = false }} />
+        <input type="text" className="st-color-text" value={text} spellCheck={false} autoComplete="off"
+          placeholder="white, #ff0000…"
+          onChange={(e) => setText(e.target.value)}
+          onBlur={() => { if (text !== (value ?? '')) onCommit(text) }}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur() }} />
+      </div>
+    </label>
+  )
+}
+
 function SelectField({ label, value, options, onCommit }) {
   return (
     <label className="st-f">
@@ -275,7 +317,8 @@ function Field({ field, obj, onUpdate, ctx }) {
     case 'text':
       return <TextField label={field.label} value={value ?? ''} onCommit={field.required ? (v) => { if (v.trim() !== '') commit(v) } : commit} />
     case 'color':
-      return <TextField label={field.label} value={value ?? field.default ?? ''} onCommit={commit} />
+      return <ColorField label={field.label} value={value ?? field.default ?? ''}
+        onScrubBegin={ctx.snapshot} onLive={live} onCommit={commit} />
     case 'textarea':
       return (
         <>
