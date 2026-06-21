@@ -30,7 +30,7 @@ const ovIcon = (t) => (t === 'text' ? 'T' : t === 'video' ? '▦' : '🖼')
 export default function StudioTimeline({
   doc, dur, zoom, playhead, selection, sourceMetas, playing,
   onSeek, onSelect, onTrim, onTrimBegin, onReorder, onZoom, onAssetDrop,
-  onOverlayMove, onOverlayTrim, onOverlayDragBegin, onAutoArrange,
+  onOverlayMove, onOverlayTrim, onOverlayDragBegin, onOverlayResolve, onAutoArrange,
   onTogglePlay, onSplit, onDuplicate, onDelete,
 }) {
   const hasCut = selection?.kind === 'cut'
@@ -141,6 +141,11 @@ export default function StudioTimeline({
           if (starts[i] + interp.cutDuration(c) / 2 < newCenter) target++
         })
         if (target !== index) onReorder(index, target)
+      }
+      // An overlay move/trim that actually moved → auto-float it off any new same-track overlap
+      // (folded into the same undo step the start-of-drag snapshot opened, via `live`).
+      if (didSnap && (finalMode === 'ov-move' || finalMode === 'ov-trim-in' || finalMode === 'ov-trim-out')) {
+        onOverlayResolve?.(index)
       }
       // ov-move / ov-trim-* / trim-* already live-applied; the start-of-drag snapshot owns undo.
     }

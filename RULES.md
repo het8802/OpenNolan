@@ -106,7 +106,12 @@ short — add a pointer, not an essay.
   (both stay visible), NLE-style. The `⇅ Arrange` toolbar button runs `interp.autoArrangeOverlays`
   (the calendar/Gantt "lane assignment" algorithm: sort by start, drop each on the first lane whose
   last item ended, else a new lane) to re-pack an existing doc into the fewest non-overlapping
-  tracks. Manual drag is always respected — only Add and the explicit button assign tracks.
+  tracks. A move/trim drag-END runs `interp.resolveOverlayOverlap(doc, index)` — a CHEAP, TARGETED
+  resolve that floats ONLY the just-edited overlay up to a free lane if it now overlaps a neighbor on
+  its own track (not a full re-pack), folded into the drag's single undo step. It's a same-ref no-op
+  when there's no new same-track overlap, so a deliberate placement (incl. an overlap on a DIFFERENT
+  track — already visible) is left alone. So overlaps auto-stack on add AND on move/trim; only a
+  cross-track vertical drag with no resulting overlap, or the explicit Arrange button, is honored verbatim.
 - **Draggable overlays:** overlays move on **absolute** project time (`interp.moveOverlay` — start
   preserves duration AND shifts keyframe `t` by the same delta; vertical drag sets `track`) and
   edge-trim (`interp.trimOverlay`). Same pointer model as cuts; snapshot **lazily on first move**

@@ -418,6 +418,9 @@ export default function Studio({ projectId, state, onClose, chat }) {
   const onOverlayMove = useCallback((index, patch) => live(d => interp.moveOverlay(d, index, patch)), [live])
   const onOverlayTrim = useCallback((index, patch) => live(d => interp.trimOverlay(d, index, patch)), [live])
   const onOverlayDragBegin = useCallback(() => snapshot(), [snapshot])
+  // On drag-end: float the just-moved/trimmed overlay off any new same-track overlap. `live` (no
+  // new history) folds it into the one undo step the drag's start-of-move snapshot already opened.
+  const onOverlayResolve = useCallback((index) => live(d => interp.resolveOverlayOverlap(d, index)), [live])
 
   // Canvas drag-to-position (feat 4): merge {x,y} (canvas px) into the overlay's position object,
   // converting a text anchor string to an object on the first drag. Live (no per-frame history) —
@@ -568,6 +571,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
                 onSeek={seekFromUser} onSelect={setSelection} onTrim={onTrim} onTrimBegin={onTrimBegin}
                 onReorder={onReorder} onZoom={setZoom} onAssetDrop={onAssetDrop}
                 onOverlayMove={onOverlayMove} onOverlayTrim={onOverlayTrim} onOverlayDragBegin={onOverlayDragBegin}
+                onOverlayResolve={onOverlayResolve}
                 onTogglePlay={togglePlay} onSplit={onSplit} onDuplicate={onDuplicate} onDelete={onDelete}
                 onAutoArrange={onAutoArrange}
               />
