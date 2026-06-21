@@ -100,4 +100,33 @@ describe('editor / agent-edit safety', () => {
     rerender(<Studio projectId="p1" state={{ name: 'demo-project' }} onClose={() => {}} chat={mockChat({ busy: false })} />)
     await waitFor(() => expect(api.getEditDecisions).toHaveBeenCalledTimes(1))
   })
+
+  it('autosaves edits to disk after a short debounce (no manual Save needed)', async () => {
+    api.saveEditDecisions.mockClear()
+    render(<Studio projectId="p1" state={{ name: 'demo-project' }} onClose={() => {}} />)
+    await screen.findByText('demo-project')
+    fireEvent.click(screen.getByTitle('Add a text overlay')) // a local edit → dirty
+    expect(api.saveEditDecisions).not.toHaveBeenCalled()       // not immediately (debounced)
+    await waitFor(() => expect(api.saveEditDecisions).toHaveBeenCalled(), { timeout: 2000 })
+  })
+
+  it('adopts the agent timeline LIVE on turn-end (no "reopen" warning) even with local edits', async () => {
+    api.getEditDecisions.mockResolvedValue({ content: {
+      version: '1.0', render_runtime: 'ffmpeg',
+      cuts: [{ id: 'c1', source: 'clips/a.mp4', in_seconds: 0, out_seconds: 4 }],
+    } })
+    const { rerender } = render(
+      <Studio projectId="p1" state={{ name: 'demo-project' }} onClose={() => {}} chat={mockChat({ busy: true })} />,
+    )
+    await screen.findByText('demo-project')
+    fireEvent.click(screen.getByTitle('Add a text overlay')) // local mid-turn edit (autosave suspended while busy)
+    // agent finishes its turn with a CHANGED disk doc → the next fetch returns the agent's version
+    api.getEditDecisions.mockResolvedValueOnce({ content: {
+      version: '1.0', render_runtime: 'ffmpeg',
+      cuts: [{ id: 'AGENT_CUT', source: 'clips/b.mp4', in_seconds: 0, out_seconds: 2 }],
+    } })
+    rerender(<Studio projectId="p1" state={{ name: 'demo-project' }} onClose={() => {}} chat={mockChat({ busy: false })} />)
+    expect(await screen.findByText(/updated by the agent/)).toBeInTheDocument()
+    expect(screen.queryByText(/Reopen the editor/i)).toBeNull() // the old bad-UX warning is gone
+  })
 })

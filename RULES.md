@@ -64,6 +64,15 @@ short — add a pointer, not an essay.
     runtime, not by FFmpeg arrangement) — and even then only the changed comp re-renders
     (render-once, content-cached). Render produces the final exact-bytes MP4; it is not the way you
     preview an edit.
+- **Agent and user share ONE live doc (no "reopen").** The on-disk `edit_decisions.json` is the
+  single source of truth that BOTH the user (editor) and the agent edit. The editor **autosaves**
+  (debounced ~700ms) so the disk is always current; it **flushes that autosave before handing a turn
+  to the agent** (so the agent reads the user's latest) and **suspends autosave while the agent is
+  mid-turn** (never clobber its write). When the agent's turn ends, the editor **adopts the new disk
+  doc LIVE** into React state — and if the user made mid-turn edits, pushes their version onto the
+  undo stack (⌘Z restores it) rather than warning them to reopen. The agent edits the JSON directly
+  (the schema is the shared contract); it does NOT use the editor's JS mutators. `agentBusyRef` /
+  `reconcilingRef` gate Save/autosave so they can't race the agent's write.
 - **Pointer events for in-timeline manipulation.** Scrub/trim/reorder/resize share one
   `pointerdown → window move/up/cancel` model; always tear down window listeners on pointerup AND
   on unmount. (Exception: cross-panel **asset drag from the Assets tab onto the timeline** uses

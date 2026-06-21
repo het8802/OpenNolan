@@ -173,24 +173,47 @@ export default function Studio({ projectId, state, onClose, chat }) {
     setDocBoth(nxt); setDirty(true)
   }, [past, future, setDocBoth])
 
-  // ── save / render ─────────────────────────────────────────────────────────
-  const save = useCallback(async () => {
-    if (!doc) return null
+  // ── save / autosave / render ──────────────────────────────────────────────
+  // One persist path (reads docRef so it always writes the LATEST doc, never a stale closure).
+  // `silent` = autosave (no toasts). Refuses while the agent is mid-turn so we never clobber its
+  // write; the editor's edits land the instant its turn ends (autosave resumes).
+  const persist = useCallback(async ({ silent } = {}) => {
+    const d = docRef.current
+    if (!d) return null
     if (agentBusyRef.current || reconcilingRef.current) {
-      flash('warn', 'Agent is editing — wait for its turn to finish before saving')
+      if (!silent) flash('warn', 'Agent is editing — your changes will save the moment its turn ends')
       return null
     }
     try {
-      await api.saveEditDecisions(projectId, doc)
-      savedRef.current = JSON.stringify(doc)
+      await api.saveEditDecisions(projectId, d)
+      savedRef.current = JSON.stringify(d)
       setDirty(false)
-      flash('ok', 'Saved')
-      return doc
+      if (!silent) flash('ok', 'Saved')
+      return d
     } catch (e) {
-      flash('err', `Save rejected: ${String(e.message || e)}`)
+      if (!silent) flash('err', `Save rejected: ${String(e.message || e)}`)
       return null
     }
-  }, [doc, projectId, flash])
+  }, [projectId, flash])
+
+  const save = useCallback(() => persist({ silent: false }), [persist])
+  // Flush a pending autosave NOW (used before handing a turn to the agent so it reads our latest).
+  const flushAutosave = useCallback(async () => { if (dirtyRef.current) await persist({ silent: true }) }, [persist])
+
+  // Autosave (debounced): the on-disk edit_decisions.json is the single source of truth shared with
+  // the agent, so we keep it current instead of waiting for a manual Save. Suspended during/around
+  // an agent turn (the reconcile effect owns the disk then).
+  useEffect(() => {
+    if (!dirty || chatBusy || agentBusyRef.current || reconcilingRef.current) return
+    const id = setTimeout(() => { persist({ silent: true }) }, 700)
+    return () => clearTimeout(id)
+  }, [dirty, doc, chatBusy, persist])
+
+  // Hand the agent our LATEST edits: flush a pending autosave before its turn starts, so it reads the
+  // timeline we actually see (not a stale disk copy). Wrap only `send`; everything else passes through.
+  const chatForPanel = useMemo(() => (
+    chat ? { ...chat, send: async (text) => { await flushAutosave(); return chat.send(text) } } : chat
+  ), [chat, flushAutosave])
 
   const render = useCallback(async () => {
     if (rendering) return
@@ -224,11 +247,13 @@ export default function Studio({ projectId, state, onClose, chat }) {
   }, [rendering, save, projectId, flash])
 
   // When the in-editor agent finishes a turn (busy true→false), it may have rewritten
-  // edit_decisions.json on disk. Re-sync so the editor isn't holding a stale doc that a later
-  // Save would use to clobber the agent's work. If the disk changed and we have NO unsaved local
-  // edits, adopt the agent's version; if we DO have local edits, warn (don't silently discard
-  // either side). `agentBusyRef` doubles as the previous-busy tracker AND the save-guard mirror;
-  // `reconcilingRef` holds the Save guard open across the async re-fetch so a Save can't race it.
+  // edit_decisions.json on disk. Adopt its new timeline LIVE into the editor — no "reopen". The user
+  // and the agent share ONE source of truth (the on-disk doc); autosave keeps our edits there before
+  // the turn, so by turn-end the disk is "our edits + the agent's on top" and adopting loses nothing.
+  // If the user DID edit during the turn (autosave is suspended then), we still adopt the agent's
+  // result but push the user's mid-turn doc onto the undo stack, so ⌘Z restores their version.
+  // `agentBusyRef` is the previous-busy tracker + save-guard mirror; `reconcilingRef` holds the guard
+  // open across the async re-fetch so an autosave/Save can't race it.
   useEffect(() => {
     const was = agentBusyRef.current
     agentBusyRef.current = chatBusy
@@ -240,12 +265,10 @@ export default function Studio({ projectId, state, onClose, chat }) {
         if (!alive || !content) return
         const incoming = JSON.stringify(content)
         if (incoming === savedRef.current) return // disk matches our last save — nothing changed
-        if (dirtyRef.current) {
-          flash('warn', 'Agent changed this timeline on disk — saving will overwrite its edits. Reopen the editor to load them.')
-        } else {
-          docRef.current = content; setDoc(content); savedRef.current = incoming; setDirty(false)
-          flash('ok', 'Timeline updated by the agent')
-        }
+        const hadLocal = dirtyRef.current
+        if (hadLocal) { setPast(p => [...p, docRef.current].slice(-100)); setFuture([]) } // keep ⌘Z to user's version
+        docRef.current = content; setDoc(content); savedRef.current = incoming; setDirty(false)
+        flash('ok', hadLocal ? 'Timeline updated by the agent — ⌘Z to restore your version' : 'Timeline updated by the agent')
       })
       .catch(() => {})
       .finally(() => { reconcilingRef.current = false })
@@ -522,7 +545,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
           {chat && (panels.agentOpen ? (
             <>
               <div className="st-agent-wrap" style={{ width: panels.agentW }}>
-                <ChatPanel chat={chat} disabled={!projectId} className="st-agent" />
+                <ChatPanel chat={chatForPanel} disabled={!projectId} className="st-agent" />
               </div>
               <div className="st-vsplit" onPointerDown={(e) => beginPanelDrag(e, 'agent')}
                 title="Drag to resize · drag fully left to hide" />
