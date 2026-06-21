@@ -82,11 +82,44 @@ def _looks_secret(key: str) -> bool:
     return any(tok in k for tok in ("KEY", "TOKEN", "SECRET", "PASSWORD"))
 
 
+def _strip_inline_comment(value: str) -> str:
+    """Drop an inline comment: everything from the first '#' onward, then trailing whitespace."""
+    i = value.find("#")
+    return value[:i].rstrip() if i != -1 else value
+
+
+def _quoted_keys(path: Path) -> set[str]:
+    """Keys whose raw .env value is quoted (so a literal '#' inside is part of the value, NOT a
+    comment, and must be preserved)."""
+    keys: set[str] = set()
+    for line in path.read_text().splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        k, _, rest = s.partition("=")
+        k = k.strip()
+        if k.startswith("export "):
+            k = k[len("export "):].strip()
+        if rest.lstrip()[:1] in ("'", '"'):
+            keys.add(k)
+    return keys
+
+
 def read_env_file(path: Path = ENV_PATH) -> dict[str, str]:
-    """Parsed {KEY: value} from the .env (handles quotes/comments via python-dotenv). {} if absent."""
+    """Parsed {KEY: value} from the .env. python-dotenv handles quotes/escapes; we then strip inline
+    `# comment`s from UNQUOTED values — dotenv only strips those when preceded by TWO spaces, so a
+    single-space ` # comment` otherwise leaks into the value (and the BYOK panel showed it). A quoted
+    value keeps a literal '#'. {} if absent."""
     if not path.exists():
         return {}
-    return {k: (v or "") for k, v in dotenv_values(path).items() if k}
+    quoted = _quoted_keys(path)
+    out: dict[str, str] = {}
+    for k, v in dotenv_values(path).items():
+        if not k:
+            continue
+        val = v or ""
+        out[k] = val if k in quoted else _strip_inline_comment(val)
+    return out
 
 
 def list_env_vars(path: Path = ENV_PATH) -> list[dict]:

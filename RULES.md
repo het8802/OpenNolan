@@ -83,6 +83,9 @@ undo stack (⌘Z restores it) rather than warning them to reopen. The agent edit
 on unmount. (Exception: cross-panel **asset drag from the Assets tab onto the timeline** uses
 HTML5 DnD — `dataTransfer` type `application/x-opennolan-asset`, dropped via `xToTime`.)
 - **CSS namespace `st-`.** Keep new studio styles prefixed and co-located in `styles.css`.
+- Do not commit until the user tells you to commit explicitly.
+- If there is any issue in this [RULES.md](http://RULES.md) that contradicts the actual repo or what the user tells you to do, then instead of silently failing, flag it to the user for confirmation to either change the [RULES.md](http://RULES.md) file or rethink on what the user wants.
+- We want an aesthetic UI, so don't add unnecessary emojis to the UI. Use aesthetic icons instead.
 
 ### Editor feature conventions
 

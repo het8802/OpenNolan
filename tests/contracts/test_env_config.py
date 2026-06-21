@@ -34,6 +34,23 @@ def test_read_env_missing_file_is_empty(tmp_path: Path):
     assert env_config.read_env_file(tmp_path / "nope.env") == {}
 
 
+def test_read_strips_inline_comments_from_unquoted_values(tmp_path: Path):
+    env = tmp_path / ".env"
+    # single-space comment (dotenv leaks it), two-space comment, and a quoted value with a literal '#'
+    env.write_text(
+        "GOOGLE_API_KEY=sk-goog # Google Imagen, Cloud TTS\n"
+        "FAL_KEY=sk-fal  # two-space comment\n"
+        "PASSWORDISH=\"a#b#c\"  # do not strip the quoted hash\n"
+    )
+    parsed = env_config.read_env_file(env)
+    assert parsed["GOOGLE_API_KEY"] == "sk-goog"   # single-space comment stripped
+    assert parsed["FAL_KEY"] == "sk-fal"            # two-space comment stripped too
+    assert parsed["PASSWORDISH"] == "a#b#c"         # quoted literal '#' preserved
+    # and the panel reflects the cleaned values
+    rows = {r["key"]: r["value"] for r in env_config.list_env_vars(env)}
+    assert rows["GOOGLE_API_KEY"] == "sk-goog"
+
+
 def test_list_env_vars_shows_menu_plus_extras(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text("OPENAI_API_KEY=sk-xyz\nMY_CUSTOM_TOKEN=abc\n")
