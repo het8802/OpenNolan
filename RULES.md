@@ -52,10 +52,18 @@ short — add a pointer, not an essay.
 - **History = `commit` vs `live`.** `commit` = one undo step. `live` = per-frame drag, no
   history; call `snapshot()` once at drag start to coalesce a drag into one undo. Never nest a
   setState updater inside another (StrictMode double-invokes).
-- **Preview == export.** The preview must reflect what FFmpeg renders. Only expose tools the
-  FFmpeg path renders (`TRANSITIONS`, `KF_DIMS_*`); interpolation is linear, so preview linearly.
-  The audio lane is selectable/editable (asset, timing, levels) but not yet drag-positioned, and
-  FFmpeg still owns mixing.
+- **Preview == export, and we are working towards a fully WYSIWYG canvas.** The preview must reflect
+  what FFmpeg renders. Only expose tools the FFmpeg path renders (`TRANSITIONS`, `KF_DIMS_*`);
+  interpolation is linear, so preview linearly. The audio lane is selectable/editable (asset, timing,
+  levels) but not yet drag-positioned, and FFmpeg still owns mixing.
+  - **NORTH STAR — edit live, render rarely.** Plain FFmpeg editing (cuts, overlays incl. video
+    overlays, text, images, audio, position/trim/track/opacity) must be **previewable WITHOUT
+    re-rendering** — the source-mode canvas composites and PLAYS it live (base clip + video overlays
+    slaved to the playhead). The user should NEVER have to hit Render just to see an edit. **Only
+    Remotion/HyperFrames composition clips require a re-render** (their pixels are produced by a
+    runtime, not by FFmpeg arrangement) — and even then only the changed comp re-renders
+    (render-once, content-cached). Render produces the final exact-bytes MP4; it is not the way you
+    preview an edit.
 - **Pointer events for in-timeline manipulation.** Scrub/trim/reorder/resize share one
   `pointerdown → window move/up/cancel` model; always tear down window listeners on pointerup AND
   on unmount. (Exception: cross-panel **asset drag from the Assets tab onto the timeline** uses
@@ -110,6 +118,15 @@ short — add a pointer, not an essay.
   `position.{x,y}` in canvas px (text anchor → object on first drag; drag origin for
   object/scale-keyframed overlays comes from canvas x/y, NOT the post-transform bbox). Still images
   are now valid **main-timeline cuts** (the FFmpeg path loops them; guarded against 0-duration).
+  **Video overlays PLAY live** in the source preview: each is a `<video>` (registered in
+  `ovVideoEls`) slaved to the playhead by the rAF clock (rolling) / a paused-seek effect (scrubbing),
+  muted unless its `audio_mix.enabled`. No re-render to preview a dropped video overlay.
+- **Crop is baked into the proxy, not the assemble.** `transform.crop` is in SOURCE pixels, so it
+  can only be applied at native source resolution — `render_proxies` bakes it into the (content-keyed)
+  proxy and `_build_assemble_edl` drops crop from the assemble. Applying a source-px crop to the
+  canvas-sized proxy goes out of bounds (`crop=1440x2560 on a 1080x1920 proxy → ffmpeg exit 234`).
+  So a crop edit re-renders that one scene (crop is a content edit); reorder/retime/transition/
+  position stay cheap.
 
 ## Testing
 

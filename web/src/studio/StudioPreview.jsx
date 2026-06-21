@@ -52,6 +52,31 @@ function pauseAllAudio(els) {
   for (const el of els.values()) { try { el.pause() } catch { /* noop */ } }
 }
 
+// Drive the VIDEO-overlay <video> elements to project time `t` so a video overlay PLAYS live in
+// the source preview (WYSIWYG) — no re-render needed. Each element is keyed by overlay index; its
+// local time is `t - start` (overlays play at 1×, from their own first frame). When `play` is true
+// (transport rolling) we seek-on-drift + play; otherwise we seek-to-frame + pause (scrub). Elements
+// only exist while the playhead is inside the overlay window (mounted on demand), so the common
+// case is "visible".
+function syncOverlayVideos(els, overlays, t, { play }) {
+  for (const [idx, el] of els) {
+    const o = overlays[idx]
+    if (!o) { try { el.pause() } catch { /* noop */ } ; continue }
+    const s = Number(o.start_seconds) || 0
+    const e = Number(o.end_seconds) || s
+    const visible = t >= s - 1e-3 && t <= e + 1e-3
+    if (!visible) { if (!el.paused) { try { el.pause() } catch { /* noop */ } } ; continue }
+    const target = Math.max(0, t - s)
+    if (play) {
+      if (el.readyState >= 1 && Math.abs(el.currentTime - target) > 0.34) { try { el.currentTime = target } catch { /* not ready */ } }
+      if (el.paused && el.readyState >= 2) el.play().catch(() => {})
+    } else {
+      if (!el.paused) { try { el.pause() } catch { /* noop */ } }
+      if (el.readyState >= 1 && Math.abs(el.currentTime - target) > 0.05) { try { el.currentTime = target } catch { /* not ready */ } }
+    }
+  }
+}
+
 export default function StudioPreview({
   projectId, doc, canvas, playhead, previewMode, renderPath, renderVersion, playing, selection,
   onScrub, onPlayingChange, onSelectOverlay, onOverlayPosition, onOverlayDragBegin,
@@ -87,6 +112,7 @@ export default function StudioPreview({
   // Audio to play alongside the source clip (unchanged).
   const audioTracks = useMemo(() => previewAudioTracks(doc), [doc])
   const audioEls = useRef(new Map())
+  const ovVideoEls = useRef(new Map()) // overlay index → <video> (video overlays that play live)
 
   const playheadRef = useRef(playhead)
   playheadRef.current = playhead
@@ -159,19 +185,29 @@ export default function StudioPreview({
         if (v.paused && v.readyState >= 2) v.play().catch(() => {})
       }
       syncAudioEls(audioEls.current, st.audioTracks, t, true)
+      syncOverlayVideos(ovVideoEls.current, st.doc.overlays || [], t, { play: true }) // video overlays play live
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
   }, [playing])
 
+  // SOURCE + paused/scrub: seek each visible video overlay to its frame and keep it paused, so a
+  // dropped video overlay shows the correct frame under the playhead without a re-render.
+  useEffect(() => {
+    if (previewMode !== 'source' || playing) return
+    syncOverlayVideos(ovVideoEls.current, doc?.overlays || [], playhead, { play: false })
+  }, [previewMode, playing, playhead, doc])
+
   useEffect(() => {
     if (playing && previewMode === 'source') return
     pauseAllAudio(audioEls.current)
+    pauseAllAudio(ovVideoEls.current) // render mode / paused: don't leave overlay videos rolling
   }, [playing, previewMode])
   useEffect(() => () => {
     const v = srcRef.current; if (v) { try { v.pause() } catch { /* noop */ } }
     pauseAllAudio(audioEls.current)
+    pauseAllAudio(ovVideoEls.current)
     if (ovDrag.current) ovDrag.current()
   }, [])
 
@@ -270,7 +306,18 @@ export default function StudioPreview({
     }
     if (type === 'text') return <div key={i} {...common}>{renderTextInner(o, scale)}</div>
     if (type === 'video') {
-      return <video key={i} {...common} src={api.sourceUrl(projectId, o.asset_id)} muted playsInline preload="metadata" />
+      // The element is registered so the rAF clock / paused-seek effect drive it (WYSIWYG: it plays
+      // live, no re-render). Muted unless this overlay mixes its audio (matches the export).
+      return (
+        <video
+          key={i} {...common}
+          ref={(el) => { const m = ovVideoEls.current; if (el) m.set(i, el); else m.delete(i) }}
+          src={api.sourceUrl(projectId, o.asset_id)}
+          muted={!o.audio_mix?.enabled}
+          playsInline
+          preload="auto"
+        />
+      )
     }
     return <img key={i} {...common} src={api.sourceUrl(projectId, o.asset_id)} alt="" draggable={false} />
   }

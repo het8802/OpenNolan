@@ -60,6 +60,21 @@ describe('WYSIWYG canvas', () => {
     expect(items[1].tagName.toLowerCase()).toBe('img')
   })
 
+  it('renders a video overlay as a playable <video> (preload=auto; muted unless audio_mix is on)', () => {
+    const mk = (audioMix) => ({
+      cuts: [videoCut],
+      overlays: [{ type: 'video', asset_id: 'pip.mp4', start_seconds: 0, end_seconds: 3, position: { x: 0, y: 0, width: 200 }, track: 0, ...(audioMix ? { audio_mix: { enabled: true, volume: 1 } } : {}) }],
+    })
+    const { container } = render(<StudioPreview {...base} doc={mk(false)} />)
+    const vid = container.querySelector('.st-ov-layer video.st-ov-canvas')
+    expect(vid).toBeInTheDocument()
+    expect(vid).toHaveAttribute('preload', 'auto')
+    expect(vid.muted).toBe(true) // no audio_mix → muted in preview (matches export)
+
+    const { container: c2 } = render(<StudioPreview {...base} doc={mk(true)} />)
+    expect(c2.querySelector('.st-ov-layer video.st-ov-canvas').muted).toBe(false) // audio_mix on → audible
+  })
+
   it('pointerdown on a canvas overlay selects it', () => {
     const onSelectOverlay = vi.fn()
     const doc = { cuts: [videoCut], overlays: [{ type: 'text', text: 'x', start_seconds: 0, end_seconds: 3, position: 'center', track: 0 }] }
