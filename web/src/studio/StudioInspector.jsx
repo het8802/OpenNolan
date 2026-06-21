@@ -1,12 +1,21 @@
-// Studio inspector — fine-grained properties for the current selection. Cut: source, trim,
-// speed, crop, transitions. Overlay: text/style or image/asset, position, opacity, timing,
-// audio mix, and keyframes. Every field commits on blur/Enter (one history step per edit,
-// not per keystroke) through the schema-safe interp mutators passed from Studio.
+// Studio inspector — properties for the current selection, rendered from the DECLARATIVE
+// propertySchema (feat 2). The selection resolves to one of 7 clip types
+// (video_main/image_main/video_overlay/image_overlay/text/music/sfx, + narration); the schema
+// for that type drives which sections/fields appear. Plain inputs (number/text/color/select)
+// bind to a dotted path via getAtPath/buildPatch; SPECIAL controls (speed presets, crop,
+// audio-mix, keyframes, text position) render bespoke sub-UI. Every field commits on blur/Enter
+// (one history step per edit) through the schema-safe interp mutators passed from Studio, so a
+// Save can never 422. When nothing is selected the panel falls through to the Assets tab.
 
 import { useEffect, useState } from 'react'
-import { TRANSITIONS, TEXT_ANCHORS, SPEED_PRESETS, overlayKind, anchorToXY } from './model.js'
+import {
+  TRANSITIONS, TEXT_ANCHORS, SPEED_PRESETS, anchorToXY, overlayKind, overlayType, isImageSource,
+} from './model.js'
+import { PROPERTY_SCHEMA, PROPERTY_TITLES, getAtPath, buildPatch } from './propertySchema.js'
 import StudioKeyframes from './StudioKeyframes.jsx'
 import StudioAssets from './StudioAssets.jsx'
+
+const baseName = (p) => String(p || '').split('/').pop() || p
 
 // ── tiny fields (commit on blur / Enter) ────────────────────────────────────
 function NumField({ label, value, onCommit, step = 0.1, min, max, suffix }) {
@@ -57,42 +66,218 @@ function SelectField({ label, value, options, onCommit }) {
   )
 }
 
+// ── option resolution for select fields (static or live-asset-backed) ───────
+function resolveOptions(field, assets, currentValue) {
+  if (field.options) return field.options
+  const src = field.optionsFrom
+  if (src === 'transitions') return TRANSITIONS
+  if (src === 'anchors') return TEXT_ANCHORS.map(a => ({ value: a, label: a }))
+  const k = assets?.kinds || {}
+  const pool =
+    src === 'video' ? (k.video || [])
+      : src === 'images' ? (k.images || [])
+        : src === 'imagesAndVideo' ? [...(k.images || []), ...(k.video || [])]
+          : src === 'music' ? [...(k.music || []), ...(k.audio || [])]
+            : src === 'audio' ? [...(k.audio || []), ...(k.music || [])]
+              : []
+  const opts = pool.map(a => ({ value: a.path, label: a.name }))
+  if (currentValue && !pool.some(a => a.path === currentValue)) {
+    opts.unshift({ value: currentValue, label: `${baseName(currentValue)} (current)` })
+  }
+  return opts
+}
+
+// ── special controls ─────────────────────────────────────────────────────────
+function SpeedPresets({ value, onCommit }) {
+  return (
+    <div className="st-speed">
+      {SPEED_PRESETS.map(s => (
+        <button key={s} className={`st-chip ${(Number(value) || 1) === s ? 'on' : ''}`}
+          onClick={() => onCommit(s)} title={`${s}× speed`}>{s}×</button>
+      ))}
+    </div>
+  )
+}
+
+// Crop is in SOURCE pixels, so seed defaults from the clip's real dims (ffprobe), not the canvas.
+function CropControl({ cut, canvas, meta, onUpdate }) {
+  const sw = meta?.width || canvas.width
+  const sh = meta?.height || canvas.height
+  const crop = cut.transform?.crop || null
+  const setCrop = (patch) => onUpdate({ transform: { ...(cut.transform || {}), crop: { ...(crop || {}), ...patch } } })
+  const clearCrop = () => { const t = { ...(cut.transform || {}) }; delete t.crop; onUpdate({ transform: t }) }
+  if (!crop) return <button className="st-link" onClick={() => setCrop({ x: 0, y: 0, width: sw, height: sh })}>+ add crop</button>
+  return (
+    <>
+      <button className="st-link" onClick={clearCrop}>remove crop</button>
+      <div className="st-row">
+        <NumField label="X" suffix="px" value={crop.x ?? 0} step={1} min={0} onCommit={(v) => setCrop({ x: v })} />
+        <NumField label="Y" suffix="px" value={crop.y ?? 0} step={1} min={0} onCommit={(v) => setCrop({ y: v })} />
+      </div>
+      <div className="st-row">
+        <NumField label="W" suffix="px" value={crop.width ?? sw} step={1} min={1} onCommit={(v) => setCrop({ width: v })} />
+        <NumField label="H" suffix="px" value={crop.height ?? sh} step={1} min={1} onCommit={(v) => setCrop({ height: v })} />
+      </div>
+      <div className="st-hint">source pixels, applied before scaling to canvas</div>
+    </>
+  )
+}
+
+function AudioMixControl({ ov, onUpdate }) {
+  return (
+    <>
+      <label className="st-check">
+        <input type="checkbox" checked={!!ov.audio_mix?.enabled}
+          onChange={(e) => onUpdate({ audio_mix: { ...(ov.audio_mix || { volume: 1 }), enabled: e.target.checked } })} />
+        mix this clip’s audio into the timeline
+      </label>
+      {ov.audio_mix?.enabled &&
+        <NumField label="Volume" value={ov.audio_mix?.volume ?? 1} step={0.1} min={0} max={2}
+          onCommit={(v) => onUpdate({ audio_mix: { ...(ov.audio_mix || {}), volume: v } })} />}
+    </>
+  )
+}
+
+// Text position is polymorphic: a named anchor (string) OR a free {x,y} (after a canvas drag).
+function TextPositionControl({ ov, canvas, onUpdate }) {
+  const pos = ov.position
+  const isAnchor = typeof pos === 'string' || pos == null
+  return (
+    <>
+      <SelectField label="Position" value={isAnchor ? (pos || 'center') : '__xy__'}
+        options={[...TEXT_ANCHORS.map(a => ({ value: a, label: a })), { value: '__xy__', label: 'Custom X/Y' }]}
+        onCommit={(v) => onUpdate({ position: v === '__xy__' ? anchorToXY(typeof pos === 'string' ? pos : 'center', canvas) : v })} />
+      {!isAnchor && (
+        <div className="st-row">
+          <NumField label="X" suffix="px" value={pos?.x ?? 0} step={1} onCommit={(v) => onUpdate({ position: { ...pos, x: v } })} />
+          <NumField label="Y" suffix="px" value={pos?.y ?? 0} step={1} onCommit={(v) => onUpdate({ position: { ...pos, y: v } })} />
+        </div>
+      )}
+      <div className="st-hint">drag the text on the canvas to position it freely</div>
+    </>
+  )
+}
+
+// ── one schema field ─────────────────────────────────────────────────────────
+function Field({ field, obj, onUpdate, ctx }) {
+  const value = getAtPath(obj, field.path)
+  const commit = (v) => onUpdate(buildPatch(obj, field.path, v))
+  switch (field.control) {
+    case 'number':
+      return <NumField label={field.label} value={value ?? field.default ?? ''} step={field.step} min={field.min} max={field.max} suffix={field.suffix} onCommit={commit} />
+    case 'text':
+      return <TextField label={field.label} value={value ?? ''} onCommit={field.required ? (v) => { if (v.trim() !== '') commit(v) } : commit} />
+    case 'color':
+      return <TextField label={field.label} value={value ?? field.default ?? ''} onCommit={commit} />
+    case 'textarea':
+      return (
+        <>
+          <TextField label={field.label} value={value ?? ''} area onCommit={field.required ? (v) => { if (v.trim() !== '') commit(v) } : commit} />
+          {field.required && <div className="st-hint">text can’t be empty</div>}
+        </>
+      )
+    case 'select':
+      return (
+        <>
+          <SelectField label={field.label} value={value ?? ''} options={resolveOptions(field, ctx.assets, value)} onCommit={commit} />
+          {field.meta && ctx.meta?.duration != null &&
+            <div className="st-hint">source length {ctx.meta.duration.toFixed(2)}s{ctx.meta.width ? ` · ${ctx.meta.width}×${ctx.meta.height}` : ''}</div>}
+        </>
+      )
+    case 'speedPresets':
+      return <SpeedPresets value={value} onCommit={commit} />
+    case 'crop':
+      return <CropControl cut={obj} canvas={ctx.canvas} meta={ctx.meta} onUpdate={onUpdate} />
+    case 'audioMix':
+      return <AudioMixControl ov={obj} onUpdate={onUpdate} />
+    case 'textPosition':
+      return <TextPositionControl ov={obj} canvas={ctx.canvas} onUpdate={onUpdate} />
+    case 'keyframes':
+      return (
+        <StudioKeyframes
+          ov={obj} index={ctx.overlayIndex} kind={overlayKind(obj)} ffmpeg={ctx.ffmpeg} playhead={ctx.playhead}
+          onSetKeyframes={ctx.onSetKeyframes} onUpsertKeyframe={ctx.onUpsertKeyframe} onRemoveKeyframe={ctx.onRemoveKeyframe}
+        />
+      )
+    default:
+      return null
+  }
+}
+
+// A single field can span a full row (its own section), or share a row with a sibling. We keep it
+// simple: render fields in order; the `st-f` grid + `st-row` pairing in CSS handles layout.
+function SchemaForm({ type, obj, onUpdate, ctx }) {
+  const sections = PROPERTY_SCHEMA[type] || []
+  return (
+    <>
+      <h3 className="st-insp-head">{PROPERTY_TITLES[type] || 'Properties'}{ctx.idLabel ? ` · ${ctx.idLabel}` : ''}</h3>
+      {sections.map((sec, si) => (
+        <section className="st-sec" key={si}>
+          {sec.title ? <div className="st-sec-h">{sec.title}</div> : null}
+          {sec.fields.map(f => <Field key={f.key} field={f} obj={obj} onUpdate={onUpdate} ctx={ctx} />)}
+          {sec.hint && <div className="st-hint">{sec.hint}</div>}
+        </section>
+      ))}
+    </>
+  )
+}
+
 export default function StudioInspector({
   projectId, doc, canvas, ffmpeg, selCut, selOverlayIndex, selAudio, selAudioObj, playhead, assets, sourceMetas,
-  onUpdateCut, onUpdateOverlay, onUpdateAudio, onSetKeyframes, onUpsertKeyframe, onRemoveKeyframe,
+  onUpdateCut, onUpdateOverlay, onNormalizeOverlay, onUpdateAudio, onSetKeyframes, onUpsertKeyframe, onRemoveKeyframe,
   onAddImage, onAddClip, onAddSfx, onSetMusic,
 }) {
   const selOverlay = selOverlayIndex >= 0 ? (doc?.overlays || [])[selOverlayIndex] : null
 
-  if (selCut) return (
-    <aside className="st-inspector">
-      <CutInspector
-        cut={selCut} canvas={canvas} ffmpeg={ffmpeg} assets={assets} meta={sourceMetas[selCut.source]}
-        onUpdate={(patch) => onUpdateCut(selCut.id, patch)}
-        NumField={NumField} TextField={TextField} SelectField={SelectField}
-      />
-    </aside>
-  )
+  // An IMAGE/VIDEO overlay with a STRING (anchor) position passes the schema but the renderer
+  // rejects it (named anchors are text-only). Normalize to an {x,y} object once so the saved doc
+  // is always renderable. Routed through onNormalizeOverlay (non-historied) so selecting such an
+  // overlay doesn't push an undo step. (Our factory emits an object; this only fires for
+  // agent-authored overlays.)
+  useEffect(() => {
+    if (selOverlay && overlayType(selOverlay) !== 'text' && typeof selOverlay.position === 'string') {
+      (onNormalizeOverlay || onUpdateOverlay)(selOverlayIndex, { position: anchorToXY(selOverlay.position, canvas) })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selOverlay, selOverlayIndex])
 
-  if (selOverlay) return (
-    <aside className="st-inspector">
-      <OverlayInspector
-        ov={selOverlay} index={selOverlayIndex} canvas={canvas} ffmpeg={ffmpeg} assets={assets} playhead={playhead}
-        onUpdate={(patch) => onUpdateOverlay(selOverlayIndex, patch)}
-        onSetKeyframes={onSetKeyframes} onUpsertKeyframe={onUpsertKeyframe} onRemoveKeyframe={onRemoveKeyframe}
-        NumField={NumField} TextField={TextField} SelectField={SelectField}
-      />
-    </aside>
-  )
+  if (selCut) {
+    // Derive the type from the selected object itself (not a doc re-lookup) so the panel is robust
+    // to a doc/selection mismatch: a video source → video_main, a still image → image_main.
+    const type = isImageSource(selCut.source) ? 'image_main' : 'video_main'
+    return (
+      <aside className="st-inspector">
+        <SchemaForm type={type} obj={selCut}
+          onUpdate={(patch) => onUpdateCut(selCut.id, patch)}
+          ctx={{ canvas, ffmpeg, assets, meta: sourceMetas[selCut.source], idLabel: selCut.id }} />
+      </aside>
+    )
+  }
 
-  if (selAudioObj) return (
-    <aside className="st-inspector">
-      <AudioInspector
-        obj={selAudioObj} kind={selAudio.audioKind} assets={assets}
-        onUpdate={onUpdateAudio} NumField={NumField} SelectField={SelectField}
-      />
-    </aside>
-  )
+  if (selOverlay) {
+    const ot = overlayType(selOverlay)
+    const type = ot === 'text' ? 'text' : ot === 'video' ? 'video_overlay' : 'image_overlay'
+    return (
+      <aside className="st-inspector">
+        <SchemaForm type={type} obj={selOverlay}
+          onUpdate={(patch) => onUpdateOverlay(selOverlayIndex, patch)}
+          ctx={{
+            canvas, ffmpeg, assets, playhead, overlayIndex: selOverlayIndex,
+            onSetKeyframes, onUpsertKeyframe, onRemoveKeyframe,
+          }} />
+      </aside>
+    )
+  }
+
+  if (selAudioObj) {
+    const type = selAudio.audioKind === 'music' ? 'music' : selAudio.audioKind === 'narration' ? 'narration' : 'sfx'
+    return (
+      <aside className="st-inspector">
+        <SchemaForm type={type} obj={selAudioObj} onUpdate={onUpdateAudio} ctx={{ canvas, assets }} />
+        <div className="st-hint">Delete with the 🗑 button in the timeline toolbar (⌫).</div>
+      </aside>
+    )
+  }
 
   // Nothing selected → the Assets tab (feat 4): clicking outside any clip shows assets, not a blank panel.
   return (
@@ -100,230 +285,5 @@ export default function StudioInspector({
       projectId={projectId} assets={assets}
       onAddImage={onAddImage} onAddClip={onAddClip} onAddSfx={onAddSfx} onSetMusic={onSetMusic}
     />
-  )
-}
-
-// ── audio (music bed / narration segment / sfx) ──────────────────────────────
-function AudioInspector({ obj, kind, assets, onUpdate, NumField, SelectField }) {
-  const music = assets?.kinds?.music || []
-  const audio = assets?.kinds?.audio || []
-  const pool = kind === 'music' ? [...music, ...audio] : [...audio, ...music]
-  const assetOpts = [
-    ...(pool.some(a => a.path === obj.asset_id) || !obj.asset_id ? [] : [{ value: obj.asset_id, label: `${obj.asset_id} (current)` }]),
-    ...pool.map(a => ({ value: a.path, label: a.name })),
-  ]
-  const title = kind === 'music' ? 'Music bed' : kind === 'narration' ? 'Narration' : 'Sound effect'
-
-  return (
-    <>
-      <h3 className="st-insp-head">{title}</h3>
-      <section className="st-sec">
-        <div className="st-sec-h">Asset</div>
-        <SelectField label="File" value={obj.asset_id ?? ''} options={assetOpts} onCommit={(v) => onUpdate({ asset_id: v })} />
-      </section>
-
-      {kind === 'music' ? (
-        <section className="st-sec">
-          <div className="st-sec-h">Levels</div>
-          <NumField label="Volume" value={obj.volume ?? 1} step={0.05} min={0} max={1} onCommit={(v) => onUpdate({ volume: v })} />
-          <div className="st-row">
-            <NumField label="Fade in" suffix="s" value={obj.fade_in_seconds ?? 0} step={0.1} min={0} onCommit={(v) => onUpdate({ fade_in_seconds: v })} />
-            <NumField label="Fade out" suffix="s" value={obj.fade_out_seconds ?? 0} step={0.1} min={0} onCommit={(v) => onUpdate({ fade_out_seconds: v })} />
-          </div>
-          <div className="st-hint">plays under the whole timeline (trimmed to the video length on render)</div>
-        </section>
-      ) : kind === 'narration' ? (
-        <section className="st-sec">
-          <div className="st-sec-h">Timing</div>
-          <div className="st-row">
-            <NumField label="Start" suffix="s" value={obj.start_seconds ?? 0} min={0} onCommit={(v) => onUpdate({ start_seconds: v })} />
-            <NumField label="End" suffix="s" value={obj.end_seconds ?? 0} min={0} onCommit={(v) => onUpdate({ end_seconds: v })} />
-          </div>
-        </section>
-      ) : (
-        <section className="st-sec">
-          <div className="st-sec-h">Timing &amp; level</div>
-          <NumField label="Start" suffix="s" value={obj.start_seconds ?? 0} min={0} onCommit={(v) => onUpdate({ start_seconds: v })} />
-          <NumField label="Volume" value={obj.volume ?? 1} step={0.05} min={0} max={1} onCommit={(v) => onUpdate({ volume: v })} />
-          <div className="st-hint">plays once from the start point</div>
-        </section>
-      )}
-
-      <div className="st-hint">Delete with the 🗑 button in the timeline toolbar (⌫).</div>
-    </>
-  )
-}
-
-// ── cut ──────────────────────────────────────────────────────────────────────
-function CutInspector({ cut, canvas, ffmpeg, assets, meta, onUpdate, NumField, TextField, SelectField }) {
-  const videos = assets?.kinds?.video || []
-  const srcOpts = [
-    ...(videos.some(v => v.path === cut.source) ? [] : [{ value: cut.source, label: `${cut.source} (current)` }]),
-    ...videos.map(v => ({ value: v.path, label: v.name })),
-  ]
-  // Crop is applied in SOURCE pixels, so default/seed it from the clip's real dimensions
-  // (from ffprobe), not the output canvas — they differ and canvas px would crop wrong.
-  const sw = meta?.width || canvas.width
-  const sh = meta?.height || canvas.height
-  const crop = cut.transform?.crop || null
-  const setCrop = (patch) => {
-    const next = { ...(crop || {}), ...patch }
-    onUpdate({ transform: { ...(cut.transform || {}), crop: next } })
-  }
-  const clearCrop = () => {
-    const t = { ...(cut.transform || {}) }
-    delete t.crop
-    onUpdate({ transform: t })
-  }
-
-  return (
-    <>
-      <h3 className="st-insp-head">Clip · {cut.id}</h3>
-
-      <section className="st-sec">
-        <div className="st-sec-h">Source</div>
-        <SelectField label="Clip" value={cut.source} options={srcOpts} onCommit={(v) => onUpdate({ source: v })} />
-        {meta?.duration != null && <div className="st-hint">source length {meta.duration.toFixed(2)}s{meta.width ? ` · ${meta.width}×${meta.height}` : ''}</div>}
-      </section>
-
-      <section className="st-sec">
-        <div className="st-sec-h">Trim & speed</div>
-        <div className="st-row">
-          <NumField label="In" suffix="s" value={cut.in_seconds} min={0} onCommit={(v) => onUpdate({ in_seconds: v })} />
-          <NumField label="Out" suffix="s" value={cut.out_seconds} min={0} onCommit={(v) => onUpdate({ out_seconds: v })} />
-        </div>
-        <NumField label="Speed" suffix="×" value={cut.speed ?? 1} step={0.1} min={0.1} onCommit={(v) => onUpdate({ speed: v })} />
-        <div className="st-speed">
-          {SPEED_PRESETS.map(s => (
-            <button
-              key={s}
-              className={`st-chip ${(Number(cut.speed) || 1) === s ? 'on' : ''}`}
-              onClick={() => onUpdate({ speed: s })}
-              title={`${s}× speed`}
-            >{s}×</button>
-          ))}
-        </div>
-      </section>
-
-      <section className="st-sec">
-        <div className="st-sec-h">Crop {crop && <button className="st-link" onClick={clearCrop}>remove</button>}</div>
-        {crop ? (
-          <>
-            <div className="st-row">
-              <NumField label="X" suffix="px" value={crop.x ?? 0} step={1} min={0} onCommit={(v) => setCrop({ x: v })} />
-              <NumField label="Y" suffix="px" value={crop.y ?? 0} step={1} min={0} onCommit={(v) => setCrop({ y: v })} />
-            </div>
-            <div className="st-row">
-              <NumField label="W" suffix="px" value={crop.width ?? sw} step={1} min={1} onCommit={(v) => setCrop({ width: v })} />
-              <NumField label="H" suffix="px" value={crop.height ?? sh} step={1} min={1} onCommit={(v) => setCrop({ height: v })} />
-            </div>
-            <div className="st-hint">source pixels, applied before scaling to canvas</div>
-          </>
-        ) : (
-          <button className="st-link" onClick={() => setCrop({ x: 0, y: 0, width: sw, height: sh })}>+ add crop</button>
-        )}
-      </section>
-
-      <section className="st-sec">
-        <div className="st-sec-h">Transitions</div>
-        <SelectField label="In" value={cut.transition_in ?? ''} options={TRANSITIONS} onCommit={(v) => onUpdate({ transition_in: v })} />
-        <SelectField label="Out" value={cut.transition_out ?? ''} options={TRANSITIONS} onCommit={(v) => onUpdate({ transition_out: v })} />
-        <NumField label="Duration" suffix="s" value={cut.transition_duration ?? 0.5} step={0.1} min={0.1} max={2} onCommit={(v) => onUpdate({ transition_duration: v })} />
-      </section>
-
-      <section className="st-sec">
-        <TextField label="Note (optional)" value={cut.reason ?? ''} onCommit={(v) => onUpdate({ reason: v })} />
-      </section>
-    </>
-  )
-}
-
-// ── overlay ────────────────────────────────────────────────────────────────
-function OverlayInspector({ ov, index, canvas, ffmpeg, assets, playhead, onUpdate, onSetKeyframes, onUpsertKeyframe, onRemoveKeyframe, NumField, TextField, SelectField }) {
-  const kind = overlayKind(ov)
-  const images = assets?.kinds?.images || []
-  const videos = assets?.kinds?.video || []
-  const assetOpts = [...images, ...videos]
-  const pos = ov.position
-  const anchorMode = typeof pos === 'string'
-
-  // An IMAGE/VIDEO overlay with a STRING (anchor) position passes the schema but the
-  // renderer rejects it (named anchors are text-only). Normalize it to an object once so
-  // the saved doc is always renderable. (Our factory already emits an object; this only
-  // fires for agent/pipeline-authored overlays.)
-  useEffect(() => {
-    if (kind !== 'text' && typeof ov.position === 'string') {
-      onUpdate({ position: anchorToXY(ov.position, canvas) })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, ov.position])
-
-  const setPosObj = (patch) => onUpdate({ position: { ...(anchorMode ? {} : pos || {}), ...patch } })
-
-  return (
-    <>
-      <h3 className="st-insp-head">{kind === 'text' ? 'Text overlay' : 'Image overlay'}</h3>
-
-      <section className="st-sec">
-        <div className="st-sec-h">Timing</div>
-        <div className="st-row">
-          <NumField label="Start" suffix="s" value={ov.start_seconds} min={0} onCommit={(v) => onUpdate({ start_seconds: v })} />
-          <NumField label="End" suffix="s" value={ov.end_seconds} min={0} onCommit={(v) => onUpdate({ end_seconds: v })} />
-        </div>
-        <NumField label="Opacity" value={ov.opacity ?? 1} step={0.05} min={0} max={1} onCommit={(v) => onUpdate({ opacity: v })} />
-      </section>
-
-      {kind === 'text' ? (
-        <section className="st-sec">
-          <div className="st-sec-h">Text</div>
-          <TextField label="Content" value={ov.text ?? ''} area onCommit={(v) => { if (v.trim() !== '') onUpdate({ text: v }) }} />
-          <div className="st-hint">text can’t be empty</div>
-          <div className="st-row">
-            <NumField label="Font size" suffix="px" value={ov.font_size ?? 48} step={1} min={1} onCommit={(v) => onUpdate({ font_size: v })} />
-            <TextField label="Color" value={ov.color ?? 'white'} onCommit={(v) => onUpdate({ color: v })} />
-          </div>
-          <SelectField label="Anchor" value={anchorMode ? pos : 'bottom-center'}
-            options={TEXT_ANCHORS.map(a => ({ value: a, label: a }))}
-            onCommit={(v) => onUpdate({ position: v })} />
-          <div className="st-sec-h" style={{ marginTop: '0.5rem' }}>Background box</div>
-          <div className="st-row">
-            <NumField label="Box opacity" value={ov.box?.opacity ?? 0.5} step={0.05} min={0} max={1}
-              onCommit={(v) => onUpdate({ box: { ...(ov.box || { color: 'black' }), opacity: v } })} />
-            <NumField label="Box padding" suffix="px" value={ov.box?.padding ?? 10} step={1} min={0}
-              onCommit={(v) => onUpdate({ box: { ...(ov.box || { color: 'black' }), padding: v } })} />
-          </div>
-        </section>
-      ) : (
-        <section className="st-sec">
-          <div className="st-sec-h">Image / video</div>
-          <SelectField label="Asset" value={ov.asset_id ?? ''}
-            options={[...(assetOpts.some(a => a.path === ov.asset_id) ? [] : [{ value: ov.asset_id, label: `${ov.asset_id} (current)` }]), ...assetOpts.map(a => ({ value: a.path, label: a.name }))]}
-            onCommit={(v) => onUpdate({ asset_id: v })} />
-          <div className="st-row">
-            <NumField label="X" suffix="px" value={anchorMode ? 0 : (pos?.x ?? 0)} step={1} onCommit={(v) => setPosObj({ x: v })} />
-            <NumField label="Y" suffix="px" value={anchorMode ? 0 : (pos?.y ?? 0)} step={1} onCommit={(v) => setPosObj({ y: v })} />
-          </div>
-          <div className="st-row">
-            <NumField label="Width" suffix="px" value={anchorMode ? '' : (pos?.width ?? '')} step={1} min={1} onCommit={(v) => setPosObj({ width: v })} />
-            <NumField label="Height" suffix="px" value={anchorMode ? '' : (pos?.height ?? '')} step={1} min={1} onCommit={(v) => setPosObj({ height: v })} />
-          </div>
-          <div className="st-hint">leave height empty to keep aspect ratio</div>
-          <div className="st-sec-h" style={{ marginTop: '0.5rem' }}>Source audio</div>
-          <label className="st-check">
-            <input type="checkbox" checked={!!ov.audio_mix?.enabled}
-              onChange={(e) => onUpdate({ audio_mix: { ...(ov.audio_mix || { volume: 1 }), enabled: e.target.checked } })} />
-            mix this clip’s audio into the timeline
-          </label>
-          {ov.audio_mix?.enabled &&
-            <NumField label="Volume" value={ov.audio_mix?.volume ?? 1} step={0.1} min={0} max={2}
-              onCommit={(v) => onUpdate({ audio_mix: { ...(ov.audio_mix || {}), volume: v } })} />}
-        </section>
-      )}
-
-      <StudioKeyframes
-        ov={ov} index={index} kind={kind} ffmpeg={ffmpeg} playhead={playhead}
-        onSetKeyframes={onSetKeyframes} onUpsertKeyframe={onUpsertKeyframe} onRemoveKeyframe={onRemoveKeyframe}
-      />
-    </>
   )
 }

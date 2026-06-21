@@ -464,6 +464,43 @@ class VideoCompose(BaseTool):
         return path.suffix.lower() in VideoCompose._IMAGE_EXTENSIONS
 
     @staticmethod
+    def _segment_base_vf(
+        cut: dict[str, Any], idx: int, target_w: int, target_h: int, fps_str: str
+    ) -> tuple[Optional[str], list[str]]:
+        """Shared per-segment video filter chain (crop → scale → pad → setsar → fps)
+        used by BOTH video and still-image cuts so they normalize to the canvas the
+        same way. Crop (if present) runs first, in SOURCE pixels (matches the schema).
+        Returns (error_message_or_None, vf_parts). Speed/setpts is NOT added here —
+        the video branch appends setpts and the image branch folds speed into its
+        looped length, so each owns its timing."""
+        vf_parts: list[str] = []
+        crop = (cut.get("transform") or {}).get("crop") or {}
+        if crop:
+            crop_w, crop_h = crop.get("width"), crop.get("height")
+            if (
+                not isinstance(crop_w, (int, float))
+                or not isinstance(crop_h, (int, float))
+                or crop_w <= 0 or crop_h <= 0
+            ):
+                return (
+                    f"cuts[{idx}].transform.crop requires positive numeric "
+                    f"width and height; got {crop!r}",
+                    [],
+                )
+            crop_x = int(round(crop.get("x", 0) or 0))
+            crop_y = int(round(crop.get("y", 0) or 0))
+            vf_parts.append(
+                f"crop={int(round(crop_w))}:{int(round(crop_h))}:{crop_x}:{crop_y}"
+            )
+        vf_parts += [
+            f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease",
+            f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black",
+            "setsar=1",
+            f"fps={fps_str}",
+        ]
+        return (None, vf_parts)
+
+    @staticmethod
     def _has_audio_stream(path: Path) -> bool:
         """Return True iff ffprobe reports at least one audio stream.
 
@@ -1168,15 +1205,52 @@ class VideoCompose(BaseTool):
                 speed = cut.get("speed", 1.0)
 
                 if self._is_image(source):
-                    return ToolResult(
-                        success=False,
-                        error=(
-                            f"Still image '{source.name}' in cuts. "
-                            "Use operation='render' (auto-routes to Remotion) "
-                            "or operation='remotion_render' for compositions "
-                            "with images, animations, or component scenes."
-                        ),
+                    # Reject a zero/negative-duration image cut up front: `-loop 1` with a
+                    # non-positive `-t` makes ffmpeg loop the still FOREVER (infinite encode →
+                    # hang + disk fill). The video branch fails fast on this implicitly; mirror it.
+                    if duration <= 0:
+                        return ToolResult(
+                            success=False,
+                            error=(
+                                f"cuts[{i}]: image source requires out_seconds > in_seconds "
+                                f"(got duration {duration})"
+                            ),
+                        )
+                    # Still image as a MAIN-timeline clip: loop it into a video
+                    # segment of the cut's PROJECT duration. Speed has no real meaning
+                    # for a still, so fold it into the looped length (duration / speed)
+                    # to match the timeline's cutDuration without a setpts pass. Stills
+                    # carry no audio — synthesize a silent stereo track (mirrors the
+                    # silent-video path) so every concat segment has the same layout.
+                    seg_seconds = duration / speed if speed and speed > 0 else duration
+                    vf_err, vf_parts = self._segment_base_vf(
+                        cut, i, target_w, target_h, fps_str
                     )
+                    if vf_err:
+                        return ToolResult(success=False, error=vf_err)
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-loop", "1",
+                        "-t", str(seg_seconds),
+                        "-i", str(source),
+                        "-f", "lavfi",
+                        "-t", str(seg_seconds),
+                        "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                        "-filter:v", ",".join(vf_parts),
+                        "-map", "0:v:0",
+                        "-map", "1:a:0",
+                        "-c:v", codec,
+                        "-crf", str(crf),
+                        "-preset", preset,
+                        "-pix_fmt", "yuv420p",
+                        "-r", fps_str,
+                        "-c:a", "aac",
+                        "-b:a", "192k",
+                        "-ar", "48000",
+                        "-ac", "2",
+                        str(seg_path),
+                    ]
+                    self.run_command(cmd)
                 else:
                     # Video source: trim to segment.
                     #
@@ -1210,33 +1284,11 @@ class VideoCompose(BaseTool):
                     # Target canvas comes from compose_target > profile >
                     # 1920x1080@30 (resolved above). Smaller sources letterbox;
                     # larger ones downscale.
-                    vf_parts: list[str] = []
-                    crop = (cut.get("transform") or {}).get("crop") or {}
-                    if crop:
-                        crop_w, crop_h = crop.get("width"), crop.get("height")
-                        if (
-                            not isinstance(crop_w, (int, float))
-                            or not isinstance(crop_h, (int, float))
-                            or crop_w <= 0 or crop_h <= 0
-                        ):
-                            return ToolResult(
-                                success=False,
-                                error=f"cuts[{i}].transform.crop requires positive "
-                                      f"numeric width and height; got {crop!r}",
-                            )
-                        crop_x = int(round(crop.get("x", 0) or 0))
-                        crop_y = int(round(crop.get("y", 0) or 0))
-                        # Crop runs BEFORE scale/pad so coordinates are in
-                        # source pixels, matching the schema's intent.
-                        vf_parts.append(
-                            f"crop={int(round(crop_w))}:{int(round(crop_h))}:{crop_x}:{crop_y}"
-                        )
-                    vf_parts += [
-                        f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease",
-                        f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black",
-                        "setsar=1",
-                        f"fps={fps_str}",
-                    ]
+                    vf_err, vf_parts = self._segment_base_vf(
+                        cut, i, target_w, target_h, fps_str
+                    )
+                    if vf_err:
+                        return ToolResult(success=False, error=vf_err)
                     af_parts: list[str] = []
                     if speed != 1.0:
                         vf_parts.append(f"setpts={1.0/speed}*PTS")
@@ -3214,6 +3266,14 @@ class VideoCompose(BaseTool):
             return ToolResult(success=False, error=f"Input not found: {input_path}")
         if not overlays:
             return ToolResult(success=False, error="No overlays provided")
+
+        # Z-order: composite in ASCENDING `track` so a higher track lands on top
+        # (rendered later in the filter chain). Python's sort is stable, so overlays
+        # sharing a track keep their array order, and the default track=0 makes this a
+        # no-op for legacy docs (array-order z-stacking preserved). PiP entries lifted
+        # from cuts[].layer='overlay' have no track → 0, so they stay under track-0
+        # overlays[], unchanged from before.
+        overlays = sorted(overlays, key=lambda o: int((o or {}).get("track") or 0))
 
         # Build complex filter for each overlay
         input_args = ["-i", str(input_path)]

@@ -46,10 +46,19 @@ export const EASINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'spring'
 export const KF_DIMS_IMAGE = ['x', 'y', 'scale', 'opacity']
 export const KF_DIMS_TEXT = ['x', 'y', 'opacity']
 
-/** 'text' | 'image' — an overlay with explicit type wins; else text iff it has `text`. */
+/** 'text' | 'image' — an overlay with explicit type wins; else text iff it has `text`.
+ * (Keyframe dims treat video like image, so this stays a two-way split for `kfDimsFor`.) */
 export function overlayKind(ov) {
   if (ov?.type === 'text') return 'text'
   if (ov?.type === 'image' || ov?.type === 'video') return 'image'
+  return ov?.text != null && ov?.asset_id == null ? 'text' : 'image'
+}
+
+/** 'text' | 'image' | 'video' — the finer three-way split the inspector/preview need. */
+export function overlayType(ov) {
+  if (ov?.type === 'text') return 'text'
+  if (ov?.type === 'video') return 'video'
+  if (ov?.type === 'image') return 'image'
   return ov?.text != null && ov?.asset_id == null ? 'text' : 'image'
 }
 
@@ -57,8 +66,45 @@ export function kfDimsFor(ov) {
   return overlayKind(ov) === 'text' ? KF_DIMS_TEXT : KF_DIMS_IMAGE
 }
 
-/** A schema-valid text overlay over [start,end]. position default bottom-center (anchor). */
-export function newTextOverlay({ start = 0, end = 3 } = {}) {
+// Still-image source extensions — kept in sync with video_compose.py `_IMAGE_EXTENSIONS`
+// (note .gif is intentionally absent: GIFs are video-like on both paths).
+export const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp']
+
+/** True if a cut source path is a still image (→ image_main on the main timeline). */
+export function isImageSource(path) {
+  const p = String(path || '').toLowerCase()
+  return IMAGE_EXTENSIONS.some(ext => p.endsWith(ext))
+}
+
+/**
+ * The clip-type key for the current selection — drives which declarative property schema the
+ * inspector renders. One of: video_main | image_main (cuts) · video_overlay | image_overlay |
+ * text (overlays) · music | sfx | narration (audio). Null if nothing/no match is selected.
+ */
+export function clipType(selection, doc) {
+  if (!selection) return null
+  if (selection.kind === 'cut') {
+    const cut = (doc?.cuts || []).find(c => c.id === selection.id)
+    if (!cut) return null
+    return isImageSource(cut.source) ? 'image_main' : 'video_main'
+  }
+  if (selection.kind === 'overlay') {
+    const ov = (doc?.overlays || [])[selection.index]
+    if (!ov) return null
+    const t = overlayType(ov)
+    return t === 'text' ? 'text' : t === 'video' ? 'video_overlay' : 'image_overlay'
+  }
+  if (selection.kind === 'audio') {
+    return selection.audioKind === 'music' ? 'music'
+      : selection.audioKind === 'sfx' ? 'sfx' : 'narration'
+  }
+  return null
+}
+
+/** A schema-valid text overlay over [start,end], CENTERED by default (feat 4): a new overlay
+ * lands in the middle of the canvas, then the user drags it. 'center' is a valid anchor on the
+ * drawtext path; it becomes an {x,y} object on the first canvas drag (drawtext accepts both). */
+export function newTextOverlay({ start = 0, end = 3, track = 0 } = {}) {
   return {
     type: 'text',
     text: 'Your text',
@@ -67,22 +113,47 @@ export function newTextOverlay({ start = 0, end = 3 } = {}) {
     box: { color: 'black', opacity: 0.5, padding: 12 },
     start_seconds: round3(start),
     end_seconds: round3(end),
-    position: 'bottom-center',
+    position: 'center',
     opacity: 1,
+    track,
   }
 }
 
-/** A schema-valid image overlay (asset_id + OBJECT position; named anchors are text-only). */
-export function newImageOverlay({ assetId, start = 0, end = 3, canvas } = {}) {
+/** Center an asset-overlay box of `widthFrac` of the canvas width. Width-only (height stays
+ * auto so the renderer keeps aspect); y is estimated assuming a square box, so the box lands
+ * near the middle — the user fine-tunes by dragging on the canvas. */
+function centeredAssetPosition(canvas, widthFrac) {
   const w = canvas?.width || 1920
   const h = canvas?.height || 1080
+  const ow = Math.round(w * widthFrac)
+  return { x: Math.round((w - ow) / 2), y: Math.max(0, Math.round((h - ow) / 2)), width: ow }
+}
+
+/** A schema-valid image overlay (asset_id + OBJECT position; named anchors are text-only),
+ * centered by default. */
+export function newImageOverlay({ assetId, start = 0, end = 3, canvas, track = 0 } = {}) {
   return {
     type: 'image',
     asset_id: assetId,
     start_seconds: round3(start),
     end_seconds: round3(end),
-    position: { x: Math.round(w * 0.05), y: Math.round(h * 0.05), width: Math.round(w * 0.25) },
+    position: centeredAssetPosition(canvas, 0.3),
     opacity: 1,
+    track,
+  }
+}
+
+/** A schema-valid VIDEO overlay (PiP) — type='video', centered by default, a little larger
+ * than an image overlay. Audio off by default (toggle via audio_mix in the inspector). */
+export function newVideoOverlay({ assetId, start = 0, end = 3, canvas, track = 0 } = {}) {
+  return {
+    type: 'video',
+    asset_id: assetId,
+    start_seconds: round3(start),
+    end_seconds: round3(end),
+    position: centeredAssetPosition(canvas, 0.4),
+    opacity: 1,
+    track,
   }
 }
 

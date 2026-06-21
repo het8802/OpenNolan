@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api.js'
 import * as interp from '../editor/interp.js'
-import { isFfmpeg, newTextOverlay, newImageOverlay } from './model.js'
+import { isFfmpeg, newTextOverlay, newImageOverlay, newVideoOverlay } from './model.js'
 import StudioToolbar from './StudioToolbar.jsx'
 import StudioTimeline from './StudioTimeline.jsx'
 import StudioInspector from './StudioInspector.jsx'
@@ -366,22 +366,59 @@ export default function Studio({ projectId, state, onClose, chat }) {
     setSelection({ kind: 'overlay', index: at })
   }, [playhead, doc, commit])
 
-  const onAddImage = useCallback((assetId, atTime) => {
+  const onAddImage = useCallback((assetId, atTime, track = 0) => {
     const start = atTime != null ? Math.max(0, atTime) : Math.min(playhead, Math.max(0, interp.timelineDuration(doc) - 1))
     const at = (doc?.overlays || []).length
-    commit(d => interp.addOverlay(d, newImageOverlay({ assetId, start, end: start + 3, canvas: interp.canvasOf(d) })))
+    commit(d => interp.addOverlay(d, newImageOverlay({ assetId, start, end: start + 3, canvas: interp.canvasOf(d), track })))
     setSelection({ kind: 'overlay', index: at })
   }, [playhead, doc, commit])
 
-  // Drop an asset from the Assets tab onto the timeline at project time `t`. Declared AFTER the
-  // add-handlers it depends on so they aren't read in their temporal dead zone (a TDZ
-  // ReferenceError here crashes the whole editor on mount, which the build can't catch).
-  const onAssetDrop = useCallback((kind, path, t) => {
-    if (kind === 'images') onAddImage(path, t)
-    else if (kind === 'video') onAddClip(path, t)
-    else if (kind === 'music') onSetMusic(path)
-    else onAddSfx(path, t)
-  }, [onAddImage, onAddClip, onSetMusic, onAddSfx])
+  const onAddVideoOverlay = useCallback((assetId, atTime, track = 0) => {
+    const start = atTime != null ? Math.max(0, atTime) : Math.min(playhead, Math.max(0, interp.timelineDuration(doc) - 1))
+    const meta = sourceMetas[assetId]
+    const len = meta?.duration ? Math.min(meta.duration, 6) : 4
+    const at = (doc?.overlays || []).length
+    commit(d => interp.addOverlay(d, newVideoOverlay({ assetId, start, end: start + len, canvas: interp.canvasOf(d), track })))
+    setSelection({ kind: 'overlay', index: at })
+  }, [playhead, doc, commit, sourceMetas])
+
+  // Drop an asset from the Assets tab onto the timeline at project time `t`. The drop TARGET
+  // ({lane, track}) decides MAIN vs OVERLAY: a drop on the cuts lane becomes a main-timeline clip
+  // (video_main or image_main); a drop on an overlay track lane becomes an overlay at that track;
+  // music/audio always route to the bed / SFX regardless of lane. Declared AFTER the add-handlers
+  // it depends on so they aren't read in their temporal dead zone (a TDZ ReferenceError here
+  // crashes the whole editor on mount, which the build can't catch).
+  const onAssetDrop = useCallback((kind, path, t, target = {}) => {
+    const { lane, track = 0 } = target
+    if (kind === 'music') { onSetMusic(path); return }
+    if (kind === 'audio') { onAddSfx(path, t); return }
+    if (lane === 'cuts') { onAddClip(path, t); return } // image or video → main-timeline clip
+    if (kind === 'video') onAddVideoOverlay(path, t, track)
+    else onAddImage(path, t, track) // images → image overlay at the dropped track
+  }, [onAddImage, onAddVideoOverlay, onAddClip, onSetMusic, onAddSfx])
+
+  // Overlay timeline drag (feat 3): move on absolute time + change track, or edge-trim. Uses the
+  // live/snapshot pattern — onOverlayDragBegin snapshots once at pointerdown so a whole drag is one
+  // undo step; the per-frame move/trim go through `live` (no history).
+  const onOverlayMove = useCallback((index, patch) => live(d => interp.moveOverlay(d, index, patch)), [live])
+  const onOverlayTrim = useCallback((index, patch) => live(d => interp.trimOverlay(d, index, patch)), [live])
+  const onOverlayDragBegin = useCallback(() => snapshot(), [snapshot])
+
+  // Canvas drag-to-position (feat 4): merge {x,y} (canvas px) into the overlay's position object,
+  // converting a text anchor string to an object on the first drag. Live (no per-frame history) —
+  // onOverlayDragBegin already snapshotted once at pointerdown.
+  const onOverlayPosition = useCallback((index, xy) => live(d => {
+    const ov = d?.overlays?.[index]
+    if (!ov) return d
+    const cur = ov.position && typeof ov.position === 'object' ? ov.position : {}
+    return interp.updateOverlay(d, index, { position: { ...cur, x: Math.round(xy.x), y: Math.round(xy.y) } })
+  }), [live])
+  const onSelectOverlay = useCallback((index) => setSelection({ kind: 'overlay', index }), [])
+
+  // Quietly self-heal an agent-authored image/video overlay whose position is a string anchor
+  // (the renderer rejects that for non-text). Routed through `live` — NOT `commit` — so merely
+  // SELECTING such an overlay never pushes a phantom undo step or wipes the redo stack.
+  const onNormalizeOverlay = useCallback((index, patch) => live(d => interp.updateOverlay(d, index, patch)), [live])
 
   const onCanvas = useCallback(({ width, height }) => {
     commit(d => interp.setCanvas(d, { width, height }))
@@ -477,9 +514,11 @@ export default function Studio({ projectId, state, onClose, chat }) {
               onClick={() => setPanels(p => ({ ...p, agentOpen: true, agentW: Math.max(AGENT_MIN, p.agentW) }))}>›</button>
           ))}
           <StudioPreview
-            projectId={projectId} doc={doc} playhead={playhead}
+            projectId={projectId} doc={doc} canvas={canvas} playhead={playhead}
             previewMode={previewMode} renderPath={renderPath} renderVersion={renderVersion}
-            playing={playing} onScrub={setPlayhead} onPlayingChange={setPlaying}
+            playing={playing} selection={selection}
+            onScrub={setPlayhead} onPlayingChange={setPlaying}
+            onSelectOverlay={onSelectOverlay} onOverlayPosition={onOverlayPosition} onOverlayDragBegin={onOverlayDragBegin}
           />
           {panels.inspectorOpen ? (
             <>
@@ -491,7 +530,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
                   selCut={selCut} selOverlayIndex={selOverlayIndex} playhead={playhead}
                   selAudio={selAudio} selAudioObj={selAudioObj}
                   assets={assets} sourceMetas={sourceMetas}
-                  onUpdateCut={onUpdateCut} onUpdateOverlay={onUpdateOverlay} onUpdateAudio={onUpdateAudio}
+                  onUpdateCut={onUpdateCut} onUpdateOverlay={onUpdateOverlay} onNormalizeOverlay={onNormalizeOverlay} onUpdateAudio={onUpdateAudio}
                   onSetKeyframes={onSetKeyframes} onUpsertKeyframe={onUpsertKeyframe} onRemoveKeyframe={onRemoveKeyframe}
                   onAddImage={onAddImage} onAddClip={onAddClip} onAddSfx={onAddSfx} onSetMusic={onSetMusic}
                 />
@@ -513,6 +552,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
                 selection={selection} sourceMetas={sourceMetas} playing={playing}
                 onSeek={seekFromUser} onSelect={setSelection} onTrim={onTrim} onTrimBegin={onTrimBegin}
                 onReorder={onReorder} onZoom={setZoom} onAssetDrop={onAssetDrop}
+                onOverlayMove={onOverlayMove} onOverlayTrim={onOverlayTrim} onOverlayDragBegin={onOverlayDragBegin}
                 onTogglePlay={togglePlay} onSplit={onSplit} onDuplicate={onDuplicate} onDelete={onDelete}
               />
             </div>

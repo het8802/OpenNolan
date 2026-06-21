@@ -84,6 +84,33 @@ short — add a pointer, not an essay.
 - **Smooth playhead (feat 6):** drive playback + scrub with `requestAnimationFrame`. The red
   line reads time → px every frame; it never stores px. A user scrub pauses playback.
 
+### Overlay tracks · per-type props · canvas editing (later additions)
+
+- **Overlay tracks (z-order):** overlays carry a `track` integer (schema field;
+  `additionalProperties:false`, default 0 = legacy array-order). The FFmpeg `_overlay` pass
+  **stable-sorts overlays by `track`** → higher track composites on top. The timeline draws one
+  lane per track (highest on top) plus an empty top lane for adding; placement is **derived** from
+  `interp.overlayTracks(doc)`, never stored. Drop target decides main-vs-overlay: cuts lane → a
+  main clip, overlay track lane → an overlay at that track.
+- **Draggable overlays:** overlays move on **absolute** project time (`interp.moveOverlay` — start
+  preserves duration AND shifts keyframe `t` by the same delta; vertical drag sets `track`) and
+  edge-trim (`interp.trimOverlay`). Same pointer model as cuts; snapshot **lazily on first move**
+  (via `spec.onBegin`) so a bare click on a handle/overlay is a pure select with no undo entry.
+- **Per-type property schema:** the inspector renders from the declarative `studio/propertySchema.js`
+  (7 types: `video_main`/`image_main`/`video_overlay`/`image_overlay`/`text`/`music`/`sfx`, +
+  narration). Type is derived from the selected OBJECT (`isImageSource`/`overlayType`), not a doc
+  re-lookup. Fields bind to a dotted `path` via `getAtPath`/`buildPatch` and commit through the
+  same `interp` mutators (Save never 422s). Special controls (speed presets / crop / audio-mix /
+  keyframes / text-position) render bespoke. image_overlay has NO audio-mix; image_main has
+  duration + no speed.
+- **WYSIWYG canvas (preview == export):** source mode renders a **canvas-aspect safe frame**
+  (`.st-safe-frame`, `object-fit:contain` mirroring the renderer's scale+pad). Overlays are drawn
+  in **canvas coordinates** mapped to the frame (`scale = frameW / canvas.width`, measured via
+  ResizeObserver — overlays gate on `scale > 0`), z-ordered by `track`. Drag-to-position writes
+  `position.{x,y}` in canvas px (text anchor → object on first drag; drag origin for
+  object/scale-keyframed overlays comes from canvas x/y, NOT the post-transform bbox). Still images
+  are now valid **main-timeline cuts** (the FFmpeg path loops them; guarded against 0-duration).
+
 ## Testing
 
 - **Run:** `npm test` in `web/` (vitest). Component tests need jsdom (configured in

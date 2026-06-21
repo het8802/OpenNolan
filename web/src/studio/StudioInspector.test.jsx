@@ -37,13 +37,21 @@ describe('selection routing', () => {
     expect(setData).toHaveBeenCalledWith('application/x-opennolan-asset', JSON.stringify({ kind: 'images', path: 'images/logo.png' }))
   })
 
-  it('shows the clip inspector for a selected cut', () => {
+  it('shows the video-clip inspector for a selected video cut', () => {
     const selCut = { id: 'c1', source: 'a.mp4', in_seconds: 0, out_seconds: 4, speed: 1 }
     const { getByText } = setup({ selCut })
-    expect(getByText('Clip · c1')).toBeInTheDocument()
+    expect(getByText('Video clip · c1')).toBeInTheDocument()
     expect(getByText('Source')).toBeInTheDocument()
     expect(getByText('Trim & speed')).toBeInTheDocument()
     expect(getByText('Transitions')).toBeInTheDocument()
+  })
+
+  it('shows the image-clip inspector (image_main) for a still image cut — duration, no speed', () => {
+    const selCut = { id: 'c2', source: 'photo.png', in_seconds: 0, out_seconds: 5 }
+    const { getByText, queryByText } = setup({ selCut })
+    expect(getByText('Image clip · c2')).toBeInTheDocument()
+    expect(getByText('Duration')).toBeInTheDocument()
+    expect(queryByText('Trim & speed')).not.toBeInTheDocument()
   })
 
   it('shows the text-overlay inspector', () => {
@@ -54,11 +62,20 @@ describe('selection routing', () => {
     expect(getByText('Text')).toBeInTheDocument()
   })
 
-  it('shows the image-overlay inspector with a source-audio toggle', () => {
-    const doc = { overlays: [{ type: 'image', asset_id: 'logo.png', start_seconds: 0, end_seconds: 3, position: { x: 10, y: 10, width: 200 }, opacity: 1 }] }
-    const { getByText } = setup({ doc, selOverlayIndex: 0 })
+  it('shows the image-overlay inspector (track + position, NO source-audio — images are silent)', () => {
+    const doc = { overlays: [{ type: 'image', asset_id: 'logo.png', start_seconds: 0, end_seconds: 3, position: { x: 10, y: 10, width: 200 }, opacity: 1, track: 0 }] }
+    const { getByText, queryByText } = setup({ doc, selOverlayIndex: 0 })
     expect(getByText('Image overlay')).toBeInTheDocument()
-    expect(getByText('Image / video')).toBeInTheDocument()
+    expect(getByText('Position & size')).toBeInTheDocument()
+    expect(getByText('Track (z-layer)')).toBeInTheDocument()
+    expect(queryByText('Source audio')).not.toBeInTheDocument()
+  })
+
+  it('shows the video-overlay inspector with a source-audio toggle', () => {
+    const doc = { overlays: [{ type: 'video', asset_id: 'pip.mp4', start_seconds: 0, end_seconds: 3, position: { x: 10, y: 10, width: 200 }, opacity: 1, track: 1 }] }
+    const { getByText } = setup({ doc, selOverlayIndex: 0 })
+    expect(getByText('Video overlay')).toBeInTheDocument()
+    expect(getByText('Position & size')).toBeInTheDocument()
     expect(getByText('Source audio')).toBeInTheDocument()
   })
 

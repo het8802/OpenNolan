@@ -6,6 +6,7 @@ import {
   removeCut, duplicateCut, reorderCut, addCut, addOverlay, removeOverlay,
   setCanvas, canvasOf, audioClips,
   setMusic, updateMusic, removeMusic, addSfx, updateSfx, removeSfx, updateNarration, removeNarration,
+  overlayTracks, moveOverlay, trimOverlay, MIN_OVERLAY_SPAN,
 } from './interp.js'
 
 describe('interpolateAt (mirrors FFmpeg _piecewise_linear_expr)', () => {
@@ -451,5 +452,84 @@ describe('interpolateAt + cutAtTime edge cases (placement seams)', () => {
     ] }
     expect(cutAtTime(doc, 3).index).toBe(1)      // seam belongs to cut b
     expect(cutAtTime(doc, 2.999).index).toBe(0)
+  })
+})
+
+describe('overlay track (z-layer) + sanitize', () => {
+  it('sanitizeOverlay coerces track to a non-negative int', () => {
+    expect(sanitizeOverlay({ type: 'text', text: 'a', start_seconds: 0, end_seconds: 1, track: 2.7 }).track).toBe(3)
+    expect(sanitizeOverlay({ type: 'text', text: 'a', start_seconds: 0, end_seconds: 1, track: -5 }).track).toBe(0)
+    expect(sanitizeOverlay({ type: 'text', text: 'a', start_seconds: 0, end_seconds: 1 }).track).toBeUndefined()
+  })
+  it('overlayTracks reports the max track + lane count', () => {
+    expect(overlayTracks({ overlays: [] })).toEqual({ max: 0, count: 1 })
+    expect(overlayTracks({ overlays: [{ track: 0 }, { track: 3 }, { track: 1 }] })).toEqual({ max: 3, count: 4 })
+    expect(overlayTracks({ overlays: [{}, {}] })).toEqual({ max: 0, count: 1 }) // missing track → 0
+  })
+})
+
+describe('moveOverlay (absolute time + track)', () => {
+  const doc = { overlays: [{ type: 'image', asset_id: 'a', start_seconds: 2, end_seconds: 5, track: 0 }] }
+  it('shifts start + end together (preserves duration), clamps start >= 0', () => {
+    const nd = moveOverlay(doc, 0, { start: 4 })
+    expect(nd.overlays[0]).toMatchObject({ start_seconds: 4, end_seconds: 7 }) // duration 3 preserved
+    const clamped = moveOverlay(doc, 0, { start: -3 })
+    expect(clamped.overlays[0]).toMatchObject({ start_seconds: 0, end_seconds: 3 })
+  })
+  it('sets the track (clamped non-negative int)', () => {
+    expect(moveOverlay(doc, 0, { track: 2 }).overlays[0].track).toBe(2)
+    expect(moveOverlay(doc, 0, { track: -1 }).overlays[0].track).toBe(0)
+  })
+  it('moves time AND track at once', () => {
+    const nd = moveOverlay(doc, 0, { start: 1, track: 3 })
+    expect(nd.overlays[0]).toMatchObject({ start_seconds: 1, end_seconds: 4, track: 3 })
+  })
+  it('is a same-ref no-op out of range or with no change', () => {
+    expect(moveOverlay(doc, 9, { start: 1 })).toBe(doc)
+    expect(moveOverlay(doc, 0, {})).toBe(doc)
+  })
+  it('a value-equal move (drag back to origin) is a same-ref no-op (honors the dirty/history contract)', () => {
+    expect(moveOverlay(doc, 0, { start: 2, track: 0 })).toBe(doc) // start/track unchanged
+  })
+  it('shifts keyframe `t` by the SAME delta as the window (keyframes travel with the clip)', () => {
+    const kfDoc = { overlays: [{
+      type: 'image', asset_id: 'a', start_seconds: 2, end_seconds: 5, track: 0,
+      keyframes: [{ t: 2, opacity: 0 }, { t: 2.5, opacity: 1 }, { t: 5, opacity: 0 }],
+    }] }
+    const moved = moveOverlay(kfDoc, 0, { start: 7 }) // +5
+    expect(moved.overlays[0]).toMatchObject({ start_seconds: 7, end_seconds: 10 })
+    expect(moved.overlays[0].keyframes.map(k => k.t)).toEqual([7, 7.5, 10])
+    // clamped move toward 0 shifts keyframes by the CLAMPED delta (start can't go below 0)
+    const back = moveOverlay(kfDoc, 0, { start: -1 }) // clamps to 0, delta = -2
+    expect(back.overlays[0].start_seconds).toBe(0)
+    expect(back.overlays[0].keyframes.map(k => k.t)).toEqual([0, 0.5, 3])
+  })
+})
+
+describe('music bed: editing a legacy top-level music doc keeps its asset_id', () => {
+  it('updateMusic seeds from legacy doc.music and collapses it into audio.music', () => {
+    const legacy = { music: { asset_id: 'bed.mp3', volume: 1 } } // legacy top-level shape
+    const nd = updateMusic(legacy, { volume: 0.4 })
+    expect(nd.audio.music).toMatchObject({ asset_id: 'bed.mp3', volume: 0.4 }) // asset_id preserved
+    expect(nd.music).toBeUndefined() // legacy field collapsed → one source of truth
+    expect(audioClips(nd).find(a => a.kind === 'music')?.asset_id).toBe('bed.mp3')
+  })
+  it('setMusic on a legacy doc replaces the asset_id and drops the legacy field', () => {
+    const nd = setMusic({ music: { asset_id: 'old.mp3', volume: 0.5 } }, 'new.mp3')
+    expect(nd.audio.music).toMatchObject({ asset_id: 'new.mp3', volume: 0.5 })
+    expect(nd.music).toBeUndefined()
+  })
+})
+
+describe('trimOverlay (edge handles, absolute time)', () => {
+  const doc = { overlays: [{ type: 'image', asset_id: 'a', start_seconds: 2, end_seconds: 6 }] }
+  it('moves the in-edge but never crosses the out within MIN_OVERLAY_SPAN', () => {
+    expect(trimOverlay(doc, 0, { start_seconds: 4 }).overlays[0].start_seconds).toBe(4)
+    const crossed = trimOverlay(doc, 0, { start_seconds: 10 }) // past end
+    expect(crossed.overlays[0].start_seconds).toBeCloseTo(6 - MIN_OVERLAY_SPAN, 5)
+  })
+  it('moves the out-edge, clamps start >= 0', () => {
+    expect(trimOverlay(doc, 0, { end_seconds: 9 }).overlays[0].end_seconds).toBe(9)
+    expect(trimOverlay(doc, 0, { start_seconds: -2 }).overlays[0].start_seconds).toBe(0)
   })
 })

@@ -1,21 +1,34 @@
-// Studio preview — two modes, with a real transport (play/pause).
-//  • SOURCE: a rough pre-render preview (no overlays/transitions). The PLAYHEAD is the master
-//    clock: while playing it advances by wall-clock time, and a SINGLE persistent <video> is
-//    SLAVED to it (its src follows the cut under the playhead; its currentTime is corrected only
-//    when it drifts, so within a cut it plays smoothly and at boundaries it re-seeks). One element
-//    is reused for every cut — we never mount a per-source element, so no detached <video> is left
-//    playing audio after a cut change, and pause stops everything.
-//  • RENDER: plays the composed MP4 (preview == export); playback drives the playhead.
+// Studio preview — two modes, with a real transport (play/pause) and WYSIWYG overlay editing.
+//  • SOURCE: a rough pre-render preview. A canvas-aspect "safe frame" (the output 1080×1920 etc.)
+//    fits inside the stage; the source clip is letterboxed inside it (object-fit:contain, mirroring
+//    the renderer's scale+pad), and EVERY overlay visible at the playhead is composited on top in
+//    CANVAS coordinates (feat 4) — text, images, video posters — z-ordered by `track`. Overlays are
+//    draggable on the canvas to set their position. The PLAYHEAD is the master clock; a single
+//    persistent <video> (or <img> for a still cut) is slaved to it.
+//  • RENDER: plays the composed MP4 (preview == export; overlays are already baked in).
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api.js'
 import * as interp from '../editor/interp.js'
-import { fmtTime, previewAudioTracks } from './model.js'
+import { fmtTime, previewAudioTracks, overlayType, isImageSource } from './model.js'
 
-// Drive the music/narration/sfx <audio> elements to project time `t`. Each track is audible
-// for t inside its window (music = whole timeline; narration = [start,end]; sfx = start →
-// asset end). `local` is the offset into the asset. Mirrors the FFmpeg mix enough to preview:
-// the clip's own audio comes from the <video>, these add the bed + voice + effects on top.
+const OV_DRAG_THRESHOLD = 3 // px before a press on a canvas overlay becomes a position drag
+
+// Screen position (relative to the canvas frame, anchor string) for a text overlay placed by a
+// named anchor — a reasonable preview approximation of the FFmpeg drawtext anchor placement.
+const TEXT_ANCHOR_CSS = {
+  'top-left': { left: '3%', top: '4%', tx: '0', ty: '0' },
+  'top-center': { left: '50%', top: '4%', tx: '-50%', ty: '0' },
+  'top-right': { left: '97%', top: '4%', tx: '-100%', ty: '0' },
+  'center-left': { left: '3%', top: '50%', tx: '0', ty: '-50%' },
+  center: { left: '50%', top: '50%', tx: '-50%', ty: '-50%' },
+  'center-right': { left: '97%', top: '50%', tx: '-100%', ty: '-50%' },
+  'bottom-left': { left: '3%', top: '96%', tx: '0', ty: '-100%' },
+  'bottom-center': { left: '50%', top: '96%', tx: '-50%', ty: '-100%' },
+  'bottom-right': { left: '97%', top: '96%', tx: '-100%', ty: '-100%' },
+}
+
+// Drive the music/narration/sfx <audio> elements to project time `t`. (Unchanged from before.)
 function syncAudioEls(els, tracks, t, active) {
   for (const tr of tracks) {
     const el = els.get(tr.key)
@@ -35,37 +48,55 @@ function syncAudioEls(els, tracks, t, active) {
   }
 }
 
-// Pause + rewind every hidden audio track (used on stop / mode switch).
 function pauseAllAudio(els) {
   for (const el of els.values()) { try { el.pause() } catch { /* noop */ } }
 }
 
-export default function StudioPreview({ projectId, doc, playhead, previewMode, renderPath, renderVersion, playing, onScrub, onPlayingChange }) {
+export default function StudioPreview({
+  projectId, doc, canvas, playhead, previewMode, renderPath, renderVersion, playing, selection,
+  onScrub, onPlayingChange, onSelectOverlay, onOverlayPosition, onOverlayDragBegin,
+}) {
   const srcRef = useRef(null)
   const renRef = useRef(null)
+  const frameRef = useRef(null)
+  const ovDrag = useRef(null)
 
   const hit = interp.cutAtTime(doc, playhead)
   const sourceRef = hit?.cut?.source || null
   const sourceTime = hit?.sourceTime || 0
   const dur = interp.timelineDuration(doc)
+  const isImg = sourceRef != null && isImageSource(sourceRef)
+  const overlays = doc?.overlays || []
 
-  // Audio to play alongside the source clip: music bed + narration + SFX, each a hidden <audio>.
+  // Measured frame size so we can map canvas px → screen px for overlays. scale = frameW/canvasW.
+  const [frameSize, setFrameSize] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const el = frameRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect()
+      setFrameSize({ w: r.width, h: r.height })
+    })
+    ro.observe(el)
+    const r = el.getBoundingClientRect()
+    setFrameSize({ w: r.width, h: r.height })
+    return () => ro.disconnect()
+  }, [previewMode, canvas.width, canvas.height])
+  const scale = frameSize.w > 0 && canvas.width > 0 ? frameSize.w / canvas.width : 0
+
+  // Audio to play alongside the source clip (unchanged).
   const audioTracks = useMemo(() => previewAudioTracks(doc), [doc])
   const audioEls = useRef(new Map())
 
-  // Mirror the playhead so the rAF clock (master) can read+advance it without re-subscribing.
   const playheadRef = useRef(playhead)
   playheadRef.current = playhead
-
-  // Latest values for the rAF clock to read without re-subscribing every frame.
   const liveRef = useRef(null)
   liveRef.current = { doc, previewMode, dur, onScrub, onPlayingChange, audioTracks }
 
-  // SOURCE: while paused (or scrubbing), the playhead drives the frame — keep the <video> paused
-  // and seeked to the playhead's source time. The loadedmetadata listener is cleaned up so a
-  // pause that lands mid-load can never leave a stale handler that resumes playback.
+  // SOURCE: while paused (or scrubbing), keep the <video> paused + seeked to the playhead's
+  // source time. (Image cuts have no <video> — nothing to seek.)
   useEffect(() => {
-    if (previewMode !== 'source' || playing) return
+    if (previewMode !== 'source' || playing || isImg) return
     const v = srcRef.current
     if (!v) return
     try { v.pause() } catch { /* noop */ }
@@ -74,17 +105,15 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
     if (v.readyState >= 1) { seek(); return }
     v.addEventListener('loadedmetadata', seek, { once: true })
     return () => v.removeEventListener('loadedmetadata', seek)
-  }, [previewMode, sourceRef, sourceTime, playing])
+  }, [previewMode, sourceRef, sourceTime, playing, isImg])
 
-  // RENDER: play/pause the composed video from the transport.
+  // RENDER: play/pause + seek the composed video.
   useEffect(() => {
     if (previewMode !== 'render') return
     const v = renRef.current
     if (!v) return
     if (playing) v.play().catch(() => {}); else v.pause()
   }, [previewMode, playing, renderPath])
-
-  // RENDER: seek the composed video when scrubbing the timeline (paused + drifted).
   useEffect(() => {
     if (previewMode !== 'render') return
     const v = renRef.current
@@ -92,10 +121,8 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
     if (v.paused && Math.abs(v.currentTime - playhead) > 0.25) { try { v.currentTime = playhead } catch { /* noop */ } }
   }, [previewMode, playhead])
 
-  // MASTER CLOCK (feat 6): while playing, advance the PLAYHEAD by real wall-clock time and slave
-  // the media to it. The playhead — not the <video> — is authoritative, so a cut boundary (even a
-  // jump-cut or a source swap) just re-seeks/loads the one video element rather than letting it run
-  // away or reset. Reads liveRef/playheadRef so it never re-subscribes per frame (dep = `playing`).
+  // MASTER CLOCK (feat 6): while playing, advance the PLAYHEAD by wall-clock time and slave the
+  // media to it. Reads liveRef/playheadRef so it never re-subscribes per frame (dep = `playing`).
   useEffect(() => {
     if (!playing) return
     let raf = 0
@@ -108,55 +135,145 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
         raf = requestAnimationFrame(tick)
         return
       }
-      if (!last) { last = ts; raf = requestAnimationFrame(tick); return } // first frame: just seed the clock
-      const dt = Math.min(0.05, (ts - last) / 1000) // seconds; clamp tab-switch / GC gaps
+      if (!last) { last = ts; raf = requestAnimationFrame(tick); return }
+      const dt = Math.min(0.05, (ts - last) / 1000)
       last = ts
-
       const t = playheadRef.current + dt
-      if (t >= st.dur) { // reached the end — stop cleanly (idempotent: never re-fire the scrub)
+      if (t >= st.dur) {
         if (playheadRef.current < st.dur) { playheadRef.current = st.dur; st.onScrub(st.dur) }
         st.onPlayingChange(false)
         const v = srcRef.current; if (v) { try { v.pause() } catch { /* noop */ } }
         pauseAllAudio(audioEls.current)
-        return // no next frame
+        return
       }
       playheadRef.current = t
       st.onScrub(t)
-
-      // Slave the single <video> to the playhead: match speed, correct large drift (boundaries),
-      // and keep it rolling. Within a cut, video time and source time advance together so no
-      // re-seek happens and playback stays smooth.
       const h = interp.cutAtTime(st.doc, t)
       const v = srcRef.current
-      if (v && h) {
-        const speed = Math.max(0.0625, Number(h.cut.speed) || 1) // clamp to a browser-playable rate
-        if (Math.abs(v.playbackRate - speed) > 0.01) v.playbackRate = speed // tolerance: don't churn on float noise
+      if (v && h && !isImageSource(h.cut.source)) {
+        const speed = Math.max(0.0625, Number(h.cut.speed) || 1)
+        if (Math.abs(v.playbackRate - speed) > 0.01) v.playbackRate = speed
         if (v.readyState >= 1 && !v.seeking && Math.abs(v.currentTime - h.sourceTime) > 0.34) {
           try { v.currentTime = h.sourceTime } catch { /* not ready */ }
         }
         if (v.paused && v.readyState >= 2) v.play().catch(() => {})
       }
-      syncAudioEls(audioEls.current, st.audioTracks, t, true) // music / narration / sfx
-
+      syncAudioEls(audioEls.current, st.audioTracks, t, true)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
   }, [playing])
 
-  // Pause every audio track whenever we're not actively playing the source preview — when
-  // paused/scrubbing, or in render mode (the composed MP4 carries its own mixed audio).
   useEffect(() => {
     if (playing && previewMode === 'source') return
     pauseAllAudio(audioEls.current)
   }, [playing, previewMode])
-
-  // On unmount (e.g. closing the editor mid-playback) pause the video + all audio — a detached
-  // media element keeps its audio going until GC, so never leave one playing.
   useEffect(() => () => {
     const v = srcRef.current; if (v) { try { v.pause() } catch { /* noop */ } }
     pauseAllAudio(audioEls.current)
+    if (ovDrag.current) ovDrag.current()
   }, [])
+
+  // Drag an overlay on the canvas → set position.x/y in CANVAS px (feat 4). Captures the overlay's
+  // current top-left relative to the frame so there's no jump (works for anchored text too — it
+  // converts to {x,y} on the first move). Coalesced into one undo step via onOverlayDragBegin.
+  const beginOverlayDrag = (e, index) => {
+    e.preventDefault(); e.stopPropagation()
+    onSelectOverlay(index)
+    const frame = frameRef.current
+    if (!frame || scale <= 0) return
+    const fr = frame.getBoundingClientRect()
+    // Origin in CANVAS px. For object-positioned overlays read the layout x/y directly (NOT the
+    // post-transform bounding box — a scale-keyframed overlay's rect is the SCALED box, which would
+    // make the drag jump). Anchored text has no numeric x/y, so derive its origin from the rect.
+    const o = overlays[index]
+    const pos = o?.position
+    const isAnchorText = overlayType(o) === 'text' && (typeof pos === 'string' || pos == null)
+    let origX, origY
+    if (isAnchorText) {
+      const er = e.currentTarget.getBoundingClientRect()
+      origX = (er.left - fr.left) / scale
+      origY = (er.top - fr.top) / scale
+    } else {
+      const kfx = interp.interpolateAt(o.keyframes, 'x', playhead)
+      const kfy = interp.interpolateAt(o.keyframes, 'y', playhead)
+      origX = kfx != null ? kfx : (pos?.x ?? 0)
+      origY = kfy != null ? kfy : (pos?.y ?? 0)
+    }
+    const startX = e.clientX, startY = e.clientY
+    let didSnap = false
+    const teardown = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', teardown)
+      ovDrag.current = null
+    }
+    const onMove = (ev) => {
+      if (!didSnap && Math.abs(ev.clientX - startX) < OV_DRAG_THRESHOLD && Math.abs(ev.clientY - startY) < OV_DRAG_THRESHOLD) return
+      if (!didSnap) { onOverlayDragBegin?.(); didSnap = true }
+      const nx = Math.round(origX + (ev.clientX - startX) / scale)
+      const ny = Math.round(origY + (ev.clientY - startY) / scale)
+      onOverlayPosition(index, { x: nx, y: ny })
+    }
+    const onUp = () => teardown()
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', teardown)
+    ovDrag.current = teardown
+  }
+
+  // Overlays visible at the playhead, sorted ascending by track (lower track first → DOM order
+  // puts higher tracks on top, matching the renderer's z-order).
+  const visibleOverlays = overlays
+    .map((o, i) => ({ o, i }))
+    .filter(({ o }) => {
+      const s = Number(o.start_seconds) || 0
+      const e = Number(o.end_seconds) || s
+      return playhead >= s - 1e-6 && playhead <= e + 1e-6
+    })
+    .sort((a, b) => (Math.round(Number(a.o.track) || 0)) - (Math.round(Number(b.o.track) || 0)))
+
+  const renderOverlay = ({ o, i }) => {
+    const sel = selection?.kind === 'overlay' && selection.index === i
+    const kfo = interp.interpolateAt(o.keyframes, 'opacity', playhead)
+    const opacity = kfo != null ? kfo : (o.opacity != null ? o.opacity : 1)
+    const kfs = interp.interpolateAt(o.keyframes, 'scale', playhead)
+    const kfx = interp.interpolateAt(o.keyframes, 'x', playhead)
+    const kfy = interp.interpolateAt(o.keyframes, 'y', playhead)
+    const type = overlayType(o)
+    const pos = o.position
+    const isAnchorText = type === 'text' && (typeof pos === 'string' || pos == null)
+    const common = {
+      className: `st-ov-canvas${sel ? ' sel' : ''}`,
+      style: { opacity, zIndex: Math.round(Number(o.track) || 0) + 1 },
+      onPointerDown: (e) => beginOverlayDrag(e, i),
+    }
+
+    if (isAnchorText) {
+      const a = TEXT_ANCHOR_CSS[pos || 'center'] || TEXT_ANCHOR_CSS.center
+      common.style = {
+        ...common.style, position: 'absolute', left: a.left, top: a.top,
+        transform: `translate(${a.tx}, ${a.ty})`,
+      }
+      return <div key={i} {...common}>{renderTextInner(o, scale)}</div>
+    }
+
+    // object position (or asset overlay): top-left in canvas px → frame px.
+    const x = (kfx != null ? kfx : (pos?.x ?? 0)) * scale
+    const y = (kfy != null ? kfy : (pos?.y ?? 0)) * scale
+    common.style = {
+      ...common.style, position: 'absolute', left: x, top: y,
+      width: pos?.width != null ? pos.width * scale : undefined,
+      transform: kfs != null && kfs !== 1 ? `scale(${kfs})` : undefined,
+      transformOrigin: 'center',
+    }
+    if (type === 'text') return <div key={i} {...common}>{renderTextInner(o, scale)}</div>
+    if (type === 'video') {
+      return <video key={i} {...common} src={api.sourceUrl(projectId, o.asset_id)} muted playsInline preload="metadata" />
+    }
+    return <img key={i} {...common} src={api.sourceUrl(projectId, o.asset_id)} alt="" draggable={false} />
+  }
 
   return (
     <div className="st-stage">
@@ -169,26 +286,33 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
           ref={(el) => { const m = audioEls.current; if (el) m.set(tr.key, el); else m.delete(tr.key) }}
         />
       ))}
+
       {previewMode === 'source' ? (
-        sourceRef != null ? (
-          <>
-            {/* ONE persistent element for every cut — src follows the playhead. No `key`, so React
-                reuses it across cuts instead of mounting a fresh (and detached, still-audible) one. */}
-            <video
-              ref={srcRef}
-              className="st-video"
-              src={api.sourceUrl(projectId, sourceRef)}
-              preload="auto"
-              playsInline
-              onClick={() => onPlayingChange(!playing)}
-            />
-            {!playing && (
-              <button className="st-stage-play" onClick={() => onPlayingChange(true)} aria-label="Play">▶</button>
-            )}
-          </>
-        ) : (
-          <div className="st-stage-empty">No clip under the playhead.</div>
-        )
+        <div className="st-safe-frame" ref={frameRef}
+          style={{ aspectRatio: `${canvas.width} / ${canvas.height}` }}>
+          {sourceRef != null ? (
+            isImg ? (
+              <img className="st-frame-media" src={api.sourceUrl(projectId, sourceRef)} alt="" draggable={false} />
+            ) : (
+              // ONE persistent <video> for every video cut — src follows the playhead (no `key`).
+              <video
+                ref={srcRef}
+                className="st-frame-media"
+                src={api.sourceUrl(projectId, sourceRef)}
+                preload="auto"
+                playsInline
+                onClick={() => onPlayingChange(!playing)}
+              />
+            )
+          ) : (
+            <div className="st-stage-empty">No clip under the playhead.</div>
+          )}
+          {/* WYSIWYG overlay layer (canvas coordinates → frame px) */}
+          {scale > 0 && <div className="st-ov-layer">{visibleOverlays.map(renderOverlay)}</div>}
+          {!playing && sourceRef != null && (
+            <button className="st-stage-play" onClick={() => onPlayingChange(true)} aria-label="Play">▶</button>
+          )}
+        </div>
       ) : renderPath ? (
         <video
           ref={renRef}
@@ -200,6 +324,7 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
           onPause={() => onPlayingChange(false)}
           onEnded={() => onPlayingChange(false)}
           onTimeUpdate={(e) => { if (!e.target.paused) onScrub(e.target.currentTime) }}
+          onSeeked={(e) => { if (e.target.paused) onScrub(e.target.currentTime) }}
         />
       ) : (
         <div className="st-stage-empty">No render yet — hit Render.</div>
@@ -211,5 +336,25 @@ export default function StudioPreview({ projectId, doc, playhead, previewMode, r
           : <>timeline {fmtTime(playhead)} / {fmtTime(dur)}</>}
       </div>
     </div>
+  )
+}
+
+// Inner content of a text overlay, scaled to the frame. Font/color/box approximate the FFmpeg
+// drawtext output (the rendered MP4 is ground truth; this is a faithful-enough preview).
+function renderTextInner(o, scale) {
+  const fontSize = (Number(o.font_size) || 48) * scale
+  const box = o.box || {}
+  const pad = (box.padding != null ? box.padding : 10) * scale
+  const boxOpacity = box.opacity != null ? box.opacity : 0.5
+  return (
+    <span
+      className="st-ov-text"
+      style={{
+        fontSize,
+        color: o.color || 'white',
+        padding: `${pad * 0.4}px ${pad}px`,
+        background: boxOpacity > 0 ? `rgba(0,0,0,${boxOpacity})` : 'transparent',
+      }}
+    >{o.text || 'text'}</span>
   )
 }
