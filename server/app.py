@@ -92,6 +92,11 @@ class AnswerRequest(BaseModel):
     question_id: str
     answer: str
 
+
+class EnvUpdateRequest(BaseModel):
+    # BYOK: {VARIABLE_NAME: value} edits to persist to the local .env (empty value = leave blank).
+    vars: dict[str, str]
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -446,6 +451,23 @@ def create_app(
                 # Surface discovery failure explicitly rather than 500-ing.
                 app.state.capabilities_cache = {"error": f"capability discovery failed: {exc}"}
         return app.state.capabilities_cache
+
+    @app.get("/api/env")
+    def get_env() -> dict[str, Any]:
+        """BYOK: the curated variable menu + each var's current value from the local .env."""
+        from server import env_config
+        return {"path": str(env_config.ENV_PATH), "vars": env_config.list_env_vars()}
+
+    @app.put("/api/env")
+    def put_env(body: EnvUpdateRequest) -> dict[str, Any]:
+        """BYOK: persist edited variables back to the local .env, then reload them for this session."""
+        from server import env_config
+        try:
+            changed = env_config.write_env_vars(body.vars)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        env_config.reload_env()  # so the next agent turn / tool subprocess sees the new keys
+        return {"changed": changed, "path": str(env_config.ENV_PATH), "vars": env_config.list_env_vars()}
 
     @app.post("/api/projects/{project_id}/chat")
     async def chat(project_id: str, body: ChatRequest):

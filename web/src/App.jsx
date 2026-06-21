@@ -137,12 +137,16 @@ function fmtDate(s) {
 
 function Dashboard({ pipelines, projects, onOpen, onCreate }) {
   const [creating, setCreating] = useState(false)
+  const [showEnv, setShowEnv] = useState(false)
   const sorted = [...projects].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
   return (
     <div className="dashboard">
       <header className="dash-header">
         <div className="brand"><span className="dot" /> OpenNolan <span className="muted">· Mission Control</span></div>
         <div className="dash-sub">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
+        <button className="byok-btn" onClick={() => setShowEnv(true)} title="Manage your API keys (.env)">
+          🔑 BYOK
+        </button>
       </header>
       <div className="dash-grid">
         <button className="tile tile-new" onClick={() => setCreating(true)}>
@@ -175,6 +179,110 @@ function Dashboard({ pipelines, projects, onOpen, onCreate }) {
       {creating && (
         <CreateModal pipelines={pipelines} onClose={() => setCreating(false)} onCreate={onCreate} />
       )}
+      {showEnv && <EnvModal onClose={() => setShowEnv(false)} />}
+    </div>
+  )
+}
+
+// ─── BYOK panel (populate the local .env, one variable per row) ──────────────────
+// Reads the curated variable menu + current values from /api/env (the repo .env) and writes edits
+// back. Secrets render as masked inputs with a reveal toggle; blank = leave unset. The whole draft
+// is sent on Save — the backend writes only what actually changed.
+
+function EnvModal({ onClose }) {
+  const [vars, setVars] = useState(null)
+  const [draft, setDraft] = useState({})
+  const [reveal, setReveal] = useState({})   // key -> show plaintext
+  const [path, setPath] = useState('')
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    api.getEnv()
+      .then(d => {
+        if (!alive) return
+        setVars(d.vars); setPath(d.path)
+        setDraft(Object.fromEntries(d.vars.map(v => [v.key, v.value || ''])))
+      })
+      .catch(e => alive && setErr(String(e.message || e)))
+    return () => { alive = false }
+  }, [])
+
+  const setVal = (key, val) => { setDraft(d => ({ ...d, [key]: val })); setSaved(null) }
+
+  async function save() {
+    setBusy(true); setErr(null); setSaved(null)
+    try {
+      const res = await api.saveEnv(draft)
+      setVars(res.vars)
+      setDraft(Object.fromEntries(res.vars.map(v => [v.key, v.value || ''])))
+      const n = (res.changed || []).length
+      setSaved(n ? `Saved ${n} variable${n === 1 ? '' : 's'} to .env` : 'No changes')
+    } catch (e) { setErr(String(e.message || e)) }
+    finally { setBusy(false) }
+  }
+
+  // Group, preserving the first-seen order from the API.
+  const groups = []
+  const byGroup = {}
+  for (const v of (vars || [])) {
+    if (!byGroup[v.group]) { byGroup[v.group] = []; groups.push(v.group) }
+    byGroup[v.group].push(v)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal env-modal" onClick={e => e.stopPropagation()}>
+        <div className="env-head">
+          <div className="env-head-text">
+            <h3>🔑 Bring your own keys</h3>
+            <div className="env-sub">
+              Stored in your local <code>.env</code>{path ? ` · ${path}` : ''}. Fill in what you have — leave the rest blank.
+            </div>
+          </div>
+          <button className="am-close" onClick={onClose} title="Close">✕</button>
+        </div>
+        <div className="env-body">
+          {err && <div className="modal-err">⚠ {err}</div>}
+          {!vars && !err && <p className="empty">Loading…</p>}
+          {vars && groups.map(g => (
+            <div key={g} className="env-group">
+              <div className="env-group-head">{g}</div>
+              {byGroup[g].map(v => (
+                <div key={v.key} className="env-row">
+                  <div className="env-row-label">
+                    <span className="env-name">{v.label}</span>
+                    <code className="env-key">{v.key}</code>
+                    {v.description && <span className="env-desc">{v.description}</span>}
+                  </div>
+                  <div className="env-input">
+                    <input
+                      type={v.secret && !reveal[v.key] ? 'password' : 'text'}
+                      value={draft[v.key] ?? ''}
+                      placeholder="not set"
+                      autoComplete="off" spellCheck={false}
+                      onChange={e => setVal(v.key, e.target.value)} />
+                    {v.secret && (
+                      <button type="button" className="env-eye"
+                        title={reveal[v.key] ? 'Hide' : 'Show'}
+                        onClick={() => setReveal(r => ({ ...r, [v.key]: !r[v.key] }))}>
+                        {reveal[v.key] ? '🙈' : '👁'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="env-actions">
+          {saved && <span className="env-saved">✓ {saved}</span>}
+          <button className="modal-cancel" onClick={onClose}>Close</button>
+          <button onClick={save} disabled={busy || !vars}>{busy ? 'Saving…' : 'Save to .env'}</button>
+        </div>
+      </div>
     </div>
   )
 }

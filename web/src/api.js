@@ -10,6 +10,15 @@ async function json(resp) {
 
 export const getPipelines = () => fetch('/api/pipelines').then(json)
 export const getProjects = () => fetch('/api/projects').then(json)
+
+// BYOK: read the local .env (curated variable menu + current values) and save edits back.
+export const getEnv = () => fetch('/api/env').then(json)
+export const saveEnv = (vars) =>
+  fetch('/api/env', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vars }),
+  }).then(json)
 export const getState = (id) => fetch(`/api/projects/${id}/state`).then(json)
 export const getCapabilities = () => fetch('/api/capabilities').then(json)
 export const listAssets = (id) => fetch(`/api/projects/${id}/assets`).then(json)
