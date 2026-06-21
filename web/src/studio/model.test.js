@@ -8,6 +8,7 @@ import {
   KF_DIMS_IMAGE, KF_DIMS_TEXT,
   overlayKind, overlayType, kfDimsFor, newTextOverlay, newImageOverlay, newVideoOverlay, presetKeyframes,
   isFfmpeg, anchorToXY, fmtTime, round3, clamp, previewAudioTracks, isImageSource, clipType,
+  scrubValue, roundTo, fmtScrub, decimalsOf,
 } from './model.js'
 import { sanitizeOverlay } from '../editor/interp.js'
 
@@ -237,5 +238,46 @@ describe('round3 / clamp', () => {
     expect(clamp(5, 0, 10)).toBe(5)
     expect(clamp(-1, 0, 10)).toBe(0)
     expect(clamp(99, 0, 10)).toBe(10)
+  })
+})
+
+describe('scrub-field math (drag-to-adjust number inputs)', () => {
+  it('decimalsOf reads the precision implied by a step', () => {
+    expect(decimalsOf(1)).toBe(0)
+    expect(decimalsOf(0.1)).toBe(1)
+    expect(decimalsOf(0.05)).toBe(2)
+    expect(decimalsOf(undefined)).toBe(0)
+    expect(decimalsOf(0)).toBe(0)
+  })
+  it('roundTo snaps to step precision (kills float artifacts)', () => {
+    expect(roundTo(4.800000001, 0.1)).toBe(4.8)
+    expect(roundTo(3.14159, 0.01)).toBe(3.14)
+    expect(roundTo(7.6, 1)).toBe(8)
+  })
+  it('scrubValue moves ~one step per pixel from the drag-start value', () => {
+    expect(scrubValue({ start: 1, dx: 40, step: 0.1 })).toBe(5)      // +40px * 0.1
+    expect(scrubValue({ start: 0, dx: 30, step: 1 })).toBe(30)       // +30px * 1
+    expect(scrubValue({ start: 10, dx: -4, step: 1 })).toBe(6)       // drag left lowers it
+  })
+  it('fine mode (Shift) moves 5× slower', () => {
+    expect(scrubValue({ start: 1, dx: 40, step: 0.1, fine: true })).toBe(1.8) // 40 * (0.1/5)=0.8
+  })
+  it('clamps to [min,max] when finite', () => {
+    expect(scrubValue({ start: 0.9, dx: 40, step: 0.05, min: 0, max: 1 })).toBe(1)   // capped
+    expect(scrubValue({ start: 0.1, dx: -100, step: 0.05, min: 0, max: 1 })).toBe(0) // floored
+    expect(scrubValue({ start: 5, dx: -100, step: 1, min: 1 })).toBe(1)              // min only
+  })
+  it('snaps to the increment grid + tolerates junk input', () => {
+    expect(scrubValue({ start: 0, dx: 7, step: 0.5 })).toBe(3.5)     // 7*0.5, on the 0.5 grid
+    expect(scrubValue({ start: undefined, dx: undefined })).toBe(0)  // no NaN leaks
+    expect(scrubValue({ start: 2, dx: 3, step: 0 })).toBe(5)         // bad step → treated as 1
+  })
+  it('fmtScrub renders compact numbers and blanks non-numbers (= unset/auto)', () => {
+    expect(fmtScrub(4)).toBe('4')
+    expect(fmtScrub(1.5)).toBe('1.5')
+    expect(fmtScrub(1.07)).toBe('1.07')
+    expect(fmtScrub('')).toBe('')
+    expect(fmtScrub(null)).toBe('')
+    expect(fmtScrub(undefined)).toBe('')
   })
 })

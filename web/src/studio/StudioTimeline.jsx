@@ -25,7 +25,6 @@ function niceStep(pxPerSec) {
 }
 
 const baseName = (p) => String(p || '').split('/').pop() || p
-const ovIcon = (t) => (t === 'text' ? 'T' : t === 'video' ? '▦' : '🖼')
 
 export default function StudioTimeline({
   doc, dur, zoom, playhead, selection, sourceMetas, playing,
@@ -248,7 +247,7 @@ export default function StudioTimeline({
                     >
                       <span className="st-trim st-trim-l"
                         onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { kind: 'overlay', mode: 'ov-trim-in', ov: o, index: i, onBegin: onOverlayDragBegin }) }} />
-                      <span className="st-ov-label">{ovIcon(ot)} {label}</span>
+                      <span className="st-ov-label">{label}</span>
                       <span className="st-trim st-trim-r"
                         onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { kind: 'overlay', mode: 'ov-trim-out', ov: o, index: i, onBegin: onOverlayDragBegin }) }} />
                     </div>
@@ -292,7 +291,6 @@ export default function StudioTimeline({
             {audio.map((a, i) => {
               const left = LANE_PAD + a.start_seconds * zoom
               const w = a.point ? 12 : Math.max(8, (a.end_seconds - a.start_seconds) * zoom)
-              const icon = a.kind === 'music' ? '♫' : a.kind === 'narration' ? '🎙' : '♪'
               const sel = selection?.kind === 'audio' && selection.audioKind === a.kind && selection.index === a.index
               return (
                 <button
@@ -301,7 +299,7 @@ export default function StudioTimeline({
                   style={{ left, width: w }}
                   title={`${a.kind} · ${baseName(a.asset_id)}`}
                   onClick={() => onSelect({ kind: 'audio', audioKind: a.kind, index: a.index })}
-                >{a.point ? icon : `${icon} ${baseName(a.asset_id)}`}</button>
+                >{a.point ? '' : baseName(a.asset_id)}</button>
               )
             })}
             {!audio.length && <span className="st-lane-empty">no audio — music / narration / SFX appear here</span>}

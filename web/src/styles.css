@@ -834,6 +834,18 @@ select { cursor: pointer; }
 .st-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.76rem; color: var(--ink); margin: 0.2rem 0; }
 .st-check input { width: auto; }
 
+/* scrubbable number field — drag to adjust, click to type (the edit-mode <input> reuses .st-f input) */
+.st-scrub { position: relative; display: flex; align-items: center; justify-content: flex-end;
+  height: 30px; padding: 0 0.5rem; border: 1px solid var(--line); border-radius: 8px; background: #fff;
+  color: var(--ink); font-size: 0.8rem; cursor: ew-resize; user-select: none; overflow: hidden; touch-action: none; }
+.st-scrub:hover { border-color: var(--accent); }
+.st-scrub:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.st-scrub-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-soft); pointer-events: none; }
+.st-scrub-val { position: relative; font-variant-numeric: tabular-nums; pointer-events: none; }
+.st-scrub-auto { color: var(--muted); }
+/* while a scrub drag is live, force the resize cursor everywhere and kill text selection */
+body.st-scrubbing, body.st-scrubbing * { cursor: ew-resize !important; user-select: none !important; }
+
 /* keyframes */
 .st-kf-presets { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.5rem; }
 .st-kf-ctrl { align-items: flex-end; }

@@ -11,11 +11,21 @@ function setup(overrides = {}) {
     selCut: null, selOverlayIndex: -1, selAudio: null, selAudioObj: null, playhead: 0,
     assets: { kinds: { images: [], video: [], audio: [], music: [] } }, sourceMetas: {},
     onUpdateCut: vi.fn(), onUpdateOverlay: vi.fn(), onUpdateAudio: vi.fn(),
+    onLiveUpdateCut: vi.fn(), onLiveUpdateOverlay: vi.fn(), onLiveUpdateAudio: vi.fn(), onScrubBegin: vi.fn(),
     onSetKeyframes: vi.fn(), onUpsertKeyframe: vi.fn(), onRemoveKeyframe: vi.fn(),
     onAddImage: vi.fn(), onAddClip: vi.fn(), onAddSfx: vi.fn(), onSetMusic: vi.fn(),
     ...overrides,
   }
   return { ...render(<StudioInspector {...props} />), props }
+}
+
+// A numeric property is now a scrub bar (role="slider"); CLICKING it (a press with no drag) reveals
+// the type-in <input>. This helper performs that click and returns the focused number input.
+function openTypeInput(getByRole, name) {
+  const bar = getByRole('slider', { name })
+  fireEvent.pointerDown(bar, { button: 0, clientX: 10 })
+  fireEvent.pointerUp(bar, { clientX: 10 }) // no movement → click → edit mode
+  return bar
 }
 
 describe('selection routing', () => {
@@ -50,7 +60,9 @@ describe('selection routing', () => {
     const selCut = { id: 'c2', source: 'photo.png', in_seconds: 0, out_seconds: 5 }
     const { getByText, queryByText } = setup({ selCut })
     expect(getByText('Image clip · c2')).toBeInTheDocument()
-    expect(getByText('Duration')).toBeInTheDocument()
+    // "Duration" is the section header here (a field of the same name lives under Transitions now
+    // that the unit moved from the caption into the value), so target the header specifically.
+    expect(getByText('Duration', { selector: '.st-sec-h' })).toBeInTheDocument()
     expect(queryByText('Trim & speed')).not.toBeInTheDocument()
   })
 
@@ -79,13 +91,16 @@ describe('selection routing', () => {
     expect(getByText('Source audio')).toBeInTheDocument()
   })
 
-  it('shows the audio inspector for a selected SFX, and commits an edit', () => {
-    const { getByText, getByDisplayValue, props } = setup({
+  it('shows the audio inspector for a selected SFX, and commits a typed edit', () => {
+    const { getByText, getByRole, getByDisplayValue, props } = setup({
       selAudio: { audioKind: 'sfx', index: 0 }, selAudioObj: { asset_id: 'whoosh.mp3', start_seconds: 3, volume: 1 },
     })
     expect(getByText('Sound effect')).toBeInTheDocument()
+    expect(getByRole('slider', { name: 'Start' }).textContent).toContain('3') // value shown in the bar
+    openTypeInput(getByRole, 'Start')                 // click the bar → type-in input appears
     const start = getByDisplayValue('3')
     fireEvent.change(start, { target: { value: '4' } })
+    expect(props.onUpdateAudio).not.toHaveBeenCalled() // typing does NOT commit
     fireEvent.blur(start)
     expect(props.onUpdateAudio).toHaveBeenCalledWith({ start_seconds: 4 })
   })
@@ -109,14 +124,99 @@ describe('image overlay self-heals a string anchor into an object position', () 
   })
 })
 
-describe('NumField commits on blur, not on change', () => {
-  it('commits a trimmed out-point through onUpdateCut only on blur', () => {
-    const selCut = { id: 'c1', source: 'a.mp4', in_seconds: 0, out_seconds: 4, speed: 1 }
-    const { getByDisplayValue, props } = setup({ selCut })
-    const out = getByDisplayValue('4')                 // the Out (s) field
+describe('ScrubField: drag to adjust, click to type (manual entry preserved)', () => {
+  const selCut = { id: 'c1', source: 'a.mp4', in_seconds: 0, out_seconds: 4, speed: 1 }
+
+  it('renders numeric props as draggable scrub bars showing the value', () => {
+    const { getByRole } = setup({ selCut })
+    const out = getByRole('slider', { name: 'Out' })
+    expect(out).toBeInTheDocument()
+    expect(out.textContent).toContain('4')
+  })
+
+  it('typing after a click commits through onUpdateCut only on blur', () => {
+    const { getByRole, getByDisplayValue, props } = setup({ selCut })
+    openTypeInput(getByRole, 'Out')                    // click the bar → type-in input
+    const out = getByDisplayValue('4')
     fireEvent.change(out, { target: { value: '5' } })
     expect(props.onUpdateCut).not.toHaveBeenCalled()   // typing does NOT commit
     fireEvent.blur(out)
     expect(props.onUpdateCut).toHaveBeenCalledWith('c1', { out_seconds: 5 })
+  })
+
+  it('a drag snapshots ONCE then live-updates (one undo step), never committing per frame', () => {
+    const { getByRole, props } = setup({ selCut })
+    const speed = getByRole('slider', { name: 'Speed' })  // step 0.1, start value 1
+    fireEvent.pointerDown(speed, { button: 0, clientX: 100 })
+    fireEvent.pointerMove(document.body, { clientX: 140 }) // +40px → +4.0 at step 0.1
+    fireEvent.pointerUp(document.body, { clientX: 140 })
+    expect(props.onScrubBegin).toHaveBeenCalledTimes(1)    // exactly one snapshot for the whole drag
+    expect(props.onLiveUpdateCut).toHaveBeenCalled()        // per-frame live updates
+    expect(props.onLiveUpdateCut).toHaveBeenLastCalledWith('c1', { speed: 5 })
+    expect(props.onUpdateCut).not.toHaveBeenCalled()        // a drag never commits per frame
+  })
+
+  it('a bare click (no movement) does NOT snapshot or live-update — it just opens the input', () => {
+    const { getByRole, getByDisplayValue, props } = setup({ selCut })
+    openTypeInput(getByRole, 'Out')
+    expect(props.onScrubBegin).not.toHaveBeenCalled()
+    expect(props.onLiveUpdateCut).not.toHaveBeenCalled()
+    expect(getByDisplayValue('4')).toBeInTheDocument()      // edit mode is open
+  })
+
+  it('shows a fill bar for a bounded field (opacity 0..1) but not for an unbounded one (speed)', () => {
+    const doc = { overlays: [{ type: 'image', asset_id: 'logo.png', start_seconds: 0, end_seconds: 3, position: { x: 0, y: 0, width: 100 }, opacity: 0.5, track: 0 }] }
+    const { getByRole, container } = setup({ doc, selOverlayIndex: 0 })
+    const opacity = getByRole('slider', { name: 'Opacity' })
+    const fill = opacity.querySelector('.st-scrub-fill')
+    expect(fill).toBeInTheDocument()
+    expect(fill.style.width).toBe('50%')               // (0.5 - 0) / (1 - 0)
+    expect(container.querySelector('.st-f-scrub')).toBeInTheDocument()
+  })
+
+  it('typed entry preserves sub-step precision (does NOT quantize to the drag step)', () => {
+    const { getByRole, getByDisplayValue, props } = setup({ selCut })
+    openTypeInput(getByRole, 'Out')
+    const out = getByDisplayValue('4')
+    fireEvent.change(out, { target: { value: '4.73' } })
+    fireEvent.blur(out)
+    expect(props.onUpdateCut).toHaveBeenCalledWith('c1', { out_seconds: 4.73 }) // not 4.7
+  })
+
+  it('retyping the SAME value commits nothing (no dead undo step / redo wipe)', () => {
+    const { getByRole, getByDisplayValue, props } = setup({ selCut })
+    openTypeInput(getByRole, 'Out')
+    const out = getByDisplayValue('4')
+    fireEvent.blur(out)                                 // unchanged
+    expect(props.onUpdateCut).not.toHaveBeenCalled()
+  })
+
+  it('arrow keys nudge the value as ONE coalesced undo step (snapshot once, live per repeat)', () => {
+    const doc = { overlays: [{ type: 'image', asset_id: 'logo.png', start_seconds: 0, end_seconds: 3, position: { x: 0, y: 0, width: 100 }, opacity: 0.5, track: 0 }] }
+    const { getByRole, props } = setup({ doc, selOverlayIndex: 0 })
+    const opacity = getByRole('slider', { name: 'Opacity' })
+    fireEvent.keyDown(opacity, { key: 'ArrowUp' })      // held-key repeat = two keydowns, no keyup
+    fireEvent.keyDown(opacity, { key: 'ArrowUp' })
+    expect(props.onScrubBegin).toHaveBeenCalledTimes(1) // exactly one snapshot for the whole run
+    expect(props.onLiveUpdateOverlay).toHaveBeenCalledWith(0, { opacity: 0.55 })
+    expect(props.onUpdateOverlay).not.toHaveBeenCalled() // arrows never per-frame commit
+  })
+
+  it('an arrow at a boundary (opacity already at max) is a pure no-op — no snapshot, no write', () => {
+    const doc = { overlays: [{ type: 'image', asset_id: 'logo.png', start_seconds: 0, end_seconds: 3, position: { x: 0, y: 0, width: 100 }, opacity: 1, track: 0 }] }
+    const { getByRole, props } = setup({ doc, selOverlayIndex: 0 })
+    fireEvent.keyDown(getByRole('slider', { name: 'Opacity' }), { key: 'ArrowUp' })
+    expect(props.onScrubBegin).not.toHaveBeenCalled()
+    expect(props.onLiveUpdateOverlay).not.toHaveBeenCalled()
+    expect(props.onUpdateOverlay).not.toHaveBeenCalled()
+  })
+
+  it('an unset numeric field reads "auto" and still carries aria-valuenow (valid slider)', () => {
+    const { getByRole } = setup({
+      selAudio: { audioKind: 'narration', index: 0 }, selAudioObj: { asset_id: 'vo.mp3', start_seconds: 0 }, // no end_seconds
+    })
+    const end = getByRole('slider', { name: 'End' })
+    expect(end.textContent).toContain('auto')
+    expect(end).toHaveAttribute('aria-valuenow')        // ARIA requires a value on role=slider
   })
 })

@@ -346,6 +346,13 @@ export default function Studio({ projectId, state, onClose, chat }) {
     else if (selAudio.audioKind === 'narration') commit(d => interp.updateNarration(d, selAudio.index, patch))
     else commit(d => interp.updateSfx(d, selAudio.index, patch))
   }, [selAudio, commit])
+  // Per-frame variant used while DRAGGING a scrub field (no history; onScrubBegin snapshotted once).
+  const onLiveUpdateAudio = useCallback((patch) => {
+    if (!selAudio) return
+    if (selAudio.audioKind === 'music') live(d => interp.updateMusic(d, patch))
+    else if (selAudio.audioKind === 'narration') live(d => interp.updateNarration(d, selAudio.index, patch))
+    else live(d => interp.updateSfx(d, selAudio.index, patch))
+  }, [selAudio, live])
 
   // Splitter drag (feat 1): 'x' resizes the inspector width, 'y' the timeline height. Below the
   // per-panel threshold → collapse. One pointerdown→window move/up model (same as the timeline).
@@ -467,6 +474,11 @@ export default function Studio({ projectId, state, onClose, chat }) {
 
   const onUpdateCut = useCallback((cutId, patch) => commit(d => interp.updateCut(d, cutId, patch)), [commit])
   const onUpdateOverlay = useCallback((index, patch) => commit(d => interp.updateOverlay(d, index, patch)), [commit])
+  // Live (no-history) variants for scrub-field DRAGS — `onScrubBegin` (= snapshot) opens ONE undo
+  // step at the start of the drag, then each frame applies through `live`. Typing / arrow keys still
+  // go through the commit handlers above (one undo step each).
+  const onLiveUpdateCut = useCallback((cutId, patch) => live(d => interp.updateCut(d, cutId, patch)), [live])
+  const onLiveUpdateOverlay = useCallback((index, patch) => live(d => interp.updateOverlay(d, index, patch)), [live])
   const onSetKeyframes = useCallback((index, kfs) => commit(d => interp.setOverlayKeyframes(d, index, kfs)), [commit])
   const onUpsertKeyframe = useCallback((index, kf) => commit(d => interp.upsertKeyframe(d, index, kf)), [commit])
   const onRemoveKeyframe = useCallback((index, ki) => commit(d => interp.removeKeyframe(d, index, ki)), [commit])
@@ -489,7 +501,10 @@ export default function Studio({ projectId, state, onClose, chat }) {
   useEffect(() => {
     const onKey = (e) => {
       const t = e.target
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      // Don't fire global shortcuts while typing in a field OR while a scrub bar (role=slider) is
+      // focused — it owns Space/Escape/arrows/Delete so they don't also toggle play / clear selection.
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable
+        || (t.getAttribute && t.getAttribute('role') === 'slider'))) return
       if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); setPlaying(p => !p); return } // space = play/pause
       if (e.key === 'Escape') { setSelection(null); return } // deselect → Assets tab
       const mod = e.metaKey || e.ctrlKey
@@ -572,6 +587,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
                   selAudio={selAudio} selAudioObj={selAudioObj}
                   assets={assets} sourceMetas={sourceMetas}
                   onUpdateCut={onUpdateCut} onUpdateOverlay={onUpdateOverlay} onNormalizeOverlay={onNormalizeOverlay} onUpdateAudio={onUpdateAudio}
+                  onLiveUpdateCut={onLiveUpdateCut} onLiveUpdateOverlay={onLiveUpdateOverlay} onLiveUpdateAudio={onLiveUpdateAudio} onScrubBegin={snapshot}
                   onSetKeyframes={onSetKeyframes} onUpsertKeyframe={onUpsertKeyframe} onRemoveKeyframe={onRemoveKeyframe}
                   onAddImage={onAddImage} onAddClip={onAddClip} onAddSfx={onAddSfx} onSetMusic={onSetMusic}
                 />
