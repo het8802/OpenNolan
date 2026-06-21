@@ -401,16 +401,17 @@ select { cursor: pointer; }
 .modal-cancel:hover { background: var(--bg); color: var(--ink); filter: none; }
 
 /* ── BYOK panel (top-right of the dashboard) ── */
-.byok-btn { margin-left: auto; align-self: center; background: #fff; color: var(--ink);
-  border: 1px solid var(--line); border-radius: 999px; padding: 0.35rem 0.85rem;
-  font-size: 0.82rem; font-weight: 550; cursor: pointer; }
+.byok-btn { margin-left: auto; align-self: center; display: inline-flex; align-items: center; gap: 0.4rem;
+  background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 999px;
+  padding: 0.35rem 0.85rem; font-size: 0.82rem; font-weight: 550; cursor: pointer; }
 .byok-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); filter: none; }
 
 .env-modal { width: min(680px, 94vw); max-height: 86vh; padding: 0; gap: 0;
   display: flex; flex-direction: column; }
 .env-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
   padding: 1rem 1.2rem; border-bottom: 1px solid var(--line); }
-.env-head h3 { margin: 0 0 0.2rem; font-size: 1.05rem; }
+.env-head h3 { margin: 0 0 0.2rem; font-size: 1.05rem; display: flex; align-items: center; gap: 0.45rem; }
+.env-head .am-close { display: inline-flex; align-items: center; justify-content: center; }
 .env-sub { font-size: 0.76rem; color: var(--muted); line-height: 1.45; }
 .env-sub code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem;
   background: var(--bg); padding: 0.05rem 0.3rem; border-radius: 5px; }
@@ -428,12 +429,12 @@ select { cursor: pointer; }
 .env-input { position: relative; display: flex; align-items: center; }
 .env-input input { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.78rem; padding-right: 2rem; }
-.env-eye { position: absolute; right: 4px; background: none; border: none; padding: 0.1rem 0.3rem;
-  cursor: pointer; font-size: 0.85rem; color: var(--muted); }
-.env-eye:hover { background: none; filter: none; }
+.env-eye { position: absolute; right: 4px; background: none; border: none; padding: 0.15rem 0.3rem;
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--muted); }
+.env-eye:hover { background: none; filter: none; color: var(--ink); }
 .env-actions { display: flex; align-items: center; justify-content: flex-end; gap: 0.6rem;
   padding: 0.8rem 1.2rem; border-top: 1px solid var(--line); }
-.env-saved { color: var(--green); font-size: 0.8rem; margin-right: auto; }
+.env-saved { color: var(--green); font-size: 0.8rem; margin-right: auto; display: inline-flex; align-items: center; gap: 0.3rem; }
 
 /* ── Stop button + stopped note ── */
 .stop-btn { background: var(--red); border-color: var(--red); color: #fff; align-self: stretch; }
@@ -882,6 +883,14 @@ select { cursor: pointer; }
 .st-scrub-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-soft); }
 .st-scrub-val { position: relative; font-variant-numeric: tabular-nums; }
 .st-scrub-auto { color: var(--muted); }
+/* The bar is a thin 30px target; its caption sits right above it and there's a gap below. If only
+   the bar carried ew-resize, moving the mouse a few px up into the caption (default) or down across
+   the inter-field gap (auto) would flip the cursor — a flicker. So the WHOLE field row owns the
+   resize cursor (caption + bar) and the row spacing moves INSIDE the row (padding, not margin) so
+   consecutive numeric fields form ONE contiguous ew-resize zone — no boundary to flicker across.
+   Edit mode keeps a text cursor for typing. */
+.st-f-scrub { cursor: ew-resize; margin-bottom: 0; padding-bottom: 0.4rem; }
+.st-f-scrub input { cursor: text; }
 /* while a scrub drag is live, force the resize cursor everywhere and kill text selection */
 body.st-scrubbing, body.st-scrubbing * { cursor: ew-resize !important; user-select: none !important; }
 
