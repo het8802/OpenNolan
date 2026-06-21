@@ -7,7 +7,7 @@ import {
   setCanvas, canvasOf, audioClips,
   setMusic, updateMusic, removeMusic, addSfx, updateSfx, removeSfx, updateNarration, removeNarration,
   overlayTracks, moveOverlay, trimOverlay, MIN_OVERLAY_SPAN,
-  placeOverlayTrack, autoArrangeOverlays,
+  placeOverlayTrack, autoArrangeOverlays, resolveOverlayOverlap,
 } from './interp.js'
 
 describe('interpolateAt (mirrors FFmpeg _piecewise_linear_expr)', () => {
@@ -561,6 +561,37 @@ describe('autoArrangeOverlays (greedy interval partitioning / lane assignment)',
     expect(autoArrangeOverlays(arranged)).toBe(arranged)
     const one = { overlays: [{ type: 'text', text: 'a', start_seconds: 0, end_seconds: 2, track: 0 }] }
     expect(autoArrangeOverlays(one)).toBe(one)
+  })
+})
+
+describe('resolveOverlayOverlap (auto-float a moved/trimmed overlay off a new same-track overlap)', () => {
+  it('floats the edited overlay UP to a free track when it overlaps a neighbor on its track', () => {
+    // index 1 was dragged onto track 0 where index 0 lives and overlaps it in time
+    const doc = { overlays: [
+      { type: 'text', text: 'a', start_seconds: 0, end_seconds: 4, track: 0 },
+      { type: 'text', text: 'b', start_seconds: 2, end_seconds: 6, track: 0 },
+    ] }
+    const nd = resolveOverlayOverlap(doc, 1)
+    expect(nd.overlays[1].track).toBe(1) // bumped to the first free lane
+    expect(nd.overlays[0].track).toBe(0) // the OTHER overlay is left untouched
+  })
+  it('is a same-ref no-op when the edited overlay does NOT overlap on its track (respects placement)', () => {
+    const doc = { overlays: [
+      { type: 'text', text: 'a', start_seconds: 0, end_seconds: 2, track: 0 },
+      { type: 'text', text: 'b', start_seconds: 3, end_seconds: 5, track: 0 }, // touches/after, no overlap
+    ] }
+    expect(resolveOverlayOverlap(doc, 1)).toBe(doc)
+  })
+  it('overlap with a DIFFERENT track is fine (already visible) — no bump', () => {
+    const doc = { overlays: [
+      { type: 'text', text: 'a', start_seconds: 0, end_seconds: 4, track: 0 },
+      { type: 'text', text: 'b', start_seconds: 2, end_seconds: 6, track: 1 }, // overlaps in time but track 1
+    ] }
+    expect(resolveOverlayOverlap(doc, 1)).toBe(doc)
+  })
+  it('out-of-range index is a same-ref no-op', () => {
+    const doc = { overlays: [{ type: 'text', text: 'a', start_seconds: 0, end_seconds: 2, track: 0 }] }
+    expect(resolveOverlayOverlap(doc, 9)).toBe(doc)
   })
 })
 

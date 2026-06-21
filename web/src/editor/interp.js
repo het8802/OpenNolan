@@ -449,6 +449,27 @@ export function autoArrangeOverlays(doc) {
   return changed ? { ...doc, overlays: next } : doc
 }
 
+/**
+ * After a MOVE/TRIM, keep the just-edited overlay from silently overlapping another on its OWN
+ * track: if it now time-overlaps any other overlay sharing its track, float it UP to the lowest
+ * free track >= its current one (a new track if needed). ONLY the edited overlay relocates — every
+ * other overlay (and the user's manual track layout) is left exactly as-is, so this never fights a
+ * deliberate placement. Same-ref no-op when there's no same-track overlap. Cheap (O(n)), so it can
+ * run on every drag-end instead of a full re-pack.
+ */
+export function resolveOverlayOverlap(doc, index) {
+  const overlays = doc?.overlays || []
+  if (index < 0 || index >= overlays.length) return doc
+  const ov = overlays[index]
+  const s = ovStart(ov), e = ovEnd(ov), tr = ovTrack(ov)
+  const clash = overlays.some((o, i) => i !== index && ovTrack(o) === tr && overlapsInTime(s, e, ovStart(o), ovEnd(o)))
+  if (!clash) return doc
+  // float up from the current track (stays near where the user dropped it) to the first free lane.
+  const target = placeOverlayTrack({ overlays: overlays.filter((_, i) => i !== index) }, s, e, tr)
+  if (target === tr) return doc
+  return updateOverlay(doc, index, { track: target })
+}
+
 /** Set the output canvas (metadata.compose_target). Merges so unspecified dims are kept. */
 export function setCanvas(doc, { width, height, fps } = {}) {
   const meta = { ...(doc.metadata || {}) }

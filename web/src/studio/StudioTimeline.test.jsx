@@ -15,6 +15,7 @@ const baseProps = {
   zoom: ZOOM, playhead: 2, selection: null, sourceMetas: {}, playing: false,
   onSeek: noop, onSelect: noop, onTrim: noop, onTrimBegin: noop, onReorder: noop, onZoom: noop,
   onTogglePlay: noop, onSplit: noop, onDuplicate: noop, onDelete: noop, onAutoArrange: noop,
+  onOverlayMove: noop, onOverlayTrim: noop, onOverlayDragBegin: noop, onOverlayResolve: noop,
 }
 
 function renderTimeline(doc, dur) {
