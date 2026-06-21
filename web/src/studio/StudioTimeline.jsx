@@ -30,7 +30,7 @@ const ovIcon = (t) => (t === 'text' ? 'T' : t === 'video' ? '▦' : '🖼')
 export default function StudioTimeline({
   doc, dur, zoom, playhead, selection, sourceMetas, playing,
   onSeek, onSelect, onTrim, onTrimBegin, onReorder, onZoom, onAssetDrop,
-  onOverlayMove, onOverlayTrim, onOverlayDragBegin,
+  onOverlayMove, onOverlayTrim, onOverlayDragBegin, onAutoArrange,
   onTogglePlay, onSplit, onDuplicate, onDelete,
 }) {
   const hasCut = selection?.kind === 'cut'
@@ -180,6 +180,8 @@ export default function StudioTimeline({
           <button className="st-btn" onClick={onSplit} title="Split at playhead (S)">✂ Split</button>
           <button className="st-btn" onClick={onDuplicate} disabled={!hasCut} title="Duplicate clip">⧉ Duplicate</button>
           <button className="st-btn st-danger" onClick={onDelete} disabled={!hasSel} title="Delete selection (⌫)">🗑 Delete</button>
+          <button className="st-btn" onClick={onAutoArrange} disabled={overlays.length < 2}
+            title="Auto-arrange overlapping overlays into separate tracks">⇅ Arrange</button>
         </div>
         <div className="st-tl-right">
           <span className="st-tl-dur">{fmtTime(dur)} total</span>

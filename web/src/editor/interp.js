@@ -392,6 +392,63 @@ export function trimOverlay(doc, index, patch) {
   return updateOverlay(doc, index, { start_seconds: round3(s), end_seconds: round3(e) })
 }
 
+/** Two time windows overlap iff they intersect (touching edges — aEnd === bStart — do NOT count). */
+function overlapsInTime(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd - 1e-9 && bStart < aEnd - 1e-9
+}
+
+const ovStart = (o) => Number(o?.start_seconds) || 0
+const ovEnd = (o) => { const s = ovStart(o); const e = Number(o?.end_seconds); return Number.isFinite(e) ? Math.max(s, e) : s }
+const ovTrack = (o) => Math.max(0, Math.round(Number(o?.track) || 0))
+
+/**
+ * Pick a track for a NEW overlay spanning [start,end]: the LOWEST track >= `fromTrack` on which it
+ * doesn't overlap any existing overlay in time — else a brand-new track on top (maxTrack+1). This is
+ * the NLE "auto-create a track when a clip would overlap" behavior: a new overlapping overlay lands
+ * on its own lane so both stay visible. Existing overlays are untouched.
+ */
+export function placeOverlayTrack(doc, start, end, fromTrack = 0) {
+  const overlays = doc?.overlays || []
+  const s = Number(start) || 0
+  const e = Number.isFinite(Number(end)) ? Math.max(s, Number(end)) : s
+  let max = 0
+  for (const o of overlays) max = Math.max(max, ovTrack(o))
+  for (let t = Math.max(0, Math.round(Number(fromTrack) || 0)); t <= max; t++) {
+    const clash = overlays.some(o => ovTrack(o) === t && overlapsInTime(s, e, ovStart(o), ovEnd(o)))
+    if (!clash) return t
+  }
+  return max + 1 // every track is busy at this time → open a fresh lane on top
+}
+
+/**
+ * Re-pack ALL overlays into the FEWEST tracks with no time-overlap — greedy interval partitioning
+ * (the calendar/Gantt "lane assignment" / "meeting rooms II" algorithm): walk overlays in start
+ * order, drop each onto the first lane whose last item has already ended, else open a new lane. The
+ * lane index becomes `track` (= z-order; earlier-starting overlays sit lower). Returns the SAME doc
+ * ref when every track already matches (no overlaps to fix), honoring the dirty/history contract.
+ */
+export function autoArrangeOverlays(doc) {
+  const overlays = doc?.overlays || []
+  if (overlays.length < 2) return doc
+  const order = overlays.map((_, i) => i).sort((a, b) => (ovStart(overlays[a]) - ovStart(overlays[b])) || (a - b))
+  const laneEnds = [] // laneEnds[t] = end of the last overlay placed on lane t
+  const assigned = new Array(overlays.length)
+  for (const i of order) {
+    const s = ovStart(overlays[i])
+    const e = ovEnd(overlays[i])
+    let lane = laneEnds.findIndex(end => end <= s + 1e-9)
+    if (lane === -1) { lane = laneEnds.length; laneEnds.push(e) } else { laneEnds[lane] = e }
+    assigned[i] = lane
+  }
+  let changed = false
+  const next = overlays.map((o, i) => {
+    if (ovTrack(o) === assigned[i]) return o
+    changed = true
+    return sanitizeOverlay({ ...o, track: assigned[i] })
+  })
+  return changed ? { ...doc, overlays: next } : doc
+}
+
 /** Set the output canvas (metadata.compose_target). Merges so unspecified dims are kept. */
 export function setCanvas(doc, { width, height, fps } = {}) {
   const meta = { ...(doc.metadata || {}) }

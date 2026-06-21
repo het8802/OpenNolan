@@ -14,7 +14,7 @@ const noop = () => {}
 const baseProps = {
   zoom: ZOOM, playhead: 2, selection: null, sourceMetas: {}, playing: false,
   onSeek: noop, onSelect: noop, onTrim: noop, onTrimBegin: noop, onReorder: noop, onZoom: noop,
-  onTogglePlay: noop, onSplit: noop, onDuplicate: noop, onDelete: noop,
+  onTogglePlay: noop, onSplit: noop, onDuplicate: noop, onDelete: noop, onAutoArrange: noop,
 }
 
 function renderTimeline(doc, dur) {
@@ -102,6 +102,13 @@ describe('overlay tracks (multi-lane, feat 1)', () => {
     expect(container.querySelectorAll('.st-ov')).toHaveLength(2)
     // the empty new-track lane is the FIRST rendered (highest track on top)
     expect(container.querySelectorAll('.st-lane-ov')[0].className).toContain('st-lane-ov-new')
+  })
+  it('the Arrange button is enabled with >=2 overlays, disabled below that', () => {
+    const { getByRole, unmount } = render(<StudioTimeline doc={doc} dur={5} {...baseProps} />)
+    expect(getByRole('button', { name: /arrange/i })).not.toBeDisabled()
+    unmount()
+    const single = render(<StudioTimeline doc={{ cuts: fullDoc.cuts, overlays: [{ type: 'text', text: 'x', start_seconds: 0, end_seconds: 1 }] }} dur={5} {...baseProps} />)
+    expect(single.getByRole('button', { name: /arrange/i })).toBeDisabled()
   })
 })
 
