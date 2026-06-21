@@ -763,7 +763,8 @@ select { cursor: pointer; }
   font: inherit; font-size: 0.78rem; border: 1px solid var(--line); background: #fff; color: var(--ink);
   border-radius: 8px; padding: 0.3rem 0.55rem; cursor: pointer; line-height: 1; white-space: nowrap;
 }
-.st-ico { padding: 0.3rem 0.5rem; min-width: 1.9rem; font-size: 0.9rem; }
+.st-ico { padding: 0.3rem 0.5rem; min-width: 1.9rem; font-size: 0.9rem;
+  display: inline-flex; align-items: center; justify-content: center; }
 .st-btn:hover, .st-ico:hover { border-color: var(--accent); color: var(--accent); }
 .st-btn:disabled, .st-ico:disabled { opacity: 0.4; cursor: default; border-color: var(--line); color: var(--ink); }
 .st-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -891,6 +892,14 @@ select { cursor: pointer; }
    Edit mode keeps a text cursor for typing. */
 .st-f-scrub { cursor: ew-resize; margin-bottom: 0; padding-bottom: 0.4rem; }
 .st-f-scrub input { cursor: text; }
+
+/* color field — native swatch picker + a text input (named ffmpeg colors still work) */
+.st-color { display: flex; align-items: center; gap: 0.5rem; }
+.st-color .st-color-swatch { width: 38px; height: 30px; min-width: 0; padding: 2px; border: 1px solid var(--line);
+  border-radius: 8px; background: #fff; cursor: pointer; flex: 0 0 auto; }
+.st-color .st-color-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+.st-color .st-color-swatch::-webkit-color-swatch { border: none; border-radius: 5px; }
+.st-color .st-color-text { flex: 1; min-width: 0; }
 /* while a scrub drag is live, force the resize cursor everywhere and kill text selection */
 body.st-scrubbing, body.st-scrubbing * { cursor: ew-resize !important; user-select: none !important; }
 

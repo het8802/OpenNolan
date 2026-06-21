@@ -114,6 +114,32 @@ describe('selection routing', () => {
   })
 })
 
+describe('text color uses a color picker (swatch + text), not a bare text box', () => {
+  const textDoc = { overlays: [{ type: 'text', text: 'Hi', start_seconds: 0, end_seconds: 2, position: 'center', opacity: 1, color: 'green' }] }
+  it('renders a native swatch picker alongside a text input showing the named color', () => {
+    const { container, getByDisplayValue } = setup({ doc: textDoc, selOverlayIndex: 0 })
+    expect(container.querySelector('.st-color-swatch')).toBeInTheDocument()
+    expect(container.querySelector('.st-color-text')).toBeInTheDocument()
+    expect(getByDisplayValue('green')).toBeInTheDocument() // named color still typeable
+  })
+  it('commits a typed color on blur (named colors preserved)', () => {
+    const { getByDisplayValue, props } = setup({ doc: textDoc, selOverlayIndex: 0 })
+    const text = getByDisplayValue('green')
+    fireEvent.change(text, { target: { value: 'red' } })
+    expect(props.onUpdateOverlay).not.toHaveBeenCalled()   // typing does not commit
+    fireEvent.blur(text)
+    expect(props.onUpdateOverlay).toHaveBeenCalledWith(0, { color: 'red' })
+  })
+  it('a swatch pick coalesces into ONE undo step (snapshot once + live)', () => {
+    const { container, props } = setup({ doc: textDoc, selOverlayIndex: 0 })
+    const swatch = container.querySelector('.st-color-swatch')
+    fireEvent.input(swatch, { target: { value: '#00ff00' } })
+    expect(props.onScrubBegin).toHaveBeenCalledTimes(1)
+    expect(props.onLiveUpdateOverlay).toHaveBeenCalledWith(0, { color: '#00ff00' })
+    expect(props.onUpdateOverlay).not.toHaveBeenCalled()    // a swatch drag never per-frame commits
+  })
+})
+
 describe('image overlay self-heals a string anchor into an object position', () => {
   // The renderer rejects a named-anchor string for image/video overlays; the inspector
   // normalizes it on mount so a saved doc is always renderable.

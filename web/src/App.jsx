@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as api from './api.js'
 import { LineChart } from './components/LineChart.jsx'
+import { IconKey, IconEye, IconEyeOff, IconCheck, IconX } from './components/icons.jsx'
 import Studio from './studio/Studio.jsx'
 import ChatPanel from './chat/ChatPanel.jsx'
 import { useAgentChat } from './chat/useAgentChat.js'
@@ -188,17 +189,6 @@ function Dashboard({ pipelines, projects, onOpen, onCreate }) {
 // Reads the curated variable menu + current values from /api/env (the repo .env) and writes edits
 // back. Secrets render as masked inputs with a reveal toggle; blank = leave unset. The whole draft
 // is sent on Save — the backend writes only what actually changed.
-
-// Inline stroke icons (currentColor, 16px) — aesthetic, no emoji.
-const Svg = (p) => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-    strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...p} />
-)
-const IconKey = (p) => <Svg {...p}><circle cx="7.5" cy="15.5" r="4.5" /><path d="M11 12 20 3" /><path d="m16 7 3 3" /><path d="m13.5 9.5 2.5 2.5" /></Svg>
-const IconEye = (p) => <Svg {...p}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></Svg>
-const IconEyeOff = (p) => <Svg {...p}><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 8 10 8a18 18 0 0 1-2.16 3.19" /><path d="M6.6 6.6A18 18 0 0 0 2 12s3.5 8 10 8a9.3 9.3 0 0 0 5.4-1.6" /><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M2 2l20 20" /></Svg>
-const IconCheck = (p) => <Svg {...p}><path d="M20 6 9 17l-5-5" /></Svg>
-const IconX = (p) => <Svg {...p}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></Svg>
 
 function EnvModal({ onClose }) {
   const [vars, setVars] = useState(null)

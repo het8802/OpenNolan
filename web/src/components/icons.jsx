@@ -1,0 +1,18 @@
+// Inline stroke icons — aesthetic, dependency-free, currentColor, 16px by default. Used across the
+// dashboard (BYOK), the studio toolbar (undo/redo), etc. No emoji (RULES.md: use aesthetic icons).
+
+export function Svg({ size = 16, ...p }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...p} />
+  )
+}
+
+export const IconKey = (p) => <Svg {...p}><circle cx="7.5" cy="15.5" r="4.5" /><path d="M11 12 20 3" /><path d="m16 7 3 3" /><path d="m13.5 9.5 2.5 2.5" /></Svg>
+export const IconEye = (p) => <Svg {...p}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></Svg>
+export const IconEyeOff = (p) => <Svg {...p}><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 8 10 8a18 18 0 0 1-2.16 3.19" /><path d="M6.6 6.6A18 18 0 0 0 2 12s3.5 8 10 8a9.3 9.3 0 0 0 5.4-1.6" /><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M2 2l20 20" /></Svg>
+export const IconCheck = (p) => <Svg {...p}><path d="M20 6 9 17l-5-5" /></Svg>
+export const IconX = (p) => <Svg {...p}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></Svg>
+// Classic undo/redo: a horizontal arrow that curves back (Lucide undo-2 / redo-2).
+export const IconUndo = (p) => <Svg {...p}><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11" /></Svg>
+export const IconRedo = (p) => <Svg {...p}><path d="m15 14 5-5-5-5" /><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H11" /></Svg>
