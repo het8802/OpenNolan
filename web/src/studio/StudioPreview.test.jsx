@@ -83,3 +83,25 @@ describe('WYSIWYG canvas', () => {
     expect(onSelectOverlay).toHaveBeenCalledWith(0)
   })
 })
+
+describe('main-clip position/scale + project background', () => {
+  it('wraps the clip in a positioned + scaled box (move + resize)', () => {
+    const doc = { cuts: [{ id: 'c1', source: 'clips/a.mp4', in_seconds: 0, out_seconds: 5, transform: { scale: 0.5 } }] }
+    const { container } = render(<StudioPreview {...base} doc={doc} />)
+    const box = container.querySelector('.st-clip-box')
+    expect(box).toBeInTheDocument()
+    expect(box.style.width).toBe('540px')  // 1080 canvas * 0.5 scale * 1 frame-factor
+    expect(box.style.left).toBe('270px')   // centered: (1080 - 540) / 2
+    expect(container.querySelector('video.st-frame-media')).toBeInTheDocument()
+  })
+  it('paints a color background on the safe frame', () => {
+    const doc = { cuts: [videoCut], metadata: { background: { type: 'color', color: '#ff0000' } } }
+    const { container } = render(<StudioPreview {...base} doc={doc} />)
+    expect(container.querySelector('.st-safe-frame').style.background).toMatch(/#ff0000|rgb\(255, 0, 0\)/)
+  })
+  it('renders an image background cover layer behind the clip', () => {
+    const doc = { cuts: [videoCut], metadata: { background: { type: 'image', asset_id: 'images/bg.png' } } }
+    const { container } = render(<StudioPreview {...base} doc={doc} />)
+    expect(container.querySelector('img.st-bg-media')).toBeInTheDocument()
+  })
+})

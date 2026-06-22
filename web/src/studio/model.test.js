@@ -9,6 +9,7 @@ import {
   overlayKind, overlayType, kfDimsFor, newTextOverlay, newImageOverlay, newVideoOverlay, presetKeyframes,
   isFfmpeg, anchorToXY, fmtTime, round3, clamp, previewAudioTracks, isImageSource, clipType,
   scrubValue, roundTo, fmtScrub, decimalsOf,
+  clipFitSize, clipBox, clipDefaultPosition, clipAnchorXY, clipPositionXY,
 } from './model.js'
 import { sanitizeOverlay } from '../editor/interp.js'
 
@@ -279,5 +280,32 @@ describe('scrub-field math (drag-to-adjust number inputs)', () => {
     expect(fmtScrub('')).toBe('')
     expect(fmtScrub(null)).toBe('')
     expect(fmtScrub(undefined)).toBe('')
+  })
+})
+
+describe('main-clip placement helpers (move + resize on the canvas)', () => {
+  const canvas = { width: 1080, height: 1920 }
+  const src = { width: 1920, height: 1080 } // 16:9 source in a 9:16 canvas
+  it('clipFitSize fits a 16:9 source into a 9:16 canvas (contain)', () => {
+    expect(clipFitSize(src, canvas)).toEqual({ width: 1080, height: 608 })
+  })
+  it('clipFitSize falls back to the canvas when dims are unknown', () => {
+    expect(clipFitSize(null, canvas)).toEqual({ width: 1080, height: 1920 })
+  })
+  it('clipBox = fit × scale with even dims', () => {
+    expect(clipBox(src, canvas, 0.5)).toEqual({ width: 540, height: 304 })
+    expect(clipBox(src, canvas, 1)).toEqual({ width: 1080, height: 608 })
+  })
+  it('clipDefaultPosition centers the box (matches the legacy centered letterbox)', () => {
+    expect(clipDefaultPosition(src, canvas, 1)).toEqual({ x: 0, y: 656 })
+  })
+  it('clipAnchorXY places the box flush to the named edge (margin 0)', () => {
+    expect(clipAnchorXY('top-left', src, canvas, 0.5)).toEqual({ x: 0, y: 0 })
+    expect(clipAnchorXY('bottom-right', src, canvas, 0.5)).toEqual({ x: 1080 - 540, y: 1920 - 304 })
+  })
+  it('clipPositionXY resolves an {x,y} object as-is and a string anchor to numbers', () => {
+    expect(clipPositionXY({ transform: { position: { x: 5, y: 9 } } }, src, canvas)).toEqual({ x: 5, y: 9 })
+    expect(clipPositionXY({ transform: { position: 'top-left', scale: 0.5 } }, src, canvas)).toEqual({ x: 0, y: 0 })
+    expect(clipPositionXY({ transform: {} }, src, canvas)).toEqual({ x: 0, y: 656 }) // default = centered
   })
 })

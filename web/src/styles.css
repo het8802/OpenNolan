@@ -844,6 +844,12 @@ select { cursor: pointer; }
 .st-safe-frame { position: relative; max-width: 100%; max-height: 100%; background: #000;
   border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .st-frame-media { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* project background image (cover) behind the clip box */
+.st-bg-media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+/* the main clip as a positioned/scaled box on the background (move + resize); black within-box
+   letterbox matches the renderer. drag to move, click (no drag) toggles play. */
+.st-clip-box { position: absolute; background: #000; overflow: hidden; cursor: grab; touch-action: none; }
+.st-clip-box.sel { outline: 1.5px solid var(--accent); outline-offset: -1px; }
 .st-ov-layer { position: absolute; inset: 0; pointer-events: none; }
 .st-ov-canvas { pointer-events: auto; cursor: grab; user-select: none; touch-action: none;
   outline: 1px dashed transparent; }
@@ -916,9 +922,12 @@ body.st-scrubbing, body.st-scrubbing * { cursor: ew-resize !important; user-sele
 
 /* timeline */
 .st-timeline { flex: 1 1 auto; min-width: 0; min-height: 0; background: var(--panel); border-top: 1px solid var(--line); display: flex; flex-direction: column; }
-.st-tl-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.3rem 0.7rem; border-bottom: 1px solid var(--line); }
-.st-tl-ops { display: flex; align-items: center; gap: 0.4rem; }
-.st-tl-right { display: flex; align-items: center; gap: 0.6rem; }
+.st-tl-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.3rem 0.7rem; border-bottom: 1px solid var(--line); }
+/* three zones: clip ops (left) · transport (center) · zoom (right). ops + right share equal flex so
+   the play button sits truly centered in the bar. */
+.st-tl-ops { display: flex; align-items: center; gap: 0.4rem; flex: 1 1 0; min-width: 0; }
+.st-tl-center { display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.st-tl-right { display: flex; align-items: center; gap: 0.6rem; flex: 1 1 0; min-width: 0; justify-content: flex-end; }
 .st-tl-dur { font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .st-zoom { display: inline-flex; align-items: center; gap: 0.3rem; }
 .st-zoom input[type=range] { width: 130px; }
@@ -965,6 +974,19 @@ body.st-scrubbing, body.st-scrubbing * { cursor: ew-resize !important; user-sele
 .st-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); pointer-events: none; z-index: 3; }
 
 /* assets tab (feat 4) — shown in the properties panel when nothing is selected */
+/* project-wide canvas background control (empty-selection panel) */
+.st-bg-ctrl { border-top: none; padding-top: 0; }
+.st-bg-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+.st-bg-swatch { display: inline-flex; width: 28px; height: 24px; border: 1px solid var(--line); border-radius: 6px;
+  overflow: hidden; cursor: pointer; padding: 0; }
+.st-bg-swatch.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.st-bg-swatch input[type="color"] { width: 140%; height: 140%; margin: -20%; padding: 0; border: none; background: none; cursor: pointer; }
+.st-bg-images { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.35rem; margin-top: 0.3rem; }
+.st-bg-img { padding: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; cursor: pointer; background: #000; }
+.st-bg-img:hover { border-color: var(--accent); }
+.st-bg-img.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.st-bg-img img { width: 100%; height: 34px; object-fit: cover; display: block; }
+
 .st-assets .st-asset-tabs { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.4rem; }
 .st-asset-tab { font: inherit; font-size: 0.72rem; text-transform: capitalize; padding: 0.2rem 0.5rem;
   border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); cursor: pointer; }

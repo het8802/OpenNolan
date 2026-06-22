@@ -13,7 +13,7 @@ function setup(overrides = {}) {
     onUpdateCut: vi.fn(), onUpdateOverlay: vi.fn(), onUpdateAudio: vi.fn(),
     onLiveUpdateCut: vi.fn(), onLiveUpdateOverlay: vi.fn(), onLiveUpdateAudio: vi.fn(), onScrubBegin: vi.fn(),
     onSetKeyframes: vi.fn(), onUpsertKeyframe: vi.fn(), onRemoveKeyframe: vi.fn(),
-    onAddImage: vi.fn(), onAddClip: vi.fn(), onAddSfx: vi.fn(), onSetMusic: vi.fn(),
+    onAddImage: vi.fn(), onAddClip: vi.fn(), onAddSfx: vi.fn(), onSetMusic: vi.fn(), onSetBackground: vi.fn(),
     ...overrides,
   }
   return { ...render(<StudioInspector {...props} />), props }
@@ -40,7 +40,7 @@ describe('selection routing', () => {
     const { container } = setup({
       assets: { kinds: { images: [{ path: 'images/logo.png', name: 'logo.png' }], video: [], audio: [], music: [] } },
     })
-    const item = container.querySelector('.st-asset-item')
+    const item = container.querySelector('.asset-grid .asset-item')
     expect(item).toHaveAttribute('draggable')
     const setData = vi.fn()
     fireEvent.dragStart(item, { dataTransfer: { setData } })
@@ -244,5 +244,40 @@ describe('ScrubField: drag to adjust, click to type (manual entry preserved)', (
     const end = getByRole('slider', { name: 'End' })
     expect(end.textContent).toContain('auto')
     expect(end).toHaveAttribute('aria-valuenow')        // ARIA requires a value on role=slider
+  })
+})
+
+describe('main-clip Position & size + canvas background', () => {
+  it('shows a Position & size control (Scale + X/Y sliders) for a video cut', () => {
+    const selCut = { id: 'c1', source: 'a.mp4', in_seconds: 0, out_seconds: 4, speed: 1 }
+    const { getByText, getByRole } = setup({ selCut, sourceMetas: { 'a.mp4': { width: 1920, height: 1080 } } })
+    expect(getByText('Position & size')).toBeInTheDocument()
+    expect(getByRole('slider', { name: 'Scale' })).toBeInTheDocument()
+    expect(getByRole('slider', { name: 'X' })).toBeInTheDocument()
+    expect(getByRole('slider', { name: 'Y' })).toBeInTheDocument()
+  })
+  it('editing Scale commits transform.scale through onUpdateCut (preserving the position)', () => {
+    const selCut = { id: 'c1', source: 'a.mp4', in_seconds: 0, out_seconds: 4, transform: { position: { x: 5, y: 6 } } }
+    const { getByRole, getByDisplayValue, props } = setup({ selCut, sourceMetas: { 'a.mp4': { width: 1920, height: 1080 } } })
+    openTypeInput(getByRole, 'Scale')
+    const input = getByDisplayValue('1')
+    fireEvent.change(input, { target: { value: '0.5' } })
+    fireEvent.blur(input)
+    expect(props.onUpdateCut).toHaveBeenCalledWith('c1', { transform: { position: { x: 5, y: 6 }, scale: 0.5 } })
+  })
+
+  it('the empty panel exposes a Canvas background control; Black clears it', () => {
+    const { getByText, props } = setup({}) // nothing selected → Assets/empty panel
+    expect(getByText('Canvas background')).toBeInTheDocument()
+    fireEvent.click(getByText('Black'))
+    expect(props.onSetBackground).toHaveBeenCalledWith(null)
+  })
+  it('picking a background image sets metadata.background to that image', () => {
+    const assets = { kinds: { images: [{ path: 'images/bg.png', name: 'bg.png' }], video: [], audio: [], music: [] } }
+    const { container, props } = setup({ assets })
+    const imgBtn = container.querySelector('.st-bg-img')
+    expect(imgBtn).toBeInTheDocument()
+    fireEvent.click(imgBtn)
+    expect(props.onSetBackground).toHaveBeenCalledWith({ type: 'image', asset_id: 'images/bg.png' })
   })
 })

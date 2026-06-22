@@ -28,7 +28,14 @@
             "type": "object",
             "properties": {
               "scale": { "type": "number", "minimum": 0, "default": 1.0 },
-              "position": { "type": "string", "default": "center" },
+              "position": {
+                "description": "Primary-cut placement on the canvas. A named anchor string (default 'center', flush to edges) OR an {x,y} object = clip box top-left in canvas px. layer='overlay' (PiP) cuts MUST use a named-anchor string (the renderer rejects {x,y} there).",
+                "default": "center",
+                "oneOf": [
+                  { "type": "string", "enum": ["top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"] },
+                  { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" } }, "required": ["x", "y"], "additionalProperties": false }
+                ]
+              },
               "animation": {
                 "type": "string",
                 "description": "Motion applied to still images (e.g. ken-burns-slow-zoom, pan-left, static)"
@@ -301,6 +308,16 @@
             "width": { "type": "integer", "minimum": 16 },
             "height": { "type": "integer", "minimum": 16 },
             "fps": { "type": "number", "exclusiveMinimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "background": {
+          "type": "object",
+          "description": "Project background composited BEHIND all primary cuts on the FFmpeg compose path. Absent ⇒ solid black (byte-identical to legacy). 'color' fills the uncovered canvas; 'image' covers it (object-fit: cover). Applied only on the proxy-assemble pass — never baked into a scene proxy.",
+          "properties": {
+            "type": { "type": "string", "enum": ["color", "image"] },
+            "color": { "type": "string", "description": "ffmpeg color (name, #RRGGBB, or 0xRRGGBB) for type='color'." },
+            "asset_id": { "type": "string", "description": "Manifest id (or path) of the background image for type='image'." }
           },
           "additionalProperties": false
         },

@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   TRANSITIONS, TEXT_ANCHORS, SPEED_PRESETS, anchorToXY, overlayKind, overlayType, isImageSource,
-  scrubValue, roundTo, fmtScrub,
+  scrubValue, roundTo, fmtScrub, clipPositionXY,
 } from './model.js'
 import { PROPERTY_SCHEMA, PROPERTY_TITLES, getAtPath, buildPatch } from './propertySchema.js'
 import StudioKeyframes from './StudioKeyframes.jsx'
@@ -230,6 +230,35 @@ function resolveOptions(field, assets, currentValue) {
 }
 
 // ── special controls ─────────────────────────────────────────────────────────
+// Main-clip placement: Scale (× the fit size) + X/Y (box top-left in canvas px). Writes
+// transform.{scale,position:{x,y}} — a string anchor ("center") is normalized to {x,y} via
+// clipPositionXY on first edit, so the renderer always gets numeric placement. Scrub = live (one
+// undo step), typing = commit. Drag-to-move happens on the canvas (StudioPreview).
+function ClipTransform({ cut, canvas, meta, onUpdate, live, onScrubBegin }) {
+  const t = cut.transform || {}
+  const scale = Number(t.scale) || 1
+  const xy = clipPositionXY(cut, meta, canvas)
+  const xf = (patch) => ({ transform: { ...(cut.transform || {}), ...patch } })
+  const scrub = (buildPatchFn) => ({
+    onScrubBegin,
+    onLive: (v) => live?.(xf(buildPatchFn(v))),
+    onCommit: (v) => onUpdate(xf(buildPatchFn(v))),
+  })
+  return (
+    <>
+      <ScrubField label="Scale" suffix="×" value={scale} step={0.05} min={0.05}
+        {...scrub((v) => ({ scale: v }))} />
+      <div className="st-row">
+        <ScrubField label="X" suffix="px" value={xy.x} step={1}
+          {...scrub((v) => ({ position: { x: v, y: xy.y } }))} />
+        <ScrubField label="Y" suffix="px" value={xy.y} step={1}
+          {...scrub((v) => ({ position: { x: xy.x, y: v } }))} />
+      </div>
+      <div className="st-hint">drag the clip on the canvas to move it; Scale resizes it over the background</div>
+    </>
+  )
+}
+
 function SpeedPresets({ value, onCommit }) {
   return (
     <div className="st-speed">
@@ -336,6 +365,8 @@ function Field({ field, obj, onUpdate, ctx }) {
       )
     case 'speedPresets':
       return <SpeedPresets value={value} onCommit={commit} />
+    case 'clipTransform':
+      return <ClipTransform cut={obj} canvas={ctx.canvas} meta={ctx.meta} onUpdate={onUpdate} live={ctx.live} onScrubBegin={ctx.snapshot} />
     case 'crop':
       return <CropControl cut={obj} canvas={ctx.canvas} meta={ctx.meta} onUpdate={onUpdate} live={ctx.live} onScrubBegin={ctx.snapshot} />
     case 'audioMix':
@@ -376,7 +407,7 @@ export default function StudioInspector({
   projectId, doc, canvas, ffmpeg, selCut, selOverlayIndex, selAudio, selAudioObj, playhead, assets, sourceMetas,
   onUpdateCut, onUpdateOverlay, onNormalizeOverlay, onUpdateAudio, onSetKeyframes, onUpsertKeyframe, onRemoveKeyframe,
   onLiveUpdateCut, onLiveUpdateOverlay, onLiveUpdateAudio, onScrubBegin,
-  onAddImage, onAddClip, onAddSfx, onSetMusic,
+  onAddImage, onAddClip, onAddSfx, onSetMusic, onSetBackground, onUploadAsset,
 }) {
   const selOverlay = selOverlayIndex >= 0 ? (doc?.overlays || [])[selOverlayIndex] : null
 
@@ -438,8 +469,9 @@ export default function StudioInspector({
   // Nothing selected → the Assets tab (feat 4): clicking outside any clip shows assets, not a blank panel.
   return (
     <StudioAssets
-      projectId={projectId} assets={assets}
+      projectId={projectId} assets={assets} background={doc?.metadata?.background || null}
       onAddImage={onAddImage} onAddClip={onAddClip} onAddSfx={onAddSfx} onSetMusic={onSetMusic}
+      onSetBackground={onSetBackground} onUploadAsset={onUploadAsset}
     />
   )
 }

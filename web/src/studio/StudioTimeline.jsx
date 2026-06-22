@@ -178,14 +178,16 @@ export default function StudioTimeline({
     <div className="st-timeline">
       <div className="st-tl-head">
         <div className="st-tl-ops">
-          <button className="st-play" onClick={onTogglePlay} title="Play / pause (Space)" aria-label={playing ? 'Pause' : 'Play'}>
-            {playing ? '⏸' : '▶'}
-          </button>
           <button className="st-btn" onClick={onSplit} title="Split at playhead (S)">✂ Split</button>
           <button className="st-btn" onClick={onDuplicate} disabled={!hasCut} title="Duplicate clip">⧉ Duplicate</button>
           <button className="st-btn st-danger" onClick={onDelete} disabled={!hasSel} title="Delete selection (⌫)">🗑 Delete</button>
           <button className="st-btn" onClick={onAutoArrange} disabled={overlays.length < 2}
             title="Auto-arrange overlapping overlays into separate tracks">⇅ Arrange</button>
+        </div>
+        <div className="st-tl-center">
+          <button className="st-play" onClick={onTogglePlay} title="Play / pause (Space)" aria-label={playing ? 'Pause' : 'Play'}>
+            {playing ? '⏸' : '▶'}
+          </button>
         </div>
         <div className="st-tl-right">
           <span className="st-tl-dur">{fmtTime(dur)} total</span>

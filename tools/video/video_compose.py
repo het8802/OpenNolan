@@ -464,16 +464,70 @@ class VideoCompose(BaseTool):
         return path.suffix.lower() in VideoCompose._IMAGE_EXTENSIONS
 
     @staticmethod
+    def _normalize_ffmpeg_color(value: Any, fallback: str = "black") -> str:
+        """Coerce a user/agent-supplied color into something ffmpeg accepts.
+
+        - '#RRGGBB' (CSS hex)        → '0xRRGGBB' (ffmpeg's hex form)
+        - '0x...' / '0X...'          → passed through (lowercased prefix)
+        - a bare color NAME / token  → passed through (ffmpeg resolves names)
+        - anything non-string/empty  → `fallback` (black by default)
+
+        Defensive against junk so a malformed background can never wedge the
+        whole render — a bad color silently degrades to black."""
+        if not isinstance(value, str):
+            return fallback
+        v = value.strip()
+        if not v:
+            return fallback
+        if v.startswith("#"):
+            hex_part = v[1:]
+            if len(hex_part) in (6, 8) and all(
+                c in "0123456789abcdefABCDEF" for c in hex_part
+            ):
+                return "0x" + hex_part
+            return fallback
+        if v[:2] in ("0x", "0X"):
+            return "0x" + v[2:]
+        # A plain name/token: allow word chars + '@' (ffmpeg "name@alpha") only.
+        if all(c.isalnum() or c in "_@." for c in v):
+            return v
+        return fallback
+
+    @staticmethod
     def _segment_base_vf(
-        cut: dict[str, Any], idx: int, target_w: int, target_h: int, fps_str: str
-    ) -> tuple[Optional[str], list[str]]:
+        cut: dict[str, Any], idx: int, target_w: int, target_h: int, fps_str: str,
+        *,
+        bg_color: str = "black",
+        bg_image: Optional[str] = None,
+        apply_transform: bool = False,
+        seg_seconds: Optional[float] = None,
+    ) -> tuple[Optional[str], list[str], Optional[dict[str, Any]]]:
         """Shared per-segment video filter chain (crop → scale → pad → setsar → fps)
         used by BOTH video and still-image cuts so they normalize to the canvas the
         same way. Crop (if present) runs first, in SOURCE pixels (matches the schema).
-        Returns (error_message_or_None, vf_parts). Speed/setpts is NOT added here —
-        the video branch appends setpts and the image branch folds speed into its
-        looped length, so each owns its timing."""
-        vf_parts: list[str] = []
+
+        Returns (error_message_or_None, vf_parts, complex_spec).
+
+        - `complex_spec is None` (the DEFAULT, and ALWAYS when apply_transform is
+          False): single-input case. `_compose` splices `-filter:v <vf_parts>` +
+          `-map 0:v:0`, exactly as before. With apply_transform=False and the
+          default bg_color='black', the emitted tail is byte-identical to the
+          legacy chain (scale…decrease, pad…color=black, setsar=1, fps=…), so
+          cached proxies + legacy docs stay valid.
+        - `complex_spec` is a dict {"inputs": [...extra ffmpeg -i args...],
+          "filtergraph": "...[v]", "vlabel": "[v]"} for the multi-input cases
+          (off-canvas color, or an image background) — `_compose` adds the extra
+          `-i` inputs AFTER source(+anullsrc) and uses `-filter_complex` + `-map [v]`.
+
+        Speed/setpts is NOT added here — the video branch appends setpts and the
+        image branch folds speed into its looped length, so each owns its timing.
+
+        apply_transform is set ONLY on the proxy-ASSEMBLE pass (via the
+        composite_background gate in `_compose`); the solo-proxy render always
+        passes apply_transform=False so proxy content (and its cache key) is
+        unchanged."""
+        # --- crop block: unchanged, always FIRST, source-pixel coordinates ---
+        crop_parts: list[str] = []
         crop = (cut.get("transform") or {}).get("crop") or {}
         if crop:
             crop_w, crop_h = crop.get("width"), crop.get("height")
@@ -486,19 +540,112 @@ class VideoCompose(BaseTool):
                     f"cuts[{idx}].transform.crop requires positive numeric "
                     f"width and height; got {crop!r}",
                     [],
+                    None,
                 )
             crop_x = int(round(crop.get("x", 0) or 0))
             crop_y = int(round(crop.get("y", 0) or 0))
-            vf_parts.append(
+            crop_parts.append(
                 f"crop={int(round(crop_w))}:{int(round(crop_h))}:{crop_x}:{crop_y}"
             )
-        vf_parts += [
-            f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease",
-            f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black",
+
+        # --- legacy single-input path (no transform): identical tail to before,
+        #     only the pad color is parameterized (defaults to black) ---
+        if not apply_transform:
+            vf_parts = list(crop_parts) + [
+                f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease",
+                f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color={bg_color}",
+                "setsar=1",
+                f"fps={fps_str}",
+            ]
+            return (None, vf_parts, None)
+
+        # --- transform path: resolve scale + position into an even box on canvas ---
+        transform = cut.get("transform") or {}
+        scale = transform.get("scale", 1.0)
+        try:
+            scale = float(scale)
+        except (TypeError, ValueError):
+            scale = 1.0
+        if scale <= 0:
+            scale = 1.0
+        # Even box dims (yuv420p), >= 2.
+        boxw = max(2, int(target_w * scale / 2) * 2)
+        boxh = max(2, int(target_h * scale / 2) * 2)
+
+        position = transform.get("position", "center")
+        if isinstance(position, dict):
+            px = int(round(position.get("x", 0) or 0))
+            py = int(round(position.get("y", 0) or 0))
+        else:
+            # Named anchor (margin=0 → flush to the canvas edges). Default 'center'.
+            parts = VideoCompose._split_anchor(position) or ("center", "center")
+            px, py = VideoCompose._anchor_xy(parts, target_w, target_h, boxw, boxh, 0)
+
+        # The clip box, scaled-to-fit inside boxw×boxh and centered within it (so a
+        # mismatched source aspect ratio letterboxes inside its own box, not the canvas).
+        fg_chain = list(crop_parts) + [
+            f"scale={boxw}:{boxh}:force_original_aspect_ratio=decrease",
             "setsar=1",
-            f"fps={fps_str}",
         ]
-        return (None, vf_parts)
+
+        fully_inside = (0 <= px <= target_w - boxw) and (0 <= py <= target_h - boxh)
+
+        if bg_image is None and fully_inside:
+            # Simplest case: one input, pad the scaled clip into place over a solid
+            # color. `pad` x/y must be within [0, W-iw]/[0, H-ih] — guaranteed here.
+            vf_parts = fg_chain + [
+                f"pad={target_w}:{target_h}:{px}:{py}:color={bg_color}",
+                f"fps={fps_str}",
+            ]
+            return (None, vf_parts, None)
+
+        # Multi-input compositing: build a background layer, overlay the clip on it.
+        # `seg_seconds` bounds any synthesized/looped bg input (mandatory — an
+        # unbounded lavfi/-loop input is an infinite encode).
+        try:
+            seg_t = float(seg_seconds) if seg_seconds and seg_seconds > 0 else 0.0
+        except (TypeError, ValueError):
+            seg_t = 0.0
+        if seg_t <= 0:
+            return (
+                f"cuts[{idx}]: a positive segment duration is required to "
+                f"composite an off-canvas/image background (got {seg_seconds!r})",
+                [],
+                None,
+            )
+        # Trim the float to a stable string ffmpeg parses.
+        seg_t_str = f"{seg_t:.6f}".rstrip("0").rstrip(".") or "0"
+
+        fg_graph = "[0:v]" + ",".join(fg_chain) + "[fg]"
+
+        if bg_image is not None:
+            # IMAGE background: object-fit:cover (scale to fill, crop overflow),
+            # then overlay the clip box. The bg is a looped still bounded by -t.
+            inputs = ["-loop", "1", "-t", seg_t_str, "-i", str(bg_image)]
+            bg_idx = "{bg}"  # _compose substitutes the resolved input index
+            bg_graph = (
+                f"[{bg_idx}:v]"
+                f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+                f"crop={target_w}:{target_h},setsar=1,fps={fps_str}[bg]"
+            )
+        else:
+            # COLOR background, box off-canvas: a lavfi color source as the bg,
+            # overlay the (possibly clipped) box at PX,PY.
+            inputs = [
+                "-f", "lavfi", "-t", seg_t_str,
+                "-i", f"color=c={bg_color}:s={target_w}x{target_h}:r={fps_str}",
+            ]
+            bg_idx = "{bg}"
+            bg_graph = f"[{bg_idx}:v]setsar=1[bg]"
+
+        filtergraph = (
+            f"{bg_graph};{fg_graph};[bg][fg]overlay={px}:{py}[v]"
+        )
+        return (
+            None,
+            [],
+            {"inputs": inputs, "filtergraph": filtergraph, "vlabel": "[v]"},
+        )
 
     @staticmethod
     def _has_audio_stream(path: Path) -> bool:
@@ -1179,6 +1326,21 @@ class VideoCompose(BaseTool):
             return ToolResult(success=False, error=canvas_err)
         fps_str = f"{target_fps:g}"
 
+        # Per-clip position/scale + project background — applied ONLY when the
+        # ASSEMBLE pass (_render_via_ffmpeg) sets this gate. NEVER derived from
+        # metadata.background here, so a solo-proxy render (which carries the full
+        # metadata) leaves proxy content + cache key untouched. None ⇒ legacy
+        # black-letterbox/fit/center, byte-identical to before.
+        composite_background = inputs.get("composite_background")
+        if isinstance(composite_background, dict):
+            bg_color = self._normalize_ffmpeg_color(
+                composite_background.get("color"), "black"
+            )
+            bg_image = composite_background.get("image") or None
+        else:
+            bg_color = "black"
+            bg_image = None
+
         # Per-join transition resolution (B.transition_in wins over A.transition_out).
         joins, transition_warnings = self._resolve_joins(cuts, edit_decisions.get("metadata"))
         has_transitions = any(j is not None for j in joins)
@@ -1225,6 +1387,27 @@ class VideoCompose(BaseTool):
                 duration = out_s - in_s
                 speed = cut.get("speed", 1.0)
 
+                # Per-clip position/scale + project background compositing is applied
+                # ONLY on the proxy-assemble pass, which sets inputs['composite_background']
+                # (a {color, image} dict). It is NEVER read from metadata here, so the
+                # solo-proxy render (which carries metadata.background) does NOT bake a
+                # background and its content/cache key is unchanged. See _render_via_ffmpeg.
+                cut_bg_color = bg_color
+                cut_bg_image = bg_image
+                # Only deviate from the legacy (black, fit, centered) path when there's
+                # a real reason to: a configured background, or a non-default transform.
+                t = cut.get("transform") or {}
+                pos = t.get("position", "center")
+                sc = t.get("scale", 1.0)
+                non_default_transform = (
+                    (composite_background is not None)
+                    and ((pos != "center") or (sc not in (1.0, 1)))
+                )
+                cut_apply_transform = bool(
+                    composite_background is not None
+                    and (cut_bg_image is not None or non_default_transform)
+                )
+
                 if self._is_image(source):
                     # Reject a zero/negative-duration image cut up front: `-loop 1` with a
                     # non-positive `-t` makes ffmpeg loop the still FOREVER (infinite encode →
@@ -1244,8 +1427,10 @@ class VideoCompose(BaseTool):
                     # carry no audio — synthesize a silent stereo track (mirrors the
                     # silent-video path) so every concat segment has the same layout.
                     seg_seconds = duration / speed if speed and speed > 0 else duration
-                    vf_err, vf_parts = self._segment_base_vf(
-                        cut, i, target_w, target_h, fps_str
+                    vf_err, vf_parts, complex_spec = self._segment_base_vf(
+                        cut, i, target_w, target_h, fps_str,
+                        bg_color=cut_bg_color, bg_image=cut_bg_image,
+                        apply_transform=cut_apply_transform, seg_seconds=seg_seconds,
                     )
                     if vf_err:
                         return ToolResult(success=False, error=vf_err)
@@ -1257,8 +1442,16 @@ class VideoCompose(BaseTool):
                         "-f", "lavfi",
                         "-t", str(seg_seconds),
                         "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-                        "-filter:v", ",".join(vf_parts),
-                        "-map", "0:v:0",
+                    ]
+                    # Source=0, anullsrc=1; any bg input lands at index 2. Video
+                    # always maps from input 0, silent audio from input 1.
+                    if complex_spec is None:
+                        cmd += ["-filter:v", ",".join(vf_parts), "-map", "0:v:0"]
+                    else:
+                        graph = complex_spec["filtergraph"].replace("{bg}", "2")
+                        cmd += complex_spec["inputs"]
+                        cmd += ["-filter_complex", graph, "-map", complex_spec["vlabel"]]
+                    cmd += [
                         "-map", "1:a:0",
                         "-c:v", codec,
                         "-crf", str(crf),
@@ -1287,13 +1480,6 @@ class VideoCompose(BaseTool):
                     # target timeline. Re-encoding with libx264/AAC is slower but
                     # gives exact cut boundaries. Same resolution in → same
                     # resolution out, so same-res inputs concat cleanly.
-                    cmd = [
-                        "ffmpeg", "-y",
-                        "-ss", str(in_s),
-                        "-t", str(duration),
-                        "-i", str(source),
-                    ]
-
                     # Normalize every segment to a consistent container so the
                     # concat-copy step is always safe (and xfade inputs match).
                     # The concat demuxer with `-c copy` requires identical codec /
@@ -1305,27 +1491,28 @@ class VideoCompose(BaseTool):
                     # Target canvas comes from compose_target > profile >
                     # 1920x1080@30 (resolved above). Smaller sources letterbox;
                     # larger ones downscale.
-                    vf_err, vf_parts = self._segment_base_vf(
-                        cut, i, target_w, target_h, fps_str
+                    seg_seconds = duration / speed if speed and speed > 0 else duration
+                    vf_err, vf_parts, complex_spec = self._segment_base_vf(
+                        cut, i, target_w, target_h, fps_str,
+                        bg_color=cut_bg_color, bg_image=cut_bg_image,
+                        apply_transform=cut_apply_transform, seg_seconds=seg_seconds,
                     )
                     if vf_err:
                         return ToolResult(success=False, error=vf_err)
                     af_parts: list[str] = []
                     if speed != 1.0:
-                        vf_parts.append(f"setpts={1.0/speed}*PTS")
                         af_parts.append(self._build_atempo(speed))
-
-                    cmd.extend(["-filter:v", ",".join(vf_parts)])
-                    if af_parts:
-                        cmd.extend(["-filter:a", ",".join(af_parts)])
-
-                    cmd.extend([
-                        "-c:v", codec,
-                        "-crf", str(crf),
-                        "-preset", preset,
-                        "-pix_fmt", "yuv420p",
-                        "-r", fps_str,
-                    ])
+                        if complex_spec is None:
+                            # Single-input path: setpts rides on the -filter:v chain.
+                            vf_parts.append(f"setpts={1.0/speed}*PTS")
+                        else:
+                            # Complex path: fold setpts into the foreground clip chain
+                            # (right after the [0:v] label) so retiming applies to the
+                            # composited clip, not the bg.
+                            complex_spec = dict(complex_spec)
+                            complex_spec["filtergraph"] = complex_spec["filtergraph"].replace(
+                                "[0:v]", f"[0:v]setpts={1.0/speed}*PTS,", 1
+                            )
 
                     # Audio handling: some source clips have no audio stream
                     # (Pexels stock often ships silent). If we unconditionally
@@ -1334,37 +1521,58 @@ class VideoCompose(BaseTool):
                     # to AAC; if absent, synthesize a silent stereo track so
                     # concat segments have a consistent stream layout.
                     has_audio = self._has_audio_stream(source)
-                    if has_audio:
-                        cmd.extend(["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"])
-                    else:
-                        # Inject silent audio via lavfi before the output.
-                        # We have to rebuild cmd to add the lavfi input
-                        # before the output path and map streams explicitly.
-                        cmd = [
-                            "ffmpeg", "-y",
-                            "-ss", str(in_s),
-                            "-t", str(duration),
-                            "-i", str(source),
-                            "-f", "lavfi",
-                            "-t", str(duration),
+
+                    # Source is input 0. A synthesized silent track (when the
+                    # source has no audio) is input 1. Any background input
+                    # (complex path only) lands AFTER those — index 1 (real
+                    # audio) or 2 (silent audio injected).
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", str(in_s),
+                        "-t", str(duration),
+                        "-i", str(source),
+                    ]
+                    if not has_audio:
+                        cmd += [
+                            "-f", "lavfi", "-t", str(duration),
                             "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-                            "-filter:v", ",".join(vf_parts),
                         ]
+                    bg_input_idx = "2" if not has_audio else "1"
+
+                    if complex_spec is None:
+                        cmd += ["-filter:v", ",".join(vf_parts)]
                         if af_parts:
-                            cmd.extend(["-filter:a", ",".join(af_parts)])
-                        cmd.extend([
-                            "-map", "0:v:0",
-                            "-map", "1:a:0",
-                            "-c:v", codec,
-                            "-crf", str(crf),
-                            "-preset", preset,
-                            "-pix_fmt", "yuv420p",
-                            "-r", fps_str,
-                            "-c:a", "aac",
-                            "-b:a", "192k",
-                            "-ar", "48000",
-                            "-ac", "2",
-                        ])
+                            cmd += ["-filter:a", ",".join(af_parts)]
+                        if not has_audio:
+                            cmd += ["-map", "0:v:0", "-map", "1:a:0"]
+                        # has_audio + simple: leave ffmpeg's default stream selection
+                        # (matches the legacy path that emitted no -map here).
+                    else:
+                        # Complex (filter_complex) path: -filter:a / -af cannot
+                        # coexist with -filter_complex, so any atempo (speed) is
+                        # folded INTO the complex graph as a labeled audio chain.
+                        graph = complex_spec["filtergraph"].replace("{bg}", bg_input_idx)
+                        audio_in = "0:a" if has_audio else "1:a"
+                        if af_parts:
+                            graph += f";[{audio_in}]{','.join(af_parts)}[aout]"
+                            audio_map = "[aout]"
+                        else:
+                            audio_map = audio_in
+                        cmd += complex_spec["inputs"]
+                        cmd += [
+                            "-filter_complex", graph,
+                            "-map", complex_spec["vlabel"],
+                            "-map", audio_map,
+                        ]
+
+                    cmd += [
+                        "-c:v", codec,
+                        "-crf", str(crf),
+                        "-preset", preset,
+                        "-pix_fmt", "yuv420p",
+                        "-r", fps_str,
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                    ]
 
                     cmd.append(str(seg_path))
                     self.run_command(cmd)
@@ -2200,9 +2408,39 @@ class VideoCompose(BaseTool):
             else output_path
         )
 
+        # --- project background (metadata.background) → _compose gate ---
+        # This is the ONLY place metadata.background is read. Setting
+        # compose_inputs['composite_background'] here (and never reading
+        # metadata.background inside _compose) is what keeps the solo-proxy
+        # render — which ALSO carries metadata.background — from baking the bg
+        # into a proxy (proxy content + cache key stay unchanged). A malformed
+        # background degrades to black rather than failing the render.
+        composite_background: Optional[dict[str, Any]] = None
+        bg = (edit_decisions.get("metadata") or {}).get("background")
+        if isinstance(bg, dict):
+            bg_type = (bg.get("type") or "").strip().lower()
+            if bg_type == "color":
+                composite_background = {
+                    "color": self._normalize_ffmpeg_color(bg.get("color"), "black"),
+                    "image": None,
+                }
+            elif bg_type == "image":
+                bg_lookup = {a["id"]: a for a in (asset_manifest or {}).get("assets", []) if a.get("id")}
+                aid = bg.get("asset_id") or ""
+                bg_path = bg_lookup[aid]["path"] if aid in bg_lookup else aid
+                if bg_path and Path(str(bg_path)).exists():
+                    composite_background = {"color": "black", "image": str(bg_path)}
+                else:
+                    # Missing image → degrade to a BLACK color background (not a hard
+                    # fail, and not silently dropping the transform): a declared bg still
+                    # means "honor the per-clip transform", just over black.
+                    composite_background = {"color": "black", "image": None}
+
         compose_inputs = dict(inputs)
         compose_inputs["edit_decisions"] = dict(edit_decisions, cuts=base_cuts)
         compose_inputs["output_path"] = str(compose_target)
+        if composite_background is not None:
+            compose_inputs["composite_background"] = composite_background
         if subtitle_path:
             compose_inputs["subtitle_path"] = subtitle_path
         if profile:
@@ -2416,6 +2654,12 @@ class VideoCompose(BaseTool):
                     [],
                 )
             anchor = transform.get("position") or "top-right"
+            if isinstance(anchor, dict):
+                return (
+                    f"cuts[{idx}].transform.position for layer='overlay' (PiP) must "
+                    f"be a named anchor string, not an {{x,y}} object — got {anchor!r}",
+                    [],
+                )
             anchor_parts = self._split_anchor(anchor)
             if anchor_parts is None:
                 return (
