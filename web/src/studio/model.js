@@ -224,6 +224,54 @@ export function anchorToXY(anchor, canvas) {
   return { x: cols[hpart] ?? cols.center, y: rows[v] ?? rows.center, width: Math.round(w * 0.25) }
 }
 
+// ── Main-clip placement on the canvas (move + resize) ────────────────────────
+// A main cut is composited as a box on the project background. At scale=1 the box is the clip
+// "fit" size (contain) — identical to the legacy full-frame letterbox. transform.scale multiplies
+// the fit size; transform.position is the box top-left in canvas px (or a named anchor string).
+// These mirror the renderer's geometry so the preview == the export.
+
+/** The clip "fit" (contain) size in canvas px — the box at scale=1. Unknown dims ⇒ the canvas. */
+export function clipFitSize(meta, canvas) {
+  const cw = canvas?.width || 1920, ch = canvas?.height || 1080
+  const sw = Number(meta?.width) || cw, sh = Number(meta?.height) || ch
+  const r = Math.min(cw / sw, ch / sh)
+  return { width: Math.round(sw * r), height: Math.round(sh * r) }
+}
+
+/** The clip box (fit × scale) in canvas px, even dims ≥ 2 (matches the renderer). */
+export function clipBox(meta, canvas, scale = 1) {
+  const fit = clipFitSize(meta, canvas)
+  const s = Number(scale) || 1
+  const even = (n) => Math.max(2, Math.round(n / 2) * 2)
+  return { width: even(fit.width * s), height: even(fit.height * s) }
+}
+
+/** Centered box top-left in canvas px (the default placement = legacy centered letterbox). */
+export function clipDefaultPosition(meta, canvas, scale = 1) {
+  const box = clipBox(meta, canvas, scale)
+  const cw = canvas?.width || 1920, ch = canvas?.height || 1080
+  return { x: Math.round((cw - box.width) / 2), y: Math.round((ch - box.height) / 2) }
+}
+
+/** A named anchor → box top-left in canvas px (flush to edges, margin 0 — matches the renderer). */
+export function clipAnchorXY(anchor, meta, canvas, scale = 1) {
+  const box = clipBox(meta, canvas, scale)
+  const cw = canvas?.width || 1920, ch = canvas?.height || 1080
+  const a = String(anchor || 'center')
+  const x = a.endsWith('left') ? 0 : a.endsWith('right') ? cw - box.width : Math.round((cw - box.width) / 2)
+  const y = a.startsWith('top') ? 0 : a.startsWith('bottom') ? ch - box.height : Math.round((ch - box.height) / 2)
+  return { x, y }
+}
+
+/** Resolve a cut's placement to {x,y} box top-left (object position as-is, else the named anchor). */
+export function clipPositionXY(cut, meta, canvas) {
+  const t = cut?.transform || {}
+  const scale = Number(t.scale) || 1
+  const pos = t.position
+  if (pos && typeof pos === 'object' && pos.x != null) return { x: Number(pos.x) || 0, y: Number(pos.y) || 0 }
+  return clipAnchorXY(typeof pos === 'string' ? pos : 'center', meta, canvas, scale)
+}
+
 /** mm:ss.c — compact tabular timecode for rulers/labels. */
 export function fmtTime(sec) {
   const s = Math.max(0, Number(sec) || 0)

@@ -463,6 +463,28 @@ export default function Studio({ projectId, state, onClose, chat }) {
   }), [live])
   const onSelectOverlay = useCallback((index) => setSelection({ kind: 'overlay', index }), [])
 
+  // Canvas drag-to-move a MAIN clip: merge {x,y} (canvas px) into transform.position, preserving
+  // scale/crop. Live (per-frame, no history); onClipDragBegin snapshotted once at pointerdown.
+  const onClipPosition = useCallback((cutId, xy) => live(d => {
+    const cut = d?.cuts?.find(c => c.id === cutId)
+    if (!cut) return d
+    const transform = { ...(cut.transform || {}), position: { x: Math.round(xy.x), y: Math.round(xy.y) } }
+    return interp.updateCut(d, cutId, { transform })
+  }), [live])
+
+  // Project background (metadata.background) — one commit per change.
+  const onSetBackground = useCallback((bg) => commit(d => interp.setBackground(d, bg)), [commit])
+
+  // Upload an asset from the editor's Assets panel (same as the pipeline page) → re-list so it shows.
+  const refreshAssets = useCallback(() => {
+    api.listAssets(projectId).then(a => setAssets(a)).catch(() => {})
+  }, [projectId])
+  const onUploadAsset = useCallback(async (kind, file) => {
+    if (!file) return
+    try { await api.uploadAsset(projectId, kind, file); refreshAssets(); flash('ok', `Uploaded ${file.name}`) }
+    catch (e) { flash('err', `Upload failed: ${String(e.message || e)}`) }
+  }, [projectId, refreshAssets, flash])
+
   // Quietly self-heal an agent-authored image/video overlay whose position is a string anchor
   // (the renderer rejects that for non-text). Routed through `live` — NOT `commit` — so merely
   // SELECTING such an overlay never pushes a phantom undo step or wipes the redo stack.
@@ -572,9 +594,10 @@ export default function Studio({ projectId, state, onClose, chat }) {
           <StudioPreview
             projectId={projectId} doc={doc} canvas={canvas} playhead={playhead}
             previewMode={previewMode} renderPath={renderPath} renderVersion={renderVersion}
-            playing={playing} selection={selection}
+            playing={playing} selection={selection} sourceMetas={sourceMetas}
             onScrub={setPlayhead} onPlayingChange={setPlaying}
             onSelectOverlay={onSelectOverlay} onOverlayPosition={onOverlayPosition} onOverlayDragBegin={onOverlayDragBegin}
+            onClipPosition={onClipPosition} onClipDragBegin={snapshot}
           />
           {panels.inspectorOpen ? (
             <>
@@ -590,6 +613,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
                   onLiveUpdateCut={onLiveUpdateCut} onLiveUpdateOverlay={onLiveUpdateOverlay} onLiveUpdateAudio={onLiveUpdateAudio} onScrubBegin={snapshot}
                   onSetKeyframes={onSetKeyframes} onUpsertKeyframe={onUpsertKeyframe} onRemoveKeyframe={onRemoveKeyframe}
                   onAddImage={onAddImage} onAddClip={onAddClip} onAddSfx={onAddSfx} onSetMusic={onSetMusic}
+                  onSetBackground={onSetBackground} onUploadAsset={onUploadAsset}
                 />
               </div>
             </>

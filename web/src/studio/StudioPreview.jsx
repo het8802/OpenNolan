@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api.js'
 import * as interp from '../editor/interp.js'
-import { fmtTime, previewAudioTracks, overlayType, isImageSource } from './model.js'
+import { fmtTime, previewAudioTracks, overlayType, isImageSource, clipBox, clipPositionXY } from './model.js'
 
 const OV_DRAG_THRESHOLD = 3 // px before a press on a canvas overlay becomes a position drag
 
@@ -78,33 +78,43 @@ function syncOverlayVideos(els, overlays, t, { play }) {
 }
 
 export default function StudioPreview({
-  projectId, doc, canvas, playhead, previewMode, renderPath, renderVersion, playing, selection,
+  projectId, doc, canvas, playhead, previewMode, renderPath, renderVersion, playing, selection, sourceMetas = {},
   onScrub, onPlayingChange, onSelectOverlay, onOverlayPosition, onOverlayDragBegin,
+  onClipPosition, onClipDragBegin,
 }) {
   const srcRef = useRef(null)
   const renRef = useRef(null)
   const frameRef = useRef(null)
+  const stageRef = useRef(null)
   const ovDrag = useRef(null)
+  const clipDrag = useRef(null)
 
   const hit = interp.cutAtTime(doc, playhead)
+  const cut = hit?.cut || null
   const sourceRef = hit?.cut?.source || null
   const sourceTime = hit?.sourceTime || 0
   const dur = interp.timelineDuration(doc)
   const isImg = sourceRef != null && isImageSource(sourceRef)
   const overlays = doc?.overlays || []
+  const background = interp.getBackground(doc)
 
-  // Measured frame size so we can map canvas px → screen px for overlays. scale = frameW/canvasW.
+  // Canvas-aspect "safe frame" size, computed by CONTAIN-fitting the canvas into the STAGE (the clip
+  // + overlays are now absolutely positioned, so the frame has no in-flow content to size itself
+  // from — we measure the stage and set the frame's px size explicitly). scale = frameW/canvasW.
   const [frameSize, setFrameSize] = useState({ w: 0, h: 0 })
   useEffect(() => {
-    const el = frameRef.current
+    const el = stageRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => {
+    const measure = () => {
       const r = el.getBoundingClientRect()
-      setFrameSize({ w: r.width, h: r.height })
-    })
+      const ar = canvas.width / canvas.height || 1
+      let w = r.width, h = r.width / ar
+      if (h > r.height) { h = r.height; w = r.height * ar }
+      setFrameSize({ w: Math.round(w), h: Math.round(h) })
+    }
+    const ro = new ResizeObserver(measure)
     ro.observe(el)
-    const r = el.getBoundingClientRect()
-    setFrameSize({ w: r.width, h: r.height })
+    measure()
     return () => ro.disconnect()
   }, [previewMode, canvas.width, canvas.height])
   const scale = frameSize.w > 0 && canvas.width > 0 ? frameSize.w / canvas.width : 0
@@ -209,6 +219,7 @@ export default function StudioPreview({
     pauseAllAudio(audioEls.current)
     pauseAllAudio(ovVideoEls.current)
     if (ovDrag.current) ovDrag.current()
+    if (clipDrag.current) clipDrag.current()
   }, [])
 
   // Drag an overlay on the canvas → set position.x/y in CANVAS px (feat 4). Captures the overlay's
@@ -258,6 +269,53 @@ export default function StudioPreview({
     window.addEventListener('pointercancel', teardown)
     ovDrag.current = teardown
   }
+
+  // Drag the MAIN clip on the canvas → set transform.position {x,y} in CANVAS px (move on the
+  // background). Same model as overlay drag: snapshot once on first move (one undo step), live per
+  // frame. A press with NO drag toggles play (preserves click-to-play). Resize is via the inspector
+  // Scale field. Origin = the clip box's current top-left (resolves a named anchor → {x,y}).
+  const beginClipDrag = (e) => {
+    if (!cut || !onClipPosition) { onPlayingChange(!playing); return }
+    e.preventDefault()
+    const frame = frameRef.current
+    if (!frame || scale <= 0) { onPlayingChange(!playing); return }
+    const meta = sourceMetas[sourceRef]
+    const orig = clipPositionXY(cut, meta, canvas)
+    const startX = e.clientX, startY = e.clientY
+    let didSnap = false
+    const teardown = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', teardown)
+      clipDrag.current = null
+    }
+    const onMove = (ev) => {
+      if (!didSnap && Math.abs(ev.clientX - startX) < OV_DRAG_THRESHOLD && Math.abs(ev.clientY - startY) < OV_DRAG_THRESHOLD) return
+      if (!didSnap) { onClipDragBegin?.(); didSnap = true }
+      const nx = Math.round(orig.x + (ev.clientX - startX) / scale)
+      const ny = Math.round(orig.y + (ev.clientY - startY) / scale)
+      onClipPosition(cut.id, { x: nx, y: ny })
+    }
+    const onUp = () => { const moved = didSnap; teardown(); if (!moved) onPlayingChange(!playing) }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', teardown)
+    clipDrag.current = teardown
+  }
+
+  // Clip box on the canvas (move + resize), in FRAME px. Pre-measure (scale<=0) → fill the frame so
+  // the persistent <video> never remounts; once measured, position+size from transform + source dims.
+  const clipBoxStyle = (() => {
+    if (scale <= 0 || !cut) return { inset: 0 }
+    const meta = sourceMetas[sourceRef]
+    const ts = Number(cut.transform?.scale) || 1
+    const box = clipBox(meta, canvas, ts)
+    const p = clipPositionXY(cut, meta, canvas)
+    return { left: p.x * scale, top: p.y * scale, width: box.width * scale, height: box.height * scale }
+  })()
+  const bgColor = background?.type === 'color' && background.color ? background.color : null
+  const bgImage = background?.type === 'image' && background.asset_id ? api.sourceUrl(projectId, background.asset_id) : null
+  const clipSelected = selection?.kind === 'cut' && cut && selection.id === cut.id
 
   // Overlays visible at the playhead, sorted ascending by track (lower track first → DOM order
   // puts higher tracks on top, matching the renderer's z-order).
@@ -323,7 +381,7 @@ export default function StudioPreview({
   }
 
   return (
-    <div className="st-stage">
+    <div className="st-stage" ref={stageRef}>
       {/* hidden audio tracks (music / narration / sfx) — synced to the playhead by the rAF clock */}
       {audioTracks.map(tr => (
         <audio
@@ -336,21 +394,26 @@ export default function StudioPreview({
 
       {previewMode === 'source' ? (
         <div className="st-safe-frame" ref={frameRef}
-          style={{ aspectRatio: `${canvas.width} / ${canvas.height}` }}>
+          style={{ width: frameSize.w || undefined, height: frameSize.h || undefined, background: bgColor || undefined }}>
+          {/* project background (color via the frame bg above; image as a cover layer behind clips) */}
+          {bgImage && <img className="st-bg-media" src={bgImage} alt="" draggable={false} />}
           {sourceRef != null ? (
-            isImg ? (
-              <img className="st-frame-media" src={api.sourceUrl(projectId, sourceRef)} alt="" draggable={false} />
-            ) : (
-              // ONE persistent <video> for every video cut — src follows the playhead (no `key`).
-              <video
-                ref={srcRef}
-                className="st-frame-media"
-                src={api.sourceUrl(projectId, sourceRef)}
-                preload="auto"
-                playsInline
-                onClick={() => onPlayingChange(!playing)}
-              />
-            )
+            // The clip BOX (move + resize) sits on the background; drag it to move, Scale to resize.
+            // The persistent <video> stays mounted inside so playback wiring is uninterrupted.
+            <div className={`st-clip-box${clipSelected ? ' sel' : ''}`} style={clipBoxStyle} onPointerDown={beginClipDrag}>
+              {isImg ? (
+                <img className="st-frame-media" src={api.sourceUrl(projectId, sourceRef)} alt="" draggable={false} />
+              ) : (
+                // ONE persistent <video> for every video cut — src follows the playhead (no `key`).
+                <video
+                  ref={srcRef}
+                  className="st-frame-media"
+                  src={api.sourceUrl(projectId, sourceRef)}
+                  preload="auto"
+                  playsInline
+                />
+              )}
+            </div>
           ) : (
             <div className="st-stage-empty">No clip under the playhead.</div>
           )}

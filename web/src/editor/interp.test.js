@@ -4,7 +4,7 @@ import {
   upsertKeyframe, removeKeyframe, scaffoldEditDecisions, timelineDuration,
   cutDuration, cutStarts, cutAtTime, trimCut, splitCutAtPlayhead, MIN_SOURCE_SPAN,
   removeCut, duplicateCut, reorderCut, addCut, addOverlay, removeOverlay,
-  setCanvas, canvasOf, audioClips,
+  setCanvas, canvasOf, audioClips, setBackground, getBackground, clearBackground,
   setMusic, updateMusic, removeMusic, addSfx, updateSfx, removeSfx, updateNarration, removeNarration,
   overlayTracks, moveOverlay, trimOverlay, MIN_OVERLAY_SPAN,
   placeOverlayTrack, autoArrangeOverlays, resolveOverlayOverlap,
@@ -620,5 +620,35 @@ describe('trimOverlay (edge handles, absolute time)', () => {
   it('moves the out-edge, clamps start >= 0', () => {
     expect(trimOverlay(doc, 0, { end_seconds: 9 }).overlays[0].end_seconds).toBe(9)
     expect(trimOverlay(doc, 0, { start_seconds: -2 }).overlays[0].start_seconds).toBe(0)
+  })
+})
+
+describe('cut transform position/scale + project background', () => {
+  it('sanitizeCut keeps a named-anchor string position and coerces scale to a number', () => {
+    const c = sanitizeCut({ id: 'c', source: 'a.mp4', transform: { scale: '0.5', position: 'center', crop: { x: 1, y: 2, width: 3, height: 4 } } })
+    expect(c.transform.scale).toBe(0.5)
+    expect(c.transform.position).toBe('center')
+    expect(c.transform.crop).toEqual({ x: 1, y: 2, width: 3, height: 4 })
+  })
+  it('sanitizeCut rounds an object {x,y} position and drops stray keys', () => {
+    const c = sanitizeCut({ id: 'c', source: 'a.mp4', transform: { position: { x: 10.6, y: -4.2, junk: 9 } } })
+    expect(c.transform.position).toEqual({ x: 11, y: -4 })
+  })
+  it('setBackground / getBackground for color + image, clear, and same-ref no-ops', () => {
+    const d0 = { cuts: [] }
+    expect(getBackground(d0)).toBeNull()
+    const d1 = setBackground(d0, { type: 'color', color: '#ff0000' })
+    expect(getBackground(d1)).toEqual({ type: 'color', color: '#ff0000' })
+    expect(setBackground(d1, { type: 'color', color: '#ff0000' })).toBe(d1) // value-equal → same ref
+    const d2 = setBackground(d1, { type: 'image', asset_id: 'bg.png' })
+    expect(getBackground(d2)).toEqual({ type: 'image', asset_id: 'bg.png' })
+    const d3 = clearBackground(d2)
+    expect(getBackground(d3)).toBeNull()
+    expect(d3.metadata.background).toBeUndefined()
+    expect(clearBackground(d0)).toBe(d0) // already none → same ref
+  })
+  it('setBackground ignores incomplete/invalid input (clears instead)', () => {
+    const d = setBackground({ metadata: {} }, { type: 'color' }) // no color
+    expect(getBackground(d)).toBeNull()
   })
 })

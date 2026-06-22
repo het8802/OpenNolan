@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest'
 import { PROPERTY_SCHEMA, PROPERTY_TITLES, getAtPath, buildPatch } from './propertySchema.js'
 
-const SPECIAL = new Set(['speedPresets', 'crop', 'audioMix', 'keyframes', 'textPosition'])
+const SPECIAL = new Set(['speedPresets', 'crop', 'audioMix', 'keyframes', 'textPosition', 'clipTransform'])
 const PLAIN = new Set(['number', 'text', 'textarea', 'color', 'select'])
 
 describe('PROPERTY_SCHEMA shape', () => {

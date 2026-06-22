@@ -103,11 +103,28 @@ class RenderJobStore:
                     o = dict(o, asset_id=new); changed = True
                 new_overlays.append(o)
 
+        # The project background image is also stored as a project-relative ref /
+        # asset id (metadata.background.asset_id, type=="image"). The renderer reads
+        # it from disk during the assemble pass, so resolve it the same way. Color
+        # backgrounds carry no path and transform.position/scale stay intact.
+        new_metadata = None
+        meta = edit_decisions.get("metadata")
+        if isinstance(meta, dict):
+            bg = meta.get("background")
+            if isinstance(bg, dict) and (bg.get("type") or "").strip().lower() == "image":
+                aid = bg.get("asset_id")
+                new = absolute(aid) if aid else aid
+                if new != aid:
+                    new_metadata = dict(meta, background=dict(bg, asset_id=new))
+                    changed = True
+
         if not changed:
             return edit_decisions
         out = dict(edit_decisions, cuts=cuts)
         if new_overlays is not None:
             out["overlays"] = new_overlays
+        if new_metadata is not None:
+            out["metadata"] = new_metadata
         return out
 
     def _set(self, job_id: str, project_id: str, **fields: Any) -> None:

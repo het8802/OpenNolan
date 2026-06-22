@@ -52,6 +52,12 @@ export function sanitizeCut(cut) {
     if (c.transform.crop && typeof c.transform.crop === 'object') {
       c.transform.crop = pick(c.transform.crop, CROP_FIELDS)
     }
+    // position is polymorphic: a named-anchor string OR an {x,y} object (clip top-left in canvas px).
+    if (c.transform.position && typeof c.transform.position === 'object') {
+      const p = c.transform.position
+      c.transform.position = { x: Math.round(Number(p.x) || 0), y: Math.round(Number(p.y) || 0) }
+    }
+    if (c.transform.scale != null) c.transform.scale = Number(c.transform.scale) || 1
   }
   return c
 }
@@ -489,6 +495,32 @@ export function canvasOf(doc) {
     height: Number(ct.height) || 1080,
     fps: Number(ct.fps) || 30,
   }
+}
+
+/** Project background (metadata.background) behind all primary cuts. null = default black. */
+export function getBackground(doc) {
+  return doc?.metadata?.background || null
+}
+
+/**
+ * Set/clear the project background (metadata.background). `bg` is {type:'color', color} or
+ * {type:'image', asset_id}; null/invalid clears it (back to default black). Immutable; a no-op
+ * (value-equal) returns the SAME doc ref so history/dirty stay correct.
+ */
+export function setBackground(doc, bg) {
+  const cur = doc?.metadata?.background || null
+  let next = null
+  if (bg && bg.type === 'color' && bg.color) next = { type: 'color', color: String(bg.color) }
+  else if (bg && bg.type === 'image' && bg.asset_id) next = { type: 'image', asset_id: String(bg.asset_id) }
+  if (JSON.stringify(cur) === JSON.stringify(next)) return doc
+  const meta = { ...(doc.metadata || {}) }
+  if (next) meta.background = next
+  else delete meta.background
+  return { ...doc, metadata: meta }
+}
+
+export function clearBackground(doc) {
+  return setBackground(doc, null)
 }
 
 /**

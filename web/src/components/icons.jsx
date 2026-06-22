@@ -16,3 +16,5 @@ export const IconX = (p) => <Svg {...p}><path d="M18 6 6 18" /><path d="m6 6 12 
 // Classic undo/redo: a horizontal arrow that curves back (Lucide undo-2 / redo-2).
 export const IconUndo = (p) => <Svg {...p}><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11" /></Svg>
 export const IconRedo = (p) => <Svg {...p}><path d="m15 14 5-5-5-5" /><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H11" /></Svg>
+export const IconPlay = (p) => <Svg {...p}><path d="M6 4v16l13-8z" fill="currentColor" stroke="none" /></Svg>
+export const IconMusic = (p) => <Svg {...p}><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></Svg>
