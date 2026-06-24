@@ -15,7 +15,9 @@ const STATUS_LABEL = {
   error: 'error',
 }
 
-const ASSET_KINDS = ['images', 'video', 'audio', 'music']
+// 'renders' is read-only (not uploadable): the agent's HyperFrames clips from hf/renders,
+// served by the backend as `agent_renders` (distinct from the "Final render" in `renders`).
+const ASSET_KINDS = ['images', 'video', 'audio', 'music', 'renders']
 
 export default function App() {
   const [pipelines, setPipelines] = useState([])
@@ -1094,12 +1096,15 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
   }
 
   const renders = data?.renders || []
-  const files = data?.kinds?.[activeKind] || []
+  // The Renders tab reads agent_renders (hf/renders clips); every other tab reads kinds[].
+  const files = (activeKind === 'renders' ? data?.agent_renders : data?.kinds?.[activeKind]) || []
 
   // Lightbox item lists. The URL carries the file's mtime as a cache-bust token so
   // a freshly finished render (same path, new bytes) reloads without a page refresh.
+  // Renders are videos — tag them 'video' so the tile + lightbox use the video player.
   const gridItems = files.map(f => ({
-    kind: activeKind, name: f.name, path: f.path, url: api.fileUrl(selected, f.path, f.mtime),
+    kind: activeKind === 'renders' ? 'video' : activeKind,
+    name: f.name, path: f.path, url: api.fileUrl(selected, f.path, f.mtime),
   }))
   const renderItems = renders.map(r => ({
     kind: 'video', name: r.name, path: r.path, url: api.fileUrl(selected, r.path, r.mtime),
@@ -1141,7 +1146,8 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
                 className={`asset-tab ${activeKind === k ? 'active' : ''}`}
                 onClick={() => setActiveKind(k)}
               >
-                {k}{data?.kinds?.[k]?.length ? ` (${data.kinds[k].length})` : ''}
+                {k}{(k === 'renders' ? data?.agent_renders : data?.kinds?.[k])?.length
+                  ? ` (${(k === 'renders' ? data.agent_renders : data.kinds[k]).length})` : ''}
               </button>
             ))}
           </div>
@@ -1154,16 +1160,18 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
             ))}
           </div>
 
-          <div
-            className={`dropzone ${dragging ? 'drag' : ''}`}
-            onClick={() => inputRef.current?.click()}
-            onDragOver={e => { e.preventDefault(); setDragging(true) }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={e => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files) }}
-          >
-            Drop a <strong>{activeKind}</strong> file here, or click to choose
-            <input ref={inputRef} type="file" hidden onChange={e => handleFiles(e.target.files)} />
-          </div>
+          {activeKind !== 'renders' && (
+            <div
+              className={`dropzone ${dragging ? 'drag' : ''}`}
+              onClick={() => inputRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={e => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files) }}
+            >
+              Drop a <strong>{activeKind}</strong> file here, or click to choose
+              <input ref={inputRef} type="file" hidden onChange={e => handleFiles(e.target.files)} />
+            </div>
+          )}
         </div>
       )}
       {viewer && (

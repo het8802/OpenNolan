@@ -145,15 +145,18 @@ def create_app(
     app.state.agent_runner = agent_runner  # injected (tests) or lazily built
     app.state.render_store = None  # editor render-job runner, lazily built
 
-    def _runner() -> Optional[AgentRunner]:
-        if app.state.agent_runner is None and auth_configured():
-            app.state.agent_runner = AgentRunner(repo_root=REPO_ROOT)
-        return app.state.agent_runner
-
     def _render_store() -> RenderJobStore:
         if app.state.render_store is None:
             app.state.render_store = RenderJobStore(pdir)
         return app.state.render_store
+
+    def _runner() -> Optional[AgentRunner]:
+        if app.state.agent_runner is None and auth_configured():
+            # Share ONE RenderJobStore with the editor so the agent's in-process
+            # `render` tool runs through it (tracked/superseded), instead of the old
+            # background-Bash render that broke turn attribution.
+            app.state.agent_runner = AgentRunner(repo_root=REPO_ROOT, render_store=_render_store())
+        return app.state.agent_runner
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -244,7 +247,16 @@ def create_app(
     @app.get("/api/projects/{project_id}/assets")
     def list_assets(project_id: str) -> dict[str, Any]:
         """List a project's asset files (grouped by kind) and rendered outputs.
-        Paths are relative to the project dir; fetch a file via /file?path=..."""
+        Paths are relative to the project dir; fetch a file via /file?path=...
+
+        Three buckets, kept distinct on purpose:
+          - kinds       — user-managed source assets under assets/ (images/video/audio/music).
+          - renders     — the editor's FINAL output(s) under renders/ (final.mp4, proxies, etc.);
+                          the dashboard surfaces these as the "Final render" player.
+          - agent_renders — the AGENT's intermediate HyperFrames clips under hf/renders/ (the
+                          building blocks the editor drops onto the timeline). See AGENT_GUIDE.md
+                          "Project Directory Convention" — any HyperFrames-rendering pipeline lands
+                          per-scene clips here, so the editor's Renders tab is pipeline-agnostic."""
         proj = pdir / project_id
         if not proj.exists():
             raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
@@ -273,7 +285,20 @@ def create_app(
                     renders.append({"path": str(f.relative_to(proj)), "name": f.name,
                                     "size_bytes": stat.st_size, "mtime": int(stat.st_mtime)})
 
-        return {"project_id": project_id, "kinds": kinds, "renders": renders}
+        # Agent-rendered HyperFrames clips: the intermediate building blocks the agent
+        # produces under hf/renders/ (separate from the editor's final output in renders/).
+        # mtime doubles as the cache-bust/remount key, same as renders above.
+        agent_renders: list[dict[str, Any]] = []
+        hf_renders_dir = proj / "hf" / "renders"
+        if hf_renders_dir.is_dir():
+            for f in sorted(hf_renders_dir.rglob("*")):
+                if f.is_file() and f.suffix.lower() in VIDEO_EXTS and not f.name.startswith("."):
+                    stat = f.stat()
+                    agent_renders.append({"path": str(f.relative_to(proj)), "name": f.name,
+                                          "size_bytes": stat.st_size, "mtime": int(stat.st_mtime)})
+
+        return {"project_id": project_id, "kinds": kinds, "renders": renders,
+                "agent_renders": agent_renders}
 
     @app.get("/api/projects/{project_id}/file")
     def get_file(project_id: str, path: str):

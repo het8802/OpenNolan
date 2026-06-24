@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   TRANSITIONS, TEXT_ANCHORS, SPEED_PRESETS, anchorToXY, overlayKind, overlayType, isImageSource,
-  scrubValue, roundTo, fmtScrub, clipPositionXY,
+  scrubValue, roundTo, fmtScrub, clipPositionXY, isScaleObject, scaleAxes,
 } from './model.js'
 import { PROPERTY_SCHEMA, PROPERTY_TITLES, getAtPath, buildPatch } from './propertySchema.js'
 import StudioKeyframes from './StudioKeyframes.jsx'
@@ -230,13 +230,17 @@ function resolveOptions(field, assets, currentValue) {
 }
 
 // ── special controls ─────────────────────────────────────────────────────────
-// Main-clip placement: Scale (× the fit size) + X/Y (box top-left in canvas px). Writes
-// transform.{scale,position:{x,y}} — a string anchor ("center") is normalized to {x,y} via
-// clipPositionXY on first edit, so the renderer always gets numeric placement. Scrub = live (one
-// undo step), typing = commit. Drag-to-move happens on the canvas (StudioPreview).
+// Main-clip placement: Scale + X/Y (box top-left in canvas px). Writes transform.{scale,position}.
+// Scale is polymorphic (schema oneOf): a UNIFORM number (× the fit-size) when "Lock aspect" is ON,
+// or a per-axis {x,y} CANVAS-fraction box (e.g. a split-screen panel {x:1,y:0.5}) when OFF. A string
+// anchor ("center") is normalized to {x,y} via clipPositionXY on first edit, so the renderer always
+// gets numeric placement. Scrub = live (one undo step), typing = commit. Drag-to-move = canvas.
 function ClipTransform({ cut, canvas, meta, onUpdate, live, onScrubBegin }) {
   const t = cut.transform || {}
-  const scale = Number(t.scale) || 1
+  const scaleObj = isScaleObject(t.scale)
+  // Uniform (locked) value for the single Scale field; per-axis values for the unlocked fields.
+  const uniform = scaleObj ? 1 : (Number(t.scale) || 1)
+  const { sx, sy } = scaleAxes(t.scale != null ? t.scale : 1)
   const xy = clipPositionXY(cut, meta, canvas)
   const xf = (patch) => ({ transform: { ...(cut.transform || {}), ...patch } })
   const scrub = (buildPatchFn) => ({
@@ -244,17 +248,38 @@ function ClipTransform({ cut, canvas, meta, onUpdate, live, onScrubBegin }) {
     onLive: (v) => live?.(xf(buildPatchFn(v))),
     onCommit: (v) => onUpdate(xf(buildPatchFn(v))),
   })
+  // Toggling the lock is a single committed step: ON collapses {x,y}→a uniform number (sx wins, the
+  // width axis); OFF expands the uniform number→{x:n,y:n} so the two fields start where the box is.
+  const toggleLock = (e) => {
+    const next = e.target.checked ? sx : { x: sx, y: sy }
+    onUpdate(xf({ scale: next }))
+  }
   return (
     <>
-      <ScrubField label="Scale" suffix="×" value={scale} step={0.05} min={0.05}
-        {...scrub((v) => ({ scale: v }))} />
+      <label className="st-check">
+        <input type="checkbox" checked={!scaleObj} onChange={toggleLock} />
+        Lock aspect (uniform scale)
+      </label>
+      {scaleObj ? (
+        <div className="st-row">
+          <ScrubField label="Scale X" suffix="×" value={sx} step={0.05} min={0}
+            {...scrub((v) => ({ scale: { x: v, y: sy } }))} />
+          <ScrubField label="Scale Y" suffix="×" value={sy} step={0.05} min={0}
+            {...scrub((v) => ({ scale: { x: sx, y: v } }))} />
+        </div>
+      ) : (
+        <ScrubField label="Scale" suffix="×" value={uniform} step={0.05} min={0.05}
+          {...scrub((v) => ({ scale: v }))} />
+      )}
       <div className="st-row">
         <ScrubField label="X" suffix="px" value={xy.x} step={1}
           {...scrub((v) => ({ position: { x: v, y: xy.y } }))} />
         <ScrubField label="Y" suffix="px" value={xy.y} step={1}
           {...scrub((v) => ({ position: { x: xy.x, y: v } }))} />
       </div>
-      <div className="st-hint">drag the clip on the canvas to move it; Scale resizes it over the background</div>
+      <div className="st-hint">{scaleObj
+        ? 'Scale X/Y size the box as a fraction of the canvas (e.g. 1 × 0.5 = split-screen panel); the clip fits inside it'
+        : 'drag the clip on the canvas to move it; Scale resizes it over the background'}</div>
     </>
   )
 }

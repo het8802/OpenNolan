@@ -198,6 +198,9 @@ projects/<project-name>/
 │   ├── audio/          # Narration segments + final mix (MP3/WAV)
 │   ├── music/          # Background music track (MP3)
 │   └── subtitles.srt   # Generated subtitles
+├── hf/                 # HyperFrames workspace: composition source (HTML/CSS/fonts/img)
+│   └── renders/        # Agent-rendered HyperFrames clips — the intermediate building blocks
+│                       #   (per-scene animations, alpha overlays) the editor drops onto the timeline
 └── renders/
     └── final.mp4       # Final rendered video (the deliverable)
 ```
@@ -205,6 +208,14 @@ projects/<project-name>/
 **Naming convention**: Use kebab-case derived from the video title (e.g., `hidden-math-of-nature`, `how-music-rewires-brain`).
 
 Create the project directory at pipeline initialization, before any stage runs. All tools and agents should write outputs to these paths — never to the repo root or ad-hoc locations.
+
+**Agent renders live in `hf/renders/`, the final video in `renders/`.** Any HyperFrames-rendering
+pipeline should run `hf render` from the `hf/` workspace so per-scene clips land in `hf/renders/`
+(this is the HyperFrames CLI default, `renders/<name>_<timestamp>`, resolved relative to that
+workspace) — the **only** assembled deliverable belongs in `renders/final.mp4`. Keeping the two
+apart is what lets the desktop editor's **Assets → Renders** tab show the agent's building-block
+clips without dredging up the final export or its render proxies. This convention is documented
+here, the single place every pipeline inherits, rather than repeated in each pipeline's skills.
 
 ## Music Library
 

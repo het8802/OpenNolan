@@ -394,6 +394,30 @@ def test_xfade_with_color_bg(vc, tmp_path):
     assert _is_lime(_rgb_at(out, 2.2, (540, 960), tmp_path)), "second scene center is its clip"
 
 
+# ── 10. non-uniform scale {x,y} → a split-screen panel box ────────────────────
+@needs_ffmpeg
+def test_nonuniform_scale_makes_a_half_height_panel(vc, tmp_path):
+    """transform.scale={x:1,y:0.5} on a 1080×1920 canvas builds a full-width,
+    half-height (1080×960) box. A 9:16 clip FILLS its 9:8 box only after a crop, but
+    a same-aspect-as-box clip fills it; here we assert the box LOCATION: a 1080×960
+    lime clip placed at y=960 fills the BOTTOM half (lime), leaving the TOP half bg."""
+    pytest.importorskip("PIL.Image")
+    face = tmp_path / "face.mp4"
+    out = tmp_path / "out.mp4"
+    # 1080×960 source (matches the half-height box aspect) so it fills with no letterbox
+    _solid_clip(face, "lime", dur=1.5, size="1080x960")
+    ed = {
+        "version": "1.0", "render_runtime": "ffmpeg",
+        "metadata": {"compose_target": CANVAS, "background": {"type": "color", "color": "blue"}},
+        "cuts": [{"id": "face", "source": str(face), "in_seconds": 0, "out_seconds": 1.5,
+                  "transform": {"scale": {"x": 1.0, "y": 0.5}, "position": {"x": 0, "y": 960}}}],
+    }
+    res = _render_ffmpeg(vc, ed, {"assets": []}, out)
+    assert res.success, res.error
+    assert _is_blue(_rgb_at(out, 0.5, (540, 200), tmp_path)), "top half is bg"
+    assert _is_lime(_rgb_at(out, 0.5, (540, 1400), tmp_path)), "bottom half is the panel clip"
+
+
 # ── 9. PiP (layer='overlay') rejects an {x,y} position ────────────────────────
 @needs_ffmpeg
 def test_pip_overlay_rejects_object_position(vc, tmp_path):

@@ -10,6 +10,7 @@ import {
   isFfmpeg, anchorToXY, fmtTime, round3, clamp, previewAudioTracks, isImageSource, clipType,
   scrubValue, roundTo, fmtScrub, decimalsOf,
   clipFitSize, clipBox, clipDefaultPosition, clipAnchorXY, clipPositionXY,
+  isScaleObject, scaleAxes,
 } from './model.js'
 import { sanitizeOverlay } from '../editor/interp.js'
 
@@ -307,5 +308,37 @@ describe('main-clip placement helpers (move + resize on the canvas)', () => {
     expect(clipPositionXY({ transform: { position: { x: 5, y: 9 } } }, src, canvas)).toEqual({ x: 5, y: 9 })
     expect(clipPositionXY({ transform: { position: 'top-left', scale: 0.5 } }, src, canvas)).toEqual({ x: 0, y: 0 })
     expect(clipPositionXY({ transform: {} }, src, canvas)).toEqual({ x: 0, y: 656 }) // default = centered
+  })
+
+  // ── non-uniform scale ({x,y} box) — preview must match the renderer's boxw=canvas*sx path ──
+  it('isScaleObject distinguishes the per-axis box from a uniform number', () => {
+    expect(isScaleObject({ x: 1, y: 0.5 })).toBe(true)
+    expect(isScaleObject(1.5)).toBe(false)
+    expect(isScaleObject(null)).toBe(false)
+    expect(isScaleObject(undefined)).toBe(false)
+  })
+  it('scaleAxes splits a uniform number into equal axes and an object into its x/y', () => {
+    expect(scaleAxes(1.5)).toEqual({ sx: 1.5, sy: 1.5 })
+    expect(scaleAxes({ x: 1, y: 0.5 })).toEqual({ sx: 1, sy: 0.5 })
+    expect(scaleAxes()).toEqual({ sx: 1, sy: 1 }) // default
+  })
+  it('scaleAxes floors non-positive / non-finite members at 1 (no zero-collapse)', () => {
+    expect(scaleAxes({ x: 0, y: 0.5 })).toEqual({ sx: 1, sy: 0.5 })
+    expect(scaleAxes({ x: 'bad', y: 2 })).toEqual({ sx: 1, sy: 2 })
+  })
+  it('clipBox for an {x,y} object is a CANVAS-fraction box (even dims), NOT fit×scale', () => {
+    // split-screen panel: full width, half height of the 1080×1920 canvas.
+    expect(clipBox(src, canvas, { x: 1, y: 0.5 })).toEqual({ width: 1080, height: 960 })
+    // a non-uniform box ignores the source fit-size — it's the panel, the clip fits inside it.
+    expect(clipBox(src, canvas, { x: 0.5, y: 1 })).toEqual({ width: 540, height: 1920 })
+  })
+  it('clipBox uniform number path is UNCHANGED (still fit × scale)', () => {
+    expect(clipBox(src, canvas, 0.5)).toEqual({ width: 540, height: 304 }) // == the legacy expectation
+    expect(clipBox(src, canvas, 1)).toEqual({ width: 1080, height: 608 })
+  })
+  it('clipPositionXY anchors an {x,y}-box clip using the box dims (split panel flush bottom-right)', () => {
+    const cut = { transform: { scale: { x: 1, y: 0.5 }, position: 'bottom-right' } }
+    // box = 1080×960 → flush bottom-right = (1080-1080, 1920-960) = (0, 960)
+    expect(clipPositionXY(cut, src, canvas)).toEqual({ x: 0, y: 960 })
   })
 })

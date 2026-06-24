@@ -27,7 +27,14 @@
           "transform": {
             "type": "object",
             "properties": {
-              "scale": { "type": "number", "minimum": 0, "default": 1.0 },
+              "scale": {
+                "description": "Primary-cut box size on the canvas. A uniform number (fraction of canvas, default 1.0) OR a per-axis {x,y} object for a non-uniform box, e.g. a split-screen panel = {\"x\":1.0,\"y\":0.5} (full width, half height). The clip fits INSIDE the box aspect-preserved (never stretched); to FILL a non-uniform box, pre-shape the source aspect with transform.crop.",
+                "default": 1.0,
+                "oneOf": [
+                  { "type": "number", "minimum": 0 },
+                  { "type": "object", "properties": { "x": { "type": "number", "minimum": 0 }, "y": { "type": "number", "minimum": 0 } }, "required": ["x", "y"], "additionalProperties": false }
+                ]
+              },
               "position": {
                 "description": "Primary-cut placement on the canvas. A named anchor string (default 'center', flush to edges) OR an {x,y} object = clip box top-left in canvas px. layer='overlay' (PiP) cuts MUST use a named-anchor string (the renderer rejects {x,y} there).",
                 "default": "center",
@@ -182,6 +189,10 @@
       "type": "object",
       "description": "Audio configuration for narration, music, and SFX.",
       "properties": {
+        "path": {
+          "type": "string",
+          "description": "Pre-mixed master audio track muxed over the assembled video (e.g. a talking head's continuous original VO). When set, it becomes the output's audio — the per-cut/segment audio is overridden — so it must span the full timeline. Read by the FFmpeg render path (video_compose _render_via_ffmpeg → _compose audio_path)."
+        },
         "narration": {
           "type": "object",
           "properties": {

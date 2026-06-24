@@ -94,6 +94,16 @@ describe('main-clip position/scale + project background', () => {
     expect(box.style.left).toBe('270px')   // centered: (1080 - 540) / 2
     expect(container.querySelector('video.st-frame-media')).toBeInTheDocument()
   })
+  it('sizes the clip box from a NON-UNIFORM {x,y} scale (canvas-fraction box, preview == export)', () => {
+    // split-screen panel: full width, half height of the 1080×1920 canvas (frame factor 1 here).
+    const doc = { cuts: [{ id: 'c1', source: 'clips/a.mp4', in_seconds: 0, out_seconds: 5, transform: { scale: { x: 1, y: 0.5 } } }] }
+    const { container } = render(<StudioPreview {...base} doc={doc} />)
+    const box = container.querySelector('.st-clip-box')
+    expect(box.style.width).toBe('1080px')  // canvas.width * 1
+    expect(box.style.height).toBe('960px')  // canvas.height * 0.5
+    expect(box.style.left).toBe('0px')      // centered: (1080 - 1080) / 2
+    expect(box.style.top).toBe('480px')     // centered: (1920 - 960) / 2
+  })
   it('paints a color background on the safe frame', () => {
     const doc = { cuts: [videoCut], metadata: { background: { type: 'color', color: '#ff0000' } } }
     const { container } = render(<StudioPreview {...base} doc={doc} />)
