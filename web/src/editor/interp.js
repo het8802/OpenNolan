@@ -44,6 +44,42 @@ function pick(obj, allowed) {
   return out
 }
 
+/**
+ * Coerce `transform.scale` to a schema-valid value, mirroring the `oneOf` contract in
+ * edit_decisions.schema.json: either a UNIFORM number (>= 0) OR a per-axis {x,y} OBJECT
+ * (x,y both numbers >= 0; `additionalProperties:false`, so x/y are the only allowed keys).
+ *
+ * An OBJECT input (the non-uniform / split-screen box, e.g. {x:1, y:0.5}) MUST stay an object —
+ * coercing it to a float (the old behavior) would corrupt it into `1` and either 422 on Save or
+ * render the wrong box. A NUMBER input stays a number (the uniform path is untouched).
+ *
+ * Bad members are dropped/clamped: a non-finite uniform number falls back to 1; for an object,
+ * non-finite or negative x/y are clamped to 0, and if NEITHER axis is usable the whole object is
+ * invalid → fall back to the uniform default 1 (the schema requires BOTH x and y).
+ *
+ * Referential equality: when the input is already a clean object whose x/y are unchanged, returns
+ * the SAME object ref so a no-op sanitize keeps the no-op-returns-same-ref contract (history/dirty).
+ */
+function sanitizeScale(scale) {
+  if (scale != null && typeof scale === 'object') {
+    const x = Number(scale.x)
+    const y = Number(scale.y)
+    // The schema requires BOTH axes; an object missing/garbage on either axis can't be a valid
+    // {x,y} box, so fall back to the uniform default rather than emit half a box.
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return 1
+    const cx = Math.max(0, x)
+    const cy = Math.max(0, y)
+    // No-op fast path: an already-clean two-key {x,y} object is returned unchanged (same ref).
+    const keys = Object.keys(scale)
+    if (cx === scale.x && cy === scale.y && keys.length === 2 && keys.includes('x') && keys.includes('y')) {
+      return scale
+    }
+    return { x: cx, y: cy }
+  }
+  const n = Number(scale)
+  return Number.isFinite(n) && n >= 0 ? n : 1
+}
+
 /** Sanitize a cut to only schema-known fields (position-style nesting handled for transform). */
 export function sanitizeCut(cut) {
   const c = pick(cut, CUT_FIELDS)
@@ -57,7 +93,9 @@ export function sanitizeCut(cut) {
       const p = c.transform.position
       c.transform.position = { x: Math.round(Number(p.x) || 0), y: Math.round(Number(p.y) || 0) }
     }
-    if (c.transform.scale != null) c.transform.scale = Number(c.transform.scale) || 1
+    // scale is polymorphic (schema oneOf): a uniform number OR a per-axis {x,y} box. Keep an
+    // object an object (the non-uniform path) — DON'T coerce it to a float, which would corrupt it.
+    if (c.transform.scale != null) c.transform.scale = sanitizeScale(c.transform.scale)
   }
   return c
 }

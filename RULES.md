@@ -101,7 +101,9 @@ audio mutators (`updateMusic`/`updateNarration`/`updateSfx` + `remove*`). The so
 plays them too: `model.previewAudioTracks(doc)` → hidden `<audio>` synced to the rAF playhead.
 - **Properties panel = selection or assets (feat 4):** show the clip / overlay / **audio** editor
 for the current selection, else the **Assets tab** (same kinds as the agent window: images /
-video / audio / music). Deselect = click the timeline background (a single handler on
+video / audio / music — plus a read-only **renders** tab fed by the backend's `agent_renders`
+array, i.e. the agent's HyperFrames clips from `{project}/hf/renders`; renders behave like videos
+on the timeline and are NOT uploadable, so their tab has no dropzone). Deselect = click the timeline background (a single handler on
 `.st-tl-scroll` that ignores `.st-clip/.st-ov/.st-aud/.st-ruler`) or press Escape → Assets.
 Adding an image comes from Assets, so +Image leaves the project toolbar.
 - **Clip ops home (feat 5):** split / duplicate / delete live in the timeline toolbar and act

@@ -266,6 +266,50 @@ describe('main-clip Position & size + canvas background', () => {
     expect(props.onUpdateCut).toHaveBeenCalledWith('c1', { transform: { position: { x: 5, y: 6 }, scale: 0.5 } })
   })
 
+  // ── non-uniform (per-axis) scale: Lock-aspect toggle + Scale X / Scale Y ──
+  const metaXY = { 'a.mp4': { width: 1920, height: 1080 } }
+  it('a uniform-scale cut shows a single Scale field + a checked "Lock aspect" toggle', () => {
+    const selCut = { id: 'c1', source: 'a.mp4', in_seconds: 0, out_seconds: 4, transform: { scale: 1 } }
+    const { getByRole, getByLabelText, queryByRole } = setup({ selCut, sourceMetas: metaXY })
+    expect(getByRole('slider', { name: 'Scale' })).toBeInTheDocument()
+    expect(queryByRole('slider', { name: 'Scale X' })).not.toBeInTheDocument()
+    const lock = getByLabelText(/Lock aspect/i)
+    expect(lock).toBeChecked() // uniform = locked
+  })
+
+  it('unchecking "Lock aspect" expands the uniform scale into an {x,y} object', () => {
+    const selCut = { id: 'c1', source: 'a.mp4', in_seconds: 0, out_seconds: 4, transform: { scale: 0.5, position: { x: 5, y: 6 } } }
+    const { getByLabelText, props } = setup({ selCut, sourceMetas: metaXY })
+    fireEvent.click(getByLabelText(/Lock aspect/i)) // toggle OFF
+    expect(props.onUpdateCut).toHaveBeenCalledWith('c1', { transform: { position: { x: 5, y: 6 }, scale: { x: 0.5, y: 0.5 } } })
+  })
+
+  it('an {x,y}-scale cut shows Scale X / Scale Y fields and an UNchecked lock toggle', () => {
+    const selCut = { id: 'c1', source: 'a.mp4', in_seconds: 0, out_seconds: 4, transform: { scale: { x: 1, y: 0.5 } } }
+    const { getByRole, getByLabelText, queryByRole } = setup({ selCut, sourceMetas: metaXY })
+    expect(getByRole('slider', { name: 'Scale X' }).textContent).toContain('1')
+    expect(getByRole('slider', { name: 'Scale Y' }).textContent).toContain('0.5')
+    expect(queryByRole('slider', { name: 'Scale' })).not.toBeInTheDocument()
+    expect(getByLabelText(/Lock aspect/i)).not.toBeChecked()
+  })
+
+  it('editing Scale Y commits a {x,y} object preserving Scale X (Save never 422s)', () => {
+    const selCut = { id: 'c1', source: 'a.mp4', in_seconds: 0, out_seconds: 4, transform: { scale: { x: 1, y: 0.5 } } }
+    const { getByRole, getByDisplayValue, props } = setup({ selCut, sourceMetas: metaXY })
+    openTypeInput(getByRole, 'Scale Y')
+    const input = getByDisplayValue('0.5')
+    fireEvent.change(input, { target: { value: '0.75' } })
+    fireEvent.blur(input)
+    expect(props.onUpdateCut).toHaveBeenCalledWith('c1', { transform: { scale: { x: 1, y: 0.75 } } })
+  })
+
+  it('re-checking "Lock aspect" collapses the {x,y} object back to a uniform number (X axis wins)', () => {
+    const selCut = { id: 'c1', source: 'a.mp4', in_seconds: 0, out_seconds: 4, transform: { scale: { x: 0.8, y: 0.4 } } }
+    const { getByLabelText, props } = setup({ selCut, sourceMetas: metaXY })
+    fireEvent.click(getByLabelText(/Lock aspect/i)) // toggle ON
+    expect(props.onUpdateCut).toHaveBeenCalledWith('c1', { transform: { scale: 0.8 } })
+  })
+
   it('the empty panel exposes a Canvas background control; Black clears it', () => {
     const { getByText, props } = setup({}) // nothing selected → Assets/empty panel
     expect(getByText('Canvas background')).toBeInTheDocument()

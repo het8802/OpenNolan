@@ -238,12 +238,45 @@ export function clipFitSize(meta, canvas) {
   return { width: Math.round(sw * r), height: Math.round(sh * r) }
 }
 
-/** The clip box (fit × scale) in canvas px, even dims ≥ 2 (matches the renderer). */
+const evenDim = (n) => Math.max(2, Math.round(Number(n) / 2) * 2)
+
+/**
+ * Whether a `transform.scale` value is the per-axis OBJECT form (non-uniform box). Mirrors the
+ * schema oneOf: a uniform number scales the fit-size; an {x,y} object is a canvas-fraction box.
+ */
+export function isScaleObject(scale) {
+  return scale != null && typeof scale === 'object'
+}
+
+/**
+ * Resolve `transform.scale` (a uniform number OR an {x,y} object) to per-axis multipliers
+ * {sx, sy}. A uniform number → sx === sy === n; an object → its x/y (each defaulting to 1 and
+ * floored at 0). Non-positive / non-finite members fall back to 1 so a half-formed value can't
+ * collapse a box to zero. Pure mirror of the renderer's `_pos_float` split in video_compose.py.
+ */
+export function scaleAxes(scale = 1) {
+  const ax = (v) => { const f = Number(v); return Number.isFinite(f) && f > 0 ? f : 1 }
+  if (isScaleObject(scale)) return { sx: ax(scale.x ?? 1), sy: ax(scale.y ?? 1) }
+  const n = ax(scale)
+  return { sx: n, sy: n }
+}
+
+/**
+ * The clip box in canvas px, even dims ≥ 2 (matches the renderer):
+ *  - UNIFORM number → fit-size × scale (the legacy centered-letterbox box; at scale=1 = the fit).
+ *  - {x,y} OBJECT → a CANVAS-fraction box (canvas.width·sx × canvas.height·sy), e.g. a split-screen
+ *    panel {x:1,y:0.5} = full-width half-height. The clip later fits INSIDE this box aspect-preserved,
+ *    so the box is the panel, NOT the clip — this mirrors video_compose's `boxw=target_w*sx` path.
+ */
 export function clipBox(meta, canvas, scale = 1) {
+  const cw = canvas?.width || 1920, ch = canvas?.height || 1080
+  if (isScaleObject(scale)) {
+    const { sx, sy } = scaleAxes(scale)
+    return { width: evenDim(cw * sx), height: evenDim(ch * sy) }
+  }
   const fit = clipFitSize(meta, canvas)
   const s = Number(scale) || 1
-  const even = (n) => Math.max(2, Math.round(n / 2) * 2)
-  return { width: even(fit.width * s), height: even(fit.height * s) }
+  return { width: evenDim(fit.width * s), height: evenDim(fit.height * s) }
 }
 
 /** Centered box top-left in canvas px (the default placement = legacy centered letterbox). */
@@ -263,10 +296,11 @@ export function clipAnchorXY(anchor, meta, canvas, scale = 1) {
   return { x, y }
 }
 
-/** Resolve a cut's placement to {x,y} box top-left (object position as-is, else the named anchor). */
+/** Resolve a cut's placement to {x,y} box top-left (object position as-is, else the named anchor).
+ * `scale` is passed THROUGH to clipBox (number OR {x,y}) so the anchored box uses the right dims. */
 export function clipPositionXY(cut, meta, canvas) {
   const t = cut?.transform || {}
-  const scale = Number(t.scale) || 1
+  const scale = t.scale != null ? t.scale : 1
   const pos = t.position
   if (pos && typeof pos === 'object' && pos.x != null) return { x: Number(pos.x) || 0, y: Number(pos.y) || 0 }
   return clipAnchorXY(typeof pos === 'string' ? pos : 'center', meta, canvas, scale)

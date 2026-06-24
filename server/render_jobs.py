@@ -42,10 +42,30 @@ class RenderJobStore:
         job_id = uuid.uuid4().hex[:12]
         out_name = f"editor_preview_{job_id}.mp4"
         with self._lock:
-            self._jobs[job_id] = {"job_id": job_id, "project_id": project_id, "status": "queued"}
+            self._jobs[job_id] = {"job_id": job_id, "project_id": project_id,
+                                  "status": "queued", "origin": "editor"}
             self._active_by_project[project_id] = job_id  # newest job wins
         threading.Thread(
             target=self._run, args=(job_id, project_id, out_name), daemon=True
+        ).start()
+        return job_id
+
+    def start_with_inputs(self, project_id: str, inputs: dict[str, Any]) -> str:
+        """Queue a render from CALLER-supplied inputs (the agent's render tool), not
+        from disk. Like start() but the caller hands the full render inputs:
+        edit_decisions (required), asset_manifest, output_path, proxies_dir,
+        hdr_policy, proposal_packet. Honors supersede via _active_by_project and
+        runs _resolve_sources, same as start(). Returns the job_id.
+
+        Tagged origin="agent" + consumed=False so the agent runner can surface a
+        finished job on the user's next turn (see AgentRunner._render_resume_note)."""
+        job_id = uuid.uuid4().hex[:12]
+        with self._lock:
+            self._jobs[job_id] = {"job_id": job_id, "project_id": project_id,
+                                  "status": "queued", "origin": "agent", "consumed": False}
+            self._active_by_project[project_id] = job_id  # newest job wins
+        threading.Thread(
+            target=self._run_with_inputs, args=(job_id, project_id, dict(inputs)), daemon=True
         ).start()
         return job_id
 
@@ -53,6 +73,21 @@ class RenderJobStore:
         with self._lock:
             job = self._jobs.get(job_id)
             return dict(job) if job else None
+
+    def active_job_for(self, project_id: str) -> Optional[dict[str, Any]]:
+        """The current (newest) job for this project, or None. Copy of its status dict."""
+        with self._lock:
+            jid = self._active_by_project.get(project_id)
+            if jid and jid in self._jobs:
+                return dict(self._jobs[jid])
+            return None
+
+    def mark_consumed(self, job_id: str) -> None:
+        """Flag a finished job as surfaced to the agent (resume-note injected once)."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is not None:
+                job["consumed"] = True
 
     # -- internals ------------------------------------------------------------
     def _video_compose(self) -> Any:
@@ -134,6 +169,7 @@ class RenderJobStore:
             self._jobs[job_id].update(**fields)
 
     def _run(self, job_id: str, project_id: str, out_name: str) -> None:
+        """Editor path: read the saved timeline from disk and render it."""
         self._set(job_id, project_id, status="running")
         try:
             edit_decisions = read_edit_decisions(self._projects_dir, project_id)
@@ -142,56 +178,127 @@ class RenderJobStore:
                           error="no edit_decisions to render — save the timeline first")
                 return
             asset_manifest = read_asset_manifest(self._projects_dir, project_id)
-
-            # video_compose's pre-compose gate REQUIRES renderer_family (optional in the
-            # schema). A hand-built/scaffolded timeline may lack it — inject a benign default
-            # into the render-only copy (NOT persisted) so a preview isn't blocked by a
-            # governance field that doesn't change pixels on the ffmpeg path.
-            preview_warnings: list[str] = []
-            if not edit_decisions.get("renderer_family"):
-                edit_decisions = dict(edit_decisions, renderer_family="social-reel")
-                preview_warnings.append(
-                    "rendered with a default renderer_family='social-reel'; set it explicitly to lock it."
-                )
-
-            # Hand the renderer absolute source/asset paths (project-relative refs don't
-            # resolve from the server cwd). Render-only copy — NOT persisted.
-            edit_decisions = self._resolve_sources(project_id, edit_decisions)
-
             renders_dir = self._projects_dir / project_id / "renders"
             renders_dir.mkdir(parents=True, exist_ok=True)
-            out_path = renders_dir / out_name
-
-            # Render-once: render each scene to a content-cached proxy clip, then
-            # assemble (cheap ffmpeg concat) into out_path. On an unchanged timeline
-            # every scene is a cache hit, so a re-edit only re-renders what changed.
-            result = self._video_compose().execute({
-                "operation": "render_proxies",
-                "edit_decisions": edit_decisions,
-                "asset_manifest": asset_manifest,
-                "output_path": str(out_path),
-                "proxies_dir": str(renders_dir / "proxies"),
-            })
-
-            if result.success and out_path.exists():
-                data = result.data or {}
-                warnings = list(preview_warnings) + list(data.get("warnings") or [])
-                if "n_scenes" in data:
-                    warnings.append(
-                        f"{data.get('n_rendered', 0)} scene(s) re-rendered, "
-                        f"{data.get('n_cached', 0)} reused from cache"
-                    )
-                self._set(
-                    job_id, project_id,
-                    status="done",
-                    # path is RELATIVE to the project dir, so the UI can fetch it via /file?path=
-                    output_path=str(out_path.relative_to(self._projects_dir / project_id)),
-                    final_review_status=data.get("final_review_status"),
-                    warnings=warnings or None,
-                )
-            else:
-                self._set(job_id, project_id, status="failed",
-                          error=(result.error or "render failed")[:2000])
+            self._execute_render(
+                job_id, project_id, edit_decisions, asset_manifest,
+                renders_dir / out_name, renders_dir / "proxies",
+            )
         except Exception as exc:  # never let a render thread die silently
             self._set(job_id, project_id, status="failed",
                       error=f"{type(exc).__name__}: {exc}"[:2000])
+
+    def _run_with_inputs(self, job_id: str, project_id: str, inputs: dict[str, Any]) -> None:
+        """Agent path: render CALLER-supplied inputs (with proposal_packet/hdr_policy)."""
+        self._set(job_id, project_id, status="running")
+        try:
+            edit_decisions = inputs.get("edit_decisions")
+            if not edit_decisions:
+                self._set(job_id, project_id, status="failed",
+                          error="edit_decisions required to render")
+                return
+            asset_manifest = inputs.get("asset_manifest") or {"assets": []}
+            renders_dir = self._projects_dir / project_id / "renders"
+            renders_dir.mkdir(parents=True, exist_ok=True)
+            out_path = self._normalize_output_path(
+                project_id, inputs.get("output_path"), f"agent_render_{job_id}.mp4"
+            )
+            proxies_dir = inputs.get("proxies_dir") or str(renders_dir / "proxies")
+            self._execute_render(
+                job_id, project_id, edit_decisions, asset_manifest, out_path, proxies_dir,
+                proposal_packet=inputs.get("proposal_packet"),
+                hdr_policy=inputs.get("hdr_policy"),
+            )
+        except Exception as exc:
+            self._set(job_id, project_id, status="failed",
+                      error=f"{type(exc).__name__}: {exc}"[:2000])
+
+    def _execute_render(
+        self, job_id: str, project_id: str,
+        edit_decisions: dict[str, Any], asset_manifest: dict[str, Any],
+        out_path: Path, proxies_dir: Path | str,
+        *, proposal_packet: Any = None, hdr_policy: Optional[str] = None,
+    ) -> None:
+        """Shared render body for both the editor (disk) and agent (inputs) paths:
+        renderer_family fallback, source resolution, render_proxies, and recording
+        the result (honoring supersede via _set)."""
+        # video_compose's pre-compose gate REQUIRES renderer_family (optional in the
+        # schema). A hand-built/scaffolded timeline may lack it — inject a benign default
+        # into the render-only copy (NOT persisted) so a render isn't blocked by a
+        # governance field that doesn't change pixels on the ffmpeg path.
+        preview_warnings: list[str] = []
+        if not edit_decisions.get("renderer_family"):
+            edit_decisions = dict(edit_decisions, renderer_family="social-reel")
+            preview_warnings.append(
+                "rendered with a default renderer_family='social-reel'; set it explicitly to lock it."
+            )
+
+        # Hand the renderer absolute source/asset paths (project-relative refs don't
+        # resolve from the server cwd). Render-only copy — NOT persisted.
+        edit_decisions = self._resolve_sources(project_id, edit_decisions)
+
+        # Render-once: render each scene to a content-cached proxy clip, then
+        # assemble (cheap ffmpeg concat) into out_path. On an unchanged timeline
+        # every scene is a cache hit, so a re-edit only re-renders what changed.
+        exec_inputs: dict[str, Any] = {
+            "operation": "render_proxies",
+            "edit_decisions": edit_decisions,
+            "asset_manifest": asset_manifest,
+            "output_path": str(out_path),
+            "proxies_dir": str(proxies_dir),
+        }
+        # Forward agent-only inputs ONLY when present (keep VideoCompose defaults otherwise).
+        if proposal_packet is not None:
+            exec_inputs["proposal_packet"] = proposal_packet
+        if hdr_policy:
+            exec_inputs["hdr_policy"] = hdr_policy
+
+        result = self._video_compose().execute(exec_inputs)
+
+        if result.success and out_path.exists():
+            data = result.data or {}
+            warnings = list(preview_warnings) + list(data.get("warnings") or [])
+            if "n_scenes" in data:
+                warnings.append(
+                    f"{data.get('n_rendered', 0)} scene(s) re-rendered, "
+                    f"{data.get('n_cached', 0)} reused from cache"
+                )
+            self._set(
+                job_id, project_id,
+                status="done",
+                # path is RELATIVE to the project dir, so the UI can fetch it via /file?path=
+                output_path=str(out_path.relative_to(self._projects_dir / project_id)),
+                final_review_status=data.get("final_review_status"),
+                warnings=warnings or None,
+            )
+        else:
+            self._set(job_id, project_id, status="failed",
+                      error=(result.error or "render failed")[:2000])
+
+    def _normalize_output_path(self, project_id: str, raw: Optional[str], fallback_name: str) -> Path:
+        """Resolve an agent-supplied output_path to an ABSOLUTE path inside the
+        project's renders/ dir. Accepts repo-relative ("projects/<id>/renders/x.mp4"),
+        project-relative ("renders/x.mp4"), or absolute paths. Path-traversal guard:
+        anything resolving outside projects/<id>/ falls back to renders/<fallback_name>."""
+        proj = (self._projects_dir / project_id).resolve()
+        fallback = proj / "renders" / fallback_name
+        if not raw:
+            return fallback
+        p = Path(raw)
+        if p.is_absolute():
+            cand = p
+        else:
+            parts = p.parts
+            if parts and parts[0] == "projects":          # repo-root-relative
+                cand = self._projects_dir / Path(*parts[1:]) if len(parts) > 1 else proj
+            elif parts and parts[0] == project_id:        # projects-dir-relative
+                cand = self._projects_dir / p
+            else:                                         # project-relative
+                cand = proj / p
+        try:
+            cand = cand.resolve()
+        except Exception:
+            return fallback
+        if cand == proj or proj in cand.parents:
+            return cand
+        return fallback

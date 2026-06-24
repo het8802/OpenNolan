@@ -634,6 +634,43 @@ describe('cut transform position/scale + project background', () => {
     const c = sanitizeCut({ id: 'c', source: 'a.mp4', transform: { position: { x: 10.6, y: -4.2, junk: 9 } } })
     expect(c.transform.position).toEqual({ x: 11, y: -4 })
   })
+})
+
+describe('sanitizeCut polymorphic scale (number OR per-axis {x,y} box)', () => {
+  it('keeps a UNIFORM number scale a number (the uniform path is untouched)', () => {
+    const c = sanitizeCut({ id: 'c', source: 'a.mp4', transform: { scale: 1.5 } })
+    expect(c.transform.scale).toBe(1.5) // NOT {x:1.5,y:1.5}
+    expect(typeof c.transform.scale).toBe('number')
+  })
+  it('coerces a numeric-string uniform scale to a number', () => {
+    const c = sanitizeCut({ id: 'c', source: 'a.mp4', transform: { scale: '0.5' } })
+    expect(c.transform.scale).toBe(0.5)
+  })
+  it('KEEPS a valid {x,y} object scale an object (does not corrupt it to a float)', () => {
+    const c = sanitizeCut({ id: 'c', source: 'a.mp4', transform: { scale: { x: 1, y: 0.5 } } })
+    expect(c.transform.scale).toEqual({ x: 1, y: 0.5 }) // split-screen panel survives Save
+  })
+  it('coerces + clamps bad members of an {x,y} scale, dropping stray keys', () => {
+    const c = sanitizeCut({ id: 'c', source: 'a.mp4', transform: { scale: { x: '0.75', y: -2, junk: 9 } } })
+    expect(c.transform.scale).toEqual({ x: 0.75, y: 0 }) // negative → 0, string → number, junk dropped
+  })
+  it('falls back to the uniform default 1 when an {x,y} scale is missing an axis (schema needs both)', () => {
+    const c = sanitizeCut({ id: 'c', source: 'a.mp4', transform: { scale: { x: 1 } } })
+    expect(c.transform.scale).toBe(1)
+  })
+  it('falls back to 1 for a non-finite uniform scale', () => {
+    const c = sanitizeCut({ id: 'c', source: 'a.mp4', transform: { scale: 'nope' } })
+    expect(c.transform.scale).toBe(1)
+  })
+  it('a clean {x,y} object round-trips by VALUE through updateCut (Save never 422s)', () => {
+    const doc = { cuts: [{ id: 'c', source: 'a.mp4', in_seconds: 0, out_seconds: 2 }] }
+    const d1 = updateCut(doc, 'c', { transform: { scale: { x: 1, y: 0.5 } } })
+    expect(d1.cuts[0].transform.scale).toEqual({ x: 1, y: 0.5 })
+    // re-sanitizing the emitted object is a value-stable identity (already clean two-key {x,y})
+    const again = sanitizeCut(d1.cuts[0])
+    expect(again.transform.scale).toEqual({ x: 1, y: 0.5 })
+    expect(again.transform.scale).toBe(d1.cuts[0].transform.scale) // same ref → no-op sanitize
+  })
   it('setBackground / getBackground for color + image, clear, and same-ref no-ops', () => {
     const d0 = { cuts: [] }
     expect(getBackground(d0)).toBeNull()

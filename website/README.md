@@ -89,12 +89,41 @@ Locally: `cp .env.example .env.local` (or set them in `.env.local`) and run `npx
 - The confirmation is a **transactional** send (one email per signup), so no unsubscribe is
   legally required — but the Audience also lets you send a launch broadcast later, which does.
 
+## PostHog analytics + experiments
+
+The site loads PostHog from `assets/posthog.js` and reads public config from
+`/api/posthog-config`, so the project key stays in Vercel env instead of being committed.
+
+Set these on the Vercel project, then redeploy:
+
+```
+POSTHOG_KEY=phc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+POSTHOG_HOST=https://us.i.posthog.com
+POSTHOG_UI_HOST=https://us.posthog.com   # optional; useful if self-hosting or using EU
+```
+
+Captured out of the box:
+
+- `$pageview`, pageleave, autocapture, web vitals, dead clicks, and rage clicks from PostHog.
+- Custom events: `cta_clicked`, `feature_gallery_selected`, `sfx_preview_played`,
+  `waitlist_submit`, `waitlist_signup`, `waitlist_duplicate`, and waitlist error events.
+- Email fields are marked with `data-ph-no-autocapture`; custom events never send the email value.
+
+Local previews do not send analytics by default. To force a local smoke test with `vercel dev`,
+open `http://localhost:3000/?ph_debug=1` after adding the PostHog env vars to `.env.local`.
+
+For A/B tests, create a PostHog experiment/feature flag after baseline traffic is flowing. The
+JavaScript SDK is initialized with feature-flag support, so experiment exposure and conversion
+events can be tied to the waitlist and CTA events above.
+
 ## Before you ship — quick checklist
 
 - [ ] **GitHub link:** in `index.html`, set `CONFIG.githubUrl` (top of the `<script>` block)
       to the public repo URL. While it's `""`, all GitHub buttons stay hidden — no broken links.
 - [ ] **Resend:** verify your domain + set the 3 required env vars above (otherwise signups
       only hit the function log and no confirmation is sent).
+- [ ] **PostHog:** set `POSTHOG_KEY` and `POSTHOG_HOST` in Vercel, then confirm `$pageview`
+      and `waitlist_submit` arrive in the OpenNolan PostHog project.
 - [ ] **Download CTA:** the "Download for Mac" button is intentionally disabled with a "Soon"
       badge. When the app ships, swap it for a real download link and flip the waitlist to
       secondary.

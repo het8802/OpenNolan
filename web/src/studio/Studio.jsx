@@ -45,7 +45,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
   const [previewMode, setPreviewMode] = useState('source') // 'source' | 'render'
   const [playing, setPlaying] = useState(false)            // transport play/pause
 
-  const [assets, setAssets] = useState({ kinds: { images: [], video: [], audio: [], music: [] }, renders: [] })
+  const [assets, setAssets] = useState({ kinds: { images: [], video: [], audio: [], music: [] }, renders: [], agent_renders: [] })
   const [sourceMetas, setSourceMetas] = useState({}) // ref -> {duration,width,height}
   const [zoom, setZoom] = useState(80) // px per second
 
@@ -260,6 +260,9 @@ export default function Studio({ projectId, state, onClose, chat }) {
     if (!(was && !chatBusy) || !projectId) return // only act on a turn that just ended
     let alive = true
     reconcilingRef.current = true
+    // The agent may have rendered new HyperFrames clips into hf/renders this turn — refresh the
+    // Assets tabs (incl. the Renders tab) so they show up without reopening the project.
+    api.listAssets(projectId).then(a => { if (alive) setAssets(a) }).catch(() => {})
     api.getEditDecisions(projectId)
       .then(({ content }) => {
         if (!alive || !content) return

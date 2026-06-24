@@ -24,6 +24,7 @@ ANTHROPIC_API_KEY, which takes precedence and would bill per-token instead.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -46,6 +47,7 @@ WRITE_TOOLS = frozenset({"Write", "Edit", "NotebookEdit", "MultiEdit"})
 
 ACTION_ALLOW = "allow"
 ACTION_CONFIRM = "confirm"
+ACTION_DENY = "deny"      # hard-deny with a steering message (no user prompt)
 
 import re
 
@@ -69,7 +71,7 @@ _DESTRUCTIVE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 @dataclass
 class ToolDecision:
-    action: str  # ACTION_ALLOW | ACTION_CONFIRM
+    action: str  # ACTION_ALLOW | ACTION_CONFIRM | ACTION_DENY
     reason: str
 
 
@@ -81,16 +83,37 @@ def bash_destructive_reason(command: str) -> Optional[str]:
     return None
 
 
+def bash_uses_videocompose_render(command: str) -> bool:
+    """True if a Bash command renders via VideoCompose `render_proxies`. That path
+    must go through the in-process `render` tool instead — rendering through
+    background Bash makes the CLI auto-resume the agent in an unsolicited turn,
+    which breaks message attribution (the off-by-one). Marker is specific
+    (VideoCompose AND render_proxies), so non-render ffmpeg/remotion calls and
+    other video_compose operations (compose/encode/burn_subtitles) are untouched."""
+    return bool(
+        re.search(r"render_proxies", command)
+        and re.search(r"VideoCompose|video_compose", command)
+    )
+
+
 def decide_tool(tool_name: str, tool_input: dict[str, Any] | None) -> ToolDecision:
-    """Allow safe tools and clean Bash; route destructive Bash + unknown tools to confirm."""
+    """Allow safe tools and clean Bash; route destructive Bash + unknown tools to confirm.
+    Hard-deny (with a steer to the `render` tool) Bash that renders via VideoCompose."""
     if tool_name in SAFE_TOOLS or tool_name in WRITE_TOOLS:
         return ToolDecision(ACTION_ALLOW, f"{tool_name} is a safe/standard tool")
-    # Question tools are always allowed — asking the user is never destructive.
-    # Covers the built-in AskUserQuestion and our in-process ask_user MCP tool.
+    # Question/render tools are always allowed — our in-process mc tools are safe.
+    # Covers the built-in AskUserQuestion and our ask_user / render MCP tools.
     if tool_name == "AskUserQuestion" or tool_name.startswith("mcp__mc__"):
-        return ToolDecision(ACTION_ALLOW, "clarifying-question tool")
+        return ToolDecision(ACTION_ALLOW, "in-process mc tool (ask_user / render)")
     if tool_name == "Bash":
         command = (tool_input or {}).get("command", "") or ""
+        if bash_uses_videocompose_render(command):
+            return ToolDecision(
+                ACTION_DENY,
+                "Render via the in-process `render` tool, not Bash/VideoCompose — "
+                "background renders break turn attribution. Call the `render` tool "
+                "with edit_decisions/asset_manifest/proposal_packet.",
+            )
         label = bash_destructive_reason(command)
         if label:
             return ToolDecision(ACTION_CONFIRM, f"Bash flagged: {label}")
@@ -115,6 +138,8 @@ def make_can_use_tool(confirm_handler: Optional[ConfirmHandler] = None):
         decision = decide_tool(tool_name, tool_input)
         if decision.action == ACTION_ALLOW:
             return PermissionResultAllow()
+        if decision.action == ACTION_DENY:
+            return PermissionResultDeny(message=decision.reason)
         if confirm_handler is None:
             return PermissionResultDeny(message=f"Blocked (no confirm handler): {decision.reason}")
         approved = await confirm_handler(tool_name, tool_input, decision.reason)
@@ -146,6 +171,12 @@ The UI will send your next turn when the user approves.
 
 When composing video: present BOTH render runtimes (Remotion AND HyperFrames) and record \
 a render_runtime_selection decision listing both in options_considered.
+
+To RENDER (the render-once / render_proxies path), call the `render` tool — it runs in-process, \
+BLOCKS until the render finishes, and returns {success, output_path, warnings} so you continue to \
+QA in the SAME turn. Pass edit_decisions (with render_runtime + renderer_family locked), \
+asset_manifest, and proposal_packet. Do NOT render by running VideoCompose render_proxies via \
+`run_in_background` Bash — a background render ends your turn and breaks message attribution.
 
 To ask the user a clarifying question, call the `ask_user` tool with your question and a list \
 of options (the user picks one in the UI and it comes back as the tool result). Use it whenever \
@@ -378,6 +409,12 @@ class AgentRunner:
     confirm_timeout_s: int = DEFAULT_CONFIRM_TIMEOUT_S
     answer_timeout_s: int = DEFAULT_ANSWER_TIMEOUT_S
     client_factory: Optional[Callable[[str], Any]] = None
+    # Shared RenderJobStore (injected from app). The in-process `render` tool drives
+    # it so renders are tracked/superseded instead of run via background Bash (which
+    # broke turn attribution). None in tests/no-auth -> the render tool errors cleanly.
+    render_store: Optional[Any] = None
+    render_timeout_s: int = 1800            # 30 min cap on a single in-turn render await
+    render_poll_interval_s: float = 0.5     # how often the render tool polls job status
 
     _clients: dict[str, Any] = field(default_factory=dict, init=False)
     _emit: dict[str, EmitFn] = field(default_factory=dict, init=False)
@@ -427,7 +464,42 @@ class AgentRunner:
             )
             return {"content": [{"type": "text", "text": answer}]}
 
-        mc_server = create_sdk_mcp_server("mc", "1.0.0", [ask_user])
+        # render: the agent's render tool. Runs IN-PROCESS through the shared
+        # RenderJobStore and BLOCKS until the render finishes, then returns the
+        # result so the agent continues to QA in the SAME turn. This replaces the
+        # old `run_in_background` Bash render, whose CLI auto-resume turn broke
+        # message attribution (the off-by-one). The job runs on a store thread, not
+        # a CLI background task, so nothing ever auto-resumes the agent.
+        @tool(
+            "render",
+            "Render the project's video. Runs IN-PROCESS and BLOCKS until it finishes, "
+            "then returns {success, output_path, warnings, error} so you continue to QA "
+            "in THIS SAME TURN. Do NOT render via background Bash or by calling "
+            "VideoCompose directly — that breaks turn attribution. Pass edit_decisions "
+            "(with render_runtime + renderer_family locked), asset_manifest, and "
+            "proposal_packet; omit edit_decisions to render the saved artifact from disk.",
+            {
+                "type": "object",
+                "properties": {
+                    "edit_decisions": {"type": "object",
+                        "description": "Timeline to render (render_runtime + renderer_family locked). Omit to render the saved artifact."},
+                    "asset_manifest": {"type": "object",
+                        "description": "asset_manifest for asset_id->path resolution."},
+                    "output_path": {"type": "string",
+                        "description": "Where to write the mp4 (project-relative, under renders/). Optional."},
+                    "proxies_dir": {"type": "string", "description": "Proxy cache dir. Optional."},
+                    "hdr_policy": {"type": "string", "enum": ["auto", "preserve", "tonemap", "sdr"],
+                        "description": "HDR handling. Optional (default auto)."},
+                    "proposal_packet": {"type": "object",
+                        "description": "proposal_packet artifact for runtime-swap detection. Optional but recommended."},
+                },
+                "required": [],
+            },
+        )
+        async def render(args: dict[str, Any]) -> dict[str, Any]:
+            return await self._run_render(project_id, args)
+
+        mc_server = create_sdk_mcp_server("mc", "1.0.0", [ask_user, render])
 
         # If a prior session for this project died, resume it so the agent
         # comes back with its full conversation context (on a fresh budget).
@@ -527,6 +599,9 @@ class AgentRunner:
         progress = self._resume_preamble(project_id)
         if progress:
             parts.append(progress)
+        render_note = self._render_resume_note(project_id)
+        if render_note:
+            parts.append(render_note)
         return "\n".join(parts)
 
     async def _confirm(self, project_id, tool_name, tool_input, reason) -> bool:
@@ -593,6 +668,128 @@ class AgentRunner:
         fut.set_result(str(answer))
         return True
 
+    # -- render tool ---------------------------------------------------------
+    def _render_tool_result(self, **fields: Any) -> dict[str, Any]:
+        """Build the MCP tool result the agent parses: a human summary line plus a
+        JSON blob carrying success/output_path/warnings/error."""
+        payload = {k: v for k, v in fields.items() if v is not None}
+        ok = bool(payload.get("success"))
+        summary = (f"Render succeeded: {payload.get('output_path')}" if ok
+                   else f"Render failed: {payload.get('error', 'unknown error')}")
+        text = summary + "\n\n" + json.dumps(payload)
+        return {"content": [{"type": "text", "text": text}], "is_error": not ok}
+
+    def _build_render_inputs(self, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        """Collect the render inputs the agent supplied; fall back to the saved
+        artifact on disk when edit_decisions is omitted (a thin `render` call)."""
+        keys = ("edit_decisions", "asset_manifest", "output_path",
+                "proxies_dir", "hdr_policy", "proposal_packet")
+        inputs = {k: args[k] for k in keys if args.get(k) is not None}
+        if "edit_decisions" not in inputs:
+            try:
+                from server.editor import read_asset_manifest, read_edit_decisions
+                projects_dir = self.repo_root / "projects"
+                ed = read_edit_decisions(projects_dir, project_id)
+                if ed is not None:
+                    inputs["edit_decisions"] = ed
+                if "asset_manifest" not in inputs:
+                    inputs["asset_manifest"] = read_asset_manifest(projects_dir, project_id)
+            except Exception:
+                pass
+        return inputs
+
+    async def _run_render(self, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        """Start a tracked render job via the shared RenderJobStore and AWAIT it,
+        emitting progress SSE. Returns the MCP tool result so the agent continues to
+        QA in the SAME turn.
+
+        The job runs on a RenderJobStore thread (NOT a Claude-CLI background task),
+        so nothing auto-resumes the agent — the render is just a blocking tool call,
+        which is what eliminates the off-by-one. On Stop the awaiting handler is
+        cancelled but the job keeps running; the next turn's resume note surfaces it."""
+        if self.render_store is None:
+            return self._render_tool_result(
+                success=False, error="render store unavailable; cannot render in-process")
+
+        inputs = self._build_render_inputs(project_id, args)
+        if not inputs.get("edit_decisions"):
+            return self._render_tool_result(
+                success=False,
+                error="no edit_decisions supplied and none saved on disk — build/save the timeline first")
+
+        loop = asyncio.get_event_loop()
+        job_id = self.render_store.start_with_inputs(project_id, inputs)
+        emit = self._emit.get(project_id)
+        if emit is not None:
+            await _maybe_await(emit({"type": "render_started", "job_id": job_id, "project_id": project_id}))
+
+        deadline = loop.time() + self.render_timeout_s
+        last_status: Optional[str] = None
+        try:
+            while True:
+                st = self.render_store.status(job_id)
+                if st is None:  # superseded/dropped by a newer render
+                    return self._render_tool_result(
+                        success=False, job_id=job_id,
+                        error=f"render job {job_id} was superseded by a newer render")
+                status = st.get("status")
+                if status != last_status and emit is not None:
+                    await _maybe_await(emit({"type": "render_progress", "job_id": job_id, "status": status}))
+                    last_status = status
+                if status == "done":
+                    self.render_store.mark_consumed(job_id)  # seen in-turn; don't re-surface next turn
+                    return self._render_tool_result(
+                        success=True, job_id=job_id, output_path=st.get("output_path"),
+                        warnings=st.get("warnings"), final_review_status=st.get("final_review_status"))
+                if status == "failed":
+                    self.render_store.mark_consumed(job_id)
+                    return self._render_tool_result(
+                        success=False, job_id=job_id, error=st.get("error") or "render failed")
+                if loop.time() > deadline:
+                    # Do NOT cancel — the job keeps running on its thread; the next
+                    # turn's resume note surfaces the finished output. Leave UNCONSUMED.
+                    return self._render_tool_result(
+                        success=False, timed_out=True, job_id=job_id,
+                        error=(f"render still running after {self.render_timeout_s}s (job {job_id}); "
+                               "it continues in the background and its result will be available on "
+                               "your next turn — do not re-render."))
+                await asyncio.sleep(self.render_poll_interval_s)
+        except asyncio.CancelledError:
+            # User hit Stop -> the turn is being cancelled. Leave the job running (it's
+            # a thread, not a CLI bg task); the next turn's resume note surfaces it.
+            raise
+
+    def _render_resume_note(self, project_id: str) -> Optional[str]:
+        """If there's an UNCONSUMED agent render job for this project, return a note
+        telling the agent to continue from it. Fires on the user's NEXT message after
+        a Stop/timeout, so the finished render is surfaced attached to that message
+        (correct attribution, no off-by-one). Terminal states are marked consumed so
+        the note fires exactly once; running/queued are left so the 'done' note fires
+        later. None when there's nothing to surface."""
+        if self.render_store is None:
+            return None
+        try:
+            job = self.render_store.active_job_for(project_id)
+        except Exception:
+            return None
+        if not job or job.get("consumed") or job.get("origin") != "agent":
+            return None
+        status = job.get("status")
+        job_id = job.get("job_id")
+        if status == "done":
+            self.render_store.mark_consumed(job_id)
+            return (f"[RENDER UPDATE: render job {job_id} COMPLETED while you were away. "
+                    f"Output: {job.get('output_path')}. Warnings: {job.get('warnings') or 'none'}. "
+                    f"Do NOT re-render — pick up from QA/verification of this output.]")
+        if status == "failed":
+            self.render_store.mark_consumed(job_id)
+            return (f"[RENDER UPDATE: render job {job_id} FAILED: {job.get('error')}. "
+                    f"Diagnose the cause and decide whether to re-render.]")
+        # queued / running — surface but do NOT consume (so the 'done' note fires later)
+        return (f"[RENDER UPDATE: render job {job_id} you started is still {status}. "
+                f"Its result will be available shortly; only call the render tool again "
+                f"if you need a fresh render.]")
+
     async def run_turn(
         self, project_id: str, message: str, on_event: Optional[EmitFn] = None
     ) -> TurnResult:
@@ -608,6 +805,13 @@ class AgentRunner:
         prompt = message
         if self._fresh_client.pop(project_id, False):
             prompt = f"{self._first_turn_preamble(project_id)}\n\n{message}"
+        else:
+            # Warm client (e.g. resumed after Stop, where interrupt() keeps the client):
+            # the fresh-client preamble won't run, so surface any unconsumed finished
+            # render here — attached to THIS user message, so it's correctly attributed.
+            render_note = self._render_resume_note(project_id)
+            if render_note:
+                prompt = f"{render_note}\n\n{message}"
 
         texts: list[str] = []
         result = TurnResult(text="", is_error=False, num_turns=0, total_cost_usd=None)

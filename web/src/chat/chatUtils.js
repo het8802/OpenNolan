@@ -13,11 +13,17 @@ export const TOOL_ICON = {
   WebFetch: '🌐',
   Skill: '🛠',
   TodoWrite: '📋',
+  render: '🎬',
+  mcp__mc__render: '🎬',
 }
 
 // Detect render-in-progress from a tool_use event (drives the inline render progress bar).
 export function isRenderCommand(item) {
-  if (item.kind !== 'tool_use' || item.name !== 'Bash') return false
+  if (item.kind !== 'tool_use') return false
+  // The in-process render tool: progress bar appears on tool_use, clears on tool_result.
+  if (item.name === 'mcp__mc__render' || item.name === 'render') return true
+  // Other render steps still shell out to ffmpeg/remotion.
+  if (item.name !== 'Bash') return false
   const d = (item.detail || '').toLowerCase()
   return d.includes('npx remotion') || d.includes('ffmpeg') || d.includes('npm run render') || d.includes('hyperframes render')
 }

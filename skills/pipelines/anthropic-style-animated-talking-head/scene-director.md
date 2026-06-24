@@ -6,6 +6,14 @@ Produce the `scene_plan`: assign every beat a **shot mode**, spec the animated a
 every reveal to its trigger word. This stage is where the pipeline is "smart" about when to show
 the face, when to overlay, when to split, and when to go full animation.
 
+> **Downstream (2026-06):** the edit director maps these shot modes into the STANDARD editor schema
+> (`cuts[]` primary track + `overlays[]`), and compose renders render-once (cached proxies + cheap
+> FFmpeg assemble) so the reel opens in the desktop editor. Two things this changes for you: (1) the
+> animated ASSETS are authored exactly as before, but `split_5050` is assembled as editable LAYERS
+> (face = a cropped, half-height primary cut; panel = a top-half video overlay) — NOT a baked vstack;
+> (2) the HDR talking head is preserved automatically (compose lifts the SDR graphics into the HDR
+> container), so keep specs SDR/ivory as usual and don't worry about color matching.
+
 ## Prerequisites
 | Layer | Resource |
 |-------|----------|
@@ -73,12 +81,14 @@ Patterns: **logo pop+rotate bumper** (sunburst scale-0 + rotate-in, optional lab
 hook), **key-term / stat pill**, **checklist building box-by-box** in the lower third (one box per
 spoken point), **small source card** in a corner.
 
-### split_5050  → animation panel (1080×960) over face crop (1080×960)
+### split_5050  → animation panel (1080×960, TOP) + face crop (1080×960, BOTTOM)
+Authored identically to before; ASSEMBLED as two editable layers (panel = top-half video overlay,
+face = a cropped half-height primary cut at `face_crop_y`) so the human can re-balance the split.
 ```
 split_spec: {
-  top_comp_id, top_canvas: 1080x960 (opaque ivory),
+  top_comp_id, top_canvas: 1080x960 (opaque ivory),   # authored as a normal 1080×960 panel mp4
   top_content: counter | small_chart | small_diagram | phrase,
-  face_crop_y,           # from Step 1 — centers the face
+  face_crop_y,           # from Step 1 — centers the face in the bottom 1080×960
   gsap_entries: [...]    # reveals on trigger words (e.g. counter lands on the spoken number)
 }
 ```

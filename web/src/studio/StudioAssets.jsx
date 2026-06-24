@@ -9,12 +9,17 @@ import { useRef, useState } from 'react'
 import * as api from '../api.js'
 import { IconPlay, IconMusic } from '../components/icons.jsx'
 
-const KINDS = ['images', 'video', 'audio', 'music']
+// 'renders' is NOT a user-uploadable asset kind — it surfaces the agent's HyperFrames
+// clips from {project}/hf/renders (the backend's `agent_renders` array). They behave like
+// videos on the timeline (click → append a cut; drag → drop wherever), so the upload
+// dropzone is hidden for this tab.
+const KINDS = ['images', 'video', 'audio', 'music', 'renders']
 const HINT = {
   images: 'click to add as an overlay · or drag onto the timeline',
   video: 'click to append a clip · or drag onto the timeline',
   audio: 'click to drop an SFX at the playhead',
   music: 'click to set the music bed',
+  renders: 'AI-rendered clips · click to append, or drag onto the timeline',
 }
 
 // Editor Assets panel (shown when nothing is selected) — same look + upload flow as the pipeline
@@ -24,11 +29,14 @@ export default function StudioAssets({ projectId, assets, background, onAddImage
   const [kind, setKind] = useState('images')
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef(null)
-  const files = assets?.kinds?.[kind] || []
+  // 'renders' reads the top-level agent_renders array; every other kind is under assets.kinds.
+  const filesFor = (k) => (k === 'renders' ? assets?.agent_renders : assets?.kinds?.[k]) || []
+  const files = filesFor(kind)
+  const isVideoKind = kind === 'video' || kind === 'renders'
 
   const onPick = (path) => {
     if (kind === 'images') onAddImage(path)
-    else if (kind === 'video') onAddClip(path)
+    else if (isVideoKind) onAddClip(path) // renders are video clips → append as a cut
     else if (kind === 'music') onSetMusic(path)
     else onAddSfx(path)
   }
@@ -44,7 +52,7 @@ export default function StudioAssets({ projectId, assets, background, onAddImage
       <div className="asset-tabs">
         {KINDS.map(k => (
           <button key={k} className={`asset-tab ${kind === k ? 'active' : ''}`} onClick={() => setKind(k)}>
-            {k}{assets?.kinds?.[k]?.length ? ` (${assets.kinds[k].length})` : ''}
+            {k}{filesFor(k).length ? ` (${filesFor(k).length})` : ''}
           </button>
         ))}
       </div>
@@ -59,14 +67,17 @@ export default function StudioAssets({ projectId, assets, background, onAddImage
             title={`${f.name} — click to add, or drag onto the timeline`}
             role="button" tabIndex={0} draggable
             onDragStart={(e) => {
-              e.dataTransfer.setData('application/x-opennolan-asset', JSON.stringify({ kind, path: f.path }))
+              // A render IS a video clip — tag the drag as 'video' so the timeline's drop
+              // handler (onAssetDrop) routes it to a cut / video-overlay, not an image overlay.
+              const dndKind = kind === 'renders' ? 'video' : kind
+              e.dataTransfer.setData('application/x-opennolan-asset', JSON.stringify({ kind: dndKind, path: f.path }))
               e.dataTransfer.effectAllowed = 'copy'
             }}
             onClick={() => onPick(f.path)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(f.path) } }}
           >
             {kind === 'images' && <img src={api.fileUrl(projectId, f.path, f.mtime)} alt={f.name} loading="lazy" />}
-            {kind === 'video' && (
+            {isVideoKind && (
               <div className="asset-thumb video">
                 <video src={api.fileUrl(projectId, f.path, f.mtime)} preload="metadata" muted playsInline />
                 <span className="asset-play"><IconPlay /></span>
@@ -80,7 +91,7 @@ export default function StudioAssets({ projectId, assets, background, onAddImage
         ))}
       </div>
 
-      {onUploadAsset && (
+      {onUploadAsset && kind !== 'renders' && (
         <div
           className={`dropzone ${dragging ? 'drag' : ''}`}
           onClick={() => inputRef.current?.click()}

@@ -308,7 +308,9 @@ export default function StudioPreview({
   const clipBoxStyle = (() => {
     if (scale <= 0 || !cut) return { inset: 0 }
     const meta = sourceMetas[sourceRef]
-    const ts = Number(cut.transform?.scale) || 1
+    // scale is a uniform number OR a per-axis {x,y} box — pass it THROUGH (don't coerce to a
+    // float, which would collapse a non-uniform box) so the preview box == the rendered box.
+    const ts = cut.transform?.scale != null ? cut.transform.scale : 1
     const box = clipBox(meta, canvas, ts)
     const p = clipPositionXY(cut, meta, canvas)
     return { left: p.x * scale, top: p.y * scale, width: box.width * scale, height: box.height * scale }

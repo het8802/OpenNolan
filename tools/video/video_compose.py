@@ -259,6 +259,21 @@ class VideoCompose(BaseTool):
             "codec": {"type": "string", "default": "libx264"},
             "crf": {"type": "integer", "default": 23},
             "preset": {"type": "string", "default": "medium"},
+            "hdr_policy": {
+                "type": "string",
+                "enum": ["auto", "preserve", "tonemap", "sdr"],
+                "default": "auto",
+                "description": (
+                    "How render_proxies handles HDR (HLG/PQ) source footage. "
+                    "auto (default): if ANY video source is HDR, PRESERVE it (10-bit "
+                    "HEVC main10 + color tags) and lift SDR graphics/stills into the "
+                    "HDR container so the whole timeline shares one color space; pure-SDR "
+                    "timelines are unchanged. preserve: force HDR (blocker if no 10-bit "
+                    "HEVC encoder). tonemap (alias sdr): convert HDR sources down to SDR. "
+                    "Never tonemaps silently — the decision is reported in "
+                    "data.hdr_handling and warnings[]."
+                ),
+            },
         },
     }
 
@@ -429,6 +444,174 @@ class VideoCompose(BaseTool):
                 found.append(enc)
         return found
 
+    # ──────────────────────────────────────────────────────────────────────
+    # HDR preservation (render_proxies / _compose / assemble)
+    #
+    # Goal: render_proxies edits HDR footage exactly like SDR — the HDR is
+    # PRESERVED end-to-end (10-bit HEVC main10 + HLG/PQ color tags), never
+    # silently tonemapped. When a timeline MIXES HDR footage with SDR graphics
+    # (text/HyperFrames cards/stills), the chosen policy is "lift graphics UP"
+    # into the HDR (BT.2020) container so everything composites in one color
+    # space (Het's decision 2026-06-22). The whole timeline shares ONE target
+    # color (taken from the first HDR source) so proxies concat with -c copy.
+    #
+    # NOTE (needs visual review): the SDR→HDR promotion of graphics and the
+    # drawtext/overlay-in-HDR compositing are color-management chains that are
+    # plausibly-correct but only a human eye on real HDR footage can confirm the
+    # ivory cards / white text don't shift. The machine-checkable part (10-bit,
+    # HLG/PQ tags on the output) is asserted in tests.
+    # ──────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _is_valid_color_token(v: Any) -> bool:
+        """ffprobe sometimes reports 'unknown'/'reserved'/'' for color fields."""
+        s = (str(v) if v is not None else "").strip().lower()
+        return bool(s) and s not in ("unknown", "reserved", "unspecified", "n/a")
+
+    def _resolve_hdr_target(self, src_info: dict[str, Any]) -> dict[str, Any]:
+        """Resolve the canonical HDR target color from an is_hdr_source() dict.
+
+        Fills sensible BT.2020 fallbacks when ffprobe left a field 'unknown'.
+        `trc` defaults from `kind` (HLG → arib-std-b67, PQ → smpte2084).
+        """
+        kind = src_info.get("kind")
+        trc = src_info.get("transfer")
+        if not self._is_valid_color_token(trc):
+            trc = "smpte2084" if kind == "pq" else "arib-std-b67"
+        prim = src_info.get("primaries")
+        if not self._is_valid_color_token(prim):
+            prim = "bt2020"
+        cspace = src_info.get("color_space")
+        if not self._is_valid_color_token(cspace):
+            cspace = "bt2020nc"
+        return {"kind": kind, "primaries": prim, "trc": trc, "colorspace": cspace}
+
+    @classmethod
+    def _zscale_available(cls) -> bool:
+        """True iff this ffmpeg has the zscale filter (libzimg) for color convert."""
+        import shutil
+        cached = getattr(cls, "_ZSCALE_CACHE", None)
+        if cached is not None:
+            return cached
+        ok = False
+        if shutil.which("ffmpeg"):
+            try:
+                out = subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-filters"],
+                    capture_output=True, text=True, timeout=15, check=False,
+                ).stdout
+                ok = " zscale " in out or out.strip().endswith("zscale") or "zscale" in out
+            except Exception:
+                ok = False
+        cls._ZSCALE_CACHE = ok
+        return ok
+
+    def _promote_sdr_to_hdr_vf(self, target: dict[str, Any]) -> str:
+        """Filter chain that lifts an SDR (BT.709) source INTO the HDR container.
+
+        ONE zscale node, fully specifying BOTH input and output: SDR graphics/
+        stills are usually UNTAGGED, and zimg refuses a partial / transfer-only
+        conversion ("code 3074: no path between colorspaces") — so we declare the
+        input as full-range-limited BT.709 and convert straight to BT.2020 + the
+        timeline's HLG/PQ transfer in a single step (verified on this ffmpeg).
+        HLG is backward-compatible so SDR mapped into it stays close to the
+        original; PQ is absolute so its mapping is approximate (visual-review item).
+        Returns "" if zscale is unavailable (caller then keeps the source SDR).
+        """
+        if not self._zscale_available():
+            return ""
+        out_trc = "smpte2084" if target.get("kind") == "pq" else "arib-std-b67"
+        return (
+            "zscale=tin=bt709:min=bt709:pin=bt709:rin=tv:"
+            f"t={out_trc}:m=bt2020nc:p=bt2020:r=tv,format=yuv420p10le"
+        )
+
+    def _tonemap_hdr_to_sdr_vf(self, src_kind: str = "hlg") -> str:
+        """Filter chain that tonemaps an HDR source DOWN to SDR (BT.709 8-bit).
+
+        Used only when hdr_policy='tonemap' (or 'auto' with no HDR encoder). The
+        HDR source is always tagged (that's how is_hdr_source detects it), so the
+        input spec here matches its kind; linearize → Hable tonemap → BT.709 SDR.
+        """
+        if not self._zscale_available():
+            # Best-effort without zscale; will look flat but won't fail the render.
+            return "format=yuv420p"
+        in_trc = "smpte2084" if src_kind == "pq" else "arib-std-b67"
+        return (
+            f"zscale=tin={in_trc}:min=bt2020nc:pin=bt2020:t=linear:npl=100,"
+            "tonemap=hable,"
+            "zscale=t=bt709:m=bt709:p=bt709:r=tv,format=yuv420p"
+        )
+
+    def _video_output_args(
+        self,
+        hdr_encode: Optional[dict[str, Any]],
+        codec: str,
+        crf: Any,
+        preset: str,
+        fps_str: Optional[str] = None,
+    ) -> list[str]:
+        """Build the `-c:v …` output tail for one segment.
+
+        hdr_encode is None  → legacy 8-bit SDR (yuv420p, libx264), byte-identical
+                              to before.
+        hdr_encode present  → 10-bit HEVC main10 with HLG/PQ color tags when its
+                              `encoder` is set (preserve/promote); when `encoder`
+                              is None the output is SDR (the tonemap case, whose
+                              vf already converts the pixels).
+
+        fps_str: append `-r <fps>` when given; omit it (e.g. the overlay pass,
+        which keeps the base's fps) when falsy.
+        """
+        rtail = ["-r", fps_str] if fps_str else []
+        if not hdr_encode:
+            return ["-c:v", codec, "-crf", str(crf), "-preset", preset,
+                    "-pix_fmt", "yuv420p"] + rtail
+
+        enc = hdr_encode.get("encoder")
+        pix = hdr_encode.get("pix_fmt") or "yuv420p10le"
+        prim = hdr_encode.get("primaries")
+        trc = hdr_encode.get("trc")
+        cspace = hdr_encode.get("colorspace")
+
+        if enc == "hevc_videotoolbox":
+            # videotoolbox ignores -crf; use a generous bitrate target for ≤1080p
+            # vertical reels. main10 + 10-bit pixfmt = HDR-capable HEVC.
+            args = ["-c:v", "hevc_videotoolbox", "-profile:v", "main10",
+                    "-pix_fmt", pix, "-b:v", "16M", "-maxrate", "20M", "-bufsize", "32M"]
+        elif enc == "libx265":
+            args = ["-c:v", "libx265", "-crf", str(crf), "-preset", preset, "-pix_fmt", pix]
+            x265p = []
+            if self._is_valid_color_token(prim):
+                x265p.append(f"colorprim={prim}")
+            if self._is_valid_color_token(trc):
+                x265p.append(f"transfer={trc}")
+            if self._is_valid_color_token(cspace):
+                x265p.append(f"colormatrix={cspace}")
+            if x265p:
+                args += ["-x265-params", ":".join(x265p)]
+        else:
+            # No HDR encoder requested (tonemap path) → SDR via libx264. Emit EXPLICIT
+            # BT.709 tags: the source carries HDR (BT.2020/PQ) metadata and ffmpeg would
+            # otherwise copy those tags onto the 8-bit SDR output, mislabeling it as HDR.
+            return ["-c:v", codec, "-crf", str(crf), "-preset", preset,
+                    "-pix_fmt", pix,
+                    "-color_primaries", "bt709", "-color_trc", "bt709",
+                    "-colorspace", "bt709"] + rtail
+
+        # Container/stream color signaling for BOTH HDR encoders. Without these
+        # tags a 10-bit file is silently treated as SDR by players.
+        if self._is_valid_color_token(prim):
+            args += ["-color_primaries", prim]
+        if self._is_valid_color_token(trc):
+            args += ["-color_trc", trc]
+        if self._is_valid_color_token(cspace):
+            args += ["-colorspace", cspace]
+        if hdr_encode.get("tag"):
+            args += ["-tag:v", hdr_encode["tag"]]
+        args += rtail
+        return args
+
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
         operation = inputs["operation"]
         start = time.time()
@@ -462,6 +645,27 @@ class VideoCompose(BaseTool):
     def _is_image(path: Path) -> bool:
         """Check if a file is a still image (routes to Remotion, not FFmpeg)."""
         return path.suffix.lower() in VideoCompose._IMAGE_EXTENSIONS
+
+    @staticmethod
+    def _has_alpha(path: Path) -> bool:
+        """True iff the asset's pixel format carries an alpha channel.
+
+        Used by the HDR overlay path: an alpha asset (transparent .mov/.png) can't
+        be zscale-converted into the HDR color space without dropping the alpha
+        plane, so it composites as-is (color approximate, warned) instead.
+        """
+        try:
+            from tools.video._shared import probe_output
+            pf = (probe_output(Path(path)).get("pix_fmt") or "").lower()
+        except Exception:
+            return False
+        if not pf:
+            return False
+        return (
+            pf.startswith("yuva")
+            or pf.startswith("ya")
+            or any(t in pf for t in ("rgba", "argb", "abgr", "bgra", "rgba64", "pal8"))
+        )
 
     @staticmethod
     def _normalize_ffmpeg_color(value: Any, fallback: str = "black") -> str:
@@ -501,6 +705,7 @@ class VideoCompose(BaseTool):
         bg_image: Optional[str] = None,
         apply_transform: bool = False,
         seg_seconds: Optional[float] = None,
+        hdr_vf_prefix: str = "",
     ) -> tuple[Optional[str], list[str], Optional[dict[str, Any]]]:
         """Shared per-segment video filter chain (crop → scale → pad → setsar → fps)
         used by BOTH video and still-image cuts so they normalize to the canvas the
@@ -548,10 +753,15 @@ class VideoCompose(BaseTool):
                 f"crop={int(round(crop_w))}:{int(round(crop_h))}:{crop_x}:{crop_y}"
             )
 
+        # --- HDR color conversion runs AFTER crop (source pixels) and BEFORE
+        #     scale, at the source's native resolution. Empty for SDR and for the
+        #     proxy-assemble pass (proxies are already in the target color space).
+        hdr_parts = [hdr_vf_prefix] if hdr_vf_prefix else []
+
         # --- legacy single-input path (no transform): identical tail to before,
         #     only the pad color is parameterized (defaults to black) ---
         if not apply_transform:
-            vf_parts = list(crop_parts) + [
+            vf_parts = list(crop_parts) + hdr_parts + [
                 f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease",
                 f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color={bg_color}",
                 "setsar=1",
@@ -560,17 +770,28 @@ class VideoCompose(BaseTool):
             return (None, vf_parts, None)
 
         # --- transform path: resolve scale + position into an even box on canvas ---
+        # `scale` is either a uniform number OR a per-axis {x, y} object (e.g. a
+        # split-screen panel = {x:1.0, y:0.5} → a full-width half-height box). The
+        # clip fits INSIDE the box aspect-preserved (never stretched); a panel that
+        # should FILL its box pre-shapes its aspect with transform.crop.
         transform = cut.get("transform") or {}
         scale = transform.get("scale", 1.0)
-        try:
-            scale = float(scale)
-        except (TypeError, ValueError):
-            scale = 1.0
-        if scale <= 0:
-            scale = 1.0
+
+        def _pos_float(v: Any, default: float = 1.0) -> float:
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return default
+            return f if f > 0 else default
+
+        if isinstance(scale, dict):
+            sx = _pos_float(scale.get("x", 1.0))
+            sy = _pos_float(scale.get("y", 1.0))
+        else:
+            sx = sy = _pos_float(scale)
         # Even box dims (yuv420p), >= 2.
-        boxw = max(2, int(target_w * scale / 2) * 2)
-        boxh = max(2, int(target_h * scale / 2) * 2)
+        boxw = max(2, int(target_w * sx / 2) * 2)
+        boxh = max(2, int(target_h * sy / 2) * 2)
 
         position = transform.get("position", "center")
         if isinstance(position, dict):
@@ -583,7 +804,7 @@ class VideoCompose(BaseTool):
 
         # The clip box, scaled-to-fit inside boxw×boxh and centered within it (so a
         # mismatched source aspect ratio letterboxes inside its own box, not the canvas).
-        fg_chain = list(crop_parts) + [
+        fg_chain = list(crop_parts) + hdr_parts + [
             f"scale={boxw}:{boxh}:force_original_aspect_ratio=decrease",
             "setsar=1",
         ]
@@ -788,6 +1009,7 @@ class VideoCompose(BaseTool):
         crf: int,
         preset: str,
         concat_out: Path,
+        hdr_encode: Optional[dict[str, Any]] = None,
     ) -> tuple[Optional[str], str]:
         """Join normalized segments with xfade/acrossfade, encoding `concat_out`.
 
@@ -856,8 +1078,7 @@ class VideoCompose(BaseTool):
         cmd.extend([
             "-filter_complex", filtergraph,
             "-map", f"[{cur_v}]", "-map", f"[{cur_a}]",
-            "-c:v", codec, "-crf", str(crf), "-preset", preset,
-            "-pix_fmt", "yuv420p", "-r", fps_str,
+            *self._video_output_args(hdr_encode, codec, crf, preset, fps_str),
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
             str(concat_out),
         ])
@@ -991,6 +1212,117 @@ class VideoCompose(BaseTool):
         asset_lookup = {a["id"]: a for a in asset_manifest.get("assets", []) if a.get("id")}
         cache = ProxyCache()
 
+        # ── HDR decision (resolved ONCE for the whole timeline) ──────────────
+        # render_proxies edits HDR exactly like SDR: detect HDR among the on-disk
+        # VIDEO sources, then PRESERVE it (10-bit HEVC main10 + HLG/PQ color tags)
+        # — lifting any SDR graphics/stills UP into the SAME HDR (BT.2020)
+        # container so every proxy concats in one color space (Het's choice
+        # 2026-06-22). One target color (from the first HDR source) is shared by
+        # the whole timeline. Policy: auto (preserve when HDR present, else SDR),
+        # preserve (force; blocker if no encoder), tonemap / sdr (force SDR).
+        # HDR preservation only applies to render_runtime='ffmpeg' (the only path
+        # that re-encodes from a source file); remotion/hyperframes proxies are
+        # SDR by construction.
+        from tools.video._shared import is_hdr_source
+
+        hdr_policy = str(inputs.get("hdr_policy") or "auto").strip().lower()
+        if hdr_policy not in ("auto", "preserve", "tonemap", "sdr"):
+            hdr_policy = "auto"
+
+        def _resolve_src_path(c: dict[str, Any]) -> str:
+            ref = c.get("source", "")
+            return asset_lookup.get(ref, {}).get("path", ref)
+
+        src_hdr_map: dict[str, dict[str, Any]] = {}
+        first_hdr: Optional[dict[str, Any]] = None
+        if render_runtime == "ffmpeg":
+            for c in cuts:
+                sp = _resolve_src_path(c)
+                if sp and sp not in src_hdr_map and Path(sp).exists() and not self._is_image(Path(sp)):
+                    info = is_hdr_source(Path(sp))
+                    src_hdr_map[sp] = info
+                    if info.get("hdr") and first_hdr is None:
+                        first_hdr = info
+        any_hdr = first_hdr is not None
+        # A timeline that mixes HDR with anything non-HDR needs SDR→HDR PROMOTION
+        # (zscale) to preserve. A timeline where EVERY cut is already an HDR video
+        # needs no promotion, so preserve works even without zscale.
+        all_cuts_hdr = bool(cuts) and all(
+            src_hdr_map.get(_resolve_src_path(c), {}).get("hdr") for c in cuts
+        )
+        zscale_ok = self._zscale_available()
+
+        hdr_warnings: list[str] = []
+        hdr_target: Optional[dict[str, Any]] = None   # timeline target color (preserve)
+        hdr_encoder: Optional[str] = None             # chosen 10-bit HEVC encoder
+        hdr_mode_timeline = "sdr"                      # 'preserve' | 'tonemap' | 'sdr'
+        if render_runtime == "ffmpeg" and any_hdr:
+            encs = self._hdr_encoders()
+            hdr_encoder = (
+                "hevc_videotoolbox" if "hevc_videotoolbox" in encs
+                else ("libx265" if "libx265" in encs else None)
+            )
+            if hdr_policy in ("tonemap", "sdr"):
+                hdr_mode_timeline = "tonemap"
+                if not zscale_ok:
+                    hdr_warnings.append(
+                        "hdr_policy='tonemap' but ffmpeg lacks the zscale filter (libzimg) "
+                        "— the HDR→SDR tone curve can't be applied properly; output is "
+                        "tagged SDR but may look flat. Install an ffmpeg with libzimg."
+                    )
+            elif hdr_encoder is None:
+                if hdr_policy == "preserve":
+                    return ToolResult(
+                        success=False,
+                        error=(
+                            "hdr_policy='preserve' but no 10-bit HEVC encoder "
+                            "(hevc_videotoolbox or libx265) is available on this machine "
+                            "— cannot preserve HDR. Install one, or re-run with "
+                            "hdr_policy='tonemap' to convert the HDR source to SDR."
+                        ),
+                    )
+                hdr_mode_timeline = "tonemap"
+                hdr_warnings.append(
+                    "HDR source detected but no 10-bit HEVC encoder available — "
+                    "tonemapping to SDR (hdr_policy='auto'). Install hevc_videotoolbox "
+                    "or libx265, or pass hdr_policy explicitly to silence this."
+                )
+            elif not all_cuts_hdr and not zscale_ok:
+                # Mixed HDR+SDR timeline but no zscale → SDR sources CANNOT be lifted
+                # into the HDR container. Preserving here would encode SDR pixels with
+                # HDR tags (a silent color mislabel). Block (preserve) or tonemap (auto).
+                if hdr_policy == "preserve":
+                    return ToolResult(
+                        success=False,
+                        error=(
+                            "hdr_policy='preserve' on a mixed HDR+SDR timeline, but ffmpeg "
+                            "lacks the zscale filter (libzimg) needed to lift the SDR "
+                            "graphics/stills into the HDR (BT.2020) container — preserving "
+                            "would mislabel SDR pixels as HDR. Install an ffmpeg with libzimg, "
+                            "or re-run with hdr_policy='tonemap'."
+                        ),
+                    )
+                hdr_mode_timeline = "tonemap"
+                hdr_warnings.append(
+                    "Mixed HDR+SDR timeline but ffmpeg lacks zscale (libzimg) to promote the "
+                    "SDR parts into HDR — tonemapping the HDR source to SDR instead "
+                    "(hdr_policy='auto'). Install an ffmpeg with libzimg to preserve HDR."
+                )
+            else:
+                hdr_mode_timeline = "preserve"
+                hdr_target = self._resolve_hdr_target(first_hdr)
+                if all_cuts_hdr:
+                    hdr_warnings.append(
+                        f"HDR timeline: preserving HDR (10-bit {hdr_encoder}, "
+                        f"{hdr_target.get('kind')})."
+                    )
+                else:
+                    hdr_warnings.append(
+                        f"HDR timeline: preserving HDR (10-bit {hdr_encoder}, "
+                        f"{hdr_target.get('kind')}) and lifting SDR graphics/stills into the "
+                        "HDR container — confirm graphics color on real HDR footage."
+                    )
+
         proxies: list[dict[str, Any]] = []
         for i, cut in enumerate(cuts):
             scene_id = str(cut.get("id") or f"scene_{i:03d}")
@@ -1061,6 +1393,46 @@ class VideoCompose(BaseTool):
                 if _crop:
                     solo_cut["transform"] = {"crop": _crop}
 
+            # Per-scene HDR encode (from the timeline decision). preserve: an HDR
+            # source keeps its color (vf_prefix=""), an SDR source/still is PROMOTED
+            # into the HDR container. tonemap: an HDR source is converted to SDR,
+            # SDR sources are untouched (None). The HDR decision is part of the
+            # cache identity — but only when it actually affects the proxy, so plain
+            # SDR proxies keep their existing keys (no cache-wide invalidation).
+            scene_hdr_encode: Optional[dict[str, Any]] = None
+            scene_hdr_identity: Optional[dict[str, Any]] = None
+            if hdr_mode_timeline == "preserve" and hdr_target:
+                base_enc = {
+                    "encoder": hdr_encoder,
+                    "pix_fmt": "yuv420p10le",
+                    "primaries": hdr_target["primaries"],
+                    "trc": hdr_target["trc"],
+                    "colorspace": hdr_target["colorspace"],
+                    "tag": "hvc1",
+                }
+                src_info = src_hdr_map.get(source_path)
+                if src_info and src_info.get("hdr"):
+                    scene_hdr_encode = dict(base_enc, vf_prefix="")
+                    _mode = "preserve"
+                else:
+                    scene_hdr_encode = dict(
+                        base_enc, vf_prefix=self._promote_sdr_to_hdr_vf(hdr_target)
+                    )
+                    _mode = "promote"
+                scene_hdr_identity = {
+                    "mode": _mode, "encoder": hdr_encoder, "pix_fmt": "yuv420p10le",
+                    "primaries": hdr_target["primaries"], "trc": hdr_target["trc"],
+                    "colorspace": hdr_target["colorspace"],
+                }
+            elif hdr_mode_timeline == "tonemap":
+                src_info = src_hdr_map.get(source_path)
+                if src_info and src_info.get("hdr"):
+                    scene_hdr_encode = {
+                        "encoder": None, "pix_fmt": "yuv420p",
+                        "vf_prefix": self._tonemap_hdr_to_sdr_vf(src_info.get("kind") or "hlg"),
+                    }
+                    scene_hdr_identity = {"mode": "tonemap", "pix_fmt": "yuv420p"}
+
             identity = {
                 "v": 2,
                 "render_runtime": render_runtime,
@@ -1071,6 +1443,8 @@ class VideoCompose(BaseTool):
                 "scene": {k: v for k, v in solo_cut.items() if k != "source"},
                 "source_hash": src_hash,
             }
+            if scene_hdr_identity:
+                identity["hdr"] = scene_hdr_identity
             key = cache.key(identity)
             # Content-addressed filename: each distinct identity owns a distinct file,
             # so a re-render with new content can never clobber an older proxy that a
@@ -1101,6 +1475,7 @@ class VideoCompose(BaseTool):
 
                 render_res = self._render_scene_proxy(
                     render_runtime, solo_ed, asset_manifest, proxy_path, profile,
+                    hdr_encode=scene_hdr_encode,
                 )
                 if not render_res.success:
                     return ToolResult(
@@ -1122,7 +1497,18 @@ class VideoCompose(BaseTool):
                     "render_runtime": render_runtime,
                 })
 
-        assemble_ed = self._build_assemble_edl(edit_decisions, proxies)
+        hdr_meta: Optional[dict[str, Any]] = None
+        if hdr_mode_timeline == "preserve" and hdr_target:
+            hdr_meta = {
+                "enabled": True,
+                "kind": hdr_target.get("kind"),
+                "encoder": hdr_encoder,
+                "pix_fmt": "yuv420p10le",
+                "primaries": hdr_target["primaries"],
+                "trc": hdr_target["trc"],
+                "colorspace": hdr_target["colorspace"],
+            }
+        assemble_ed = self._build_assemble_edl(edit_decisions, proxies, hdr_meta=hdr_meta)
 
         assemble_edl_path = inputs.get("assemble_edl_path")
         if assemble_edl_path:
@@ -1142,7 +1528,16 @@ class VideoCompose(BaseTool):
             "n_rendered": len(proxies) - n_cached,
             "canvas": canvas,
             "render_runtime": render_runtime,
+            "hdr_handling": {
+                "policy": hdr_policy,
+                "source_hdr": any_hdr,
+                "decision": hdr_mode_timeline,
+                "encoder": hdr_encoder,
+                "target": hdr_target,
+            },
         }
+        if hdr_warnings:
+            proxy_summary["warnings"] = list(hdr_warnings)
 
         # One-call mode: with an output_path, also assemble + render the proxies to
         # a final video — the cached drop-in for operation="render" the editor uses
@@ -1160,7 +1555,12 @@ class VideoCompose(BaseTool):
             "profile": profile,
         })
         data = dict(final_res.data or {})
+        # Union the assemble pass's warnings with the proxy/HDR warnings (the
+        # proxy_summary.update below would otherwise clobber one with the other).
+        merged_warnings = list(data.get("warnings") or []) + list(hdr_warnings or [])
         data.update(proxy_summary)
+        if merged_warnings:
+            data["warnings"] = merged_warnings
         return ToolResult(
             success=final_res.success,
             data=data,
@@ -1175,8 +1575,15 @@ class VideoCompose(BaseTool):
         asset_manifest: dict[str, Any],
         proxy_path: Path,
         profile: Optional[str],
+        hdr_encode: Optional[dict[str, Any]] = None,
     ) -> ToolResult:
-        """Render ONE solo scene to proxy_path via the locked runtime (lean path)."""
+        """Render ONE solo scene to proxy_path via the locked runtime (lean path).
+
+        `hdr_encode` (ffmpeg path only) carries the per-scene HDR preserve/promote/
+        tonemap decision into `_compose`. remotion/hyperframes emit SDR proxies, so
+        an HDR-preserve request there is silently SDR — render_proxies only sets
+        hdr_encode when render_runtime='ffmpeg', so this can't happen in practice.
+        """
         proxy_path = Path(proxy_path)
         proxy_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1186,6 +1593,7 @@ class VideoCompose(BaseTool):
                 "edit_decisions": solo_ed,
                 "output_path": str(proxy_path),
                 "profile": profile,
+                "hdr_encode": hdr_encode,
             })
         if render_runtime == "remotion":
             inp: dict[str, Any] = {"edit_decisions": solo_ed, "output_path": str(proxy_path)}
@@ -1207,6 +1615,7 @@ class VideoCompose(BaseTool):
         self,
         original: dict[str, Any],
         proxies: list[dict[str, Any]],
+        hdr_meta: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Build an ffmpeg-runtime edit_decisions that concatenates the proxies.
 
@@ -1267,6 +1676,11 @@ class VideoCompose(BaseTool):
         meta.pop("proposal_render_runtime", None)
         meta["assemble_of_proxies"] = True
         meta["proxy_render_runtime"] = original.get("render_runtime")
+        # The proxies were rendered HDR (10-bit + tags); record the target color so
+        # _render_via_ffmpeg keeps the assemble re-encode (concat/overlays/subtitle
+        # burn) 10-bit + tagged rather than auto-negotiating back down to SDR.
+        if hdr_meta:
+            meta["hdr"] = hdr_meta
         assembled["metadata"] = meta
         return assembled
 
@@ -1340,6 +1754,17 @@ class VideoCompose(BaseTool):
         else:
             bg_color = "black"
             bg_image = None
+
+        # HDR preservation: when render_proxies resolves the timeline as HDR it
+        # passes a per-scene `hdr_encode` dict here (encoder + 10-bit pixfmt +
+        # HLG/PQ color tags, and a `vf_prefix` color-conversion chain for
+        # promote/tonemap). None (the default) ⇒ legacy 8-bit SDR, byte-identical
+        # to before. `_video_output_args` owns the encode tail; `vf_prefix` is
+        # spliced into each segment's filterchain by `_segment_base_vf`.
+        hdr_encode = inputs.get("hdr_encode") or None
+        hdr_vf_prefix = (
+            hdr_encode.get("vf_prefix") if isinstance(hdr_encode, dict) else ""
+        ) or ""
 
         # Per-join transition resolution (B.transition_in wins over A.transition_out).
         joins, transition_warnings = self._resolve_joins(cuts, edit_decisions.get("metadata"))
@@ -1427,10 +1852,14 @@ class VideoCompose(BaseTool):
                     # carry no audio — synthesize a silent stereo track (mirrors the
                     # silent-video path) so every concat segment has the same layout.
                     seg_seconds = duration / speed if speed and speed > 0 else duration
+                    # A still cannot carry SOURCE HDR (it's generated/looped); in an
+                    # HDR timeline it is PROMOTED into the HDR container via the same
+                    # vf_prefix as any SDR source, so it concats uniformly.
                     vf_err, vf_parts, complex_spec = self._segment_base_vf(
                         cut, i, target_w, target_h, fps_str,
                         bg_color=cut_bg_color, bg_image=cut_bg_image,
                         apply_transform=cut_apply_transform, seg_seconds=seg_seconds,
+                        hdr_vf_prefix=hdr_vf_prefix,
                     )
                     if vf_err:
                         return ToolResult(success=False, error=vf_err)
@@ -1451,13 +1880,9 @@ class VideoCompose(BaseTool):
                         graph = complex_spec["filtergraph"].replace("{bg}", "2")
                         cmd += complex_spec["inputs"]
                         cmd += ["-filter_complex", graph, "-map", complex_spec["vlabel"]]
+                    cmd += ["-map", "1:a:0"]
+                    cmd += self._video_output_args(hdr_encode, codec, crf, preset, fps_str)
                     cmd += [
-                        "-map", "1:a:0",
-                        "-c:v", codec,
-                        "-crf", str(crf),
-                        "-preset", preset,
-                        "-pix_fmt", "yuv420p",
-                        "-r", fps_str,
                         "-c:a", "aac",
                         "-b:a", "192k",
                         "-ar", "48000",
@@ -1496,6 +1921,7 @@ class VideoCompose(BaseTool):
                         cut, i, target_w, target_h, fps_str,
                         bg_color=cut_bg_color, bg_image=cut_bg_image,
                         apply_transform=cut_apply_transform, seg_seconds=seg_seconds,
+                        hdr_vf_prefix=hdr_vf_prefix,
                     )
                     if vf_err:
                         return ToolResult(success=False, error=vf_err)
@@ -1565,12 +1991,8 @@ class VideoCompose(BaseTool):
                             "-map", audio_map,
                         ]
 
+                    cmd += self._video_output_args(hdr_encode, codec, crf, preset, fps_str)
                     cmd += [
-                        "-c:v", codec,
-                        "-crf", str(crf),
-                        "-preset", preset,
-                        "-pix_fmt", "yuv420p",
-                        "-r", fps_str,
                         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
                     ]
 
@@ -1589,6 +2011,7 @@ class VideoCompose(BaseTool):
             if used_xfade:
                 err, xfade_filtergraph = self._transitions_concat(
                     temp_segments, joins, fps_str, codec, crf, preset, concat_out,
+                    hdr_encode=hdr_encode,
                 )
                 if err:
                     return ToolResult(success=False, error=f"transition render failed: {err}")
@@ -1630,7 +2053,12 @@ class VideoCompose(BaseTool):
 
             if needs_reencode:
                 cmd.extend(["-vf", ",".join(vfilters)])
-                cmd.extend(["-c:v", codec, "-crf", str(crf), "-preset", preset])
+                if hdr_encode:
+                    # Keep the subtitle-burn re-encode 10-bit + HLG/PQ tags so HDR
+                    # isn't dropped at the last pass. (-r here is harmless.)
+                    cmd.extend(self._video_output_args(hdr_encode, codec, crf, preset, fps_str))
+                else:
+                    cmd.extend(["-c:v", codec, "-crf", str(crf), "-preset", preset])
             else:
                 cmd.extend(["-c:v", "copy"])
 
@@ -1665,6 +2093,17 @@ class VideoCompose(BaseTool):
                 success=True,
                 data=data,
                 artifacts=[str(output_path)],
+            )
+        except subprocess.CalledProcessError as e:
+            # Surface the ffmpeg stderr (the segment/mux calls in this block are
+            # otherwise bare run_command — a raw CalledProcessError drops the reason,
+            # e.g. an HDR encoder rejecting a profile/pixfmt). Mirrors the pattern in
+            # _transitions_concat / _overlay so encoder failures self-diagnose.
+            stderr = ((getattr(e, "stderr", "") or "") or "ffmpeg compose failed").strip()[-800:]
+            enc = (hdr_encode or {}).get("encoder") or codec
+            return ToolResult(
+                success=False,
+                error=f"ffmpeg compose failed (video codec={enc}): {stderr}",
             )
         finally:
             # Cleanup temp files
@@ -2272,6 +2711,63 @@ class VideoCompose(BaseTool):
 
         return render_result
 
+    def _assemble_hdr_encode(
+        self,
+        edit_decisions: dict[str, Any],
+        base_cuts: list[dict[str, Any]],
+        inputs: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Resolve the HDR encode for the assemble / direct-ffmpeg render.
+
+        Two sources, in priority order:
+          1. metadata.hdr — stamped by _build_assemble_edl when render_proxies
+             resolved the timeline as HDR. The proxies are ALREADY in the target
+             color space, so this is a pure PRESERVE pass (vf_prefix="").
+          2. Direct render of raw footage (no proxies): preserve only when EVERY
+             non-image base cut is HDR (one color decision applies to all segments
+             in _compose, so a mixed direct render can't per-cut promote — route
+             that through render_proxies). Returns None ⇒ legacy SDR.
+        """
+        meta_hdr = (edit_decisions.get("metadata") or {}).get("hdr")
+        if isinstance(meta_hdr, dict) and meta_hdr.get("enabled"):
+            return {
+                "encoder": meta_hdr.get("encoder"),
+                "pix_fmt": meta_hdr.get("pix_fmt") or "yuv420p10le",
+                "primaries": meta_hdr.get("primaries"),
+                "trc": meta_hdr.get("trc"),
+                "colorspace": meta_hdr.get("colorspace"),
+                "tag": "hvc1",
+                "vf_prefix": "",
+            }
+
+        policy = str(inputs.get("hdr_policy") or "auto").strip().lower()
+        if policy in ("tonemap", "sdr"):
+            return None
+        from tools.video._shared import is_hdr_source
+        vids = [
+            c for c in base_cuts
+            if c.get("source") and Path(str(c["source"])).exists()
+            and not self._is_image(Path(str(c["source"])))
+        ]
+        if not vids:
+            return None
+        infos = [is_hdr_source(Path(str(c["source"]))) for c in vids]
+        if not all(x.get("hdr") for x in infos):
+            return None  # mixed HDR/SDR direct render → SDR here; use render_proxies
+        encs = self._hdr_encoders()
+        enc = (
+            "hevc_videotoolbox" if "hevc_videotoolbox" in encs
+            else ("libx265" if "libx265" in encs else None)
+        )
+        if enc is None:
+            return None  # can't preserve; don't block the direct path
+        target = self._resolve_hdr_target(infos[0])
+        return {
+            "encoder": enc, "pix_fmt": "yuv420p10le",
+            "primaries": target["primaries"], "trc": target["trc"],
+            "colorspace": target["colorspace"], "tag": "hvc1", "vf_prefix": "",
+        }
+
     def _render_via_ffmpeg(
         self,
         *,
@@ -2436,6 +2932,40 @@ class VideoCompose(BaseTool):
                     # means "honor the per-clip transform", just over black.
                     composite_background = {"color": "black", "image": None}
 
+        # HDR: keep the assemble re-encode (concat / subtitle burn / overlays)
+        # 10-bit + HLG/PQ tagged. metadata.hdr is the proxy-assemble signal
+        # (stamped by _build_assemble_edl); a DIRECT ffmpeg render of raw footage
+        # is preserved only when EVERY base cut is HDR (a single color decision is
+        # applied to all segments here, so a mixed direct render can't per-cut
+        # promote — route mixed HDR/SDR through render_proxies). vf_prefix="" means
+        # the inputs are already in the target color space (no conversion).
+        assemble_hdr_encode = self._assemble_hdr_encode(edit_decisions, base_cuts, inputs)
+
+        # Surface a silent HDR drop: a DIRECT render (no proxy metadata.hdr) of a
+        # mixed HDR/SDR timeline (or with no HDR encoder) can't preserve HDR here —
+        # _assemble_hdr_encode returns None and the HDR footage is left SDR. The
+        # "never tonemap silently" contract means we must say so (the proxy path
+        # already warns; this brings the direct path in line).
+        direct_hdr_drop_warning: Optional[str] = None
+        if not (assemble_hdr_encode and assemble_hdr_encode.get("encoder")) \
+                and not (edit_decisions.get("metadata") or {}).get("hdr"):
+            _pol = str(inputs.get("hdr_policy") or "auto").strip().lower()
+            if _pol not in ("tonemap", "sdr"):
+                from tools.video._shared import is_hdr_source
+                _has_hdr = any(
+                    c.get("source") and Path(str(c["source"])).exists()
+                    and not self._is_image(Path(str(c["source"])))
+                    and is_hdr_source(Path(str(c["source"]))).get("hdr")
+                    for c in base_cuts
+                )
+                if _has_hdr:
+                    direct_hdr_drop_warning = (
+                        "HDR source(s) in this direct ffmpeg render were left SDR — one "
+                        "color decision applies to all cuts here, so a mixed HDR/SDR "
+                        "timeline (or one with no 10-bit HEVC encoder) can't preserve HDR. "
+                        "Render via render_proxies to preserve HDR, or pass hdr_policy."
+                    )
+
         compose_inputs = dict(inputs)
         compose_inputs["edit_decisions"] = dict(edit_decisions, cuts=base_cuts)
         compose_inputs["output_path"] = str(compose_target)
@@ -2445,9 +2975,16 @@ class VideoCompose(BaseTool):
             compose_inputs["subtitle_path"] = subtitle_path
         if profile:
             compose_inputs["profile"] = profile
+        if assemble_hdr_encode:
+            compose_inputs["hdr_encode"] = assemble_hdr_encode
 
         try:
             render_result = self._compose(compose_inputs)
+
+            if render_result.success and direct_hdr_drop_warning:
+                if render_result.data is None:
+                    render_result.data = {}
+                render_result.data.setdefault("warnings", []).append(direct_hdr_drop_warning)
 
             # Second pass: composite overlays (incl. keyframed motion) onto the base.
             if render_result.success and resolved_overlays:
@@ -2461,6 +2998,7 @@ class VideoCompose(BaseTool):
                     "input_path": str(compose_target),
                     "overlays": resolved_overlays,
                     "output_path": str(output_path),
+                    "hdr_encode": assemble_hdr_encode,
                 })
                 try:
                     compose_target.unlink()  # drop the intermediate base
@@ -3249,45 +3787,62 @@ class VideoCompose(BaseTool):
             if render_runtime_edit:
                 promise_preservation["render_runtime_used"] = render_runtime_edit
 
-                proposal_runtime: str | None = None
-                runtime_source: str | None = None
-                if proposal_packet:
-                    pp_runtime = (
-                        (proposal_packet.get("production_plan") or {}).get("render_runtime")
-                        or ""
-                    ).strip().lower()
-                    if pp_runtime:
-                        proposal_runtime = pp_runtime
-                        runtime_source = "proposal_packet.production_plan.render_runtime"
-                if proposal_runtime is None:
-                    md_runtime = (
-                        (edit_decisions.get("metadata") or {}).get("proposal_render_runtime")
-                        or ""
-                    ).strip().lower()
-                    if md_runtime:
-                        proposal_runtime = md_runtime
-                        runtime_source = "edit_decisions.metadata.proposal_render_runtime"
-
-                if proposal_runtime is None:
+                _meta = edit_decisions.get("metadata") or {}
+                if _meta.get("assemble_of_proxies"):
+                    # Render-once / NLE two-phase render: each scene's proxy was
+                    # rendered in the LOCKED runtime (meta.proxy_render_runtime),
+                    # then the proxies are ASSEMBLED with ffmpeg. The assemble EDL
+                    # is always render_runtime='ffmpeg' by construction, so the
+                    # naive proposal!=edit check would mis-flag a legitimate
+                    # remotion/hyperframes → ffmpeg proxy assemble as a runtime
+                    # swap. It is NOT one — skip the swap detection here. (The
+                    # editor path already avoids this by carrying no proposal_packet;
+                    # this guard covers the pipeline path that DOES pass one.)
                     promise_preservation["runtime_swap_check"] = (
-                        "skipped — no proposal_packet or proposal_render_runtime "
-                        "metadata provided. Reviewer skill does cross-artifact "
-                        "comparison separately."
-                    )
-                elif proposal_runtime != render_runtime_edit:
-                    promise_preservation["runtime_swap_detected"] = True
-                    promise_preservation["runtime_swap_check"] = (
-                        f"detected — source: {runtime_source}"
-                    )
-                    promise_preservation["issues"].append(
-                        f"render_runtime changed between proposal ({proposal_runtime}) "
-                        f"and compose ({render_runtime_edit}) — this is a contract "
-                        f"violation unless a render_runtime_selection decision was logged."
+                        "skipped — two-phase proxy assemble "
+                        f"(proxy_render_runtime={_meta.get('proxy_render_runtime')}); "
+                        "an ffmpeg assemble of proxies is not a runtime swap"
                     )
                 else:
-                    promise_preservation["runtime_swap_check"] = (
-                        f"ok — proposal and edit agree ({runtime_source})"
-                    )
+                    proposal_runtime: str | None = None
+                    runtime_source: str | None = None
+                    if proposal_packet:
+                        pp_runtime = (
+                            (proposal_packet.get("production_plan") or {}).get("render_runtime")
+                            or ""
+                        ).strip().lower()
+                        if pp_runtime:
+                            proposal_runtime = pp_runtime
+                            runtime_source = "proposal_packet.production_plan.render_runtime"
+                    if proposal_runtime is None:
+                        md_runtime = (
+                            (edit_decisions.get("metadata") or {}).get("proposal_render_runtime")
+                            or ""
+                        ).strip().lower()
+                        if md_runtime:
+                            proposal_runtime = md_runtime
+                            runtime_source = "edit_decisions.metadata.proposal_render_runtime"
+
+                    if proposal_runtime is None:
+                        promise_preservation["runtime_swap_check"] = (
+                            "skipped — no proposal_packet or proposal_render_runtime "
+                            "metadata provided. Reviewer skill does cross-artifact "
+                            "comparison separately."
+                        )
+                    elif proposal_runtime != render_runtime_edit:
+                        promise_preservation["runtime_swap_detected"] = True
+                        promise_preservation["runtime_swap_check"] = (
+                            f"detected — source: {runtime_source}"
+                        )
+                        promise_preservation["issues"].append(
+                            f"render_runtime changed between proposal ({proposal_runtime}) "
+                            f"and compose ({render_runtime_edit}) — this is a contract "
+                            f"violation unless a render_runtime_selection decision was logged."
+                        )
+                    else:
+                        promise_preservation["runtime_swap_check"] = (
+                            f"ok — proposal and edit agree ({runtime_source})"
+                        )
 
             delivery_data = (
                 edit_decisions.get("metadata", {}).get("delivery_promise")
@@ -3527,6 +4082,26 @@ class VideoCompose(BaseTool):
         codec = inputs.get("codec", "libx264")
         crf = inputs.get("crf", 23)
 
+        # HDR base: keep the OUTPUT 10-bit + HLG/PQ tagged so the overlay pass
+        # doesn't silently drop the base's HDR. OPAQUE graphic overlays are lifted
+        # into the HDR color space before compositing; ALPHA overlays (transparent
+        # .mov/.png) and drawtext can't be safely zscale-converted without dropping
+        # alpha, so they're composited as-is with a warning (their color is
+        # approximate over HDR — the documented visual-review boundary).
+        hdr_encode = inputs.get("hdr_encode") or None
+        hdr_promote_vf = ""
+        # The `overlay` filter defaults to 8-bit (format=yuv420), which would crush
+        # the 10-bit HDR base at every composite. Tell it to composite in 10-bit so
+        # the HDR base keeps its bit depth. Empty for SDR (unchanged).
+        ov_hdr_fmt = ":format=yuv420p10" if (hdr_encode and hdr_encode.get("encoder")) else ""
+        if hdr_encode and hdr_encode.get("encoder"):
+            hdr_promote_vf = self._promote_sdr_to_hdr_vf({
+                "kind": "pq" if (hdr_encode.get("trc") == "smpte2084") else "hlg",
+                "primaries": hdr_encode.get("primaries"),
+                "trc": hdr_encode.get("trc"),
+                "colorspace": hdr_encode.get("colorspace"),
+            })
+
         if not input_path.exists():
             return ToolResult(success=False, error=f"Input not found: {input_path}")
         if not overlays:
@@ -3559,6 +4134,12 @@ class VideoCompose(BaseTool):
                     return ToolResult(success=False, error=dt_err)
                 filter_parts.append(dt_filter)
                 warnings.extend(dt_warnings)
+                if hdr_promote_vf:
+                    warnings.append(
+                        f"overlays[{i}]: drawtext rendered onto an HDR base — text "
+                        "color is interpreted in BT.2020 and may shift slightly "
+                        "(white/black are fine). Review on real HDR footage."
+                    )
                 prev_label = out_label
                 continue
 
@@ -3675,6 +4256,19 @@ class VideoCompose(BaseTool):
 
             # --- static sizing (aspect-preserving when one dimension is omitted) ---
             pre_chain: list[str] = []
+            if hdr_promote_vf:
+                # Lift an OPAQUE graphic into the HDR color space before it's
+                # composited on the 10-bit base. zscale can't carry an alpha plane,
+                # so transparent assets composite as-is (color approximate, warned).
+                if self._has_alpha(asset_path):
+                    warnings.append(
+                        f"overlays[{i}]: transparent overlay '{asset_path.name}' "
+                        "composited onto an HDR base without BT.2020 color conversion "
+                        "(alpha can't be zscale'd) — review its color, or set "
+                        "hdr_policy='tonemap' if it looks wrong."
+                    )
+                else:
+                    pre_chain.append(hdr_promote_vf)
             if pts_offset:
                 # Shift the overlay stream so its first frame lands at
                 # pts_offset_seconds on the project timeline (delayed video
@@ -3714,7 +4308,7 @@ class VideoCompose(BaseTool):
                     keyframes, base_x, base_y, start, i, overlay_input, prev_label,
                     out_label, enable,
                     pre_chain=pre_chain, nat_w=nat_w, nat_h=nat_h,
-                    static_opacity=static_opacity,
+                    static_opacity=static_opacity, ov_format=ov_hdr_fmt,
                 )
                 filter_parts.extend(kfw["filters"])
                 warnings.extend(kfw["warnings"])
@@ -3727,7 +4321,7 @@ class VideoCompose(BaseTool):
                     filter_parts.append(f"[{overlay_input}]{','.join(pre_chain)}[{lbl}]")
                     overlay_input = lbl
                 filter_parts.append(
-                    f"[{prev_label}][{overlay_input}]overlay={base_x}:{base_y}:enable='{enable}'[{out_label}]"
+                    f"[{prev_label}][{overlay_input}]overlay={base_x}:{base_y}:enable='{enable}'{ov_hdr_fmt}[{out_label}]"
                 )
             prev_label = out_label
 
@@ -3770,15 +4364,22 @@ class VideoCompose(BaseTool):
 
         filter_complex = ";".join(filter_parts)
 
+        # Video tail: HDR keeps 10-bit + HLG/PQ tags (no -r — base fps is kept);
+        # SDR is the exact legacy ["-c:v", codec, "-crf", crf] tail.
+        video_tail = (
+            self._video_output_args(hdr_encode, codec, crf, "medium", None)
+            if hdr_encode else ["-c:v", codec, "-crf", str(crf)]
+        )
+
         cmd = ["ffmpeg", "-y"]
         cmd.extend(input_args)
         cmd.extend(["-filter_complex", filter_complex])
         if audio_out_label:
             cmd.extend(["-map", f"[{prev_label}]", "-map", f"[{audio_out_label}]"])
-            cmd.extend(["-c:v", codec, "-crf", str(crf), "-c:a", "aac", "-b:a", "192k"])
+            cmd.extend([*video_tail, "-c:a", "aac", "-b:a", "192k"])
         else:
             cmd.extend(["-map", f"[{prev_label}]", "-map", "0:a?"])
-            cmd.extend(["-c:v", codec, "-crf", str(crf), "-c:a", "copy"])
+            cmd.extend([*video_tail, "-c:a", "copy"])
         cmd.append(str(output_path))
 
         try:
@@ -4239,6 +4840,7 @@ class VideoCompose(BaseTool):
         nat_w: Optional[int] = None,
         nat_h: Optional[int] = None,
         static_opacity: Optional[float] = None,
+        ov_format: str = "",
     ) -> dict:
         """Build the filtergraph parts for one keyframed overlay.
 
@@ -4329,7 +4931,7 @@ class VideoCompose(BaseTool):
             filters.append(f"[{src}]{','.join(chain)}[{pre}]")
             src = pre
         filters.append(
-            f"[{prev_label}][{src}]overlay=x='{x_expr}':y='{y_expr}':enable='{enable}'[{out_label}]"
+            f"[{prev_label}][{src}]overlay=x='{x_expr}':y='{y_expr}':enable='{enable}'{ov_format}[{out_label}]"
         )
         return {"filters": filters, "warnings": warnings}
 

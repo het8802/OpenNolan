@@ -487,9 +487,9 @@
           <h1>Go viral without becoming a <span class="accent">video editor</span>.</h1>
           <p class="hero-sub">OpenNolan is the first Mac app built for founders &amp; builders that makes the whole TikTok or Reel for you — no editing. Drop in your clips and the AI agent pulls supporting images and B-roll from the web, hunts down the trending music, sound effects, meme GIFs and stickers that make videos travel, and cuts it all into rapid, motion-driven sequences tuned for vertical.</p>
 
-          <form class="hero-form waitlist-form" novalidate>
+          <form class="hero-form waitlist-form" data-analytics-placement="hero" data-ph-no-autocapture novalidate>
             <div class="field-row">
-              <input type="email" name="email" placeholder="you@startup.com" autocomplete="email" required aria-label="Email address" />
+              <input type="email" name="email" placeholder="you@startup.com" autocomplete="email" required aria-label="Email address" data-ph-no-autocapture />
               <input type="text" name="company" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
               <button type="submit" class="btn btn-primary">Join the waitlist</button>
             </div>
@@ -859,9 +859,9 @@
           <span class="eyebrow center" style="display:flex;justify-content:center;">Coming soon to Mac</span>
           <h2>Be first to make content that gets seen.</h2>
           <p>Join the waitlist and we'll tell you the moment OpenNolan is ready — so your next launch breaks through the scroll, no editing required.</p>
-          <form class="waitlist-form" novalidate>
+          <form class="waitlist-form" data-analytics-placement="final_cta" data-ph-no-autocapture novalidate>
             <div class="field-row">
-              <input type="email" name="email" placeholder="you@startup.com" autocomplete="email" required aria-label="Email address" />
+              <input type="email" name="email" placeholder="you@startup.com" autocomplete="email" required aria-label="Email address" data-ph-no-autocapture />
               <input type="text" name="company" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
               <button type="submit" class="btn btn-primary">Join the waitlist</button>
             </div>
@@ -913,8 +913,11 @@
     </div>
   </footer>
 
+  <script src="assets/posthog.js"></script>
   <script>
     const CONFIG = { githubUrl: "https://github.com/het8802/OpenNolan" };
+    function track(name, props) { if (window.openNolanTrack) window.openNolanTrack(name, props || {}); }
+    function waitlistPlacement(form) { return form.dataset.analyticsPlacement || (form.classList.contains('hero-form') ? 'hero' : 'final_cta'); }
 
     document.querySelectorAll('[data-github]').forEach((el) => {
       if (CONFIG.githubUrl) { el.href = CONFIG.githubUrl; el.hidden = false; el.target = "_blank"; el.rel = "noopener"; }
@@ -926,6 +929,18 @@
     const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 8);
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
+    document.addEventListener('click', (e) => {
+      const target = e.target.closest('a,button');
+      if (!target) return;
+      const href = target.getAttribute('href') || '';
+      if (href.startsWith('#') || target.hasAttribute('data-github')) {
+        track('cta_clicked', {
+          label: target.textContent.trim().replace(/\s+/g, ' ').slice(0, 80),
+          href: href || undefined,
+          section: target.closest('header') ? 'nav' : target.closest('footer') ? 'footer' : 'body',
+        });
+      }
+    });
 
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -971,7 +986,7 @@
       }
     }
     tabs.forEach((t) => {
-      t.addEventListener('click', () => activate(t.dataset.feat));
+      t.addEventListener('click', () => { activate(t.dataset.feat); track('feature_gallery_selected', { feature: t.dataset.feat }); });
       t.addEventListener('keydown', (e) => {
         const i = tabs.indexOf(t);
         if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); const n = tabs[(i + 1) % tabs.length]; n.focus(); activate(n.dataset.feat); }
@@ -989,6 +1004,7 @@
         sfxAudio = new Audio(chip.dataset.sfx);
         sfxEl = chip;
         chip.classList.add('playing');
+        track('sfx_preview_played', { asset: chip.dataset.sfx.split('/').pop(), label: chip.textContent.trim() });
         sfxAudio.play().catch(() => {});
         sfxAudio.onended = () => chip.classList.remove('playing');
       });
@@ -1137,25 +1153,30 @@
         const emailInput = form.querySelector('input[name="email"]');
         const honeypot = form.querySelector('input[name="company"]');
         const btn = form.querySelector('button[type="submit"]');
+        const placement = waitlistPlacement(form);
         const email = (emailInput.value || '').trim().toLowerCase();
-        if (!EMAIL_RE.test(email)) { setStatus(form, 'Please enter a valid email address.', 'error'); emailInput.focus(); return; }
+        if (!EMAIL_RE.test(email)) { track('waitlist_email_invalid', { placement }); setStatus(form, 'Please enter a valid email address.', 'error'); emailInput.focus(); return; }
         const original = btn.textContent;
         btn.disabled = true; btn.textContent = 'Joining…'; setStatus(form, '', '');
+        track('waitlist_submit', { placement });
         try {
           const res = await fetch('/api/waitlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, company: honeypot ? honeypot.value : '', ref: location.pathname }) });
           if (res.ok) {
             const data = await res.json().catch(() => ({}));
-            if (data.alreadyJoined) { setStatus(form, "You're already on the list — see you at launch! 🎬", 'success'); }
+            if (data.alreadyJoined) { track('waitlist_duplicate', { placement }); setStatus(form, "You're already on the list — see you at launch! 🎬", 'success'); }
             else {
               showSuccess(form);
-              if (window.va) { window.va('event', { name: 'waitlist_signup', data: { placement: form.classList.contains('hero-form') ? 'hero' : 'cta' } }); }
+              track('waitlist_signup', { placement });
+              if (window.va) { window.va('event', { name: 'waitlist_signup', data: { placement } }); }
             }
           } else {
             const data = await res.json().catch(() => ({}));
+            track('waitlist_error', { placement, status: res.status });
             setStatus(form, data.error || 'Something went wrong. Please try again.', 'error');
             btn.disabled = false; btn.textContent = original;
           }
         } catch (err) {
+          track('waitlist_network_error', { placement });
           setStatus(form, 'Network error — please try again in a moment.', 'error');
           btn.disabled = false; btn.textContent = original;
         }
