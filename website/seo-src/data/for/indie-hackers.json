@@ -1,0 +1,88 @@
+{
+  "cluster": "for",
+  "slug": "indie-hackers",
+  "targetKeyword": "video editor for indie hackers",
+  "title": "Video Editor for Indie Hackers — No Subscription",
+  "metaDescription": "A video editor for indie hackers: turn ship logs into shorts, bring your own API key, no markup, no subscription. Open source, Mac-native. Join the waitlist.",
+  "eyebrow": "Built for indie hackers",
+  "h1": "The video editor for indie hackers who ship faster than they edit",
+  "h1Accent": "indie hackers",
+  "breadcrumbLabel": "For indie hackers",
+  "hubCardTitle": "For indie hackers",
+  "hubCardDesc": "Turn ship logs into shorts. Bring your own key, no subscription, no markup. Open source and Mac-native.",
+  "lede": "You're shipping in public on a budget that doesn't stretch to an editor or another SaaS subscription. You need shorts that travel as fast as you push code — without the editing tax eating your one free evening.",
+  "intro": [
+    "You're a solo, bootstrapped maker. The product is moving, the changelog is growing, and #buildinpublic is your whole distribution strategy. The thing standing between your work and the people who'd love it isn't the code — it's the editing. To get seen on the feed you're told to become a full-time video editor: chase trending audio, cut B-roll, sync captions, add proof. That's a part-time job you never signed up for, and it doesn't bill itself to anyone.",
+    "That editing tax is the villain. It's why most great indie products stay invisible while flashier ones capture the reach. Hiring an editor is out of budget. Another monthly subscription on top of your stack is the last thing your runway wants. So the shorts don't get made, or they get made flat and slow, and they get skipped in the first second.",
+    "OpenNolan is the guide here, not the hero — you are. We're builders too; we'd rather ship product than learn a timeline. So we built a Mac app where an AI agent makes the whole reel from your raw clips, you bring your own API key and pay providers directly, and the whole thing is open source. No markup. No subscription. Just shorts that ship at the speed you do."
+  ],
+  "sections": [
+    {
+      "h2": "Turn your ship log into shorts without the editing tax",
+      "body": [
+        "Every push, every demo, every screen recording is raw material. The problem has never been having something to show — it's that turning a 40-second screen grab into something the feed actually pushes takes hours you'd rather spend building.",
+        "OpenNolan flips the order. Drop in your clips (or just describe the video), and the AI agent does the editor's job: trending hooks and fast cuts, explainer animations, screenshot proof with auto-highlight, B-roll and images pulled from the web, music and sound effects, captions burned in for the 85% who watch on mute. You get a finished vertical cut tuned for Reels, TikTok, and Shorts — built on the actual [short-form playbook](/#features), not guesswork."
+      ],
+      "checks": [
+        "Drop in clips or describe the video — the agent builds the whole reel",
+        "Screenshot proof with auto-highlight, made for product demos",
+        "Burned-in captions for the 85% watching on mute",
+        "Trending hooks, fast cuts, and motion tuned for 9:16"
+      ],
+      "quote": "Your changelog is already content. OpenNolan just turns it into shorts."
+    },
+    {
+      "h2": "Bring your own key: cost control that fits a bootstrapped budget",
+      "body": [
+        "Most editing tools want a monthly subscription whether you ship one video that month or thirty. That math doesn't work when you're funding everything yourself.",
+        "OpenNolan is bring-your-own-key (BYOK). You add your own AI provider API key and pay providers directly — no markup, no subscription, no account required. You're in full control of spend: a quiet month costs you almost nothing, a launch week scales with what you actually use. The model is local-first too, so your clips and files stay on your Mac instead of someone else's cloud.",
+        "And because it's open source, there's no vendor lock-in to worry about. You can read the code, see exactly what it does with your files and keys, and trust it the way an indie hacker trusts any tool in their stack."
+      ],
+      "checks": [
+        "Pay AI providers directly — no markup, no subscription",
+        "No account required; spend scales with your actual usage",
+        "Local-first: your files stay on your Mac",
+        "Open source — read the code, no lock-in"
+      ]
+    },
+    {
+      "h2": "Render once, edit cheap — keep your shipping cadence",
+      "body": [
+        "Speed is the whole point. The agent gives you a finished cut, but you stay the editor-in-chief. Post it as-is, or tweak first on a real timeline: reorder, retrim, retime, swap a caption, move an overlay.",
+        "OpenNolan renders once, then most edits preview instantly without re-rendering. Only AI-composition scenes re-render, and only the one scene you changed. So a quick fix before you post takes seconds, not a fresh export — which is exactly how a solo maker keeps a daily or weekly #buildinpublic rhythm without the timeline becoming a second job."
+      ],
+      "quote": "Ship a short between commits, not instead of them."
+    },
+    {
+      "h2": "Where you land: discovered, not just shipped",
+      "body": [
+        "The transformation is simple. You go from the reluctant editor whose product nobody sees, to the founder whose work travels — with shorts made in minutes, on a budget that respects your runway.",
+        "If you're scaling past solo and want the team angle, see what OpenNolan does for [founders](/for/founders) and for [SaaS](/for/saas). But if it's just you, shipping fast and building in public, this is your tool: own your costs, own your cadence, get discovered."
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "Is OpenNolan available to download yet?",
+      "a": "Not yet — OpenNolan is a Mac app in active development, and this site is the waitlist. Join it and you'll be first to know the moment it ships. No spam, just the launch. If you build in public, getting in early means you're ready to turn your next milestone into a short on day one."
+    },
+    {
+      "q": "How does pricing work for a bootstrapped maker?",
+      "a": "There's no subscription and no markup. OpenNolan is bring-your-own-key: you add your own AI provider API key and pay those providers directly for what you use. No account is required. A slow month costs you almost nothing; a launch week scales with your actual usage — cost control that fits a solo budget."
+    },
+    {
+      "q": "Is it really open source?",
+      "a": "Yes. OpenNolan is open source, so you can read the code, see exactly what it does with your clips and API keys, and trust it the way you trust the rest of your stack. There's no vendor lock-in, and because it's local-first, your files stay on your Mac rather than on someone else's servers."
+    },
+    {
+      "q": "Can I turn screen recordings and ship logs into shorts?",
+      "a": "That's the core use case. Drop in screen recordings, demos, or clips and the AI agent builds a vertical cut — adding hooks, fast cuts, captions, music, and screenshot proof with auto-highlight. It's tuned for product demos, so your changelog and #buildinpublic updates become shorts without you learning a timeline."
+    },
+    {
+      "q": "Does it run on Windows or in the browser?",
+      "a": "Not right now. OpenNolan is a native macOS desktop app — not a web app and not Windows. That's a deliberate choice for a local-first, render-once model that keeps your files private and your edits instant. If you're on a Mac, join the waitlist and you'll be first in line when it ships."
+    }
+  ],
+  "ctaHeading": "Ship shorts as fast as you ship product",
+  "ctaSub": "Join the waitlist for the open-source, BYOK Mac app built for solo, bootstrapped makers."
+}

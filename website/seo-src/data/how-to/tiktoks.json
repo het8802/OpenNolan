@@ -1,0 +1,112 @@
+{
+  "cluster": "how-to",
+  "slug": "tiktoks",
+  "targetKeyword": "how to make TikToks",
+  "title": "How to Make TikToks for Your Product (2026)",
+  "metaDescription": "How to make TikToks that feel native and travel: the hook, trending sounds, pacing, captions, and a cadence founders can keep. Join the waitlist.",
+  "eyebrow": "TikTok playbook",
+  "h1": "How to make TikToks for your product without becoming an editor",
+  "h1Accent": "make TikToks",
+  "breadcrumbLabel": "TikTok",
+  "hubCardTitle": "How to make TikToks",
+  "hubCardDesc": "The native-feel TikTok playbook: hook, trending sounds, pacing, captions, and a cadence you can keep.",
+  "lede": "You want your product on the For You page — reach, attention, the users who'd love it. The catch is that the TikToks that travel feel native and fast, and learning to make them eats the week you'd rather spend building.",
+  "intro": [
+    "Here is the thing nobody tells founders about TikTok: the platform doesn't reward the polished launch video you'd put on a homepage. It rewards videos that feel like they belong on the feed — fast, native, a little raw, scored to a sound the algorithm already trusts. You are the hero who wants the product discovered. The obstacle is that TikTok has its own grammar, and you didn't sign up to learn it.",
+    "The villain is the editing tax. To get seen, you're told to become a full-time editor — hunting trending audio, cutting every second tight, syncing captions, matching a format that's already moved on by next week. That's a part-time job founders never agreed to, and it's why most great products stay invisible while flashier ones capture the For You page.",
+    "OpenNolan is the guide, not the hero — you are. We're builders too; we'd rather ship product than learn a timeline. So we built a Mac app where an AI agent makes the whole TikTok from your raw clips, tuned for the vertical feed and built on the actual short-form playbook. This page walks the real process step by step — useful even if you never touch our app — then shows how OpenNolan does each step for you."
+  ],
+  "sections": [
+    {
+      "h2": "What makes a TikTok feel native (and why it matters)",
+      "body": [
+        "TikTok is the most format-sensitive of the big three short-form platforms. A clip that's clearly repurposed from somewhere else — letterboxed, slow, scored to stock music — gets read as an ad and skipped. The videos that travel look like a person filmed them on a phone and cut them with intent: vertical 9:16 (1080×1920), full-bleed, a sound that's trending right now, captions that move, and a pace that never lets the thumb rest.",
+        "Native feel is not about production value. It's about belonging. The same demo footage can flop as a slick corporate cut and fly as a fast, sound-driven TikTok. If you only make one short-form edit and post it everywhere, TikTok is the platform most likely to punish you for it — which is exactly why it's worth treating on its own terms.",
+        "If you're also posting elsewhere, the format diverges: see [how to make Instagram Reels](/how-to/instagram-reels) and [how to make YouTube Shorts](/how-to/youtube-shorts) for where those audiences differ."
+      ],
+      "checks": [
+        "Vertical 9:16, 1080×1920, full-bleed — no letterboxing",
+        "Trending sound, not stock music",
+        "Captions that move with the cut, readable on mute",
+        "Pace that resets attention every 1–3 seconds"
+      ],
+      "quote": "On TikTok, looking native beats looking polished. Belonging is the production value."
+    },
+    {
+      "h2": "How to make a TikTok: the real step-by-step",
+      "stepsHeading": "Five steps from raw clips to a TikTok that travels",
+      "body": [
+        "This is the process whether you edit it by hand in CapCut or let an agent do it. Each step is what actually separates a TikTok that lands from one that dies in the first second.",
+        "Below each step is how OpenNolan handles it for you — so the playbook runs without you studying it or sitting at a timeline."
+      ],
+      "steps": [
+        {
+          "title": "Lead with the payoff in under a second",
+          "body": "The first frame decides everything. Open on the result, a pattern interrupt, or the boldest claim — never a slow intro or a logo. If your hook is 'here's a tool I built,' you've already lost; 'I replaced my whole video editor with this' stops the thumb. OpenNolan: the agent opens on the payoff and writes a [hook](/learn/what-is-a-hook) built to stop the scroll, drawn from trending hook patterns."
+        },
+        {
+          "title": "Ride a trending sound",
+          "body": "TikTok's algorithm actively pushes videos using sounds that are spiking. A trending audio bed gives your clip distribution it wouldn't earn on its own, and it sets the rhythm you cut to. Pick a sound that fits the energy, not just the most popular one. OpenNolan: the agent adds music and sound effects (via ElevenLabs) and cuts the video to the beat, so the pacing and the sound move together."
+        },
+        {
+          "title": "Cut hard every 1–3 seconds",
+          "body": "Motion resets attention. Hard cuts, zoom punches, and B-roll inserts keep the viewer from drifting. A static talking head that runs ten seconds without a cut is a desktop habit the feed punishes. OpenNolan: the agent assembles rapid cuts and keyframe motion (position, scale, opacity), pulls B-roll and images from the web, and tunes the whole sequence for vertical."
+        },
+        {
+          "title": "Burn in captions for the mute majority",
+          "body": "Around 85% of viewers watch with sound off, so the message has to carry visually. Captions should be large, high-contrast, and timed to the words — not a passive subtitle track. OpenNolan: the agent writes and burns in captions synced to the cut, styled for the feed, so the point lands whether the sound is on or off."
+        },
+        {
+          "title": "Show receipts, then post and tweak",
+          "body": "Proof converts. Drop in a screenshot, a stat, or a result so the claim isn't just talk. Then post — and if a beat is off, fix it fast rather than re-exporting for an hour. OpenNolan: it adds screenshot proof with auto-highlight, and its render-once model lets you tweak any cut on a real timeline with edits previewing instantly — no full re-render."
+        }
+      ]
+    },
+    {
+      "h2": "Hooks, series, and a posting cadence you can actually keep",
+      "body": [
+        "One great TikTok is luck; a cadence is a strategy. The accounts that win post consistently and lean on series — repeatable formats like 'building my product, day N,' 'things I wish I knew,' or a recurring hook you can refill with new footage. A series trains both the algorithm and your audience to expect you, and it turns the hard part (inventing a format) into a one-time decision.",
+        "The blocker is always the same: cadence dies when each video takes half a day to edit. If posting daily means editing daily, you'll quit by week two. The way to keep a cadence is to make the per-video cost small enough that posting is easy. That's the whole point of handing the editing to an agent — the format stays consistent, only the footage changes, and a finished cut is minutes away instead of an evening."
+      ],
+      "checks": [
+        "Build repeatable series formats, not one-off videos",
+        "Reuse a proven hook structure with fresh footage",
+        "Keep the per-video editing cost low enough to post often",
+        "Let cadence, not any single viral hit, do the work"
+      ],
+      "quote": "You don't need one viral TikTok. You need a format you can post every day without it eating the day."
+    },
+    {
+      "h2": "Mistakes founders make on TikTok",
+      "body": [
+        "The most common one is posting a desktop video on a phone-feed platform: slow, calm, talking-head footage with a logo intro and stock music. The second is repurposing a single edit across every platform, so the TikTok feels imported. The third is a buried hook — the good part arrives at second eight, long after the viewer left. The fourth is posting once, getting a flat result, and concluding 'TikTok doesn't work for B2B' instead of posting twenty more.",
+        "Every one of these traces back to the editing tax. When each video is expensive to make, you make fewer, bury the hook to save effort, and reuse one cut everywhere. Make editing cheap and the mistakes fix themselves: you can afford a real hook, a native cut per platform, and the volume that TikTok actually rewards.",
+        "The transformation is the point — from the reluctant editor whose product nobody sees, to the founder whose work travels on the For You page, with TikToks made in minutes instead of evenings."
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "Can I use OpenNolan to make TikToks today?",
+      "a": "Not yet — OpenNolan is a Mac app in active development, and this site is the waitlist. Join it and you'll be first to know the moment it ships. Everything on this page works whether or not you use the app, but if you want an AI agent to make the whole TikTok from your clips, getting on the list early means you're ready on day one."
+    },
+    {
+      "q": "How do you make a TikTok feel native instead of like an ad?",
+      "a": "Shoot or grab footage vertically, open on the payoff in under a second, score it to a trending sound rather than stock music, cut hard every one to three seconds, and burn in captions for the mute majority. The goal is belonging, not polish — a native TikTok looks like it was filmed and cut by a person with intent, not exported from a corporate edit."
+    },
+    {
+      "q": "Do I need trending sounds to make TikToks that travel?",
+      "a": "They help a lot. TikTok's algorithm actively pushes videos using sounds that are spiking, so a trending audio bed earns distribution your clip wouldn't get on its own. Pick one that fits your energy and cut to its beat. OpenNolan's agent adds music and sound effects and edits the video to the rhythm so pacing and sound move together."
+    },
+    {
+      "q": "What does OpenNolan cost, and does it run on Windows?",
+      "a": "There's no subscription and no markup. OpenNolan is bring-your-own-key: you add your own AI provider API key and pay those providers directly for what you use, with no account required. It's a native macOS app — not a web app and not Windows — which is what makes its local-first, render-once model possible. If you're on a Mac, join the waitlist."
+    },
+    {
+      "q": "How often should a founder post TikToks?",
+      "a": "Consistently beats occasionally — a steady cadence built on repeatable series formats trains both the algorithm and your audience. The real constraint isn't strategy, it's editing time: cadence dies when each video takes half a day. Keep the per-video cost small (an agent that makes the whole cut helps) so posting often stays sustainable instead of becoming a second job."
+    }
+  ],
+  "ctaHeading": "Make TikToks that travel, without becoming an editor",
+  "ctaSub": "Join the waitlist for the open-source, BYOK Mac app whose AI agent makes the whole TikTok from your clips."
+}

@@ -1,0 +1,119 @@
+{
+  "cluster": "compare",
+  "slug": "descript",
+  "targetKeyword": "OpenNolan vs Descript",
+  "title": "OpenNolan vs Descript: Agent Reel vs Doc Editing",
+  "metaDescription": "OpenNolan vs Descript: Descript edits by editing a transcript; OpenNolan is a Mac agent that builds your whole vertical reel. Join the waitlist.",
+  "eyebrow": "vs Descript",
+  "h1": "OpenNolan vs Descript: an agent that builds the reel, not a doc you edit",
+  "h1Accent": "builds the reel",
+  "breadcrumbLabel": "vs Descript",
+  "hubCardTitle": "OpenNolan vs Descript",
+  "hubCardDesc": "Descript edits by editing text. OpenNolan assembles a vertical reel with an AI agent.",
+  "lede": "You want your product seen on Reels and TikTok, not a transcript to comb through. Descript is excellent for talking-heavy, long-form work — but a doc isn't a finished vertical cut.",
+  "intro": [
+    "You're a founder or builder. You shipped something good and now you need short-form video to get it discovered. Descript is a popular way to edit talking content: it transcribes your audio, and you cut the video by deleting words in a document. For podcasts and long-form talking-heads, that's a genuinely smart model — delete the filler, the audio follows.",
+    "But editing-by-transcript still assumes you'll do the editing. You're the one trimming, the one finding B-roll, the one syncing captions, the one chasing trending sound and making it feel vertical. That's the editing tax — the unwritten rule that to get seen, you have to become a video editor first. Different interface, same job on your plate.",
+    "We're builders too, and we'd rather ship than learn a timeline. So OpenNolan takes a different shape: it's a Mac app where an **AI agent makes the whole reel** from your raw clips — B-roll and images from the web, music and SFX, captions, rapid cuts and motion, tuned for 9:16. You review and tweak; the agent does the assembly."
+  ],
+  "sections": [
+    {
+      "h2": "Doc-style editing vs an agent that assembles the cut",
+      "body": [
+        "This is the real fork. In Descript, the unit of work is the **transcript**: you read the words, highlight what to keep, and the video follows your text edits. It's precise and pleasant for dialogue-driven content, and it's why podcasters love it.",
+        "In OpenNolan, the unit of work is the **finished reel**. You drop in clips (or just describe the video) and bring your own API key. The agent builds the composition, places clips, pulls supporting B-roll and images, adds music and sound effects, writes captions, animates overlays, and assembles a vertical cut. You're not deleting words to shape a video — the agent shapes the video, and you fine-tune it."
+      ],
+      "checks": [
+        "Descript: you edit text, the cut follows",
+        "OpenNolan: the agent builds the cut, you review",
+        "Both end in real editing — but OpenNolan starts from a finished draft"
+      ]
+    },
+    {
+      "h2": "Built vertical-first for Reels, TikTok, and Shorts",
+      "body": [
+        "Descript spans podcasts, screen recordings, and long-form talking content — broad and capable across formats. OpenNolan is narrower on purpose: it's **vertical-first**, built for 9:16 / 1080×1920 short-form, and it bakes the [short-form playbook](/learn/what-is-a-hook) into how the agent edits.",
+        "That means a hook in the first second, hard cuts every one to three seconds, captions sized for sound-off watching, and motion that resets attention. You don't have to know the playbook — the agent applies it, then you adjust on a [real timeline](/#features) if you want a different feel."
+      ],
+      "quote": "Descript is a great studio for talking content. OpenNolan is a machine for scroll-stopping vertical reels."
+    },
+    {
+      "h2": "Mac-native, bring-your-own-key, open source",
+      "body": [
+        "Descript is a subscription tool that runs on web and desktop — sign up, pay monthly, work in their cloud-connected workflow. OpenNolan is a different deal: a **native macOS app** with a **bring-your-own-key** model. You add your own AI provider key and pay providers directly — no markup, no subscription, no account required.",
+        "It's also **local-first and open source**: your files stay on your Mac, and 'render once, edit cheap' means most edits — reorder, retrim, retime, reposition, text — preview instantly without re-rendering. Only an AI-composition scene re-renders, and only the one you changed."
+      ],
+      "checks": [
+        "Native macOS app (not web, not mobile)",
+        "Bring your own key — pay providers directly, no subscription",
+        "Open source, local-first, files stay on your machine",
+        "Render once, edit cheap: most tweaks preview instantly"
+      ]
+    }
+  ],
+  "comparison": {
+    "competitor": "Descript",
+    "intro": "Descript is genuinely great at transcript-based editing for podcasts and long-form talking content. OpenNolan is built for a different job: an AI agent that assembles a finished vertical reel for founders who don't want to edit.",
+    "rows": [
+      {
+        "feature": "Who it's for",
+        "openNolan": "Founders and builders who need short-form to get discovered, but aren't editors",
+        "competitor": "Podcasters and creators doing talking-heavy, long-form, and screen-recorded content"
+      },
+      {
+        "feature": "How editing happens",
+        "openNolan": "An AI agent builds the whole reel; you review and fine-tune",
+        "competitor": "You edit a transcript by deleting words; the video follows your text"
+      },
+      {
+        "feature": "Vertical short-form focus",
+        "openNolan": "Vertical-first (9:16), built around the Reels/TikTok/Shorts playbook",
+        "competitor": "Format-flexible; strong for long-form and podcasts, not short-form-first"
+      },
+      {
+        "feature": "Platform",
+        "openNolan": "Native macOS app",
+        "competitor": "Web and desktop app"
+      },
+      {
+        "feature": "Pricing model",
+        "openNolan": "Bring your own key — pay AI providers directly, no subscription",
+        "competitor": "Subscription"
+      },
+      {
+        "feature": "Data and where files live",
+        "openNolan": "Local-first; files stay on your Mac",
+        "competitor": "Cloud-connected workflow"
+      },
+      {
+        "feature": "Open source",
+        "openNolan": "Yes",
+        "competitor": "No (proprietary)"
+      }
+    ]
+  },
+  "faqs": [
+    {
+      "q": "What's the core difference between OpenNolan and Descript?",
+      "a": "Descript edits by editing text — you delete words in a transcript and the video follows. OpenNolan edits by assembling: an AI agent builds the whole vertical reel from your clips, adding B-roll, music, captions, and motion. Descript shines for podcasts and long-form; OpenNolan is built to make scroll-stopping short-form for people who don't want to edit."
+    },
+    {
+      "q": "Is OpenNolan good for podcasts and long-form like Descript?",
+      "a": "Not really — and that's intentional. Descript is the stronger choice for podcasts, long-form talking-heads, and transcript-driven editing. OpenNolan is vertical-first, built for Reels, TikTok, and Shorts. If your goal is short-form video that gets your product discovered, OpenNolan is aimed squarely at you."
+    },
+    {
+      "q": "Can I download OpenNolan today?",
+      "a": "Not yet. OpenNolan is in active development and this site is a waitlist — join it and we'll let you know the moment the Mac app is ready. Descript is available now if you need to edit talking content today. We'd rather ship something that genuinely makes the whole reel than rush it."
+    },
+    {
+      "q": "How does pricing compare? Is OpenNolan a subscription like Descript?",
+      "a": "No. Descript is a subscription. OpenNolan uses bring-your-own-key: you add your own AI provider API key and pay providers directly, with no markup, no subscription, and no account required. It's also open source and runs as a native Mac app, so your files stay on your machine."
+    },
+    {
+      "q": "Do I still get to edit, or does the agent do everything?",
+      "a": "You get both. The agent makes the first full cut — clips, B-roll, music, captions, motion, all tuned for vertical. Then you fine-tune on a real timeline: cuts, overlays, text, speed, transitions. Thanks to render-once, edit-cheap, most of those tweaks preview instantly without re-rendering."
+    }
+  ],
+  "ctaHeading": "Skip the transcript. Ship the reel.",
+  "ctaSub": "Join the waitlist and be first to let an AI agent build your whole vertical reel on your Mac."
+}

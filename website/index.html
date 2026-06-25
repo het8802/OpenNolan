@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OpenNolan — Your clips in, a finished reel out</title>
-  <meta name="description" content="The first Mac app built for founders & builders: drop in your clips and the AI agent makes the whole TikTok or Reel — supporting images and B-roll from the web, sound effects, music, rapid cuts and motion, tuned for vertical. No editing. Join the waitlist." />
+  <meta name="description" content="OpenNolan is a Mac app where an AI agent makes the whole TikTok or Reel from your clips — B-roll, music, captions and motion. No editing. Join the waitlist." />
   <link rel="canonical" href="https://www.opennolan.com/" />
   <meta name="robots" content="index, follow" />
 
@@ -134,7 +134,7 @@
     .hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0;}
     .form-success-card{display:none;background:var(--sage-soft);border:1px solid rgba(110,127,99,0.35);border-radius:14px;padding:18px 20px;max-width:460px;margin-left:auto;margin-right:auto;}
     .form-success-card.show{display:block;animation:pop .3s;}
-    .form-success-card h4{font-family:var(--serif);font-size:19px;margin:0 0 4px;color:#3c4733;}
+    .form-success-card .fs-h{font-family:var(--serif);font-weight:600;font-size:19px;margin:0 0 4px;color:#3c4733;}
     .form-success-card p{font-size:14.5px;color:#4d5743;}
     @keyframes pop{from{transform:scale(.97);opacity:0;}to{transform:scale(1);opacity:1;}}
 
@@ -352,7 +352,7 @@
     .principles{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:44px;}
     .principle{background:rgba(255,253,248,0.05);border:1px solid rgba(251,248,241,0.14);border-radius:14px;padding:20px 18px;}
     .principle .n{font-family:var(--serif);font-size:13px;font-weight:600;color:var(--sand);letter-spacing:.04em;}
-    .principle h4{font-family:var(--sans);font-size:15px;font-weight:600;color:var(--paper);margin:10px 0 5px;}
+    .principle h3{font-family:var(--sans);font-size:15px;font-weight:600;color:var(--paper);margin:10px 0 5px;letter-spacing:0;}
     .principle p{font-size:13px;color:rgba(251,248,241,0.6);line-height:1.5;}
     @media (max-width:860px){.principles{grid-template-columns:1fr 1fr;}}
 
@@ -435,12 +435,22 @@
     .cta-card .waitlist-form,.cta-card .form-success-card{margin-left:auto;margin-right:auto;}
     .cta-card .form-note,.cta-card .form-status{justify-content:center;text-align:center;}
 
+    /* Explore / cluster nav cards */
+    .nav-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;}
+    .nav-card{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px 22px;box-shadow:var(--shadow-sm);transition:border-color .18s,transform .18s,box-shadow .18s;}
+    .nav-card:hover{border-color:var(--coral);transform:translateY(-3px);box-shadow:var(--shadow-md);}
+    .nav-card h3{font-size:19px;margin-bottom:8px;}
+    .nav-card p{font-size:14.5px;color:var(--ink-soft);flex:1;}
+    .nav-card .go{margin-top:14px;font-size:14px;font-weight:600;color:var(--coral-strong);}
+    @media (max-width:900px){.nav-cards{grid-template-columns:1fr 1fr;}}
+    @media (max-width:520px){.nav-cards{grid-template-columns:1fr;}}
+
     footer{padding:56px 0 40px;border-top:1px solid var(--line);}
     .foot-grid{display:flex;justify-content:space-between;align-items:flex-start;gap:40px;flex-wrap:wrap;}
     .foot-brand{max-width:330px;}
     .foot-brand p{color:var(--ink-soft);font-size:15px;margin-top:14px;}
     .foot-cols{display:flex;gap:64px;flex-wrap:wrap;}
-    .foot-col h5{font-size:13px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin:0 0 14px;font-weight:700;}
+    .foot-col h3{font-family:var(--sans);font-size:13px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin:0 0 14px;font-weight:700;}
     .foot-col a{display:block;color:var(--ink-soft);font-size:15px;margin-bottom:10px;transition:color .15s;}
     .foot-col a:hover{color:var(--coral-strong);}
     .foot-bottom{margin-top:44px;padding-top:22px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:13.5px;color:var(--muted);}
@@ -485,7 +495,7 @@
         <div class="hero-copy">
           <span class="eyebrow">The first reel maker built for founders &amp; builders</span>
           <h1>Go viral without becoming a <span class="accent">video editor</span>.</h1>
-          <p class="hero-sub">OpenNolan is the first Mac app built for founders &amp; builders that makes the whole TikTok or Reel for you — no editing. Drop in your clips and the AI agent pulls supporting images and B-roll from the web, hunts down the trending music, sound effects, meme GIFs and stickers that make videos travel, and cuts it all into rapid, motion-driven sequences tuned for vertical.</p>
+          <p class="hero-sub">OpenNolan is a Mac app where an AI agent makes the whole TikTok or Reel from your clips — no editing. It pulls B-roll and images from the web, adds the trending music, sound effects and motion that make videos travel, and cuts it all fast for vertical. You just review it.</p>
 
           <form class="hero-form waitlist-form" data-analytics-placement="hero" data-ph-no-autocapture novalidate>
             <div class="field-row">
@@ -500,7 +510,7 @@
             <p class="form-status" role="status" aria-live="polite"></p>
           </form>
           <div class="form-success-card" role="status">
-            <h4>You're on the list 🎬</h4>
+            <p class="fs-h">You're on the list 🎬</p>
             <p>Check your inbox — we just sent a confirmation. We'll email you again the moment OpenNolan is ready to download.</p>
           </div>
 
@@ -662,11 +672,11 @@
           <p class="lead">Every reel that travels runs the same formula. OpenNolan bakes it in: hand it your clips and the agent finds the trending pieces and assembles the high-paced, vertical cut for you — so you ship videos that follow the playbook without studying it, or editing it.</p>
         </div>
         <div class="principles">
-          <div class="principle reveal"><span class="n">01</span><h4>Hook in &lt;1s</h4><p>Open on the payoff or a pattern interrupt before anyone can scroll.</p></div>
-          <div class="principle reveal"><span class="n">02</span><h4>Cut every 1–3s</h4><p>Hard cuts and motion reset attention and keep the thumb still.</p></div>
-          <div class="principle reveal"><span class="n">03</span><h4>Trending sound</h4><p>Ride the audio and memes the algorithm is already pushing.</p></div>
-          <div class="principle reveal"><span class="n">04</span><h4>Captions on mute</h4><p>85% watch with sound off — burned-in captions carry the message.</p></div>
-          <div class="principle reveal"><span class="n">05</span><h4>Show receipts</h4><p>Screenshots, stats and proof make the claim land and convert.</p></div>
+          <div class="principle reveal"><span class="n">01</span><h3>Hook in &lt;1s</h3><p>Open on the payoff or a pattern interrupt before anyone can scroll.</p></div>
+          <div class="principle reveal"><span class="n">02</span><h3>Cut every 1–3s</h3><p>Hard cuts and motion reset attention and keep the thumb still.</p></div>
+          <div class="principle reveal"><span class="n">03</span><h3>Trending sound</h3><p>Ride the audio and memes the algorithm is already pushing.</p></div>
+          <div class="principle reveal"><span class="n">04</span><h3>Captions on mute</h3><p>85% watch with sound off — burned-in captions carry the message.</p></div>
+          <div class="principle reveal"><span class="n">05</span><h3>Show receipts</h3><p>Screenshots, stats and proof make the claim land and convert.</p></div>
         </div>
       </div>
     </section>
@@ -852,6 +862,39 @@
       </div>
     </section>
 
+    <!-- EXPLORE / CLUSTER HUBS -->
+    <section id="explore" style="padding-top:0;">
+      <div class="wrap">
+        <div class="section-head center reveal" style="margin-bottom:34px;">
+          <span class="eyebrow">Find your path</span>
+          <h2>Built for how you ship.</h2>
+          <p>However you make content, here's where to start.</p>
+        </div>
+        <div class="nav-cards reveal">
+          <a class="nav-card" href="/for">
+            <h3>For your stack</h3>
+            <p>How OpenNolan works for founders, indie hackers, SaaS teams, developers, agencies and solopreneurs.</p>
+            <span class="go">Built for you →</span>
+          </a>
+          <a class="nav-card" href="/how-to">
+            <h3>How-to guides</h3>
+            <p>Make Instagram Reels, TikToks, YouTube Shorts, product demos and launch videos that get watched.</p>
+            <span class="go">Read the guides →</span>
+          </a>
+          <a class="nav-card" href="/compare">
+            <h3>Honest comparisons</h3>
+            <p>OpenNolan vs CapCut, Descript, Opus Clip, Submagic, Veed and Adobe Premiere.</p>
+            <span class="go">Compare tools →</span>
+          </a>
+          <a class="nav-card" href="/learn">
+            <h3>Short-form glossary</h3>
+            <p>Plain-English definitions — the hook, B-roll, jump cuts, captions and vertical video.</p>
+            <span class="go">Learn the terms →</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
     <!-- FINAL CTA -->
     <section class="cta-final" id="waitlist">
       <div class="wrap">
@@ -872,7 +915,7 @@
             <p class="form-status" role="status" aria-live="polite"></p>
           </form>
           <div class="form-success-card" role="status">
-            <h4>You're on the list 🎬</h4>
+            <p class="fs-h">You're on the list 🎬</p>
             <p>Check your inbox — we just sent a confirmation. We'll email you again the moment OpenNolan is ready to download.</p>
           </div>
         </div>
@@ -893,16 +936,31 @@
         </div>
         <div class="foot-cols">
           <div class="foot-col">
-            <h5>Product</h5>
+            <h3>Product</h3>
             <a href="#problem">Why OpenNolan</a>
             <a href="#playbook">The playbook</a>
             <a href="#features">Features</a>
             <a href="#waitlist">Join the waitlist</a>
           </div>
           <div class="foot-col">
-            <h5>Project</h5>
+            <h3>Built for</h3>
+            <a href="/for/founders">Founders</a>
+            <a href="/for/indie-hackers">Indie hackers</a>
+            <a href="/for/saas">SaaS</a>
+            <a href="/for">All audiences →</a>
+          </div>
+          <div class="foot-col">
+            <h3>Compare</h3>
+            <a href="/compare/capcut">vs CapCut</a>
+            <a href="/compare/descript">vs Descript</a>
+            <a href="/compare/opus-clip">vs Opus Clip</a>
+            <a href="/compare">All comparisons →</a>
+          </div>
+          <div class="foot-col">
+            <h3>Resources</h3>
+            <a href="/how-to">How-to guides</a>
+            <a href="/learn">Glossary</a>
             <a href="#" data-github hidden>GitHub</a>
-            <a href="#waitlist">Get launch updates</a>
           </div>
         </div>
       </div>

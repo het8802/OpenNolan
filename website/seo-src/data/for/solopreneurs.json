@@ -1,0 +1,90 @@
+{
+  "cluster": "for",
+  "slug": "solopreneurs",
+  "targetKeyword": "video editing app for solopreneurs",
+  "title": "Video Editing App for Solopreneurs | OpenNolan",
+  "metaDescription": "OpenNolan is a video editing app for solopreneurs where an AI agent makes the whole Reel, so you can post consistently without an editor. Join the waitlist.",
+  "eyebrow": "For solopreneurs",
+  "h1": "The video editing app for solopreneurs who post solo",
+  "h1Accent": "post solo",
+  "breadcrumbLabel": "For solopreneurs",
+  "hubCardTitle": "For solopreneurs",
+  "hubCardDesc": "Stay consistent on short-form without a team or an editor. The agent makes the whole reel.",
+  "lede": "You are the founder, the marketer, the support desk, and the editor. Short-form is your biggest channel, but it is the first thing that slips when the week gets full.",
+  "intro": [
+    "You run a one-person business, and content is how people find you. No ad budget, no sales team, no growth hire — just you, posting, hoping the next reel is the one that travels. That works right up until the editing tax shows up: trending audio to chase, B-roll to cut, captions to sync. The video that takes twenty minutes to film takes three hours to finish, and three hours is exactly what a solo operator does not have.",
+    "So cadence breaks. You post hard for a week, then go quiet for three because client work ate the calendar. The algorithm forgets you, the momentum resets, and you start over. The villain here is not laziness — it is the unwritten rule that to be seen you have to also become a full-time editor, on top of every other hat you already wear.",
+    "We built OpenNolan for exactly this. We are builders too, and we would rather ship than learn a timeline. It is a Mac app where an AI agent makes the whole vertical reel from your raw clips — so the bottleneck stops being you, and posting consistently stops depending on whether you had a free afternoon."
+  ],
+  "sections": [
+    {
+      "h2": "Consistency is the channel — protect it",
+      "body": [
+        "For a solo business, the single biggest lever in short-form is not one viral hit. It is showing up. The accounts that grow are the ones that post on a steady cadence long enough for one to land. The problem is that cadence and editing pull against each other: every post you finish by hand is time you did not spend on the actual business.",
+        "OpenNolan removes that trade-off. Instead of you carving out an editing block, the agent does the assembly — so the only input that scales with your week is filming, not finishing. You stay consistent because consistency no longer costs you a full afternoon per post."
+      ],
+      "checks": [
+        "Post on a steady cadence without an editor",
+        "Filming is the only step that needs your time",
+        "No quiet weeks when client work piles up"
+      ],
+      "quote": "The reel that travels is the one you actually shipped this week."
+    },
+    {
+      "h2": "Batch a week of content in one sitting",
+      "body": [
+        "The way solo creators survive is batching: film a stack of clips in one session, then turn them into a week of posts. The catch is the second half — editing seven videos is where the batch dies and the backlog of unposted footage starts.",
+        "Drop your clips into OpenNolan (or just describe the video) and the agent makes each reel end to end: it pulls supporting images and B-roll from the web, adds music and sound effects, writes and times captions, and cuts it all into fast, motion-driven sequences tuned for vertical. A filming session becomes a queue of finished posts instead of a folder of raw footage you keep meaning to get to."
+      ],
+      "checks": [
+        "Turn one filming session into a week of reels",
+        "Agent adds B-roll, music, SFX, and captions",
+        "Built for 9:16 Reels, TikTok, and Shorts"
+      ]
+    },
+    {
+      "h2": "You are the whole team — so let the agent take the editor seat",
+      "body": [
+        "Wearing every hat means the editor hat is the one you are worst at and resent the most. OpenNolan does not ask you to get good at it. The agent starts the project, builds the composition, places the cuts, and assembles a vertical reel built on the actual short-form playbook — hook in the first second, hard cuts every few seconds, captions for the 85 percent watching on mute.",
+        "When you do want to put your hands on it, every cut sits on a real timeline. And because OpenNolan renders once then edits cheap, most tweaks — reorder, retrim, reposition, retext — preview instantly without re-rendering. You get an editor's output without keeping an editor's hours.",
+        "If your content is mostly product talk, the [short-form video for SaaS](/for/saas) angle goes deeper on demos and screenshots, and [what makes a hook](/learn/what-is-a-hook) is worth a read before your next batch."
+      ]
+    },
+    {
+      "h2": "Built for one person, by people who ship alone",
+      "body": [
+        "This is not a studio tool retrofitted for solo use. OpenNolan is bring-your-own-key: you add your own AI provider key and pay the providers directly — no subscription, no markup, no seat you are not using. It runs locally on your Mac, so your raw footage and unreleased clips stay on your machine, not on someone's server.",
+        "For a one-person business, that means your content engine costs what you actually use and nothing more — which matters when there is no marketing budget line, just you deciding what is worth it this month."
+      ],
+      "checks": [
+        "Bring your own key — no subscription, pay providers directly",
+        "Runs on your Mac, your files stay local",
+        "Open source, no account required"
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "Can I download the OpenNolan app for solopreneurs today?",
+      "a": "Not yet — OpenNolan is in active development and this page is the waitlist. It is a native Mac app, not a web or mobile tool. Join the waitlist and we will email you the moment it is ready to download, so you are editing on day one instead of hearing about it late."
+    },
+    {
+      "q": "How does OpenNolan help me post consistently without a team?",
+      "a": "The editing step is what usually breaks a solo posting cadence. OpenNolan's AI agent makes the whole reel from your clips — B-roll, music, captions, cuts — so finishing a video no longer needs a free afternoon. Film a batch, let the agent assemble, and queue a week of posts in one sitting."
+    },
+    {
+      "q": "What does it cost for a one-person business?",
+      "a": "OpenNolan uses bring-your-own-key: you add your own AI provider API key and pay the providers directly, with no markup and no subscription. There is no per-seat fee and no account required. For a solopreneur with no marketing budget, your content costs only what you actually use."
+    },
+    {
+      "q": "I am not an editor. Do I need editing skills?",
+      "a": "No. The agent builds the composition, places cuts, adds music and captions, and assembles a vertical reel on the real short-form playbook for you. If you want to adjust something, every cut is on a real timeline and most edits preview instantly thanks to render-once editing — but you can also just post what the agent made."
+    },
+    {
+      "q": "Does it work for Reels, TikTok, and Shorts?",
+      "a": "Yes. OpenNolan is vertical-first, built for 9:16 at 1080×1920, and exports for Instagram Reels, TikTok, and YouTube Shorts. If you want a platform-specific walkthrough, see our guide on [making Instagram Reels](/how-to/instagram-reels)."
+    }
+  ],
+  "ctaHeading": "Keep posting — without becoming the editor",
+  "ctaSub": "Join the waitlist and be first when the Mac app that makes your reels ships."
+}

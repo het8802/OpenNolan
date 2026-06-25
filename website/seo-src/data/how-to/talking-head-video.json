@@ -1,0 +1,119 @@
+{
+  "cluster": "how-to",
+  "slug": "talking-head-video",
+  "targetKeyword": "how to make a talking-head video",
+  "title": "How to Make a Talking-Head Video (Founder Guide)",
+  "metaDescription": "Learn how to make a talking-head video that holds attention: hook, framing, cutting filler, B-roll, captions. A founder's playbook. Join the waitlist.",
+  "eyebrow": "Face to camera",
+  "h1": "How to make a talking-head video that people actually watch",
+  "h1Accent": "actually watch",
+  "breadcrumbLabel": "Talking-head video",
+  "hubCardTitle": "How to make a talking-head video",
+  "hubCardDesc": "The founder face-to-camera playbook: hook, framing, cutting filler, B-roll, captions — without the editor.",
+  "lede": "You're the founder, so you're the face. But filming yourself is the easy part — it's the cutting that eats the evening. Here's how to make a talking-head video that holds attention, and how to get it without becoming the editor.",
+  "intro": [
+    "A talking-head video sounds simple: point a camera at yourself, explain the thing, post it. Then you watch it back. The energy dips, the pauses drag, the ums pile up, and the screen never changes — so the viewer leaves before your point lands. The shot was fine. The problem is everything that happens after you stop recording.",
+    "The villain here is the editing tax. To make face-to-camera actually travel you have to cut every dead beat, slice the filler, drop in B-roll and screenshots so the frame keeps moving, then sync captions because most people watch on mute. That's hours per video, every week, and it's the exact work founders quietly give up on after the third reel.",
+    "We built OpenNolan because we're builders, not editors, and we'd rather ship product than scrub a waveform looking for ums. It's a Mac app where an AI agent turns your raw talking-head clips into a finished vertical cut — tight pacing, B-roll, captions, the lot — then hands you a real timeline so the final word stays yours."
+  ],
+  "sections": [
+    {
+      "h2": "The talking-head playbook, step by step",
+      "body": [
+        "Whether you edit by hand or let an agent do it, the recipe for a face-to-camera video that holds attention is the same. Get the hook right, frame yourself well, then ruthlessly cut everything that makes a viewer's thumb twitch. The steps below work in any editor — they're just easier when something else does the slicing."
+      ],
+      "checks": [
+        "Open on the payoff, not the throat-clear or the intro",
+        "Cut every silence, breath, and filler word so the energy never sags",
+        "Break up the talking head with B-roll, screenshots, and motion",
+        "Burn in captions, because most of the feed watches on mute"
+      ]
+    },
+    {
+      "h2": "How OpenNolan does each step for you",
+      "body": [
+        "Doing all of that by hand is the part-time job nobody signed up for. So OpenNolan's AI agent runs the same playbook on your footage. It reads your clips, cuts the dead air and filler, finds and drops in supporting B-roll and images from the web, pulls in your screenshots with auto-highlight, writes burned-in captions, and assembles a vertical cut tuned for Reels, TikTok, and Shorts.",
+        "It also handles the things that quietly make talking-head footage look pro: background removal so you can sit cleanly over B-roll or a screen recording, music and sound effects, and keyframed motion on overlays. You filmed yourself once. The agent does the slicing you'd otherwise spend the night on."
+      ],
+      "checks": [
+        "Auto-cuts filler and dead air to keep the pace tight",
+        "Pulls B-roll, images, and screenshots in to hold attention",
+        "Background removal to drop you cleanly over B-roll or a demo",
+        "Captions, music, and SFX added automatically"
+      ],
+      "quote": "You film yourself once. The agent does the slicing you'd spend the night on."
+    },
+    {
+      "h2": "Review on a real timeline, so it still sounds like you",
+      "body": [
+        "Your face and voice are the brand, so an agent that posts with no say is a non-starter. OpenNolan isn't a black box. After it builds the cut, you get a real NLE timeline: retrim a clip, swap a caption, move a screenshot earlier, fix the one line that lands flat.",
+        "And editing stays cheap. OpenNolan renders once, then most edits — reorder, retrim, retime, reposition, text — preview instantly without re-rendering. Only an AI-composed scene re-renders, and only the one you changed. So reviewing every talking-head cut before it goes out is fast enough that you'll actually do it.",
+        "If you want the same playbook tuned to a platform, the [Instagram Reels how-to](/how-to/instagram-reels) and the [short-form video for founders](/for/founders) guide go deeper."
+      ]
+    },
+    {
+      "h2": "Mistakes that kill a talking-head video",
+      "body": [
+        "Most founder face-to-camera videos die from the same handful of habits. Avoiding them does more for your watch-time than any new camera."
+      ],
+      "checks": [
+        "A slow open: warming up on camera instead of starting on the payoff",
+        "One static shot for 40 seconds — nothing changes, so attention drifts",
+        "Leaving filler and pauses in, which reads as low energy",
+        "No captions, so the muted scrollers never get the message",
+        "Talking past the point instead of cutting the moment it's made"
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "title": "Write a hook, then say it first",
+      "body": "Decide the single most interesting thing you'll say and open on it — a result, a sharp claim, a pattern interrupt. Skip the intro and the throat-clear. The first second decides whether anyone hears the rest, so the payoff goes at the very front, not after a windup. OpenNolan's agent identifies the strongest opening from your footage and cuts to it, so the reel starts on the line that stops the scroll."
+    },
+    {
+      "title": "Frame and light yourself simply",
+      "body": "Put the camera at eye level, your eyes in the top third, a window or soft light in front of you (never behind), and a clean or de-cluttered background. Vertical, 9:16. You don't need a studio — you need to be sharp, lit, and easy to look at. OpenNolan crops and positions you for vertical and can remove the background entirely, so a messy room never sinks an otherwise good take."
+    },
+    {
+      "title": "Cut the filler and the dead air",
+      "body": "This is where talking-head footage is won or lost. Slice every silence, breath, and 'um,' and tighten the gaps between sentences until the energy never dips. Aim to change something on screen every few seconds. Done by hand this is the slow part; OpenNolan's agent auto-cuts filler and dead air across your clips, so the pacing comes out tight without you scrubbing the waveform line by line."
+    },
+    {
+      "title": "Cut in B-roll and screenshots",
+      "body": "A face talking for 40 seconds straight loses people. Break it up: drop in B-roll, product screenshots, stats, and proof over your voice so the frame keeps moving and the claim lands. OpenNolan pulls supporting B-roll and images from the web, brings in your screenshots with auto-highlight, and lays them over your talking-head clips at the moments that need a visual."
+    },
+    {
+      "title": "Add captions, music, and sound",
+      "body": "Around 85% of short-form is watched on mute, so burned-in captions carry the message — and a little music plus the odd sound effect adds the energy a single voice can't. OpenNolan writes and burns in captions automatically and adds music and SFX, so the video works with the sound off and feels alive with it on."
+    },
+    {
+      "title": "Review, tweak, and post",
+      "body": "Watch it once as a viewer would. Fix the line that drags, move a screenshot, retrim the open. On OpenNolan you do this on a real timeline, and because it renders once, most edits preview instantly — so the review takes minutes, not another evening. Then export for Reels, TikTok, or Shorts and post."
+    }
+  ],
+  "stepsHeading": "A practical process for making a talking-head video",
+  "faqs": [
+    {
+      "q": "How do I make a talking-head video that holds attention?",
+      "a": "Open on the payoff, not an intro. Cut every silence and filler word so the energy stays high. Break up the talking head with B-roll, screenshots, and motion every few seconds, and burn in captions for muted viewers. The shot matters less than the cutting — that's the work OpenNolan's agent does for you on your raw clips."
+    },
+    {
+      "q": "What gear and setup do I need for a face-to-camera video?",
+      "a": "Less than you think. A phone at eye level, soft light in front of you, a clean background, and vertical framing covers it. You don't need a studio. If your background is messy, OpenNolan can remove it, and it crops and positions you for 9:16 — so a decent take in a normal room is enough to start."
+    },
+    {
+      "q": "How do I cut the filler and dead air without spending hours?",
+      "a": "By hand it means scrubbing the waveform for every um and pause, which is the slowest part of editing talking-head footage. OpenNolan's AI agent does it automatically: it cuts filler and dead air across your clips and tightens the pacing, then lets you fine-tune the result on a real timeline if you want the last word."
+    },
+    {
+      "q": "Is OpenNolan available to download yet?",
+      "a": "Not yet. OpenNolan is a Mac app in active development, and this is a waitlist. Add your email and you'll be first to know the moment it ships. We'd rather launch something founders can rely on for weekly talking-head content than push a download that isn't ready."
+    },
+    {
+      "q": "How much does it cost, and what's bring-your-own-key?",
+      "a": "There's no subscription and no markup. OpenNolan uses bring-your-own-key: you add your own AI provider API key and pay those providers directly for what you use. No account required, and your clips stay local on your Mac — which matters when you're filming an unreleased feature. Pricing lands closer to launch; join the waitlist to hear first."
+    }
+  ],
+  "ctaHeading": "Film yourself once. Let the agent cut it.",
+  "ctaSub": "Be first when the Mac app ships — no spam, just the launch."
+}

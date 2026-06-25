@@ -1,0 +1,128 @@
+{
+  "cluster": "compare",
+  "slug": "capcut",
+  "targetKeyword": "OpenNolan vs CapCut",
+  "title": "OpenNolan vs CapCut: AI Agent vs Manual Editor",
+  "metaDescription": "OpenNolan vs CapCut: CapCut hands you manual tools; OpenNolan's AI agent assembles the whole reel for founders. See the difference, join the waitlist.",
+  "eyebrow": "vs CapCut",
+  "h1": "OpenNolan vs CapCut: who actually does the editing?",
+  "h1Accent": "does the editing",
+  "breadcrumbLabel": "vs CapCut",
+  "hubCardTitle": "OpenNolan vs CapCut",
+  "hubCardDesc": "CapCut gives you the tools. OpenNolan's AI agent does the editing for you — built for founders.",
+  "lede": "You want your product to get discovered through short-form video — without spending your week learning a timeline. CapCut is a brilliant manual editor, but it still expects you to do the cutting.",
+  "intro": [
+    "Here is the honest version. **CapCut is genuinely good.** It is free, hugely popular, and packed with templates, effects, and trending audio. If you are a TikTok-native creator who enjoys editing, it is one of the best manual tools you can pick up. None of that is in question.",
+    "The catch is what it asks of you. CapCut hands you a powerful editor, then waits for you to make every cut, sync every caption, and chase every trend. For a founder who would rather ship product than become an editor, that is the editing tax — the unwritten rule that to get seen you first have to learn video editing.",
+    "OpenNolan starts from the other end. Instead of giving you better tools to do the work, an **AI agent does the work** — it assembles the whole vertical reel from your raw clips, then hands you a real timeline only if you want to tweak. We are builders too, and we would rather ship than learn a timeline."
+  ],
+  "sections": [
+    {
+      "h2": "The real difference: an AI agent vs a manual editor",
+      "body": [
+        "CapCut is a manual editing app. You import clips, drag them onto a timeline, trim, add captions, layer effects, and pick a trending sound. The templates speed up the look, but the editing decisions and the labor are still yours. That is great if editing is the thing you want to do.",
+        "OpenNolan is not a better set of manual tools — it is a different model. You drop in your clips (or just describe the video), and the agent builds the composition, places clips, pulls B-roll and images from the web, adds music and sound effects, writes captions, animates overlays, and assembles a vertical cut. The finished reel is the starting point, not the reward at the end of an evening of editing."
+      ],
+      "checks": [
+        "CapCut: you do the cutting, with strong templates and effects to help",
+        "OpenNolan: the agent makes the whole reel, then you review",
+        "Both target 9:16 short-form for Reels, TikTok, and Shorts",
+        "OpenNolan adds a real timeline for fine-tuning after the agent's first pass"
+      ]
+    },
+    {
+      "h2": "The plan: from raw clips to a finished reel in three steps",
+      "body": [
+        "The workflow is built for someone whose main job is not video. There is no blank timeline to stare at and no template to reverse-engineer.",
+        "Step one: drop in your clips (or describe the video) and bring your own AI key. Step two: the agent makes the whole reel — web B-roll and images, music, sound effects, captions, rapid cuts and motion, all tuned for vertical. Step three: post it, or tweak first on a real timeline where every edit previews instantly."
+      ],
+      "quote": "CapCut gives you the editor. OpenNolan gives you the edit."
+    },
+    {
+      "h2": "Mac-native, local-first, and bring-your-own-key",
+      "body": [
+        "Beyond who does the editing, the shape of the product is different. OpenNolan is a **native macOS app** that runs on your machine — your files stay local. CapCut runs on mobile and desktop and is web-and-app-centric; some teams also weigh the data and ownership questions that come with its ByteDance ownership. That is a call you should make for yourself, with the facts.",
+        "On cost, the models differ structurally. OpenNolan is **bring-your-own-key**: you add your own AI provider key and pay providers directly, no markup and no subscription, with no account required. It is also **open source**. CapCut is free to start and well-known for its template and trending-audio library — a different bargain, optimized for native creators rather than founders.",
+        "If you are weighing other tools too, the [comparison with Adobe Premiere Pro](/compare/adobe-premiere) covers another manual editor, and [for SaaS founders](/for/saas) walks through the workflow end to end."
+      ],
+      "checks": [
+        "Native macOS app, local-first rendering, files stay on your Mac",
+        "Bring your own key — pay providers directly, no subscription, no account",
+        "Open source",
+        "Built for founders and builders, not native short-form creators"
+      ]
+    },
+    {
+      "h2": "What success looks like for a founder",
+      "body": [
+        "The point is not to win an editing contest. It is to ship scroll-stopping short-form as fast as you ship product, so your product actually gets discovered. With CapCut, the path to that runs through you becoming the editor. With OpenNolan, the agent carries the editing and you carry the judgment.",
+        "And because OpenNolan renders once and edits cheap, the timeline is there when your taste says a cut should land a beat later or a caption should read differently. Most edits — reorder, retrim, retime, reposition, text — preview instantly without re-rendering, so refining stays fast instead of turning into another editing session."
+      ]
+    }
+  ],
+  "comparison": {
+    "competitor": "CapCut",
+    "intro": "CapCut is a free, hugely popular manual video editor with a deep template, effect, and trending-audio library — excellent for TikTok-native creators. OpenNolan takes a different approach: an AI agent assembles the whole reel for founders who would rather not edit.",
+    "rows": [
+      {
+        "feature": "Who it's for",
+        "openNolan": "Founders, builders, and indie hackers who are not editors",
+        "competitor": "Creators and TikTok-native editors who enjoy editing"
+      },
+      {
+        "feature": "How editing happens",
+        "openNolan": "An AI agent assembles the whole reel for you",
+        "competitor": "Manual — you make every cut, with templates to help"
+      },
+      {
+        "feature": "Platform",
+        "openNolan": "Native macOS app, local-first",
+        "competitor": "Mobile and desktop, web-and-app-centric"
+      },
+      {
+        "feature": "Pricing model",
+        "openNolan": "Bring your own key — pay providers directly, no subscription",
+        "competitor": "Free to start, with paid tiers for pro features"
+      },
+      {
+        "feature": "Vertical short-form focus",
+        "openNolan": "Vertical-first 9:16 for Reels, TikTok, Shorts",
+        "competitor": "Strong short-form focus, plus broad general editing"
+      },
+      {
+        "feature": "Where your files live",
+        "openNolan": "On your Mac — local-first and private",
+        "competitor": "Cloud-connected; some weigh ByteDance ownership"
+      },
+      {
+        "feature": "Open source",
+        "openNolan": "Yes",
+        "competitor": "No"
+      }
+    ]
+  },
+  "faqs": [
+    {
+      "q": "Is OpenNolan a CapCut alternative I can download now?",
+      "a": "Not yet. OpenNolan is in active development and this site is a **waitlist** — you cannot download it today. CapCut is available now if you need a manual editor immediately. Join the waitlist and we will let you know the moment the Mac app is ready for you to try."
+    },
+    {
+      "q": "What is the main difference between OpenNolan and CapCut?",
+      "a": "CapCut is a manual editor: it gives you great tools and templates, and you do the cutting. OpenNolan is an AI agent that does the editing for you — it assembles the whole vertical reel from your clips, then hands you a real timeline only if you want to fine-tune the result."
+    },
+    {
+      "q": "How does pricing compare?",
+      "a": "CapCut is free to start with paid tiers for pro features. OpenNolan uses bring-your-own-key: you add your own AI provider key and pay those providers directly, with no markup, no subscription, and no account required. It is also open source, so you can see exactly how it works."
+    },
+    {
+      "q": "Does OpenNolan run on Windows or mobile like CapCut?",
+      "a": "No. OpenNolan is a native macOS app and runs locally on your Mac, so your files stay on your machine. CapCut works across mobile and desktop. If you are on a Mac and want the AI agent to do the editing, OpenNolan is built for you — see the [features overview](/#features)."
+    },
+    {
+      "q": "Is OpenNolan only for vertical video?",
+      "a": "OpenNolan is vertical-first, built for 9:16 / 1080x1920 short-form and exports tuned for Instagram Reels, TikTok, and YouTube Shorts. CapCut handles vertical short-form too, along with broader general-purpose editing. If your goal is getting discovered through short-form, OpenNolan is focused squarely on that."
+    }
+  ],
+  "ctaHeading": "Let the agent do the editing CapCut leaves to you",
+  "ctaSub": "Join the waitlist and be first to try the Mac app that makes the whole reel for you."
+}

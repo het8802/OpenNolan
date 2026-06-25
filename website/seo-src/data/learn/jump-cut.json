@@ -1,0 +1,92 @@
+{
+  "cluster": "learn",
+  "slug": "jump-cut",
+  "targetKeyword": "jump cut",
+  "title": "What Is a Jump Cut? The Short-Form Pacing Trick",
+  "metaDescription": "A jump cut removes the gaps inside one shot so your subject \"jumps\" forward and the pace never drops. Learn how to use it and how OpenNolan cuts pace for you.",
+  "eyebrow": "Editing glossary",
+  "h1": "What is a jump cut, and why short-form runs on it",
+  "h1Accent": "jump cut",
+  "breadcrumbLabel": "Jump cut",
+  "hubCardTitle": "Jump cut: the pacing trick explained",
+  "hubCardDesc": "Cut the dead air inside one shot so your subject jumps forward. The engine of short-form pace.",
+  "lede": "You filmed a good take, but there are pauses, ums and dead seconds that make it drag. A jump cut snips those gaps out so the energy never drops and the viewer never reaches for the scroll.",
+  "intro": [
+    "A jump cut is when you cut out the gaps inside one continuous shot so the subject appears to \"jump\" forward in place. You film yourself talking, then remove the pauses, the filler words, the breaths, and the dead air between sentences. The camera doesn't move, but the subject visibly snaps ahead. The result is a tighter, faster version of the same take with none of the slack.",
+    "Here's why it matters for you: short-form video lives and dies on pace. A founder talking calmly to camera is a desktop habit, and the feed punishes it. Every second of dead air is a second the scroller decides to leave. The jump cut is the single most-used edit in short-form precisely because it keeps removing those exit ramps until the whole clip moves.",
+    "The catch is that cutting your own talking head into a fast, clean reel is tedious work, the kind that eats an afternoon for thirty seconds of footage. That's the editing tax: to get seen, you're told to become a full-time editor. OpenNolan is a Mac app where an AI agent does that pace work for you, so you can understand the jump cut without spending your week performing one."
+  ],
+  "sections": [
+    {
+      "h2": "How a jump cut works, step by step",
+      "body": [
+        "A jump cut isn't a fancy effect. It's removal. You're deleting the moments where nothing is happening and stitching the good parts together so they butt up against each other."
+      ],
+      "checks": [
+        "Record one continuous take, talking straight to camera.",
+        "Find the dead spots: pauses, breaths, \"um\" and \"so\", restarts, the half-second before you land a point.",
+        "Cut each of those out and close the gap, so the next words start instantly.",
+        "Keep the framing identical across the cut, so only your motion jumps, not the shot.",
+        "Aim for a new cut every one to three seconds, so attention keeps resetting."
+      ]
+    },
+    {
+      "h2": "Why short-form video runs on jump cuts",
+      "body": [
+        "Two of the durable rules of short-form are at play here. First, hook in under a second: there's no room for a slow windup, and jump cuts let you start on the payoff. Second, cut every one to three seconds, because hard cuts and motion reset a wandering eye. The jump cut is how you hit both rules from a single take.",
+        "Removing filler is also about respect for the viewer. Nobody owes you the patience to sit through your pauses. When you cut the slack, every sentence earns its place and the clip feels dense with value, even though you said the exact same thing. Pace is perceived effort, and the jump cut manufactures it."
+      ],
+      "quote": "A jump cut doesn't add anything. It removes everything that was making people leave."
+    },
+    {
+      "h2": "The overuse trap (and how to keep it watchable)",
+      "body": [
+        "Jump cuts can go too far. When every breath is gone and the cuts come faster than the ear can follow, the clip starts to feel jittery and exhausting, more anxious than energetic. The pace stops serving the message and starts fighting it. A relentless wall of cuts also flattens emphasis, because if everything is fast, nothing lands.",
+        "The fix is rhythm, not just speed. Let a strong line breathe for a beat before the next cut. Vary the cut length instead of machine-gunning a fixed interval. And lean on other tools, like [B-roll](/learn/b-roll) and [burned-in captions](/learn/burned-in-captions), to carry energy so the jump cuts don't have to do all the work alone."
+      ],
+      "checks": [
+        "Keep a beat of silence after a punchline so it has room to land.",
+        "Vary cut length; don't lock to one rigid interval.",
+        "Let B-roll or motion share the pacing load.",
+        "Cut for meaning first, then tighten for speed."
+      ]
+    },
+    {
+      "h2": "How OpenNolan paces your cuts automatically",
+      "body": [
+        "You don't have to scrub through your own footage hunting for dead air. In OpenNolan, the AI agent takes your raw clips and builds the whole vertical cut for you: it places the clips, trims the slack, and times the cuts to the short-form playbook, so the pace stays up without you doing it by hand.",
+        "And because the pacing is yours to own, you're not locked out of it. After the first render, OpenNolan works on a \"render once, edit cheap\" model: retrimming a clip, nudging a cut, or reordering the timeline previews instantly, with no re-render. So if a section feels too jumpy, you loosen it in a second on a real timeline, the same way a [video hook](/learn/what-is-a-hook) or your captions stay fully editable."
+      ],
+      "checks": [
+        "The agent builds the vertical cut and times the pacing for you.",
+        "Trims and retimes preview instantly after the first render.",
+        "Every cut stays editable on a real timeline.",
+        "Bring your own API key, no subscription and no markup."
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "What is a jump cut in simple terms?",
+      "a": "A jump cut is cutting out the gaps inside one continuous shot so the subject appears to \"jump\" forward. You film a take, then remove the pauses, breaths and filler words and stitch the good parts together. The camera stays put, but the slack is gone, so the clip moves faster and keeps attention."
+    },
+    {
+      "q": "How often should I jump cut in a short-form video?",
+      "a": "A good rule of thumb is a new cut every one to three seconds, since hard cuts reset a wandering eye. But don't lock to a rigid interval. Vary the length, and let a strong line breathe for a beat before the next cut. Cut for meaning first, then tighten for pace."
+    },
+    {
+      "q": "Can you overuse jump cuts?",
+      "a": "Yes. When cuts come faster than the ear can follow, the clip feels jittery and exhausting instead of energetic, and emphasis flattens because nothing has room to land. The fix is rhythm over raw speed: vary your cut lengths and let B-roll, captions and motion share the pacing load."
+    },
+    {
+      "q": "Does OpenNolan do jump cuts for me?",
+      "a": "That's the idea. The AI agent takes your raw clips, trims the dead air, and times the cuts to the short-form playbook so the pace stays up without manual scrubbing. Every cut stays editable afterward on a real timeline, and thanks to render-once editing, retrims and retimes preview instantly."
+    },
+    {
+      "q": "Is OpenNolan available to download yet?",
+      "a": "Not yet. OpenNolan is a Mac app in active development, and this is the waitlist. When it ships you'll bring your own AI provider key and pay providers directly, with no subscription and no markup. Join the waitlist and we'll email you the moment it's ready to download."
+    }
+  ],
+  "ctaHeading": "Let the agent handle the pace. You handle the product.",
+  "ctaSub": "Join the waitlist and be first to make scroll-stopping reels without scrubbing your own footage for dead air."
+}

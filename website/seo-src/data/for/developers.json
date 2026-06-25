@@ -1,0 +1,93 @@
+{
+  "cluster": "for",
+  "slug": "developers",
+  "targetKeyword": "video editor for developers",
+  "title": "Video Editor for Developers — OpenNolan",
+  "metaDescription": "Agentic video editor for developers: turn a terminal recording into a short — the AI agent does the cuts. Local, open source, BYOK. Join the waitlist.",
+  "eyebrow": "For developers",
+  "h1": "A video editor for developers who hate timelines",
+  "h1Accent": "developers",
+  "breadcrumbLabel": "For developers",
+  "hubCardTitle": "For developers",
+  "hubCardDesc": "Turn a terminal recording into a short. Agentic, local, open source, BYOK — no manual timeline required.",
+  "lede": "You ship the tool. You demo the CLI. Then you stare at a timeline you never wanted to learn. OpenNolan lets an AI agent do the editing, so a terminal recording becomes a scroll-stopping short without you dragging clips by hand.",
+  "intro": [
+    "You can stand up an API, wire a CI pipeline, and debug a race condition before lunch. But cutting a 40-second demo of the thing you just built somehow eats an entire afternoon. The work isn't hard — it's tedious. Hunting for the moment your command actually returns, syncing captions, finding music that doesn't sound like elevator hold. That's the tax you pay just to show people what you made.",
+    "The villain here is the manual timeline. Dev tools, APIs, and CLIs are some of the hardest things to demo well — most of the action is text scrolling in a terminal — and the GUI editors that exist treat you like you've got hours to fiddle with razor tools. You'd rather pipe a recording into a command and get a finished cut back. That instinct is correct.",
+    "We built OpenNolan because we'd rather ship than learn a timeline too. It's a Mac app where an AI agent makes the whole vertical short from your raw clips — cuts, captions, B-roll, music, motion — and it runs locally, brings its own intelligence through your own API key, and is open source so you can read exactly what it does. You stay the builder. The agent handles the editing."
+  ],
+  "sections": [
+    {
+      "h2": "Turn a terminal recording into a short",
+      "body": [
+        "The agent-first workflow is the part that will feel familiar. Drop in your screen capture or terminal recording, tell the agent what the tool does, and bring your own provider key. It reads the brief, finds the payoff moment, and assembles a vertical cut tuned for Reels, TikTok, and Shorts — the formats where developer audiences actually scroll.",
+        "Because dev demos are mostly text in motion, the agent leans on the things that make them watchable: a hard hook in the first second, fast cuts every one to three seconds, captions burned in for the ~85% who watch on mute, and screenshot proof with auto-highlight when you want to point at a result. It is the short-form playbook applied to a `curl` call instead of a dance trend."
+      ],
+      "checks": [
+        "Screen or terminal recording in, vertical short out",
+        "Agent picks the hook and the cuts, not you",
+        "Burned-in captions so the demo reads on mute",
+        "Screenshot proof with auto-highlight for results and benchmarks"
+      ],
+      "quote": "Pipe a recording in, get a finished cut back — that's the workflow developers actually want."
+    },
+    {
+      "h2": "The agent does the editing — you stay in the loop",
+      "body": [
+        "Here's the plan, three steps. One: drop in your clips, or just describe the demo, and add your API key. Two: the agent makes the whole reel — pulling supporting images and B-roll from the web, adding music and sound effects, writing captions, animating overlays, and cutting it for vertical. Three: post it, or open a real timeline and tweak first.",
+        "If you do want to adjust something, the editing model is built for people who think in terms of cheap iteration. OpenNolan renders once, then most edits — reorder, retrim, retime, reposition, transitions, text — preview instantly without re-rendering. Only AI-composition scenes re-render, and only the single scene you changed. It feels less like a video suite and more like a fast feedback loop you already trust."
+      ],
+      "checks": [
+        "Agent-built composition: cuts, B-roll, captions, music, motion",
+        "Render once, then preview most edits with no re-render",
+        "Only the one changed scene re-renders, not the whole timeline",
+        "A real NLE timeline is there when you want manual control"
+      ]
+    },
+    {
+      "h2": "Local-first, open source, bring your own key",
+      "body": [
+        "This is the part a technical audience cares about most, so we'll be plain. OpenNolan is a native macOS app that runs on your machine — your clips and project files stay local. It is open source, so you can read the code, see how the agent makes decisions, and trust it because you can inspect it, not because we asked you to.",
+        "There's no subscription and no markup. You bring your own AI provider key and pay the provider directly — no account required. If you've ever wired up an API key for a side project, the setup is the same idea. You control the key, the cost, and the data.",
+        "Founders and indie hackers want the same speed for different reasons — see [the founders page](/for/founders) and [the indie hackers page](/for/indie-hackers). For developers, the draw is the agentic, scriptable feel: tell it what you built, let it edit, keep the receipts local."
+      ],
+      "checks": [
+        "Native Mac app, runs locally, files stay on your machine",
+        "Open source — read exactly what the agent does",
+        "Bring your own key, pay providers directly, no markup",
+        "No subscription, no account required"
+      ]
+    },
+    {
+      "h2": "Ship demos as fast as you ship code",
+      "body": [
+        "The outcome is simple. The new feature you merged this morning gets a short by this afternoon — not next sprint, not never. Your launch tweet has a video attached instead of a wall of text. The CLI nobody could picture suddenly clicks because someone watched fifteen seconds of it working.",
+        "Developer products live or die on whether people can see them in action. When making the demo costs minutes instead of an afternoon, you make more of them — and the tool you built actually gets discovered. That's the whole point: less time as a reluctant editor, more time shipping. New to the format? Start with [what makes a hook work](/learn/what-is-a-hook)."
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "Is OpenNolan available to download yet?",
+      "a": "Not yet — this is a waitlist. OpenNolan is a native Mac app in active development, and the page you're on is how you get notified the moment it ships. Join the waitlist and you'll be among the first to download it. No spam, just the launch announcement when it's ready."
+    },
+    {
+      "q": "How does the bring-your-own-key (BYOK) pricing work?",
+      "a": "You add your own AI provider API key and pay the provider directly — no markup and no subscription from us. There's no account required either. If you've ever set an API key for a side project, it's the same workflow: you control the key, the spend, and your data stays on your Mac."
+    },
+    {
+      "q": "Is it really open source and local-first?",
+      "a": "Yes. OpenNolan is open source, so you can read the code and see exactly how the agent makes editing decisions. It's a native macOS app that runs locally — your clips and project files stay on your machine rather than getting uploaded to someone's cloud render farm."
+    },
+    {
+      "q": "Can it turn a terminal or screen recording into a short?",
+      "a": "That's a core use case. Drop in a terminal or screen recording, tell the agent what the tool does, and it builds a vertical cut — finding the payoff moment, adding fast cuts, captions for mute viewers, and screenshot proof with auto-highlight. It's the short-form playbook applied to dev demos instead of trends."
+    },
+    {
+      "q": "Do I have to use the timeline at all?",
+      "a": "No. The agent assembles the whole short on its own, so you can post straight away. If you want to adjust a cut, a real timeline is there — and thanks to render-once editing, most tweaks preview instantly without re-rendering. You're never forced into manual timeline work to get a finished video."
+    }
+  ],
+  "ctaHeading": "Ship the demo without dragging a single clip",
+  "ctaSub": "Be first to the Mac app where an agent edits your terminal recordings into shorts — local, open source, bring your own key."
+}

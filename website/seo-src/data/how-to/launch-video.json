@@ -1,0 +1,116 @@
+{
+  "cluster": "how-to",
+  "slug": "launch-video",
+  "targetKeyword": "how to make a product launch video",
+  "title": "How to Make a Product Launch Video | OpenNolan",
+  "metaDescription": "How to make a product launch video that earns the click on Product Hunt, X, and LinkedIn — hook, proof, founder face, per-platform cuts. Join the waitlist.",
+  "eyebrow": "The launch-day cut",
+  "h1": "How to make a product launch video that earns the click",
+  "h1Accent": "earns the click",
+  "breadcrumbLabel": "Launch video",
+  "hubCardTitle": "How to make a product launch video",
+  "hubCardDesc": "The launch-day asset for Product Hunt, X, and LinkedIn — hook, proof, founder face, and a per-platform cut.",
+  "lede": "Launch day is one shot. The video at the top of your Product Hunt post and your X thread is the thing people judge before they read a word — and it decides whether they click or scroll.",
+  "intro": [
+    "You've shipped. Now the whole launch rides on a single video that has to do four jobs at once: stop the scroll, make the claim, prove the product works, and earn the click — all before anyone reads your tagline. Get it right and the thread takes off. Get it wrong and the best launch you've ever had dies in the first second of a muted autoplay.",
+    "The villain here isn't your product. It's the editing tax — the unwritten rule that a launch video worth posting needs a week of cutting, a hunt for the right music, captions synced by hand, and proof stitched in frame by frame. Launch week is the worst possible time to also become a video editor, and yet that's exactly when founders try.",
+    "We built OpenNolan because we're builders too, and we'd rather ship than babysit a timeline the night before a launch. It's a Mac app where an AI agent makes the **whole** launch video from your raw clips and screen captures — then hands you a real editor so the final cut still sounds like you, not a template. Here's the playbook either way, and how OpenNolan runs it for you."
+  ],
+  "sections": [
+    {
+      "h2": "What makes a product launch video different",
+      "body": [
+        "A launch video is not a recurring Reel and it's not a long demo. It's a one-time, high-stakes asset that lives at the top of a Product Hunt post, an X announcement thread, and a LinkedIn update on the same day. Its job is to convert attention into a click on launch day, not to keep a content calendar fed.",
+        "That changes the brief. You lead with the single biggest claim, you show the product actually working within a few seconds, you back it with real receipts, and you put your face on it so a stranger trusts a stranger. Calm, slow, and feature-by-feature is a demo. A launch video is the trailer for the demo — fast, confident, and built to be watched on mute."
+      ],
+      "quote": "Launch day is one shot. The video is the trailer, not the demo."
+    },
+    {
+      "h2": "The launch video playbook, step by step",
+      "body": [
+        "This is the durable process — it works whether you cut it by hand or let an agent do it. The order matters: the hook and the proof carry the whole video, and everything else supports them. Run the steps below, then let OpenNolan handle the parts that eat your launch week."
+      ]
+    },
+    {
+      "h2": "How OpenNolan builds your launch video for you",
+      "body": [
+        "Drop in your raw clips, your screen recording, and a quick description of what you launched — then bring your own AI provider key. The agent reads the brief, opens on your big claim, drops in the screenshot proof with auto-highlight on the number that matters, pulls supporting B-roll and images from the web, adds music and sound effects, writes burned-in captions, and cuts it all fast for vertical.",
+        "Because it renders once, the night-before panic is cheap. Reorder a scene, retrim the hook, swap a caption, or reposition your founder talking-head clip and it previews instantly — only an AI-composed scene re-renders, and only the one you changed. You get a launch-day asset and the control to fix the one line that sounds off, without re-rendering the whole thing at midnight."
+      ],
+      "checks": [
+        "Opens on your biggest claim, built on the short-form playbook",
+        "Screenshot proof with auto-highlight on the metric that matters",
+        "Founder talking-head with background removal for trust",
+        "Burned-in captions, because launch autoplay is muted",
+        "Render once, then retrim and reorder instantly before you post"
+      ]
+    },
+    {
+      "h2": "One cut per platform, not one cut for all",
+      "body": [
+        "The same launch deserves a different edit per surface. Product Hunt and X reward a tight 20-to-40-second cut that front-loads the claim and the click. LinkedIn rewards a slightly calmer, founder-forward version that reads as a story. A vertical Reel or Short reaches a colder audience who've never heard of you, so the hook has to work even harder.",
+        "Cutting four versions by hand on launch week is exactly the tax that stops founders from posting everywhere. With OpenNolan you start from one finished cut and spin variants fast, because the heavy render is already done. If you want the recurring vertical version after launch day, the [Instagram Reels how-to](/how-to/instagram-reels) and the [product demo video](/how-to/product-demo-video) guides go deeper on those formats."
+      ]
+    },
+    {
+      "h2": "Common launch video mistakes to avoid",
+      "body": [
+        "Most launch videos fail in predictable ways: they open with a logo animation instead of the claim, they bury the product reveal past the point where people have already scrolled, they show no proof so the claim feels like marketing, and they ship with no captions into a muted feed. Any one of these quietly halves your click-through on the biggest day of the quarter.",
+        "The fix is the playbook above, applied with discipline you don't have time for on launch week. That's the whole reason OpenNolan exists — to put the proven structure into every cut by default, so your one shot isn't undone by a slow first second or a missing receipt."
+      ],
+      "checks": [
+        "Don't open on a logo — open on the claim or the payoff",
+        "Don't hide the product — show it working in the first few seconds",
+        "Don't claim without receipts — put real numbers on screen",
+        "Don't ship silent — burn in captions for muted autoplay"
+      ]
+    }
+  ],
+  "stepsHeading": "How to make a product launch video: 5 steps",
+  "steps": [
+    {
+      "title": "Lead with the one big claim",
+      "body": "Decide the single sentence that makes someone stop. Not your full value prop — the boldest true thing your product does. Put it in the first second as text and as the opening line, before any logo or intro. **OpenNolan opens on the payoff for you**, building the hook from your brief instead of a slow build-up that loses the scroll."
+    },
+    {
+      "title": "Show the product actually working",
+      "body": "Within a few seconds, cut to the product doing the thing — a screen recording, the result, the moment of magic. Talking about it is a demo; showing it is a launch. **OpenNolan places your screen captures and B-roll** into a fast vertical cut, so the reveal lands early instead of after a minute of setup nobody waits for."
+    },
+    {
+      "title": "Put real proof on screen",
+      "body": "A claim without receipts reads as marketing. Drop in a screenshot of the metric, the chart, the waitlist count, the before-and-after — and highlight the number that matters so it can't be missed. **OpenNolan adds screenshot proof with auto-highlight**, so your strongest evidence is framed and called out, not buried in a tiny corner."
+    },
+    {
+      "title": "Add your founder face for trust",
+      "body": "People back people on launch day. A short, direct talking-head clip — even ten seconds of you saying why you built it — converts strangers better than any voiceover. **OpenNolan handles talking-head with background removal**, so your face sits cleanly over the product without you setting up a studio the night before launch."
+    },
+    {
+      "title": "Cut it per platform, with a clear CTA",
+      "body": "Export a tight cut for Product Hunt and X, a calmer founder-forward version for LinkedIn, and a vertical one for Reels — each ending on one clear ask: upvote, try it, join the waitlist. **OpenNolan renders once so variants are cheap**, and you finish each version on a real timeline before you post."
+    }
+  ],
+  "faqs": [
+    {
+      "q": "How long should a product launch video be?",
+      "a": "For the launch-day asset on Product Hunt and X, aim for 20 to 40 seconds — long enough to land the claim, show the product, and add proof, short enough to watch on mute. LinkedIn can run a touch longer if it reads as a founder story. The first second still decides everything, so front-load the hook regardless of length."
+    },
+    {
+      "q": "How do you make a product launch video without an editor?",
+      "a": "You start from a finished cut instead of a blank timeline. With OpenNolan you drop in raw clips and a screen recording, and the AI agent builds the whole launch video — hook, product reveal, screenshot proof, captions, music, and a founder talking-head. You review and tweak on a real timeline, but you're never editing from scratch on launch week."
+    },
+    {
+      "q": "Is OpenNolan available to download yet?",
+      "a": "Not yet. OpenNolan is a Mac app in active development, and this site is a waitlist. Join with your email and you'll be first to know the moment it ships. If you've got a launch coming up, get on the list now so the app is ready when your next launch day is."
+    },
+    {
+      "q": "What does it cost, and is there a subscription?",
+      "a": "There's no subscription and no markup. OpenNolan uses bring-your-own-key: you add your own AI provider API key and pay those providers directly for what you use. No account is required, and your clips stay local on your Mac — which matters when you're cutting an unreleased product before launch. Pricing details land closer to launch."
+    },
+    {
+      "q": "Can I make one launch video and adapt it for each platform?",
+      "a": "Yes. Build the main cut once, then spin a tight Product Hunt and X version, a calmer LinkedIn one, and a vertical Reel. Because OpenNolan renders once and most edits preview instantly, making per-platform variants is fast — you're retrimming and reordering, not re-rendering each one from zero on launch day."
+    }
+  ],
+  "ctaHeading": "Your launch deserves a video that lands",
+  "ctaSub": "Be first when the Mac app ships — no spam, just the launch."
+}

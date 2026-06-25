@@ -1,0 +1,99 @@
+{
+  "cluster": "learn",
+  "slug": "vertical-video",
+  "targetKeyword": "vertical video",
+  "title": "Vertical Video: What 9:16 Is and Why It Wins",
+  "metaDescription": "Vertical video is portrait 9:16 footage (1080x1920) that fills a phone screen. Learn safe zones, resolutions, and how to go vertical-first. Join the waitlist.",
+  "eyebrow": "Format Basics",
+  "h1": "Vertical video, explained for builders",
+  "h1Accent": "Vertical video",
+  "breadcrumbLabel": "Vertical video",
+  "hubCardTitle": "Vertical video (9:16) explained",
+  "hubCardDesc": "What portrait 9:16 footage is, why it wins on mobile feeds, and how to compose vertical-first.",
+  "lede": "You shot something worth posting, but it shows up letterboxed with black bars and gets scrolled past. The fix is format: vertical video is what the feed is built for.",
+  "intro": [
+    "**Vertical video is portrait 9:16 footage — typically 1080x1920 — that fills a phone screen top to bottom.** It is the native format of Instagram Reels, TikTok, and YouTube Shorts, where almost everyone watches one-handed, holding their phone upright. Get the format right and your video occupies the whole screen. Get it wrong and it sits in a small landscape box with dead space above and below, which reads as off-platform and gets skipped.",
+    "If you are a founder or builder, this is the part nobody warned you about. You can have a sharp clip and still lose because it was framed for a TV, not a thumb. The villain is the editing tax: the assumption that competing in the feed means learning aspect ratios, safe zones, and reframing — a whole craft you never signed up for when you set out to ship a product.",
+    "We are builders too, and we would rather ship than reframe footage by hand. OpenNolan is a Mac app where an AI agent composes the whole reel vertical-first — so 9:16 is the default, not a manual conversion you do every time. This page covers the format itself; the app just makes living in it effortless."
+  ],
+  "sections": [
+    {
+      "h2": "9:16 aspect ratio and the resolutions that matter",
+      "body": [
+        "Aspect ratio is the shape of the frame: width to height. Vertical video uses **9:16**, meaning the frame is taller than it is wide — the mirror image of the 16:9 you see on a TV or YouTube desktop. On a phone held upright, 9:16 fills every pixel.",
+        "The resolution you want is **1080x1920** (often called 1080p vertical or Full HD portrait). That is the sweet spot for Reels, TikTok, and Shorts: crisp on modern phones without bloating file size. Higher options exist — 4K vertical is 2160x3840 — but 1080x1920 is the standard most short-form is shot, edited, and delivered in."
+      ],
+      "checks": [
+        "9:16 = portrait, taller than wide",
+        "1080x1920 is the standard short-form resolution",
+        "16:9 (landscape) is the opposite shape and gets letterboxed",
+        "Square 1:1 and 4:5 are feed-friendly but not full-screen"
+      ]
+    },
+    {
+      "h2": "Safe zones: keep your content clear of the UI",
+      "body": [
+        "A full 9:16 frame is not all usable space. Each platform stacks its own interface on top of your video — the caption and handle along the bottom, the like, comment, share, and follow buttons up the right edge, and a progress bar or profile pic near the top. Anything important you place in those areas gets covered.",
+        "The **safe zone** is the central band that stays visible across Reels, TikTok, and Shorts. Keep your subject, your text, and your hook inside it. A reliable rule of thumb: leave roughly the top ~10% and bottom ~20% of the frame clear, and pull captions and key visuals away from the right edge so the action buttons do not sit on top of your words."
+      ],
+      "quote": "If your caption lands under the share button, nobody reads it. Design for the safe zone, not the full canvas."
+    },
+    {
+      "h2": "Why vertical wins on mobile feeds",
+      "body": [
+        "Phones are held upright the overwhelming majority of the time, and the feed is an endless vertical scroll. A 9:16 video meets the viewer exactly where their thumb already is: full screen, no tilting, no pinch-to-zoom, no black bars signaling that this clip came from somewhere else.",
+        "That format match buys you the only thing that matters in short-form — the first second. A landscape clip in a vertical feed wastes most of the screen and visually flags itself as repurposed, which costs you attention before your [hook](/learn/what-is-a-hook) even plays. Vertical is table stakes for [short-form video](/learn/short-form-video); it is the container everything else rides in."
+      ]
+    },
+    {
+      "h2": "Converting landscape to vertical (and why composing vertical-first beats it)",
+      "body": [
+        "If your footage is landscape, you have a few ways to reach 9:16. You can **crop** in to the most important part of the frame, which fills the screen but throws away the sides. You can **pad** with a blurred or solid background above and below the clip, which keeps everything but shrinks your subject. Or you can **reframe** dynamically, panning the crop to follow the action across a wider shot.",
+        "Every one of these is a manual judgment call per clip — where to crop, what to lose, when to pan. That is the editing tax in miniature. The better path is to **compose vertical-first**: think in 9:16 from the start so your subject and text are already built for the tall frame, instead of rescued into it after the fact."
+      ],
+      "checks": [
+        "Crop — fills the frame, loses the edges",
+        "Pad — keeps the whole shot, shrinks the subject",
+        "Reframe — pans the crop to follow the action",
+        "Vertical-first — skip the conversion, build for 9:16 from the start"
+      ]
+    },
+    {
+      "h2": "How OpenNolan composes vertical-first",
+      "body": [
+        "OpenNolan builds for **9:16 / 1080x1920** by default. The AI agent assembles the whole reel inside the vertical frame — placing your clips, pulling B-roll and images from the web, adding music and sound effects, and writing burned-in captions — all positioned for the tall canvas and the platform safe zones rather than squeezed in afterward.",
+        "Because the app is **render-once, edit-cheap**, you are not locked in. After the first render, repositioning a clip, nudging text out of the UI band, or retiming a cut previews instantly without re-rendering the whole video. It runs on your Mac with your own AI key — **bring your own key, no subscription, no markup**. The app is open source and still in development; the [waitlist](/#waitlist) is open now."
+      ],
+      "checks": [
+        "9:16 / 1080x1920 vertical by default",
+        "Clips, B-roll, captions, and motion placed for the tall frame",
+        "Instant reposition after the first render",
+        "Mac-native, local-first, bring your own key"
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "What is vertical video?",
+      "a": "Vertical video is footage shot or edited in a portrait 9:16 aspect ratio — typically 1080x1920 — so it fills a phone screen held upright. It is the native format of Instagram Reels, TikTok, and YouTube Shorts. The opposite is landscape (16:9), which appears letterboxed with black bars on a phone."
+    },
+    {
+      "q": "What resolution should vertical video be?",
+      "a": "The standard is 1080x1920 (1080p portrait), which is sharp on modern phones without large file sizes. That covers Reels, TikTok, and Shorts. You can go higher with 4K vertical at 2160x3840, but most short-form is shot, edited, and delivered at 1080x1920, so it is the safest default."
+    },
+    {
+      "q": "Can I turn a landscape video into vertical?",
+      "a": "Yes, by cropping in, padding with a blurred background, or reframing the crop to follow the action. Each loses or compromises something, and each is a per-clip decision. Composing vertical-first avoids the conversion entirely — you build for the 9:16 frame from the start instead of rescuing footage into it."
+    },
+    {
+      "q": "Does OpenNolan export vertical video?",
+      "a": "Yes. OpenNolan is built vertical-first for 9:16 / 1080x1920 and exports for Reels, TikTok, and Shorts. The AI agent composes the whole reel inside the tall frame, with content placed clear of platform UI. Note the app is not released yet — it is a waitlist, and you can join now to get early access."
+    },
+    {
+      "q": "How much does OpenNolan cost?",
+      "a": "OpenNolan uses bring-your-own-key: you add your own AI provider API key and pay those providers directly, with no markup and no subscription. The app is a native Mac app and is open source. It is currently in active development, so the way in today is the waitlist."
+    }
+  ],
+  "ctaHeading": "Build vertical-first without the editing tax",
+  "ctaSub": "OpenNolan composes your reel in 9:16 by default, so your video fills the feed instead of fighting it. Join the waitlist for early access."
+}

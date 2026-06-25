@@ -1,0 +1,86 @@
+{
+  "cluster": "for",
+  "slug": "agencies",
+  "targetKeyword": "short-form video tool for agencies",
+  "title": "Short-Form Video Tool for Agencies | OpenNolan",
+  "metaDescription": "A short-form video tool for agencies: ship more client reels weekly, hold quality steady, and review on a real timeline before delivery. Join the waitlist.",
+  "eyebrow": "For agencies",
+  "h1": "The short-form video tool for agencies shipping at volume",
+  "h1Accent": "at volume",
+  "breadcrumbLabel": "For agencies",
+  "hubCardTitle": "Short-form video tool for agencies",
+  "hubCardDesc": "Ship more client reels per week, keep quality consistent, and polish on a real timeline before handoff.",
+  "lede": "You sell short-form by the batch. The bottleneck isn't ideas — it's the hours each cut eats before it's good enough to send a client. OpenNolan moves that work off your editors' plates.",
+  "intro": [
+    "You run an agency. Your clients want a steady stream of Reels, TikToks, and Shorts, and your margin lives in how many you can ship per editor per week. The math is brutal: every cut means sourcing B-roll, syncing captions, finding music, and trimming for vertical — multiplied by every client on the roster. Output is capped by headcount, and headcount eats the margin you were hired to protect.",
+    "The villain here is the editing tax at scale. One reel is a manageable afternoon. Twenty reels a week across eight clients is a treadmill that no amount of hustle outruns — and the work gets less consistent the faster you push it. Quality drifts, deadlines slip, and you end up either hiring ahead of revenue or shipping cuts you're not proud of.",
+    "OpenNolan is a Mac app where an AI agent makes the whole first cut — B-roll and images pulled from the web, music, sound effects, captions, rapid cuts, and motion, all tuned for 9:16. Your editor doesn't start from a blank timeline; they start from a finished draft and spend their time on judgment, not grunt work. We're builders too, and we'd rather your team review than rebuild."
+  ],
+  "sections": [
+    {
+      "h2": "A repeatable playbook for high-volume client work",
+      "body": [
+        "Throughput comes from a system, not from working later. The pattern that scales for agencies is the same every time: feed in the raw clips for a client, let the agent build the first cut against the short-form playbook, then have a human review and approve before it leaves the building. No reel ships without eyes on it — but no editor burns an afternoon getting it to the review stage.",
+        "Because the draft already follows the rules that make short-form travel, your editors review against a consistent baseline instead of reinventing structure per client. That's where consistency at volume actually comes from."
+      ],
+      "checks": [
+        "Hook in the first second, cuts every 1–3 seconds",
+        "Captions burned in for sound-off viewing",
+        "Vertical 9:16 framing tuned for Reels, TikTok, and Shorts",
+        "Receipts — screenshots and proof — placed where they land"
+      ]
+    },
+    {
+      "h2": "How OpenNolan lifts output without lifting headcount",
+      "body": [
+        "The agent does the heavy, repetitive part of every cut: it places clips, pulls supporting images and B-roll from the web, adds music and sound effects, writes captions, animates overlays, and assembles a vertical edit. That's the work that used to define how many reels one editor could touch in a day. Move it off their plate and the per-editor ceiling rises without a new hire.",
+        "Then there's the part that keeps your delivery timeline honest. OpenNolan renders once and edits cheap — after the first render, most changes (reorder, retrim, retime, transitions, reposition, text) preview instantly without re-rendering. Only an AI-composition scene re-renders, and only the one you changed. Client comes back with a note the morning it's due? Your editor makes the change and sees it immediately, instead of waiting on an export queue."
+      ],
+      "quote": "Your editors stop building reels from scratch and start reviewing finished drafts — that's the throughput unlock.",
+      "checks": [
+        "First cut built by the agent, not by a billed hour",
+        "Instant preview on revisions — no re-render to see a change",
+        "Only the changed scene re-renders, so polish is fast",
+        "A real NLE timeline for the final human pass before handoff"
+      ]
+    },
+    {
+      "h2": "Margin control with bring-your-own-key",
+      "body": [
+        "Per-video cost is what makes or breaks agency economics, and most tools hide it behind a seat-based subscription that climbs as your team grows. OpenNolan is bring-your-own-key: you add your own AI provider key and pay the providers directly — no markup, no subscription, no per-seat tax. Your cost per reel is the actual compute it took, which you can see and control.",
+        "It's also a native Mac app that runs local-first, so your clients' raw footage stays on your machines. And it's open source. For an agency, that means the throughput tool sitting at the center of delivery isn't a black box you're renting by the seat. If you're weighing it against a consumer editor, the [comparison with CapCut](/compare/capcut) lays out the structural difference."
+      ]
+    },
+    {
+      "h2": "What changes when the first cut is already done",
+      "body": [
+        "When the agent owns the draft and your editor owns the judgment, the week looks different. You take on the extra client without the extra hire. Quality holds steady across the roster because every reel starts from the same proven structure. And the final polish — the human pass that earns the invoice — fits inside a real delivery timeline because revisions are instant.",
+        "Output stops being a function of how many hours your team can grind and becomes a function of how good your review is. That's the business you actually want to be running. The same engine works whether you're producing for [SaaS clients](/for/saas) or your own brand."
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "Can OpenNolan handle short-form video for multiple clients at volume?",
+      "a": "That's the use case it's built for. The agent makes the whole first cut for each client — B-roll, music, captions, cuts, motion — so an editor reviews finished drafts instead of building from scratch. You raise output per editor without raising headcount. The app is currently a waitlist, not yet downloadable, so join to get early access."
+    },
+    {
+      "q": "How does a human stay in the loop before client delivery?",
+      "a": "The model is hybrid: the agent assembles the cut, then a person reviews and edits it on a real NLE timeline — cuts, captions, overlays, text, audio, transitions — before anything ships. No reel goes to a client unreviewed. The render-once design means revision notes preview instantly, so the final polish fits a real deadline."
+    },
+    {
+      "q": "What does each video cost to produce?",
+      "a": "OpenNolan is bring-your-own-key. You add your own AI provider API key and pay the providers directly — no markup, no subscription, no per-seat fee. Your cost per reel is the real compute it used, which is what makes the margin math work for agencies. No account is required, and the app is open source."
+    },
+    {
+      "q": "Is it available now, and what platform does it run on?",
+      "a": "OpenNolan is a native macOS desktop app — not web, not Windows. It runs local-first, so client footage stays on your Mac. It isn't released yet; this site is the waitlist. Join now and you'll be among the first agencies to get access when it ships."
+    },
+    {
+      "q": "Will the output actually be good enough to deliver to clients?",
+      "a": "The agent builds against the durable short-form playbook — a hook in the first second, cuts every one to three seconds, burned-in captions, vertical framing, and proof shown on screen. See [what makes a hook work](/learn/what-is-a-hook). It's a strong first cut, and your editor's review pass is where it becomes client-ready."
+    }
+  ],
+  "ctaHeading": "Ship more client reels per editor",
+  "ctaSub": "Join the waitlist to be among the first agencies producing short-form at volume — with a human review pass on every cut."
+}

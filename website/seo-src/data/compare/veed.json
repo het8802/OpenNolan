@@ -1,0 +1,125 @@
+{
+  "cluster": "compare",
+  "slug": "veed",
+  "targetKeyword": "OpenNolan vs Veed",
+  "title": "OpenNolan vs Veed: Local Mac Agent vs Browser",
+  "metaDescription": "OpenNolan vs Veed: Veed is a browser editor you drive; OpenNolan is a Mac app whose AI agent edits for you. See the difference, then join the waitlist.",
+  "eyebrow": "vs Veed",
+  "h1": "OpenNolan vs Veed: the agent edits, on your Mac",
+  "h1Accent": "on your Mac",
+  "breadcrumbLabel": "vs Veed",
+  "hubCardTitle": "OpenNolan vs Veed",
+  "hubCardDesc": "Browser editor you drive vs a local Mac agent that makes the whole reel. See the honest comparison.",
+  "lede": "You want your product seen on Reels and TikTok, not another tab full of timelines to learn. Veed is a slick browser editor you operate yourself; OpenNolan is a Mac app where the agent does the editing.",
+  "intro": [
+    "You're a founder or builder. You need short-form video so your product gets discovered, and you'd rather ship than spend your week learning an editor. The real villain here isn't Veed or any one tool. It's the editing tax: the assumption that to get seen, you first have to become a video editor, upload everything to the cloud, trim it by hand, and sync captions clip by clip.",
+    "Veed is genuinely good at what it does. It runs in any browser, has subtitles, templates, recording, and team collaboration, and you can jump in from any machine with no install. But it's still a tool you drive. You make the cuts, you place the B-roll, you do the editing. The work doesn't disappear; it just moves into a tab.",
+    "OpenNolan takes a different shape. It's a native Mac app, and its AI agent builds the whole reel from your clips, then hands you a real timeline if you want to tweak. We're builders too, so we made the thing we wanted: the agent does the editing, your files stay on your machine, and you bring your own key instead of paying a subscription."
+  ],
+  "sections": [
+    {
+      "h2": "Browser SaaS vs a local Mac agent",
+      "body": [
+        "The clearest split between OpenNolan and Veed is where the work happens and who does it. Veed lives in the browser. Your footage uploads to the cloud, and you edit it there by hand. That's convenient when you're hopping between machines, and it's why teams like it for quick collaborative edits.",
+        "OpenNolan runs on your Mac. There's no upload step, because your clips never leave your machine. And instead of you operating a timeline, the **AI agent makes the whole reel** first: it places clips, pulls B-roll and images from the web, adds music and sound effects, writes captions, animates overlays, and assembles a vertical cut. You start as the director, not the editor."
+      ],
+      "checks": [
+        "Local-first: your raw clips stay on your Mac, no cloud upload",
+        "Agent-driven: the reel is built for you, not by you",
+        "Native macOS app, tuned for one job: vertical short-form"
+      ]
+    },
+    {
+      "h2": "How the editing actually happens",
+      "body": [
+        "With Veed, the plan is the classic manual one: upload, cut, caption, export. It has AI features layered on top, but the spine is still a human operating an online editor. If you don't know what a good hook or a fast cut looks like, the tool won't supply that judgment for you.",
+        "OpenNolan's plan has three steps and you only own the first one. Drop in your clips (or just describe the video) and bring your API key. The agent makes the whole reel on the short-form playbook: hook early, cut every one to three seconds, captions for sound-off viewers, proof on screen. Then you post it, or tweak first on a real timeline where every edit previews instantly."
+      ],
+      "quote": "Veed gives you the editor. OpenNolan gives you the edit."
+    },
+    {
+      "h2": "Render once, edit cheap, and own your tools",
+      "body": [
+        "OpenNolan is built on a render-once, edit-cheap model. After the first render, most changes (reorder, retrim, retime, transitions, reposition, text) preview instantly without re-rendering. Only AI-composition scenes re-render, and only the one you changed. That keeps fine-tuning fast on local hardware.",
+        "On cost and control, the models differ structurally. Veed is a subscription SaaS. OpenNolan is **bring-your-own-key**: you add your own AI provider key and pay providers directly, with no markup and no monthly plan. It's also open source, so the tool is yours to inspect and keep. If you want the full picture, see [how OpenNolan compares to CapCut](/compare/capcut) or the [feature overview](/#features)."
+      ],
+      "checks": [
+        "No subscription: bring your own key, pay providers directly",
+        "Most edits preview instantly after the first render",
+        "Open source and Mac-native, built around your privacy"
+      ]
+    },
+    {
+      "h2": "Which one fits how you work",
+      "body": [
+        "If you want a flexible browser editor for collaborative, general-purpose video and you're happy doing the editing yourself, Veed is a strong pick. It's convenient, works on any OS, and the team features are real.",
+        "If you're a founder or builder who wants vertical short-form to ship as fast as your product, without becoming an editor and without your footage leaving your Mac, OpenNolan is built for exactly that. The agent does the heavy lifting; you stay in control. OpenNolan isn't released yet, so the move today is to [join the waitlist](/#waitlist) and get in early."
+      ]
+    }
+  ],
+  "comparison": {
+    "competitor": "Veed",
+    "intro": "Veed is a convenient, browser-based editor with subtitles, templates, recording, and team collaboration. OpenNolan is a local Mac-native app where an AI agent makes the whole vertical reel for you. Here's how they differ on the durable dimensions.",
+    "rows": [
+      {
+        "feature": "Who it's for",
+        "openNolan": "Founders and builders who want short-form without becoming editors",
+        "competitor": "Anyone wanting a flexible online editor, including teams"
+      },
+      {
+        "feature": "How editing happens",
+        "openNolan": "AI agent builds the whole reel; you fine-tune on a timeline",
+        "competitor": "You edit it yourself in the browser, with some AI helpers"
+      },
+      {
+        "feature": "Platform",
+        "openNolan": "Native macOS desktop app",
+        "competitor": "Browser-based web app, works on any OS"
+      },
+      {
+        "feature": "Pricing model",
+        "openNolan": "Bring your own key; pay providers directly, no subscription",
+        "competitor": "Subscription SaaS"
+      },
+      {
+        "feature": "Vertical short-form focus",
+        "openNolan": "Built first for 9:16 Reels, TikTok, and Shorts",
+        "competitor": "General-purpose; many formats and use cases"
+      },
+      {
+        "feature": "Where your files live",
+        "openNolan": "Local-first; clips stay on your Mac, no upload",
+        "competitor": "Uploaded to the cloud and edited in the browser"
+      },
+      {
+        "feature": "Open source",
+        "openNolan": "Yes, open source",
+        "competitor": "Proprietary"
+      }
+    ]
+  },
+  "faqs": [
+    {
+      "q": "What's the main difference between OpenNolan and Veed?",
+      "a": "Veed is a browser-based editor you operate yourself in the cloud, with subtitles, templates, and team collaboration. OpenNolan is a native Mac app where an AI agent makes the whole vertical reel from your clips, then lets you tweak on a real timeline. The short version: Veed gives you an editor, OpenNolan does the editing."
+    },
+    {
+      "q": "Can I download OpenNolan right now?",
+      "a": "Not yet. OpenNolan is in active development and this site is a waitlist. Veed is available today in the browser. If you want a Mac-native, agent-driven alternative where your footage stays local, join the waitlist and we'll let you know the moment it's ready to try."
+    },
+    {
+      "q": "Does OpenNolan upload my clips like Veed does?",
+      "a": "No. Veed is browser-based, so your footage uploads to the cloud to be edited. OpenNolan is local-first: it runs on your Mac and your clips stay on your machine. The agent works on your footage locally and renders locally, which also keeps fine-tuning fast after the first render."
+    },
+    {
+      "q": "How does pricing compare to Veed?",
+      "a": "Veed is a subscription SaaS. OpenNolan is bring-your-own-key: you add your own AI provider API key and pay those providers directly, with no markup and no monthly plan, and no account required. OpenNolan is also open source. We avoid quoting Veed's prices here because they change."
+    },
+    {
+      "q": "Is OpenNolan a full editor, or only the AI part?",
+      "a": "Both. The agent builds the whole reel first: clips, B-roll, music, sound effects, captions, and motion tuned for vertical. Then you get a real NLE timeline for cuts, overlays, text, images, audio, transitions, crop, and speed. So you can post what the agent makes, or take over and refine any cut."
+    }
+  ],
+  "ctaHeading": "Want the agent to edit, not just another editor?",
+  "ctaSub": "OpenNolan is a local Mac app whose AI agent makes the whole reel. Join the waitlist and get in early."
+}

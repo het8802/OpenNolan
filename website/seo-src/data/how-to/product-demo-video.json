@@ -1,0 +1,129 @@
+{
+  "cluster": "how-to",
+  "slug": "product-demo-video",
+  "targetKeyword": "how to make a product demo video",
+  "title": "How to Make a Product Demo Video That Converts",
+  "metaDescription": "How to make a product demo video for Reels, TikTok, and Shorts: lead with the outcome, show real proof, keep it short. A founder's playbook. Join the list.",
+  "eyebrow": "Demo videos",
+  "h1": "How to make a product demo video that actually converts",
+  "h1Accent": "actually converts",
+  "breadcrumbLabel": "Product demo video",
+  "hubCardTitle": "How to make a product demo video",
+  "hubCardDesc": "Lead with the outcome, not the UI tour. A short-form demo playbook for founders, plus how the agent builds it.",
+  "lede": "You built something genuinely useful, and the fastest way to prove it is a demo. But the demos founders make tend to be slow screen tours that lose people before the value lands. Here's how to make a short product demo that earns the install.",
+  "intro": [
+    "A product demo video has one job: make a stranger understand, in seconds, why your thing is worth their time. That's harder than it sounds, because the natural instinct is to start at your login screen and walk through every menu. By the time you reach the part that matters, the viewer is already gone. The demo that converts does the opposite — it opens on the result and works backward.",
+    "The villain here is the same one every builder fights: the editing tax. To make a demo that holds attention, you're told you need to record clean screen captures, cut out the dead air, drop in callouts and zooms, add captions, score it with music, and trim it to length. That's a full afternoon of editing for thirty seconds of video, every time your product changes — which, if you're shipping, is constantly.",
+    "We built OpenNolan because we're builders too, and we'd rather demo the product than edit the demo. It's a Mac app where an AI agent turns your raw screen recordings into a finished vertical cut — outcome-first, captioned, paced for the feed — then hands you a real timeline so the final version says exactly what you mean. Below is the actual playbook, useful whether or not you ever open the app."
+  ],
+  "sections": [
+    {
+      "h2": "Lead with the outcome, not the UI tour",
+      "body": [
+        "The single biggest mistake in product demos is starting with the interface. Nobody cares about your sidebar until they care about what your sidebar does for them. So open on the after: the finished result, the saved hour, the problem visibly solved. Show the destination first, then let the steps earn their place by explaining how you got there.",
+        "Practically, that means your first frame should be the payoff — the dashboard already populated, the report already generated, the thing that makes someone go \"wait, how.\" Curiosity is what buys you the next ten seconds. A UI tour answers questions nobody asked yet; an outcome creates the question that makes them watch."
+      ],
+      "checks": [
+        "First frame is the result, not the home screen",
+        "Tie every click to a benefit, not a feature name",
+        "Cut the setup, the login, and the empty states"
+      ],
+      "quote": "Show what it does before you show how it works."
+    },
+    {
+      "h2": "Screen recording, screenshot proof, and explainer animations",
+      "body": [
+        "Three kinds of footage carry a demo. Screen recording is the spine — capture the real flow at full resolution, then trim hard so every second moves. Screenshot proof is your evidence: a results graph, a before/after, a real number on screen makes the claim land in a way narration never can. And explainer animations fill the gaps a raw recording can't show — the concept behind the feature, the data flowing, the thing that happens off-screen.",
+        "You don't need all three in every demo, but you almost always want recording plus one form of proof. The recording shows it's real; the proof shows it works. Animations are the polish that makes a thirty-second clip feel like it came from a team, not a tab you forgot to close."
+      ],
+      "checks": [
+        "Screen recording trimmed to only the moments that move",
+        "Screenshot proof with the key number or result highlighted",
+        "Explainer animation for what the recording can't capture"
+      ]
+    },
+    {
+      "h2": "Keep it short, hook in the first second, caption everything",
+      "body": [
+        "Short-form demos live or die on three rules. Keep it short — under thirty seconds for the feed, and ruthless even then; a demo that needs two minutes needs a tighter idea. Win the [first second with a real hook](/learn/what-is-a-hook): open on the payoff or a pattern interrupt, never on \"hey guys, today I want to show you.\" And caption everything, because most of the feed watches on mute — burned-in captions are what carry your value prop when the sound is off.",
+        "Then close with one clear call to action. Not three. Tell the viewer the single next step — try it, star the repo, join the list — and make it the last thing they see. A demo without a CTA is a trailer with no showtime."
+      ],
+      "checks": [
+        "Under 30 seconds, cut every 1 to 3 seconds",
+        "Hook lands the value in the first second",
+        "Burned-in captions for the 85% watching on mute",
+        "One CTA, stated plainly, at the end"
+      ]
+    },
+    {
+      "h2": "How OpenNolan makes the demo for you",
+      "body": [
+        "Run the same playbook without doing the editing. Drop your screen recordings into OpenNolan, or just describe the demo you want, and the AI agent assembles the whole vertical cut: it finds the outcome moment and leads with it, trims the dead air, adds explainer animations for the parts a raw capture can't show, drops in your screenshot proof with auto-highlight, writes and burns in captions, scores it with music and sound effects, and paces it for Reels, TikTok, and Shorts.",
+        "Then you get the final say on a real timeline — retrim a clip, swap a caption, reorder a beat, fix the one line that's off. Because OpenNolan renders once and keeps edits cheap, most of those tweaks preview instantly without re-rendering. It's a Mac app, it's open source, and it's bring-your-own-key, so you pay AI providers directly with no subscription and no markup. Your recordings stay on your machine, which matters when the demo shows an unreleased feature."
+      ],
+      "checks": [
+        "Agent leads with the outcome and trims to length",
+        "Screenshot proof with auto-highlight, explainer animations, captions",
+        "Real timeline review; render once, then edit cheap"
+      ]
+    },
+    {
+      "h2": "The result: a demo you'll actually ship every week",
+      "body": [
+        "When the editing tax is gone, the demo stops being a project and becomes a habit. Shipped a feature on Tuesday? The demo goes out Tuesday, while it's still fresh, instead of sitting in a someday folder. You can spin up several cuts of a launch instead of agonizing over one. The feed rewards consistency, and consistency is exactly what manual editing makes impossible for a team of one.",
+        "That's the transformation: from a founder whose great product nobody can see, to one whose demos travel — outcome-first, proof on screen, made in the time it used to take to find a trending sound. If you want the platform-specific angle next, the [Instagram Reels how-to](/how-to/instagram-reels) and the [short-form video for SaaS](/for/saas) guide go deeper."
+      ]
+    }
+  ],
+  "stepsHeading": "The product demo video playbook, step by step",
+  "steps": [
+    {
+      "title": "Find your one outcome",
+      "body": "Before you record anything, name the single result that makes your product worth using — the saved hour, the finished report, the problem gone. That outcome is your opening frame and the spine of the whole demo. If you can't name one, the demo isn't ready; the idea is. In OpenNolan, you can just describe this outcome and the agent builds the cut around it."
+    },
+    {
+      "title": "Record the real flow, then cut it hard",
+      "body": "Capture the actual screen flow that produces the outcome, at full resolution, in one clean take if you can. Then be ruthless: trim the login, the loading, the empty states, and every pause. Keep only the seconds that move the story. OpenNolan ingests your raw recordings and trims the dead air for you, so you record loose and let the agent tighten it."
+    },
+    {
+      "title": "Stack proof and explainer beats",
+      "body": "Drop in a screenshot of the real result with the key number highlighted, and add a short animation for anything the recording can't show — the concept, the data, the off-screen magic. Proof makes the claim credible; animation makes it clear. OpenNolan adds explainer animations and auto-highlights your screenshot proof as part of the build."
+    },
+    {
+      "title": "Open with a hook and add captions",
+      "body": "Lead with the payoff in the first second, never with a slow intro. Then caption everything, because most viewers watch on mute and the captions carry your message. Ride a trending sound if it fits. OpenNolan writes and burns in captions, scores the cut with music and sound effects, and paces it for vertical automatically."
+    },
+    {
+      "title": "End on one clear CTA",
+      "body": "Close with a single next step — try it, star the repo, join the list — and make it the final frame the viewer sees. One ask, stated plainly. Multiple CTAs split attention and convert worse than one. In OpenNolan you can edit the closing card on the timeline so the ask matches whatever campaign the demo is for."
+    },
+    {
+      "title": "Review on a real timeline, then ship",
+      "body": "Watch it once end to end and fix what's off — a caption typo, a beat that drags, a clip in the wrong order. Then post it while the feature is still fresh. OpenNolan gives you a real NLE timeline for this final pass, and because it renders once and edits stay cheap, most tweaks preview instantly so reviewing every demo is fast enough that you'll actually do it."
+    }
+  ],
+  "faqs": [
+    {
+      "q": "How do I make a product demo video that converts?",
+      "a": "Lead with the outcome, not a UI tour. Open on the result your product delivers, hook the viewer in the first second, then show the real flow trimmed tight. Add screenshot proof, burned-in captions, and one clear CTA at the end. Keep it under thirty seconds for short-form feeds where most demos are now discovered."
+    },
+    {
+      "q": "How long should a short-form product demo be?",
+      "a": "For Reels, TikTok, and Shorts, aim for under thirty seconds, and cut every one to three seconds to keep attention moving. If your demo genuinely needs more, the idea is too broad — split it into several focused demos. Shorter, tighter clips travel further and earn the click better than one long walkthrough nobody finishes."
+    },
+    {
+      "q": "What should the first frame of a demo video be?",
+      "a": "The payoff. Show the finished result, the solved problem, or the surprising number before you show any menus or setup. That outcome creates the curiosity that buys you the next ten seconds. Starting on your login screen or home dashboard answers questions nobody has asked yet, and that's where most demo viewers drop off."
+    },
+    {
+      "q": "Can OpenNolan make a product demo video automatically?",
+      "a": "That's the idea. You drop in your screen recordings or describe the demo, and the AI agent assembles the whole vertical cut — outcome-first ordering, trimmed footage, explainer animations, screenshot proof with auto-highlight, captions, music, and pacing. You then refine it on a real timeline. OpenNolan is a Mac app in active development, so this is currently a waitlist."
+    },
+    {
+      "q": "Is OpenNolan available now, and what does it cost?",
+      "a": "OpenNolan is a macOS app in active development, so this is a waitlist — join with your email to be first when it ships. There's no subscription and no markup. It uses bring-your-own-key: you add your own AI provider API key and pay those providers directly. No account is required, and your recordings stay local on your Mac."
+    }
+  ],
+  "ctaHeading": "Make the demo. Skip the afternoon of editing.",
+  "ctaSub": "Be first when the Mac app ships — no spam, just the launch."
+}

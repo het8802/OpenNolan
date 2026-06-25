@@ -1,0 +1,112 @@
+{
+  "cluster": "how-to",
+  "slug": "youtube-shorts",
+  "targetKeyword": "how to make YouTube Shorts",
+  "title": "How to Make YouTube Shorts: A Founder's Playbook",
+  "metaDescription": "Learn how to make YouTube Shorts that loop, rank, and get your product found — specs, hooks, captions, repurposing long content. Join the OpenNolan waitlist.",
+  "eyebrow": "How-to",
+  "h1": "How to make YouTube Shorts that actually get watched",
+  "h1Accent": "get watched",
+  "breadcrumbLabel": "YouTube Shorts",
+  "hubCardTitle": "How to make YouTube Shorts",
+  "hubCardDesc": "Specs, hooks, captions, and the loop — the real Shorts playbook for founders who'd rather ship product.",
+  "lede": "You want your product found on YouTube without becoming a full-time editor. Shorts are the fastest lane in — if you understand the loop, the hook, and what YouTube actually surfaces.",
+  "intro": [
+    "You are a builder, not a video editor. But YouTube is where people go to figure out whether your product is worth their time, and Shorts are the cheapest way onto that surface. The catch: a Short that gets seen looks effortless and is anything but — a sharp hook, hard cuts, captions on mute, and a clean loop that pulls the viewer around again.",
+    "The villain here is the editing tax. The unwritten rule that to get discovered on YouTube you first have to learn a timeline, chase trims, sync captions, and burn a weekend per clip. Most founders pay it once, hate it, and quietly stop posting — right as the algorithm was starting to notice them.",
+    "We are builders too, and we would rather ship than scrub a playhead. **OpenNolan** is a Mac app where an AI agent makes the whole Short from your raw clips — cuts, captions, B-roll, music, motion, all tuned for 9:16 — then hands you a real timeline if you want to tweak. This guide teaches the Shorts playbook plainly, then shows where the agent does each step for you."
+  ],
+  "stepsHeading": "The YouTube Shorts playbook, step by step",
+  "steps": [
+    {
+      "title": "Get the specs right: 9:16, under 60 seconds",
+      "body": "A YouTube Short is a vertical video at 1080×1920 (9:16) that runs 60 seconds or less — that's what makes YouTube treat it as a Short and feed it into the Shorts shelf instead of regular search. Shoot or export vertical, keep faces and text away from the edges (the UI overlays buttons there), and aim short: 15–35 seconds tends to loop and retain better than a full 60. **OpenNolan** is vertical-first and exports 1080×1920 by default, so you never fight an aspect ratio."
+    },
+    {
+      "title": "Earn the first second with the hook",
+      "body": "Shorts live and die on retention, and retention starts in frame one. Open on the payoff or a pattern interrupt — the result, the surprising claim, the before/after — never a slow logo intro. If the viewer doesn't get a reason to stay in the first second, the algorithm reads the swipe-away and stops showing it. The agent is built on this playbook: it leads with your strongest moment instead of burying it. (More on this in [what is a hook](/learn/what-is-a-hook).)"
+    },
+    {
+      "title": "Cut fast and design the loop",
+      "body": "Hard-cut every 1–3 seconds to reset attention, then make the end flow back into the beginning so the Short replays seamlessly — loops are pure retention, and YouTube rewards them. End on a line that pays off the hook, or land the last frame where the first one started. OpenNolan places the rapid cuts and motion for you and keeps the pacing tight, so the clip feels alive without you nudging every edit."
+    },
+    {
+      "title": "Burn in captions for mute viewers",
+      "body": "Most people scroll Shorts on mute, so the message has to survive without sound. Burn captions directly into the video rather than relying on YouTube's auto-captions — styled, on-brand, synced to the words. They lift retention and they carry your point to anyone watching silently in a meeting. The agent writes and times captions automatically; you can restyle or fix any word on the timeline afterward."
+    },
+    {
+      "title": "Repurpose long content into Shorts",
+      "body": "Your highest-leverage move on YouTube is mining what you already have. Pull the sharpest 20–40 seconds out of a podcast clip, demo, livestream, or talk, reframe it to 9:16, and ship it as a standalone Short with its own hook. One long recording can become five Shorts. Drop your raw footage into OpenNolan, describe the moment you want, and the agent finds the beat, reframes vertical, and builds it into a finished Short."
+    },
+    {
+      "title": "Title and tag for YouTube discovery",
+      "body": "Unlike most short-form, Shorts are searchable on YouTube — so the title matters. Write a clear, keyword-aware title that says what the viewer gets, add a short description with one or two relevant terms, and let the spoken words and captions reinforce the topic. This is the SEO layer your competitors skip. Pair it with the playbook above and your Short can keep pulling views for weeks, not hours."
+    }
+  ],
+  "sections": [
+    {
+      "h2": "Why YouTube Shorts are different from Reels and TikTok",
+      "body": [
+        "Reels and TikTok are feed-and-forget — a clip spikes, then fades. YouTube Shorts behave differently because they sit on top of a search engine. A Short can be discovered through the Shorts feed today and through YouTube search months from now, which makes the title, description, and on-screen words do double duty. That's a different game than [Instagram Reels](/how-to/instagram-reels) or [TikToks](/how-to/tiktoks), where trending sound carries more of the weight.",
+        "For a founder, that durability is the whole point. A Short that explains what your product does, titled around how people actually search, keeps quietly bringing in the right viewers long after you posted it. Build for the loop and the hook to win the feed; write the title for search to win the long tail."
+      ],
+      "checks": [
+        "Searchable: titles and descriptions surface Shorts in YouTube search",
+        "Loop-driven: seamless replays compound watch time",
+        "Long-tail: one good Short can pull views for weeks"
+      ]
+    },
+    {
+      "h2": "How OpenNolan makes the whole Short for you",
+      "body": [
+        "Here is the plan, and it is three steps. Drop your clips into the Mac app (or just describe the Short you want) and bring your own AI provider key. The agent makes the whole thing — it pulls supporting B-roll and images from the web, adds music and sound effects, writes and times captions, builds the hook and the loop, and places the rapid cuts and motion, all in 9:16. Then you post it, or you tweak it first on a real timeline.",
+        "Because OpenNolan is render-once and edit-cheap, that tweaking is fast. After the first render, most edits — reorder a cut, retime a clip, fix a caption, reposition text — preview instantly without re-rendering. Only an AI-composition scene re-renders, and only the one you changed. You spend your minutes on judgment, not on waiting for export bars."
+      ],
+      "quote": "Your clips in, a finished Short out — then a real timeline if you want the last 5%.",
+      "checks": [
+        "Vertical-first 9:16 export, no aspect-ratio fights",
+        "Hooks, fast cuts, and loops built on the real playbook",
+        "Captions written, timed, and burned in for mute viewers",
+        "B-roll, music, and SFX pulled in automatically"
+      ]
+    },
+    {
+      "h2": "Common YouTube Shorts mistakes to avoid",
+      "body": [
+        "The usual ways founders lose: a slow intro that wastes the first second, a horizontal clip awkwardly letterboxed into vertical, no captions so the muted majority misses the point, an ending that just stops instead of looping, and a generic title that search can't find. Each one is small. Together they're the difference between a Short that travels and one that gets skipped.",
+        "The deeper mistake is treating Shorts as a side quest you'll get to later. If posting one clip costs a day in an editor, you'll never build the consistency the algorithm rewards. The fix isn't more discipline — it's removing the editing tax so shipping a Short costs minutes, not a weekend."
+      ]
+    },
+    {
+      "h2": "What success looks like",
+      "body": [
+        "Picture shipping a Short the same afternoon you record the clip. Your product shows up in the Shorts feed, your title catches search, the loop holds people for a second viewing, and the captions land even on mute. You post regularly because it's cheap to, and over weeks the right viewers — the ones looking for exactly what you built — keep finding you.",
+        "That's the transformation: from a reluctant editor whose product nobody sees, to a founder whose work gets discovered, with content that keeps working after you've moved on. You stay in your lane — building — and let the agent handle the reel."
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "Can I download OpenNolan to make YouTube Shorts right now?",
+      "a": "Not yet — OpenNolan is in active development and this site is a waitlist. It's a native Mac app where an AI agent turns your raw clips into a finished vertical Short, with a real timeline for tweaks. Join the waitlist and you'll be among the first in when it opens. No account needed to sign up."
+    },
+    {
+      "q": "What are the YouTube Shorts specs I need to hit?",
+      "a": "A Short is vertical 9:16 video (1080×1920) that runs 60 seconds or less — that's what puts it in the Shorts feed. Keep text and faces clear of the edges where YouTube's buttons sit, and aim shorter, around 15–35 seconds, for stronger loops. OpenNolan is vertical-first and exports 1080×1920 by default."
+    },
+    {
+      "q": "How do I turn my long YouTube videos into Shorts?",
+      "a": "Find the sharpest 20–40 second moment — a clear answer, a demo beat, a strong line — reframe it to 9:16, give it its own hook, and post it as a standalone Short. One recording can yield several. In OpenNolan you drop in the footage, describe the moment, and the agent finds the beat and builds the Short."
+    },
+    {
+      "q": "What does OpenNolan cost, and do I need an API key?",
+      "a": "OpenNolan uses bring-your-own-key: you add your own AI provider key and pay the provider directly, with no subscription and no markup. There's no account to create. Pricing for the app itself will be shared as it gets closer to release — for now, join the waitlist to follow along."
+    },
+    {
+      "q": "Is OpenNolan only for YouTube Shorts?",
+      "a": "No. It's vertical-first and exports for YouTube Shorts, Instagram Reels, and TikTok from the same project — the playbook overlaps across all three. The agent builds the 9:16 cut once, and you can adapt the hook, caption, or title per platform. It's a Mac app, macOS only for now."
+    }
+  ],
+  "ctaHeading": "Ship YouTube Shorts in minutes, not weekends",
+  "ctaSub": "Join the waitlist and be first in when the Mac app that makes the whole Short opens."
+}

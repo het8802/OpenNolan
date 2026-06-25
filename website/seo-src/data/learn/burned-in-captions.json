@@ -1,0 +1,99 @@
+{
+  "cluster": "learn",
+  "slug": "burned-in-captions",
+  "targetKeyword": "burned-in captions",
+  "title": "Burned-In Captions: What They Are & Why They Win",
+  "metaDescription": "Burned-in captions are subtitles baked into the video pixels, visible even on mute. See how they beat soft subtitles and how to style them for short-form.",
+  "eyebrow": "Captions glossary",
+  "h1": "Burned-in captions, explained for people who post on mute",
+  "h1Accent": "Burned-in captions",
+  "breadcrumbLabel": "Burned-in captions",
+  "hubCardTitle": "Burned-in captions, plainly explained",
+  "hubCardDesc": "What open captions are, how they beat soft subtitles on social, and how to style them for vertical.",
+  "lede": "Most people watch your video with the sound off. Burned-in captions are how the message still lands — baked into the pixels, always on, impossible to skip past.",
+  "intro": [
+    "**Burned-in captions** (also called open captions) are subtitles rendered permanently into the video's pixels. They are part of the picture itself, so they show up everywhere the video plays — autoplaying in a feed, embedded on a site, downloaded and reposted — with no toggle to turn them off. If the frame is visible, the caption is visible.",
+    "That permanence is the whole point on social. Around 85% of short-form gets watched with the sound off, which means a video with no on-screen text is a video most people experience in silence. Your hook, your punchline, your call to action — gone. Burned-in captions carry the message regardless of whether anyone ever taps unmute.",
+    "You are a builder, not a subtitle editor, and hand-timing words to a waveform is the kind of grind that eats an afternoon. OpenNolan is a Mac app whose AI agent writes and burns in the captions for you as part of building the whole reel — so the words land on mute without you babysitting a timeline."
+  ],
+  "sections": [
+    {
+      "h2": "Burned-in vs closed (soft) captions",
+      "body": [
+        "The difference comes down to where the text lives. **Closed (soft) captions** are a separate text track — an SRT or VTT file, or YouTube's CC layer — that the player overlays on top of the video. The viewer can turn them on or off, and the platform decides how they look. **Burned-in (open) captions** are part of the rendered video frame. No track, no toggle, no platform styling — what you designed is exactly what every viewer sees.",
+        "Soft captions are great for accessibility menus and SEO indexing because the text stays machine-readable. But on Reels, TikTok, and Shorts, autoplay defaults to muted and most viewers never touch the caption toggle. Burning the text in guarantees it appears, and it lets you control the look completely instead of accepting the platform's plain default style."
+      ],
+      "checks": [
+        "Soft captions: a separate file, viewer can toggle, platform controls the styling",
+        "Burned-in captions: baked into the frame, always visible, you control every pixel",
+        "Soft survives reposts as a missing track; burned-in survives reposts intact"
+      ]
+    },
+    {
+      "h2": "Why mute viewing makes burned-in captions non-optional",
+      "body": [
+        "Short-form feeds autoplay silently by default. A viewer is scrolling in a coffee shop, on a train, in a meeting they shouldn't be in — sound off. The roughly 85% mute-watch figure isn't a niche edge case; it is the default condition your video has to perform under. Plan for silence first and treat sound as a bonus.",
+        "Burned-in captions are what make a muted video still readable in the [first second that decides everything](/learn/what-is-a-hook). They keep the viewer's eyes busy while the cuts do their work, and they let your hook do its job before anyone reaches for the volume. No captions, and a muted scroller has no reason to stop."
+      ],
+      "quote": "If 85% watch on mute, a video without burned-in captions is a video most people never actually hear."
+    },
+    {
+      "h2": "Styling burned-in captions for short-form",
+      "body": [
+        "Static subtitles at the bottom of the frame are a film convention, not a short-form one. The style that performs on social is **word-by-word**, sometimes called karaoke captions: large, centered text where each word pops in on beat as it's spoken, often with the active word highlighted. The motion itself is attention — it gives the eye something changing in every frame, which is the same reason short-form leans on [fast cuts and jump cuts](/learn/jump-cut).",
+        "A few things make burned-in captions readable rather than noisy: a heavy sans-serif weight, a contrast outline or pill background so text survives any footage behind it, and placement in the safe zone — clear of the platform's UI buttons and the bottom progress bar. Keep one to three words on screen at a time so the eye reads in a glance, not a paragraph."
+      ],
+      "checks": [
+        "Word-by-word reveal synced to the spoken audio",
+        "Bold, high-contrast type with an outline or background pill",
+        "Centered, large, one to three words at a time",
+        "Inside the safe zone, clear of platform UI and the progress bar"
+      ]
+    },
+    {
+      "h2": "Accessibility: burned-in is a floor, not a ceiling",
+      "body": [
+        "Burned-in captions help anyone watching without sound, including viewers who are deaf or hard of hearing, and that's a real accessibility win. But there is an honest trade-off: because the text is baked into the pixels, a screen reader can't parse it, and viewers can't resize it or translate it the way a soft track allows. Open captions are visual, not programmatic.",
+        "The pragmatic approach for short-form is both. Burn captions in so the message always shows, and let the platform's auto-generated soft captions ride along underneath for the people who use a screen reader or want to translate. You get guaranteed on-screen text without giving up the machine-readable layer."
+      ]
+    },
+    {
+      "h2": "How OpenNolan generates burned-in captions",
+      "body": [
+        "In OpenNolan, captions aren't a separate chore — the AI agent transcribes your clips, writes the on-screen text, and burns it into the vertical cut as part of assembling the whole reel. You get word-by-word, mute-ready captions sitting in the safe zone without opening a caption editor or dragging a single keyframe.",
+        "Because the app follows a render-once, edit-cheap model, fixing a caption is cheap. Change the wording, restyle the text, nudge the timing — most edits preview instantly on the real timeline without a full re-render. And since OpenNolan is bring-your-own-key and runs locally on your Mac, your footage never leaves your machine while the agent does the work.",
+        "OpenNolan isn't downloadable yet — the app is in active development and this is a waitlist. Captions are one piece of the agent building a finished [short-form video](/learn/short-form-video) end to end, from hook to B-roll to the last cut."
+      ],
+      "checks": [
+        "Agent transcribes and writes the captions automatically",
+        "Word-by-word style burned into the vertical 9:16 frame",
+        "Restyle or re-time captions instantly, no full re-render",
+        "Local-first and bring-your-own-key — footage stays on your Mac"
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "What are burned-in captions?",
+      "a": "Burned-in captions, also called open captions, are subtitles rendered permanently into the video's pixels. They're part of the picture rather than a separate text track, so they appear everywhere the video plays and can't be toggled off. That's why they're the standard for short-form, where most viewers watch on mute."
+    },
+    {
+      "q": "What's the difference between burned-in and closed captions?",
+      "a": "Closed (soft) captions are a separate file, like an SRT or VTT, that the player overlays and the viewer can turn off. Burned-in (open) captions are baked into the video frame itself — always visible, no toggle, and styled exactly how you designed them. Soft captions stay machine-readable; burned-in captions guarantee the text always shows."
+    },
+    {
+      "q": "Do burned-in captions hurt accessibility?",
+      "a": "They help mute and hard-of-hearing viewers, but the baked-in text can't be read by a screen reader, resized, or translated. The honest best practice is to do both: burn captions in so the message always appears, and let the platform's auto soft captions ride along underneath for screen-reader and translation support."
+    },
+    {
+      "q": "Can OpenNolan generate burned-in captions automatically?",
+      "a": "Yes. The AI agent transcribes your clips, writes the on-screen text, and burns word-by-word captions into the vertical cut as part of building the reel — no caption editor required. The app isn't released yet, though; OpenNolan is in active development and you can join the waitlist to get early access."
+    },
+    {
+      "q": "Is OpenNolan a subscription, and what platform does it run on?",
+      "a": "Neither a subscription nor a markup. OpenNolan is a native Mac app that's bring-your-own-key: you add your own AI provider key and pay providers directly, with no account required. It's open source and runs locally, so your footage stays on your machine. It's macOS-only and currently on the waitlist."
+    }
+  ],
+  "ctaHeading": "Let the agent write your captions on mute",
+  "ctaSub": "Join the waitlist and get burned-in, word-by-word captions baked into every reel — no timeline required."
+}

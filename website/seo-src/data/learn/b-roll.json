@@ -1,0 +1,99 @@
+{
+  "cluster": "learn",
+  "slug": "b-roll",
+  "targetKeyword": "B-roll",
+  "title": "What Is B-Roll? A Plain Guide for Founders",
+  "metaDescription": "B-roll is the supporting footage cut over your main shot to add motion and hold attention. Learn what it is, where to get it, and how to use it well.",
+  "eyebrow": "Glossary",
+  "h1": "What is B-roll, and why does every good video have it?",
+  "h1Accent": "B-roll",
+  "breadcrumbLabel": "B-roll",
+  "hubCardTitle": "B-roll: definition and how to use it",
+  "hubCardDesc": "The supporting footage that adds motion, makes your point, and keeps people watching. Plain-English guide.",
+  "lede": "You filmed yourself talking. It works, but it sits there. B-roll is the cutaway footage that gives the eye something new every couple of seconds — the difference between a clip people watch and one they scroll past.",
+  "intro": [
+    "**B-roll is the supplementary footage you cut over your main shot to illustrate a point, add motion, and hold attention.** If the camera pointed at you talking is the spine of the video, B-roll is everything you cut to in between — a screen recording of your product, a quick stock shot, an animated diagram, a photo pulled from the web. It carries the story when your face alone would get stale.",
+    "Here's the catch for founders: you know the talking-head clip on its own feels flat next to what's on the feed, but sourcing, trimming, and placing B-roll is exactly the kind of fiddly editing work that eats an afternoon. That's the editing tax — the unwritten rule that to look good you have to become a part-time editor.",
+    "We built OpenNolan because we're builders too, and we'd rather ship product than babysit a timeline. This page is the honest version of what B-roll is and how to use it well — and where an AI agent can do the sourcing and placing for you so you don't have to."
+  ],
+  "sections": [
+    {
+      "h2": "A-roll vs B-roll: the two layers of any video",
+      "body": [
+        "**A-roll** is your primary footage — the main thing the video is about. For a founder that's usually you on camera explaining the product, or a screen demo you narrate. It carries the words and the throughline.",
+        "**B-roll** is the secondary footage layered over or cut between A-roll. It doesn't drive the narration; it supports it. When you say \"users were dropping off at checkout,\" the B-roll is the screen recording of that checkout flow. The audio keeps running underneath, so the cut never breaks your point — it just gives the viewer something to look at while you make it."
+      ],
+      "checks": [
+        "A-roll = the main shot that carries the message",
+        "B-roll = cutaways that illustrate and add motion",
+        "B-roll usually plays under continuous A-roll audio",
+        "Good videos alternate between the two constantly"
+      ]
+    },
+    {
+      "h2": "Why B-roll holds attention",
+      "body": [
+        "Short-form lives and dies on the first second and every second after. A static talking head gives the eye nothing new, and attention leaks. Every cut to B-roll is a small visual reset — the same reason [fast cuts every one to three seconds](/learn/jump-cut) keep people watching. New frame, renewed attention.",
+        "B-roll also does work words can't. Telling someone your dashboard is clean is weak; showing two seconds of the dashboard is proof. That's the \"show receipts\" rule of the short-form playbook — screenshots, stats, and real footage make a claim land and convert far better than narration alone."
+      ],
+      "quote": "Don't tell them it's good. Cut to two seconds of it being good."
+    },
+    {
+      "h2": "Where founders actually get B-roll",
+      "body": [
+        "You don't need a film crew. There are four practical sources, and most reels mix all of them:"
+      ],
+      "checks": [
+        "**Screen recordings** — your product, dashboard, terminal, or browser in action. The highest-converting B-roll for builders, because it's real proof.",
+        "**Stock footage** — generic shots for mood or context (a city, hands typing, a coffee). Fast, but can feel generic if overused.",
+        "**AI-generated B-roll** — short clips generated to match your script when no real footage exists for the idea.",
+        "**Images from the web** — logos, screenshots, charts, photos dropped in and held on screen with a little motion."
+      ]
+    },
+    {
+      "h2": "How to cut B-roll in (the manual way)",
+      "body": [
+        "Done by hand, the loop looks like this: find the moment in your A-roll where a claim needs support, source a clip for it, drop it on a track above your main footage, trim it to roughly two seconds, and let the A-roll audio keep playing underneath. Repeat for every claim. Then nudge each cut so the B-roll lands on the word it illustrates, not a beat early or late.",
+        "It's not hard. It's just slow, and there's a lot of it. A two-minute reel can need a dozen cutaways, and every re-trim means re-watching. This is the part of editing that quietly turns into your whole evening."
+      ]
+    },
+    {
+      "h2": "How OpenNolan pulls and places B-roll for you",
+      "body": [
+        "OpenNolan is a Mac app where an AI agent makes the whole vertical reel from your raw clips. B-roll is a big part of what it handles: it reads your script, finds the moments that need support, and pulls supporting images and B-roll from the web — plus AI-generated B-roll video and screenshot proof with auto-highlight when that fits better. Then it places each cutaway on the timeline, timed to the line it illustrates.",
+        "You stay the editor. Every placement lands on a real timeline, so you can swap a clip, retrim a cutaway, or move it a beat — and because OpenNolan renders once and keeps edits cheap, those tweaks preview instantly without re-rendering the whole video. See [how the agent builds a Reel end to end](/how-to/instagram-reels), or browse [everything the agent can do](/#features).",
+        "It's bring-your-own-key and open source: you add your own AI provider key and pay providers directly, with no subscription and no markup. The app isn't released yet — this is the waitlist — but B-roll automation is core to what it does."
+      ],
+      "checks": [
+        "Agent finds moments that need a cutaway",
+        "Pulls B-roll and images from the web, or generates them",
+        "Places each clip timed to the line it supports",
+        "You retrim and swap on a real timeline, instantly"
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "What is B-roll in simple terms?",
+      "a": "B-roll is the supplementary footage you cut over your main shot to illustrate a point and keep the video moving. If A-roll is you talking, B-roll is everything you cut to while you talk — a screen recording, a stock clip, a photo, an animation. It carries the visuals so a single talking head never gets stale."
+    },
+    {
+      "q": "What's the difference between A-roll and B-roll?",
+      "a": "A-roll is your primary footage that carries the message — usually you on camera or a narrated demo. B-roll is the secondary footage layered over or between it to support the point. The A-roll audio keeps running while B-roll plays on screen, so cutaways add motion and proof without breaking your narration."
+    },
+    {
+      "q": "Where do founders get B-roll without filming more?",
+      "a": "Four sources cover almost everything: screen recordings of your product (the strongest proof), stock footage for mood, AI-generated clips when no real footage exists, and images pulled from the web. Most reels mix all four. OpenNolan's agent sources from these automatically, so you don't have to hunt for clips by hand."
+    },
+    {
+      "q": "Does OpenNolan add B-roll automatically?",
+      "a": "Yes — that's a core part of what the agent does. It reads your script, finds the moments that need support, pulls B-roll and images from the web or generates them, and places each cutaway on the timeline timed to the line it illustrates. You can then retrim or swap anything on a real timeline, with edits previewing instantly."
+    },
+    {
+      "q": "Can I download OpenNolan today, and what does it cost?",
+      "a": "Not yet — OpenNolan is in active development and this site is the waitlist. It's a native Mac app, bring-your-own-key and open source: you add your own AI provider key and pay those providers directly, with no subscription and no markup from us. Join the waitlist to get access when it ships."
+    }
+  ],
+  "ctaHeading": "Get B-roll placed for you, not chased",
+  "ctaSub": "Join the waitlist and let the agent source and time your cutaways — while you stay the editor."
+}

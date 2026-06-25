@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Landing page + waitlist for the OpenNolan Mac app",
   "scripts": {
-    "dev": "vercel dev",
+    "dev": "npx --yes serve --listen 8787",
     "deploy": "vercel deploy --prod"
   },
   "dependencies": {}

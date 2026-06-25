@@ -1,0 +1,121 @@
+{
+  "cluster": "how-to",
+  "slug": "instagram-reels",
+  "targetKeyword": "how to make Instagram Reels",
+  "title": "How to Make Instagram Reels That Get Reach",
+  "metaDescription": "How to make Instagram Reels that get reach: specs, hooks, trending audio, fast cuts, captions, covers, and a real playbook. See how OpenNolan does it for you.",
+  "eyebrow": "Instagram Reels",
+  "h1": "How to make Instagram Reels that actually get reach",
+  "h1Accent": "get reach",
+  "breadcrumbLabel": "Instagram Reels",
+  "hubCardTitle": "How to make Instagram Reels",
+  "hubCardDesc": "Specs, hooks, trending audio, captions and a real playbook — plus how OpenNolan builds the whole Reel for you.",
+  "lede": "You want your product seen on Instagram, not a second career in editing. This is the real Reels playbook — specs, hooks, audio, cuts, captions — followed by how OpenNolan runs it for you.",
+  "intro": [
+    "You're a builder, and the feed is where people find products now. So you want to make Instagram Reels that get reach — clips that stop the thumb, get watched to the end, and send a few of those viewers to your landing page. The problem is that the Reels that travel don't look like the ones you can make on a busy Tuesday.",
+    "The villain here is the editing tax: the unwritten rule that to get reach you must turn yourself into a part-time editor. Find a trending sound, cut to the beat, size everything around Instagram's UI, burn in captions, design a cover that earns the grid spot. Each Reel becomes an evening, and the cadence Instagram rewards quietly burns you out before you build a habit.",
+    "We built OpenNolan because we'd rather ship product than babysit a timeline. It's a Mac app where an AI agent makes the **whole** vertical Reel from your raw clips — and then hands you a real editor for the final cut. This guide is genuinely useful even if you never touch it: learn the playbook first, then see how each step gets done for you."
+  ],
+  "sections": [
+    {
+      "h2": "Get the Reel specs right: 9:16, length, and safe zones",
+      "body": [
+        "Start with the frame, because Instagram is unforgiving about it. Reels are vertical: shoot and export at **9:16, 1080×1920**. Anything else gets letterboxed or cropped, and a black bar in the feed reads as low effort before a word is spoken.",
+        "Then mind the safe zones. Instagram lays its own UI over your video — the caption, username, audio tag, and the right-hand action rail of like, comment, share, and save buttons. Keep your hook text and key visuals in the middle of the frame, roughly the central 80%, so nothing important hides behind a button. On length, shorter usually wins: 7 to 20 seconds is the sweet spot for reach, because completion rate matters more than runtime, and a tight Reel is easy to rewatch."
+      ],
+      "checks": [
+        "Export 9:16 at 1080×1920 — full-bleed, no bars",
+        "Keep text and faces inside the central safe zone",
+        "Aim for 7–20s; reward completion, not runtime",
+        "Leave the bottom-left clear of Instagram's caption overlay"
+      ]
+    },
+    {
+      "h2": "The hook, trending audio, and fast cuts that earn the watch",
+      "body": [
+        "Reach is won in the first second. Open on the payoff or a pattern interrupt — the result, the bold claim, the surprising before — not a slow intro. If your first frame is a logo or a throat-clear, the scroll wins. Want to go deeper on this one move? The [anatomy of a hook](/learn/what-is-a-hook) breaks down why the first second decides everything.",
+        "Audio is Instagram's quiet ranking lever. Riding a trending sound from the Reels audio library gives the algorithm a reason to push your clip onto more For You pages, and the beat gives you a natural cut rhythm. Then keep it moving: a hard cut every 1 to 3 seconds resets attention and stops the brain from drifting. Flat, single-take talking is a desktop habit; the Reels feed rewards motion."
+      ],
+      "quote": "Win the first second, ride the sound, cut before they get bored."
+    },
+    {
+      "h2": "Captions, covers, and the posting playbook",
+      "body": [
+        "Most of the feed watches on mute, so burned-in captions aren't optional — they carry the message when there's no sound, and they keep viewers reading instead of swiping. Add receipts where you can: a screenshot, a metric, a real result makes the claim land and turns watchers into clickers.",
+        "Two finishing moves decide whether a Reel earns its place. The cover, or thumbnail, is the still that represents your Reel in the grid and the Reels tab — design it with a few clear words so a browser knows the payoff before tapping. For posting, write a caption that adds context, use a handful of specific, relevant hashtags rather than a wall of generic ones, and post when your audience is actually online. Consistency beats any single perfect Reel — the algorithm rewards people who show up."
+      ],
+      "checks": [
+        "Burn in captions — most viewers watch on mute",
+        "Show proof: screenshots, stats, real results",
+        "Design a cover with a clear, readable payoff",
+        "Use a few specific hashtags, not a generic wall",
+        "Post consistently — cadence compounds reach"
+      ]
+    },
+    {
+      "h2": "How OpenNolan makes the whole Reel for you",
+      "body": [
+        "Now the part where you skip the editing tax. In OpenNolan, you drop in your raw clips — or just describe the Reel — and the AI agent runs the playbook above. It opens on a hook, finds music and sound effects, pulls supporting B-roll and images from the web, cuts fast, animates overlays, and burns in captions, all framed for 9:16 with the safe zones respected.",
+        "Then it hands you a real timeline, so the final cut still sounds like you. Retrim a clip, swap a caption, reorder a scene — and because OpenNolan renders once and edits cheap, most tweaks preview instantly with no re-render. It's a native Mac app with [bring-your-own-key](/for/founders) pricing: add your own AI provider key, pay providers directly, no subscription, no markup, and your clips stay on your machine.",
+        "The outcome is the one you actually wanted: ship scroll-stopping Reels as fast as you ship product. Your Instagram gets discovered, the content travels, and you never became a video editor to make it happen."
+      ],
+      "checks": [
+        "Drop in clips or describe the Reel — agent builds the cut",
+        "Hook, trending-style audio, fast cuts, captions, B-roll",
+        "Framed 9:16 with Instagram's safe zones respected",
+        "Real timeline for the final word — render once, edit cheap"
+      ]
+    }
+  ],
+  "stepsHeading": "The step-by-step playbook for making an Instagram Reel",
+  "steps": [
+    {
+      "title": "Plan one clear idea and hook",
+      "body": "Pick a single payoff per Reel — one result, one tip, one before-and-after. Decide the first-second hook before you record: the line or visual that makes a scroller stop. If you can't say the hook in five words, the idea is too broad for the feed. In OpenNolan you can just describe this idea and let the agent shape it into a hook."
+    },
+    {
+      "title": "Capture vertical footage at 9:16",
+      "body": "Record in 9:16 / 1080×1920 from the start so nothing gets cropped later. Get a few takes and a little extra B-roll — product on screen, your hands, the result. Keep faces and any on-screen text inside the central safe zone, away from Instagram's caption and button overlays. Rough, real clips are fine; the editing is the part you're about to skip."
+    },
+    {
+      "title": "Cut to a tight, motion-driven sequence",
+      "body": "Trim to the moments that move the story and hard-cut every 1 to 3 seconds to reset attention. Lay it over a trending sound so the cuts ride the beat. Aim for 7 to 20 seconds total. This is the slow part by hand — in OpenNolan the agent does the cutting, timing, music, and B-roll for you, framed for vertical."
+    },
+    {
+      "title": "Add captions, proof, and motion overlays",
+      "body": "Burn in captions for the mute majority, drop in a screenshot or stat as proof, and add light motion — text reveals, highlights — so the frame never sits still. OpenNolan writes and burns in the captions, auto-highlights screenshot proof, and animates overlays as part of building the cut."
+    },
+    {
+      "title": "Design a cover and write the post",
+      "body": "Make a cover still with a few clear words so the Reel earns its grid spot. Write a caption that adds context, add a few specific hashtags, and pick a posting time when your audience is online. A strong cover lifts taps from the Reels tab and your profile grid, where a lot of reach quietly comes from."
+    },
+    {
+      "title": "Review, export, and ship — then do it again",
+      "body": "Watch it once on mute and once with sound. Fix the one beat that drags. Export at 1080×1920 and post. Then repeat, because cadence is what compounds on Instagram. OpenNolan's render-once model makes review fast enough that you'll actually do it before every Reel goes out, so consistency stops being the thing that breaks."
+    }
+  ],
+  "faqs": [
+    {
+      "q": "What are the right specs for an Instagram Reel?",
+      "a": "Export vertical at 9:16, 1080×1920, so it fills the feed with no black bars. Keep your hook text and key visuals inside the central safe zone, away from Instagram's caption and the right-hand button rail. For reach, 7 to 20 seconds usually beats longer runs, because completion rate matters more than length."
+    },
+    {
+      "q": "How do trending audio and the hook help a Reel get reach?",
+      "a": "A trending sound from Instagram's Reels audio library gives the algorithm a reason to push your clip to more For You pages, and the beat sets your cut rhythm. The hook earns the watch in the first second — open on the payoff, not an intro. Together they decide whether a Reel travels or gets skipped."
+    },
+    {
+      "q": "Can I make Instagram Reels without any editing experience?",
+      "a": "Yes — that's the whole point of OpenNolan. You drop in raw clips or describe the Reel, and the AI agent builds the full vertical cut: hook, trending-style audio, fast cuts, captions, B-roll, and motion, all framed 9:16. You start from a finished Reel, not a blank timeline, and only tweak if you want to."
+    },
+    {
+      "q": "Is OpenNolan available to download yet?",
+      "a": "Not yet. OpenNolan is a Mac app in active development, and this is a waitlist. Add your email and you'll be first to know the moment it ships. We'd rather launch something you can rely on for weekly Reels than push a download before it's ready to carry your content."
+    },
+    {
+      "q": "How much does OpenNolan cost?",
+      "a": "There's no subscription and no markup. OpenNolan uses bring-your-own-key: you add your own AI provider API key and pay those providers directly for what you use. No account is required, and because it's a native Mac app, your clips stay local. App pricing lands closer to launch — join the waitlist to hear first."
+    }
+  ],
+  "ctaHeading": "Make Reels that get reach — without the editing",
+  "ctaSub": "Be first when the Mac app ships — no spam, just the launch."
+}

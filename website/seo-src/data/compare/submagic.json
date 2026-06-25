@@ -1,0 +1,131 @@
+{
+  "cluster": "compare",
+  "slug": "submagic",
+  "targetKeyword": "OpenNolan vs Submagic",
+  "title": "OpenNolan vs Submagic: Whole Reel, Not Just Captions",
+  "metaDescription": "OpenNolan vs Submagic: Submagic captions a clip you cut. OpenNolan is a Mac-native AI agent that builds the whole vertical reel. Join the waitlist.",
+  "eyebrow": "vs Submagic",
+  "h1": "OpenNolan vs Submagic: captions on a clip, or the whole reel",
+  "h1Accent": "the whole reel",
+  "breadcrumbLabel": "vs Submagic",
+  "hubCardTitle": "OpenNolan vs Submagic",
+  "hubCardDesc": "Submagic enhances a clip you already cut. OpenNolan's AI agent builds the entire vertical reel.",
+  "lede": "You want short-form that gets your product discovered — not another tool that only kicks in after you've already done the editing. The hard part isn't the captions. It's making the whole reel.",
+  "intro": [
+    "You're a founder or builder, not an editor. You want your product seen on Reels, TikTok, and Shorts — and you want the work of getting there to disappear. Submagic is a real help with one slice of that: paste in a clip and it adds fast, animated captions, suggests B-roll, drops in zooms and sound effects. If you've already cut a video, it makes it punchier.",
+    "But notice the villain hiding in that sentence: **you already cut the video.** The editing tax — choosing the hook, finding the clips, pacing the cuts, pulling proof, scoring it to music — still lands on you. A captioning layer decorates the result. It doesn't do the part that eats your whole week.",
+    "OpenNolan is built for the part before the captions. It's a **Mac app where an AI agent assembles the entire reel** from your raw clips — structure, B-roll and images from the web, screenshots with auto-highlight, music, sound effects, motion, and yes, captions too. Then you fine-tune anything on a real timeline. We're builders who'd rather ship than learn an editor, so we made the agent do the editing."
+  ],
+  "sections": [
+    {
+      "h2": "An enhancement layer vs a whole-video agent",
+      "body": [
+        "Here's the fair, structural difference. Submagic is an enhancement layer: it takes a clip you provide and makes it look like short-form — captions, emojis, zooms, B-roll suggestions, SFX. It's web-based and subscription-priced, and it's genuinely fast at that job.",
+        "OpenNolan starts a step earlier. The agent takes your raw footage (or just a description) and **builds the reel from scratch** — it picks the hook, places the clips, cuts to rhythm, pulls supporting B-roll and images, adds music and sound, animates overlays, and burns in captions. Submagic decorates the clip; OpenNolan does the editing."
+      ],
+      "checks": [
+        "Submagic: captions, zooms, emojis, B-roll suggestions on a clip you supply",
+        "OpenNolan: hook, structure, cuts, B-roll, screenshots, music, motion, captions",
+        "Submagic improves a finished cut; OpenNolan makes the cut for you"
+      ],
+      "quote": "Submagic polishes the clip. OpenNolan builds the reel the clip belongs to."
+    },
+    {
+      "h2": "How the editing actually happens",
+      "body": [
+        "With a captioning tool, the editing workflow is still yours. You decide the order, trim the silences, choose what's on screen — then the tool layers style on top. That's fine if you already know your way around an edit. It's a wall if you're a builder who never wanted to learn one.",
+        "OpenNolan flips it. **The agent does the first pass of editing**, then hands you a real NLE timeline to adjust cuts, captions, overlays, images, audio, transitions, crop, and speed. And because of our **render-once, edit-cheap** model, most of those tweaks — reorder, retrim, retime, reposition — preview instantly without re-rendering. You stay in control without doing the grunt work. Want the underlying moves? See our [Instagram Reels playbook](/how-to/instagram-reels)."
+      ],
+      "checks": [
+        "Agent builds the whole composition, not just the styling",
+        "Real timeline editor for full manual control afterward",
+        "Render once; most edits preview instantly, no re-render"
+      ]
+    },
+    {
+      "h2": "Mac-native, local, BYOK, open source",
+      "body": [
+        "Submagic runs in the browser on a subscription, with your files passing through its service. That's a normal, convenient model for a web tool.",
+        "OpenNolan is a different shape on purpose. It's a **native macOS app** that runs on your machine — your footage stays local. You **bring your own AI provider key** and pay providers directly, with no markup and no subscription, no account required. And it's **open source**, so you can see exactly how the agent works. For a deeper look at the pieces, browse the [feature overview](/#features) or our [CapCut comparison](/compare/capcut)."
+      ],
+      "checks": [
+        "Native Mac app, not a web subscription",
+        "Local-first: your files stay on your machine",
+        "Bring your own key — pay providers directly, no markup",
+        "Open source"
+      ]
+    },
+    {
+      "h2": "Which one fits where you are",
+      "body": [
+        "If you're already comfortable editing and just want faster, prettier captions on a clip you cut yourself, Submagic does that well — it's a solid enhancement layer and we won't pretend otherwise.",
+        "If the real blocker is that you don't have time to edit at all — you have raw clips and a product to ship — then a captioning tool only covers the last 10%. OpenNolan is for the founder who wants the **whole reel made** and then the option to tune it. The outcome we're after: scroll-stopping short-form that ships as fast as your product, without you becoming an editor."
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "Is OpenNolan vs Submagic a fair comparison if Submagic is mainly a captions tool?",
+      "a": "Yes, because the overlap is real but partial. Submagic is excellent at automatic animated captions and enhancing a clip you already edited. OpenNolan also writes burned-in captions, but it does the whole job before that — structuring the reel, cutting, pulling B-roll, adding music and motion. They meet at captions and diverge everywhere else."
+    },
+    {
+      "q": "Can OpenNolan make the whole video, not just style it?",
+      "a": "That's the core idea. The AI agent assembles the entire vertical reel from your raw clips or a description: hook, fast cuts, B-roll and images from the web, screenshots with auto-highlight, music, sound effects, motion, and captions. Then you can refine any cut on a real timeline. It builds the reel rather than decorating one you already made."
+    },
+    {
+      "q": "Does OpenNolan use a subscription like Submagic?",
+      "a": "No. Submagic is a subscription web tool. OpenNolan is bring-your-own-key: you add your own AI provider API key and pay those providers directly, with no markup and no subscription. There's no account to create. Your footage stays local because it's a native Mac app, and the project is open source."
+    },
+    {
+      "q": "Is OpenNolan available to download right now?",
+      "a": "Not yet — OpenNolan is in active development and this is the waitlist. Submagic is live today as a web app. If a Mac-native agent that builds the whole reel (not just captions) is what you want, join the waitlist and we'll let you know the moment early access opens."
+    },
+    {
+      "q": "Is OpenNolan only for Mac?",
+      "a": "Yes. OpenNolan is a native macOS desktop app, which is what lets it render locally and keep your files on your machine. Submagic, by contrast, is web-based and works across platforms in a browser. If you're on macOS and want local, open-source, bring-your-own-key short-form editing, OpenNolan is built for you."
+    }
+  ],
+  "ctaHeading": "Want the whole reel made, not just captioned?",
+  "ctaSub": "Join the waitlist for the Mac app whose AI agent builds the entire reel — and let you tune every cut after.",
+  "comparison": {
+    "competitor": "Submagic",
+    "intro": "Submagic is great at fast, animated captions and enhancing a clip you already cut. OpenNolan starts earlier — an AI agent builds the whole vertical reel, then hands you a real timeline to refine.",
+    "rows": [
+      {
+        "feature": "Who it's for",
+        "openNolan": "Founders and builders who want the whole reel made, not just styled",
+        "competitor": "Creators who already edit and want faster, prettier captions"
+      },
+      {
+        "feature": "How editing happens",
+        "openNolan": "AI agent builds structure, cuts, B-roll, music and captions; you refine on a real timeline",
+        "competitor": "You cut the clip; the tool layers captions, zooms, emojis and B-roll suggestions on top"
+      },
+      {
+        "feature": "Scope of the job",
+        "openNolan": "Whole-reel agent: hook, clips, B-roll, screenshots, music, motion, captions",
+        "competitor": "Enhancement layer on a clip you provide"
+      },
+      {
+        "feature": "Platform",
+        "openNolan": "Native macOS app, runs on your machine",
+        "competitor": "Web app, works across platforms in a browser"
+      },
+      {
+        "feature": "Pricing model",
+        "openNolan": "Bring your own AI key, pay providers directly, no subscription or markup",
+        "competitor": "Subscription"
+      },
+      {
+        "feature": "Where your files live",
+        "openNolan": "Local-first — footage stays on your Mac",
+        "competitor": "Files pass through the web service"
+      },
+      {
+        "feature": "Open source",
+        "openNolan": "Yes",
+        "competitor": "No"
+      }
+    ]
+  }
+}

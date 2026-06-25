@@ -1,0 +1,87 @@
+{
+  "cluster": "learn",
+  "slug": "what-is-a-hook",
+  "targetKeyword": "video hook",
+  "title": "What Is a Video Hook? The First Second Explained",
+  "metaDescription": "A video hook is the first second that stops the scroll. Learn the hook types, founder examples, and common mistakes — then see how OpenNolan opens on yours.",
+  "eyebrow": "Hook, defined",
+  "h1": "What is a video hook (and why the first second decides everything)",
+  "h1Accent": "video hook",
+  "breadcrumbLabel": "Hook",
+  "hubCardTitle": "What is a video hook?",
+  "hubCardDesc": "The first ~1 second that stops the scroll. Hook types, founder examples, and the mistakes to avoid.",
+  "lede": "You made the video. Nobody watched past the first frame. The hook is the part that decides whether your product gets seen at all — and most founders give it away for free.",
+  "intro": [
+    "A **video hook** is the first roughly one second of a short-form video — the moment that stops a thumb mid-scroll. It works one of two ways: it shows the **payoff up front** (the result, the surprise, the punchline) before any setup, or it uses a **pattern interrupt** (an unexpected image, motion, or claim) that the brain can't ignore. Everything after the hook only matters if the hook earns the watch.",
+    "Here's the part that stings for builders. You can have the best product on the feed and still get skipped, because the videos that travel don't open the way ours instinctively do. We start with context — \"hey, so I've been working on this thing\" — and by the time we reach the good part, the viewer is already three videos away. The first second was the whole game, and we spent it warming up.",
+    "We built OpenNolan because we're builders too, and we'd rather ship product than sit in a timeline relearning this every week. This page is the plain-English version of what a hook is and how to build one — and at the end, how the agent opens your reel on the hook automatically so you don't have to think about it."
+  ],
+  "sections": [
+    {
+      "h2": "Why the first second matters more than the rest",
+      "body": [
+        "Short-form platforms decide whether to push your video based on early signals — and the earliest, strongest signal is whether people keep watching past the opening. A scroller gives you a fraction of a second to answer one question: is this worth my attention? If the answer isn't obvious before the first sentence finishes, they're gone, and the algorithm reads that as \"don't show this to more people.\"",
+        "This is why a weak hook quietly caps everything downstream. Your edit can be tight, your captions clean, your product genuinely great — none of it gets seen if the first second doesn't land. Fixing the hook is the single highest-leverage change you can make to a video that isn't getting reach."
+      ],
+      "quote": "The first second isn't the intro to the video. It is the video, as far as the scroll is concerned."
+    },
+    {
+      "h2": "The five hook types that actually stop the scroll",
+      "body": [
+        "Most strong hooks fall into one of a handful of shapes. You don't need all of them — you need one, executed in the first second. Reach for whichever fits the clip you already have."
+      ],
+      "checks": [
+        "Payoff-first: open on the result or the surprise, then explain how you got there. \"This took 4 hours to build\" over the finished thing — not a slow lead-up to it.",
+        "Pattern interrupt: an unexpected visual, motion, or cut that breaks the feed's rhythm and makes the eye stop before the brain decides to.",
+        "Bold claim: a confident, specific statement that's slightly hard to believe — so people stay to see if you back it up.",
+        "Question: name the exact problem your viewer has out loud, so they feel seen and need the answer.",
+        "Visual hook: a striking on-screen image — a chart spiking, a before/after, a screenshot with the number highlighted — that carries the message with zero words."
+      ]
+    },
+    {
+      "h2": "Hook examples for founders (and the mistakes to skip)",
+      "body": [
+        "Concrete beats abstract. If you're shipping a product, your hook usually lives inside something you already have on screen: a metric, a demo moment, a reaction. \"We hit 10k users with no marketing team\" (bold claim), \"watch what happens when you paste a messy spreadsheet here\" (payoff-first on the demo), or simply opening on the dashboard with the key number already highlighted (visual). Each one earns the next two seconds.",
+        "The mistakes are predictable because almost everyone makes them. Don't open with a logo or a title card — that's a stop sign, not a hook. Don't say \"hi guys, in this video\" — you've spent the only second that mattered on a greeting. Don't bury the interesting part at second eight; move it to second zero. And don't whisper a bold claim quietly — a strong hook is delivered like you believe it.",
+        "If you want the wider system the hook sits inside, see how it connects to [short-form pacing and structure](/learn/short-form-video). The hook gets the watch; the rest of the playbook keeps it."
+      ]
+    },
+    {
+      "h2": "How OpenNolan opens your reel on the hook",
+      "body": [
+        "OpenNolan is a Mac app where an AI agent makes the whole vertical reel from your raw clips. Hook-first isn't an afterthought — it's baked into how the agent assembles the edit. It looks for the strongest moment in your footage and your story, then opens on it: the payoff, the proof, or a pattern interrupt, in the first second, rather than easing in.",
+        "From there the agent builds the rest the way the feed rewards it — fast cuts, motion, music and sound effects, B-roll and images pulled from the web, and burned-in captions for the ~85% who watch on mute. You bring your own AI key and pay providers directly, so there's no subscription and no markup. If the agent's hook isn't the one you'd pick, you change it on a real timeline, and thanks to render-once editing the swap previews instantly."
+      ],
+      "checks": [
+        "Agent opens on the payoff or pattern interrupt — not a logo or a slow intro",
+        "Fast cuts, motion, music and SFX tuned for vertical, so the hook keeps its momentum",
+        "Burned-in captions land the message even with sound off",
+        "Re-pick the hook on the timeline; edits preview instantly, no full re-render"
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "What is a video hook in simple terms?",
+      "a": "A video hook is the first one second or so of a short-form video — the bit that decides whether someone stops scrolling. A strong hook leads with the payoff (the result or surprise) or uses a pattern interrupt to grab attention before any setup. If the hook doesn't land, the rest of the video barely gets watched, no matter how good it is."
+    },
+    {
+      "q": "How long should a video hook be?",
+      "a": "Under a second to grab attention, and ideally the first three seconds to hold it. People decide whether to keep watching almost instantly, so the most interesting thing — your claim, your result, your visual — should be on screen immediately. Don't spend that first second on a greeting, a logo, or a slow lead-up to the good part."
+    },
+    {
+      "q": "What makes a bad hook?",
+      "a": "The usual culprits: opening on a logo or title card, starting with \"hi guys, in this video,\" burying the interesting moment several seconds in, or delivering a bold claim too quietly to register. Each one wastes the only second that decides your reach. A good hook moves the payoff to the very front and delivers it like you mean it."
+    },
+    {
+      "q": "Does OpenNolan write the hook for me?",
+      "a": "Yes — the agent finds the strongest moment in your clips and story and opens the reel on it automatically, payoff-first or with a pattern interrupt. OpenNolan is currently a **waitlist**; the Mac app isn't released yet. [Join the waitlist](/#waitlist) and we'll email you the moment it ships so you can try it on your own footage."
+    },
+    {
+      "q": "Is OpenNolan free, and what do I need to run it?",
+      "a": "There's no subscription and no markup. OpenNolan is an open-source Mac app that uses your own AI provider key (BYOK) — you pay the providers directly for what you use. It runs locally on macOS, so your clips stay on your machine. It's not downloadable yet; the site is a waitlist while the app is in active development."
+    }
+  ],
+  "ctaHeading": "Stop giving away your first second",
+  "ctaSub": "Join the waitlist and be first to let the agent open every reel on the hook — from your raw clips, no editing."
+}

@@ -8,3 +8,7 @@ assets/gallery/app-screenshot-2.png
 
 # Stray probe clip, never referenced by the page.
 assets/gallery/_test.mp4
+
+# Programmatic-SEO source: page data + generator. The generated HTML in
+# /for, /compare, /how-to, /learn ships; this source folder does not.
+seo-src

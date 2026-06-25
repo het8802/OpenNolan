@@ -1,0 +1,127 @@
+{
+  "cluster": "compare",
+  "slug": "adobe-premiere",
+  "targetKeyword": "OpenNolan vs Adobe Premiere Pro",
+  "title": "OpenNolan vs Adobe Premiere Pro for Builders",
+  "metaDescription": "OpenNolan vs Adobe Premiere Pro: Premiere is the pro editor's NLE. OpenNolan is the agent that makes the whole vertical reel for non-editors.",
+  "eyebrow": "vs Adobe Premiere Pro",
+  "h1": "OpenNolan vs Adobe Premiere Pro: a pro NLE or an agent that edits for you",
+  "h1Accent": "edits for you",
+  "breadcrumbLabel": "vs Adobe Premiere",
+  "hubCardTitle": "OpenNolan vs Adobe Premiere Pro",
+  "hubCardDesc": "Premiere gives experts total control. OpenNolan does the editing for founders who aren't editors.",
+  "lede": "You want your product seen, not a film-school degree. Adobe Premiere Pro is the most powerful editor on the planet — if you are an editor. If you're a founder who just needs the reel done, the bar is the problem.",
+  "intro": [
+    "You're a builder. You want short-form video that gets your product discovered, and you want it without learning a timeline, a hundred panels, and a workflow built for people who edit full-time. That's the real question behind **OpenNolan vs Adobe Premiere Pro**: do you want the most control, or do you want the work done?",
+    "Adobe Premiere Pro is the professional industry standard for a reason. Pro editors live in it because it gives them total manual control — deep effects, color, audio, frame-perfect cuts. None of that is the problem. The problem is the editing tax: to get seen, you're told you must become the editor, and Premiere assumes you already are one.",
+    "OpenNolan takes the other path. We're builders too, and we'd rather ship product than learn an NLE. So the agent does the editing: it builds the composition, pulls B-roll and images from the web, adds music and sound effects, writes captions, and assembles a vertical cut. You stay the founder. The reel still gets made."
+  ],
+  "sections": [
+    {
+      "h2": "Who each tool is actually built for",
+      "body": [
+        "Premiere is built for editors — people whose job is the edit. If that's you, it's hard to beat: maximal control, a deep effects ecosystem, and the depth to finish anything from a Reel to a feature. The trade is that the tool expects expertise you bring to it.",
+        "OpenNolan is built for the opposite person: the founder, indie hacker, or developer who needs vertical short-form to get discovered and is **not** a video editor. Instead of handing you the controls, it does the first pass for you — then lets you tweak on a real timeline if you want to."
+      ],
+      "checks": [
+        "Premiere: for professional editors who want total manual control",
+        "OpenNolan: for builders who want the reel made, not the craft mastered",
+        "Both can finish a polished cut — the difference is who does the work"
+      ]
+    },
+    {
+      "h2": "How the edit happens: an AI agent vs a manual timeline",
+      "body": [
+        "In Premiere, every cut, caption, and effect is a decision you make by hand on the timeline. That's the source of its power and the source of its learning curve — nothing happens until you do it.",
+        "In OpenNolan, an AI agent makes the whole reel from your raw clips. Drop in footage (or just describe the video) and bring your own API key. The agent builds the composition: trending-style hooks and fast cuts, explainer animations, screenshot proof with auto-highlight, AI-generated B-roll, music and SFX, and burned-in captions — all tuned for 9:16. You review instead of assemble."
+      ],
+      "quote": "Premiere waits for you to make every cut. OpenNolan makes the first cut, then waits for your notes."
+    },
+    {
+      "h2": "Vertical-first, render-once, and built on the short-form playbook",
+      "body": [
+        "Premiere is format-agnostic — it edits anything, which means nothing about it is opinionated toward 9:16 short-form. OpenNolan is the opposite: it's vertical-first, 1080×1920, exporting straight for [Instagram Reels](/how-to/instagram-reels), TikTok, and Shorts, with the actual playbook baked in — [hook in the first second](/learn/what-is-a-hook), cut every one to three seconds, captions for mute viewers, and receipts on screen.",
+        "It's also fast to revise. With **render once, edit cheap**, after the first render most edits — reorder, retrim, retime, reposition, transitions, text — preview instantly. Only AI-composition scenes re-render, and only the one you changed. You're not waiting on a full export to see a tweak."
+      ],
+      "checks": [
+        "Vertical-first 9:16 output for Reels, TikTok, and Shorts",
+        "Short-form playbook built in, not assembled by hand",
+        "Render-once means instant previews after the first render",
+        "A real timeline editor is still there when you want manual control"
+      ]
+    },
+    {
+      "h2": "Pricing, platform, and where your files live",
+      "body": [
+        "Premiere runs on Mac and Windows on a Creative Cloud subscription. OpenNolan is a native macOS app with no subscription and no markup: **bring your own key**, add your AI provider's API key, and pay the provider directly. No account required.",
+        "OpenNolan is also local-first and private — it runs on your Mac and your files stay on your machine — and it's open source. The honest part: OpenNolan isn't released yet. This is a waitlist. Premiere you can buy today; OpenNolan you can [get early access](/#features) to by joining the list."
+      ],
+      "quote": "No subscription, no markup, open source, your files on your Mac — that's the deal OpenNolan is building toward."
+    }
+  ],
+  "comparison": {
+    "competitor": "Adobe Premiere Pro",
+    "intro": "Adobe Premiere Pro is the professional industry-standard NLE — unbeatable for expert editors who want total manual control. OpenNolan isn't trying to out-power it; it's built for founders who aren't editors and want the reel made for them.",
+    "rows": [
+      {
+        "feature": "Who it's for",
+        "openNolan": "Founders, builders, and developers who aren't video editors",
+        "competitor": "Professional editors who want maximal manual control"
+      },
+      {
+        "feature": "How editing happens",
+        "openNolan": "An AI agent makes the whole vertical reel; you review and tweak",
+        "competitor": "You edit every cut and effect by hand on the timeline"
+      },
+      {
+        "feature": "Platform",
+        "openNolan": "Native macOS app, local-first",
+        "competitor": "Desktop app on Mac and Windows"
+      },
+      {
+        "feature": "Pricing model",
+        "openNolan": "Bring your own key — pay providers directly, no subscription",
+        "competitor": "Creative Cloud subscription"
+      },
+      {
+        "feature": "Vertical short-form focus",
+        "openNolan": "Vertical-first 9:16, built on the short-form playbook",
+        "competitor": "Format-agnostic pro NLE, not short-form-first"
+      },
+      {
+        "feature": "Where your files live",
+        "openNolan": "On your Mac — local-first and private",
+        "competitor": "Local project files with Creative Cloud account/services"
+      },
+      {
+        "feature": "Open source",
+        "openNolan": "Yes, open source",
+        "competitor": "Proprietary"
+      }
+    ]
+  },
+  "faqs": [
+    {
+      "q": "Is OpenNolan a replacement for Adobe Premiere Pro?",
+      "a": "Not for professional editors. If your job is the edit and you want total manual control, Premiere is the standard for good reason. OpenNolan is for founders and builders who aren't editors and want a vertical reel made for them by an AI agent, with a real timeline to tweak afterward — a different job entirely."
+    },
+    {
+      "q": "Do I need editing experience to use OpenNolan?",
+      "a": "No. That's the point. Premiere assumes you're an editor; OpenNolan assumes you're not. You drop in clips or describe the video, and the agent builds the composition — cuts, B-roll, music, captions, motion — tuned for vertical. You only touch the timeline if you want to fine-tune, and even then it's built to be simple."
+    },
+    {
+      "q": "How does OpenNolan's pricing compare to a Premiere subscription?",
+      "a": "Premiere runs on a Creative Cloud subscription. OpenNolan has no subscription and no markup — you bring your own AI provider key and pay the provider directly, with no account required. It's also open source. Note that OpenNolan isn't released yet, so the way to start is to join the waitlist."
+    },
+    {
+      "q": "Is OpenNolan available on Windows like Premiere?",
+      "a": "No. Premiere runs on both Mac and Windows. OpenNolan is a native macOS app only, built to be local-first and private so your files stay on your machine. If you're on a Mac and want the agent to make your reels, join the waitlist for early access."
+    },
+    {
+      "q": "Can I still edit by hand in OpenNolan?",
+      "a": "Yes. The agent does the first pass, but there's a real timeline editor for cuts, overlays, text, images, audio, transitions, crop, and speed. It's not as deep as Premiere's pro toolset — that's intentional — but with render-once, edit-cheap, most tweaks preview instantly instead of waiting on a full re-render."
+    }
+  ],
+  "ctaHeading": "Want the reel made, not the timeline mastered?",
+  "ctaSub": "OpenNolan is a Mac app where an AI agent makes the whole vertical reel — join the waitlist for early access."
+}

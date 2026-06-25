@@ -1,0 +1,130 @@
+{
+  "cluster": "compare",
+  "slug": "opus-clip",
+  "targetKeyword": "OpenNolan vs Opus Clip",
+  "title": "OpenNolan vs Opus Clip: Create vs Repurpose",
+  "metaDescription": "OpenNolan vs Opus Clip: Opus Clip slices a long video into clips; OpenNolan builds an original vertical reel from raw clips or an idea. See the difference.",
+  "eyebrow": "vs Opus Clip",
+  "h1": "OpenNolan vs Opus Clip: create a reel, don't just slice one",
+  "h1Accent": "create a reel",
+  "breadcrumbLabel": "vs Opus Clip",
+  "hubCardTitle": "OpenNolan vs Opus Clip",
+  "hubCardDesc": "Opus Clip repurposes long videos into clips. OpenNolan builds an original short from raw clips or an idea.",
+  "lede": "You want short-form that gets your product discovered. The question is whether you start with a long video to chop up — or with raw clips and an idea that need to become a reel.",
+  "intro": [
+    "You're a builder, not an editor. What you actually want is a vertical video that stops the scroll and sends people to your product — without losing a week to it. The villain here is the editing tax: the unspoken rule that to get seen, you first have to become a full-time video editor chasing trending audio, cutting B-roll, and syncing captions.",
+    "Opus Clip and OpenNolan both fight that tax, but from different starting points. Opus Clip is built to **repurpose** — feed it a long podcast, webinar, or stream and it finds the strong moments and turns them into short clips with captions and a virality score. If you already produce long videos, that's genuinely useful.",
+    "OpenNolan starts earlier. You drop in raw clips or just describe the video, and an AI agent **creates** an original short — pulling B-roll and images from the web, adding music, sound effects, captions, rapid cuts and motion, all tuned for vertical. No long video required. Then you fine-tune any cut on a real timeline. We're builders too, so we built the guide we wanted: Mac-native, bring-your-own-key, open source."
+  ],
+  "sections": [
+    {
+      "h2": "Repurpose vs create: where each tool starts",
+      "body": [
+        "The cleanest way to choose is to look at your input. Opus Clip needs an existing long video — it's a slicing engine. Give it an hour of footage and it surfaces the clip-worthy moments. If your bottleneck is \"I have lots of long content and no time to cut it down,\" that's exactly its job.",
+        "OpenNolan's input is rawer: loose clips from your phone or screen recorder, a few screenshots, or nothing but an idea. There may be no long video to repurpose at all. The agent assembles an original reel from those pieces — finding supporting B-roll, writing the hook, scoring it with music, and pacing it for the feed."
+      ],
+      "checks": [
+        "Opus Clip: long video in, multiple clips out",
+        "OpenNolan: raw clips or an idea in, one finished original reel out",
+        "OpenNolan adds web B-roll, images, music, SFX, captions, and motion the agent sources for you"
+      ],
+      "quote": "Opus Clip finds the best moments in a video you already made. OpenNolan makes the reel you don't have yet."
+    },
+    {
+      "h2": "How the editing actually happens",
+      "body": [
+        "Opus Clip is an automated web app: it processes your upload, returns clips, and you tune captions and framing in the browser. It's fast and it's good at what it does — turning long-form into shareable cuts.",
+        "OpenNolan pairs an AI agent with a real editor. The agent does the heavy lift — composition, cuts, B-roll, captions, animated overlays — then hands you a proper timeline. Thanks to a render-once, edit-cheap model, most edits (reorder, retrim, retime, reposition, text) preview instantly without re-rendering. You get automation when you want it and full manual control when you need it. If you'd rather see the playbook the agent follows, read [what makes a hook work](/learn/what-is-a-hook)."
+      ],
+      "checks": [
+        "Agent builds the whole cut, you adjust on a timeline",
+        "Render-once, edit-cheap: most tweaks preview instantly",
+        "Cuts, overlays, text, images, audio, transitions, crop, and speed all editable by hand"
+      ]
+    },
+    {
+      "h2": "Platform, pricing, and where your files live",
+      "body": [
+        "Opus Clip is a web app on a subscription and credit model — your video goes up to their servers, and you pay a recurring plan. For many teams that's the right trade.",
+        "OpenNolan is a native Mac app that runs local-first: your files stay on your machine. Instead of a subscription, you bring your own AI provider key and pay providers directly — no markup, no account required. And it's open source, so you can read exactly what it does. If you're shipping product content week after week, see [why this fits a SaaS workflow](/for/saas)."
+      ],
+      "checks": [
+        "Mac-native and local-first vs web app",
+        "Bring-your-own-key, pay providers directly vs subscription plus credits",
+        "Open source, no account required"
+      ]
+    },
+    {
+      "h2": "Which one fits your week",
+      "body": [
+        "Pick Opus Clip if you already create long videos and need a fast, hands-off way to slice them into clips with captions and a virality read. That's a real, valuable job and it does it well.",
+        "Pick OpenNolan if you don't have a long video to chop — you have raw clips or an idea, and you want an original vertical reel built for you, on your Mac, with full timeline control and no subscription. The two aren't mutually exclusive, but they solve different halves of the short-form problem. OpenNolan is still in development, so the way to claim early access is to join the waitlist."
+      ]
+    }
+  ],
+  "comparison": {
+    "competitor": "Opus Clip",
+    "intro": "Opus Clip is excellent at one thing: turning long videos into short clips, fast. The real difference is the starting point — repurposing existing footage versus creating an original reel from raw clips or an idea.",
+    "rows": [
+      {
+        "feature": "Who it's for",
+        "openNolan": "Founders and builders making original shorts from raw clips or an idea",
+        "competitor": "Creators and teams with long videos (podcasts, webinars, streams) to repurpose"
+      },
+      {
+        "feature": "Core job",
+        "openNolan": "Creates an original vertical reel — B-roll, images, music, SFX, captions, motion",
+        "competitor": "Slices one long video into multiple short clips with captions and a virality score"
+      },
+      {
+        "feature": "How editing happens",
+        "openNolan": "AI agent builds the whole cut, then you fine-tune on a real timeline",
+        "competitor": "Automated processing in the browser with caption and framing tweaks"
+      },
+      {
+        "feature": "Platform",
+        "openNolan": "Native Mac app, local-first (files stay on your machine)",
+        "competitor": "Web app, cloud-processed"
+      },
+      {
+        "feature": "Pricing model",
+        "openNolan": "Bring your own key, pay providers directly — no subscription, no account",
+        "competitor": "Subscription with credits"
+      },
+      {
+        "feature": "Input required",
+        "openNolan": "Raw clips, screenshots, or just a description — no long video needed",
+        "competitor": "An existing long video to chop up"
+      },
+      {
+        "feature": "Open source",
+        "openNolan": "Yes — you can read exactly what it does",
+        "competitor": "No"
+      }
+    ]
+  },
+  "faqs": [
+    {
+      "q": "What's the real difference between OpenNolan and Opus Clip?",
+      "a": "Starting point. Opus Clip repurposes an existing long video into short clips. OpenNolan creates an original vertical reel from raw clips, screenshots, or just an idea — no long video required. The agent sources B-roll, music, captions, and motion, then hands you a real timeline to fine-tune."
+    },
+    {
+      "q": "Can OpenNolan repurpose a long video like Opus Clip does?",
+      "a": "OpenNolan is built to create original shorts rather than auto-slice long-form into many clips. You can bring in any footage you have, and the agent assembles a finished vertical cut from it. If your main need is chopping a long podcast or webinar into many clips fast, Opus Clip is purpose-built for that specific job."
+    },
+    {
+      "q": "Is OpenNolan available to download today?",
+      "a": "Not yet — OpenNolan is a Mac app in active development, and this is the waitlist. Join the list and we'll email you the moment it's ready to download. Opus Clip is a live web app you can use now; the two start from different points in your workflow."
+    },
+    {
+      "q": "How does pricing compare — subscription vs BYOK?",
+      "a": "Opus Clip runs on a subscription with credits, processed in the cloud. OpenNolan uses bring-your-own-key: you add your own AI provider key and pay providers directly, no markup and no account required. It runs local-first on your Mac, so your files stay on your machine, and it's open source."
+    },
+    {
+      "q": "Is OpenNolan Mac-only?",
+      "a": "Yes. OpenNolan is a native macOS desktop app, not a web tool — that's part of how it keeps rendering local and your files private. Opus Clip is a web app that works across platforms in the browser. If a Mac-native, local-first workflow matters to you, that's a meaningful difference."
+    }
+  ],
+  "ctaHeading": "Build the reel, don't just slice one",
+  "ctaSub": "Join the waitlist and be first when the Mac app that creates your short-form ships."
+}

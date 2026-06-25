@@ -1,0 +1,85 @@
+{
+  "cluster": "for",
+  "slug": "founders",
+  "targetKeyword": "AI video editor for founders",
+  "title": "AI Video Editor for Founders | OpenNolan",
+  "metaDescription": "OpenNolan is an AI video editor for founders who must do their own marketing. Turn launches and build-in-public updates into reels. Join the waitlist.",
+  "eyebrow": "For founders",
+  "h1": "An AI video editor for founders who'd rather build",
+  "h1Accent": "rather build",
+  "breadcrumbLabel": "For founders",
+  "hubCardTitle": "AI video editor for founders",
+  "hubCardDesc": "Turn launches and build-in-public updates into scroll-stopping reels — without becoming the editor.",
+  "lede": "You started a company to build a product, not to learn a timeline. But you're the face now, and the launches won't market themselves. OpenNolan makes the reel so you can get back to shipping.",
+  "intro": [
+    "Here's the founder trap. The product is good. The roadmap is real. But growth depends on people actually seeing it — and the place they look is the feed. So you become the marketer, then the writer, then, somehow, the video editor. None of those were the job you signed up for, and the last one quietly eats the most time.",
+    "The villain isn't your lack of talent on camera. It's the editing tax — the unwritten rule that to get seen you have to chase trending audio, cut B-roll, sync captions, and stack proof, every single week. That tax is what turns one good launch idea into three lost evenings, and it's why most founder content never ships.",
+    "We built OpenNolan because we're builders too, and we'd rather ship product than babysit a timeline. It's a Mac app where an AI agent makes the **whole** vertical reel from your raw clips — then hands you a real editor so the final cut still sounds like you, not like a template."
+  ],
+  "sections": [
+    {
+      "h2": "Founder-led marketing without the part-time editing job",
+      "body": [
+        "Founder-led marketing works because people buy from people. The catch is that doing it well usually means doing a second job: scripting, filming, and then the long tail of editing that decides whether anyone watches past the first second. That second job is where most founders quietly give up.",
+        "OpenNolan removes the editing job, not the founder. You stay the voice and the face. The agent handles the part you hate — finding the trending pieces, cutting fast, syncing burned-in captions, pulling supporting B-roll and images from the web — and assembles a vertical cut tuned for Reels, TikTok, and Shorts."
+      ],
+      "checks": [
+        "Drop in raw clips or just describe the video",
+        "Agent adds B-roll, images, music, and SFX from the web",
+        "Hooks, rapid cuts, and motion built on the short-form playbook",
+        "Captions on mute, because most of the feed watches with sound off"
+      ]
+    },
+    {
+      "h2": "Turn launches and build-in-public updates into reels",
+      "body": [
+        "Building in public is a steady stream of moments worth posting: a feature shipped, a milestone hit, a hard lesson, a launch day. The problem is each one needs to become a video fast, while it's still fresh — and that cadence is exactly what burns founders out on editing.",
+        "This is where an AI video editor earns its place. Point it at the clips from this week's update and it returns a finished reel in the time it used to take you to find a trending sound. Launch day, you spin up several cuts instead of agonizing over one. The feed rewards consistency, and consistency is the thing manual editing makes impossible."
+      ],
+      "quote": "Ship the reel as fast as you ship the feature."
+    },
+    {
+      "h2": "Review on a real timeline, so it still sounds like you",
+      "body": [
+        "An agent that posts for you with no say is a non-starter for a founder — your voice is the brand. So OpenNolan isn't a black box. After the agent builds the cut, you get a real NLE timeline: retrim a clip, swap a caption, reorder a scene, fix the one line that sounds off.",
+        "And because of how it renders, editing stays cheap. OpenNolan renders once, then most edits — reorder, retrim, retime, reposition, text — preview instantly without re-rendering. Only an AI-composed scene re-renders, and only the one you changed. You get final-cut control without the wait that makes founders skip review entirely."
+      ],
+      "checks": [
+        "Real timeline: cuts, captions, text, images, audio, transitions, speed",
+        "Render once, then edit cheap — most tweaks preview instantly",
+        "Keep the agent's speed and your judgment on the final word"
+      ]
+    },
+    {
+      "h2": "Built for builders: Mac-native, bring your own key",
+      "body": [
+        "OpenNolan is a native macOS app, not a web tab and not a subscription. You bring your own AI provider key and pay the providers directly — no markup, no monthly fee, no account. Your clips stay on your machine, which matters when you're cutting an unreleased feature.",
+        "It's also open source. If you want to see the same playbook applied to your channel or product, the [short-form video for SaaS](/for/saas) guide and the [Instagram Reels how-to](/how-to/instagram-reels) go deeper. OpenNolan isn't downloadable yet — it's in active development — so the move right now is to get on the waitlist and be first when the Mac app ships."
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "What is an AI video editor for founders?",
+      "a": "It's a tool that does the editing a founder doesn't have time for. You bring raw clips or an idea, and OpenNolan's AI agent builds the whole vertical reel — hooks, fast cuts, captions, music, B-roll, and motion. You stay the face and voice; the agent removes the time-sink that usually kills founder-led content."
+    },
+    {
+      "q": "Can I make videos without any editing experience?",
+      "a": "Yes — that's the point. You don't open a timeline cold and guess. The agent assembles a finished cut for you first, following the short-form playbook. If you want to adjust anything, the timeline is there, but you start from a working reel, not a blank canvas. Most founders never need to touch the deep editing tools."
+    },
+    {
+      "q": "Is OpenNolan available to download yet?",
+      "a": "Not yet. OpenNolan is a Mac app in active development, and this is a waitlist. Join with your email and you'll be first to know the moment it ships. We'd rather launch something a founder can actually rely on for weekly content than rush a download that isn't ready."
+    },
+    {
+      "q": "How much does it cost, and is there a subscription?",
+      "a": "There's no subscription and no markup. OpenNolan uses bring-your-own-key: you add your own AI provider API key and pay those providers directly for what you use. No account is required, and your files stay local on your Mac. Pricing details for the app will land closer to launch — join the waitlist to hear first."
+    },
+    {
+      "q": "Will the videos still sound like me?",
+      "a": "They should — that's why review happens on a real timeline. The agent builds the cut, then you keep final say: swap captions, retrim clips, fix a line. Render-once means most edits preview instantly, so reviewing every reel before it goes out is fast enough that you'll actually do it."
+    }
+  ],
+  "ctaHeading": "Make the reel. Get back to building.",
+  "ctaSub": "Be first when the Mac app ships — no spam, just the launch."
+}

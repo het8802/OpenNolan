@@ -1,0 +1,99 @@
+{
+  "cluster": "learn",
+  "slug": "short-form-video",
+  "targetKeyword": "short-form video",
+  "title": "What Is Short-Form Video? A Plain Guide",
+  "metaDescription": "Short-form video is vertical, under-90-second content made for Reels, TikTok, and Shorts. Here is what it is, why it wins discovery, and how to make it fast.",
+  "eyebrow": "Short-form, defined",
+  "h1": "What is short-form video, and why does it win attention?",
+  "h1Accent": "short-form video",
+  "breadcrumbLabel": "Short-form video",
+  "hubCardTitle": "What is short-form video?",
+  "hubCardDesc": "The definition, the format, why it dominates discovery, and the playbook builders use to get seen.",
+  "lede": "You keep hearing that short-form is where products get discovered now. Here is what it actually is, why the feed rewards it, and how to make it without becoming a full-time editor.",
+  "intro": [
+    "Short-form video is vertical video, usually under 60 to 90 seconds, made for the Reels, TikTok, and Shorts feeds. It plays full-screen on a phone, autoplays as people scroll, and is built to be watched in seconds rather than minutes. If a clip is tall, fast, and feed-native, it is short-form.",
+    "For a founder, the appeal is simple: this is the format that gets a product in front of strangers. The discovery feeds push short videos to people who do not follow you yet, which is exactly the reach you want. The catch is the **editing tax** — the unspoken rule that to get seen, you first have to become a video editor, chasing trending audio, cutting B-roll, and syncing captions.",
+    "We built OpenNolan because we are builders too, and we would rather ship product than learn a timeline. It is a Mac app where an AI agent makes the whole vertical cut from your raw clips, using the short-form playbook below — so you can learn what short-form is, then actually make it without losing your week to it."
+  ],
+  "sections": [
+    {
+      "h2": "Short-form vs long-form: the real difference",
+      "body": [
+        "Long-form video earns a viewer who already chose to watch — a YouTube tutorial, a podcast, a webinar. The viewer arrived on purpose and will give you minutes. Short-form is the opposite: nobody chose you. The clip has to win a viewer who is scrolling past, in the first second, with the sound off as often as on.",
+        "That changes everything about how it is made. Short-form is vertical instead of widescreen, measured in seconds instead of minutes, and front-loaded so the payoff comes before the patience runs out. It is a discovery format, not a depth format."
+      ],
+      "checks": [
+        "Vertical 9:16, built for full-screen phone playback",
+        "Usually under 60 to 90 seconds, often far shorter",
+        "Shown to people who do not follow you yet",
+        "Watched on mute by most of the audience"
+      ]
+    },
+    {
+      "h2": "Why short-form dominates discovery",
+      "body": [
+        "The platforms decide what travels, and right now they push short vertical video harder than anything else. A 30-second clip can reach people who have never heard of you, with no ad spend, purely because the feed surfaced it. That is reach you cannot buy as cheaply anywhere else, which is why founders keep coming back to it even when editing it is painful.",
+        "It also compounds. A long-form video is one bet. A week of short-form is several bets, each cheap to make once you have a system — and any one of them can be the clip that puts your product in front of thousands of the right people."
+      ],
+      "quote": "Long-form is for people who already found you. Short-form is how they find you in the first place."
+    },
+    {
+      "h2": "The short-form playbook, in brief",
+      "body": [
+        "Good short-form is not random luck — it follows a handful of durable rules. These are the moves that separate a clip that travels from one that gets skipped, and they are the same rules OpenNolan builds into every cut."
+      ],
+      "checks": [
+        "**Hook in under a second** — open on the payoff, not the setup. See [what makes a hook](/learn/what-is-a-hook).",
+        "**Cut every 1 to 3 seconds** — hard cuts and motion reset attention.",
+        "**Ride trending sound** — the algorithm already pushes it.",
+        "**Burn in captions** — most people watch on mute, so the text carries the message. See [burned-in captions](/learn/burned-in-captions).",
+        "**Show receipts** — screenshots, stats, and proof make the claim land."
+      ]
+    },
+    {
+      "h2": "How OpenNolan makes short-form for you",
+      "body": [
+        "Knowing the playbook and having time to execute it are two different problems. OpenNolan handles the execution. You drop in your raw clips (or just describe the video) and bring your own AI key, and the agent assembles the whole vertical cut: it pulls B-roll and images from the web, adds music and sound effects, writes and burns in captions, places rapid cuts and motion, and tunes the whole thing for 9:16.",
+        "When the first cut is done, you are not stuck with it. Every clip lands on a real timeline, so you can retrim, reorder, swap a line of text, or adjust a caption — and because of the **render-once, edit-cheap** model, most of those edits preview instantly without re-rendering. You stay the director; the agent does the editing labor."
+      ],
+      "checks": [
+        "Mac-native app, vertical-first for Reels, TikTok, and Shorts",
+        "Bring your own key — pay AI providers directly, no subscription, no markup",
+        "Local-first and private — your files stay on your machine",
+        "Open source"
+      ]
+    },
+    {
+      "h2": "What success looks like",
+      "body": [
+        "The goal was never to become a video editor. It was to get your product discovered. With short-form handled, you can ship a scroll-stopping vertical clip about as fast as you ship a feature — and let the feeds do the introducing. That is the difference between a great product nobody sees and one that travels.",
+        "If you want to go deeper on the format, read up on [vertical video](/learn/vertical-video) — the tall 9:16 frame is what makes a clip feel feed-native in the first place."
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "What counts as short-form video?",
+      "a": "Short-form video is vertical video, usually under 60 to 90 seconds, made for feeds like Instagram Reels, TikTok, and YouTube Shorts. The defining traits are the tall 9:16 format, the short runtime, and the fact that it is built to win a scrolling viewer who does not already follow you."
+    },
+    {
+      "q": "How long should a short-form video be?",
+      "a": "There is no single rule, but most short-form lands under 60 to 90 seconds, and plenty performs best between 7 and 30 seconds. Shorter clips are easier to watch all the way through, and full watches signal the algorithm to push the video to more people. Lead with the payoff so the length never feels long."
+    },
+    {
+      "q": "Why is short-form video so good for getting discovered?",
+      "a": "The platforms push short vertical video to people who do not follow you yet, so a single clip can reach thousands of strangers with no ad spend. For founders, that is the cheapest reach available, which is why short-form has become the default way to get a product noticed."
+    },
+    {
+      "q": "Can I use OpenNolan to make short-form video today?",
+      "a": "Not yet — OpenNolan is in active development and this page is a waitlist. The Mac app uses an AI agent to assemble the whole vertical cut from your clips, then lets you fine-tune it on a real timeline. Join the waitlist to get access when it opens."
+    },
+    {
+      "q": "Is there a subscription, and what platform does it run on?",
+      "a": "OpenNolan is a native macOS app and uses bring-your-own-key, so you add your own AI provider key and pay those providers directly with no subscription and no markup. It is local-first, so your files stay on your Mac, and it is open source."
+    }
+  ],
+  "ctaHeading": "Make short-form video without becoming an editor",
+  "ctaSub": "Join the waitlist and get OpenNolan on your Mac when it opens — drop in clips, get a finished vertical cut."
+}

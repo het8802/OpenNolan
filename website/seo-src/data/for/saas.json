@@ -1,0 +1,80 @@
+{
+  "cluster": "for",
+  "slug": "saas",
+  "targetKeyword": "short-form video for SaaS",
+  "title": "Short-Form Video for SaaS Founders | OpenNolan",
+  "metaDescription": "Short-form video for SaaS, made by an AI agent. Turn product demos, screen recordings and changelogs into scroll-stopping Reels. Join the waitlist.",
+  "eyebrow": "For SaaS founders",
+  "h1": "Short-form video for SaaS that turns your product into demand",
+  "h1Accent": "turns your product into demand",
+  "breadcrumbLabel": "For SaaS",
+  "hubCardTitle": "Short-form video for SaaS",
+  "hubCardDesc": "Turn demos, screen recordings and changelogs into Reels that drive sign-ups — without learning to edit.",
+  "lede": "You shipped the feature. Now it needs to be seen. Short-form is where SaaS gets discovered today, but turning a screen recording into a Reel that actually converts is its own full-time skill.",
+  "intro": [
+    "You are a SaaS builder, not a video editor. Your product solves a real problem, your changelog ships weekly, and the demo lands every time you give it live. But on the feed, a raw screen recording is a wall of UI that nobody watches past the first second. The thing that should be your best marketing asset just sits there.",
+    "The villain is the editing tax: the unspoken rule that to turn product into demand you first have to become a part-time motion designer. Cut the demo into beats. Highlight the click that matters. Add the explainer overlay. Sync captions. Find the sound. That work is why most great features get a launch tweet and nothing else.",
+    "OpenNolan is the guide. We are builders too, and we would rather ship product than babysit a timeline. It is a Mac app where an AI agent takes your screen recordings and turns them into vertical, scroll-stopping short-form, then hands you a real editor for the last 10 percent. Feature to demo, screenshot to proof, changelog to content — without the week of editing."
+  ],
+  "sections": [
+    {
+      "h2": "The product-led growth playbook for short-form",
+      "body": [
+        "Product-led growth lives or dies on whether people can see the product working. The feed is the cheapest place to show it. The pattern that travels for SaaS is consistent: open on the payoff, show the feature solving a real problem in seconds, prove it with a screenshot or a number, then explain how it works in one clean animated beat.",
+        "The hard part is that this pattern is editing-heavy. A two-minute Loom is not a Reel. You have to find the one moment worth showing, cut everything else, highlight the click, and keep the pace fast enough that nobody scrolls. OpenNolan runs that playbook for you from the raw recording."
+      ],
+      "checks": [
+        "Feature announcements cut down to the one moment that matters",
+        "Product demos paced for vertical, not for a sales call",
+        "Screenshot proof with the key metric auto-highlighted",
+        "Explainer animations that show how it works in one beat",
+        "Changelog entries repurposed into a steady drip of content"
+      ]
+    },
+    {
+      "h2": "From screen recording to Reel, made by the agent",
+      "body": [
+        "Drop in your screen recordings and bring your own API key. The agent finds the hook, trims the demo to its sharpest cut, and assembles a vertical 9:16 video tuned for Reels, TikTok and Shorts. It can pull supporting B-roll and images from the web, add music and sound effects, write burned-in captions for the 85 percent who watch on mute, and animate overlays that point at the exact feature you are showing.",
+        "Two capabilities matter most for SaaS. Screenshot proof with auto-highlight turns a dashboard or a results screen into a frame that lands the claim. Explainer animations, built with Remotion and HyperFrames, turn an abstract feature into a short visual of how it actually works — the part a raw recording can never show on its own."
+      ],
+      "quote": "A changelog entry is a demand-gen asset. It just needed an editor you did not have time to become."
+    },
+    {
+      "h2": "Tune the last 10 percent, then post",
+      "body": [
+        "The agent gets you a finished cut, not a rough draft you have to rescue. But you know your product better than any model, so the last word is yours. OpenNolan opens onto a real timeline where you can retrim a clip, reorder beats, fix a caption, reposition the highlight on a screenshot, or swap the music.",
+        "Because of the render-once, edit-cheap model, most of those edits preview instantly without re-rendering. Only an AI-composition scene re-renders, and only the one you changed. So polishing a product demo feels like editing text, not waiting on exports. See [how the editor works](/#features) or learn [what makes a hook stop the scroll](/learn/what-is-a-hook)."
+      ],
+      "checks": [
+        "Real NLE timeline: cuts, overlays, text, images, audio, transitions, crop, speed",
+        "Most edits preview instantly, no full re-render",
+        "Reposition highlights and captions to match your UI exactly",
+        "Export vertical for Reels, TikTok and Shorts"
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "q": "Can OpenNolan turn my product demos and screen recordings into short-form video?",
+      "a": "Yes, that is the core use case for SaaS. Drop in a screen recording and the AI agent trims it to the moment that matters, paces it for vertical, highlights the key click or metric, writes captions, and adds music. You get a finished Reel from a raw demo instead of a two-minute Loom nobody finishes watching."
+    },
+    {
+      "q": "How does it handle screenshot proof and explainer animations?",
+      "a": "The agent can drop in screenshots and auto-highlight the number or feature that lands your claim, so a dashboard becomes proof rather than clutter. For showing how a feature works, it builds explainer animations with Remotion and HyperFrames — short, clean visual beats that a plain screen recording cannot capture."
+    },
+    {
+      "q": "Is OpenNolan available to download yet?",
+      "a": "Not yet. OpenNolan is a Mac app in active development, and this is the waitlist. Join it and we will email you the moment it ships so you can start turning changelogs and demos into short-form right away. No spam, just the launch."
+    },
+    {
+      "q": "What does it cost, and is there a subscription?",
+      "a": "There is no subscription and no markup. OpenNolan is bring-your-own-key: you add your own AI provider API key and pay those providers directly for what you use. It is open source and runs locally on your Mac, so your product footage and unreleased features stay on your machine."
+    },
+    {
+      "q": "Why a Mac app instead of a web tool for SaaS marketing?",
+      "a": "OpenNolan is a native macOS app, not a web or mobile tool. Running locally means your screen recordings, dashboards and pre-launch demos never leave your machine, and the render-once engine makes editing fast. It is built for builders who want to repurpose product into content without uploading it to someone else's cloud."
+    }
+  ],
+  "ctaHeading": "Turn your next feature into a Reel, not just a tweet",
+  "ctaSub": "Join the waitlist and be first to turn your SaaS demos, screenshots and changelogs into short-form that drives sign-ups."
+}
