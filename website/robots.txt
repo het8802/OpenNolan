@@ -1,4 +1,65 @@
+# robots.txt — opennolan.com
+# We welcome search engines and AI assistants. The entire site is open to crawl,
+# index, and cite. AI context index: https://www.opennolan.com/llms.txt
+
 User-agent: *
+Allow: /
+
+# --- AI assistants & answer engines (explicitly welcomed so they can cite us) ---
+
+# OpenAI — ChatGPT
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+# Anthropic — Claude
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+# Perplexity
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+# Google — Gemini & AI Overviews
+User-agent: Google-Extended
+Allow: /
+
+# Microsoft — Copilot (via Bing)
+User-agent: Bingbot
+Allow: /
+
+# Common Crawl (feeds many LLM training sets)
+User-agent: CCBot
+Allow: /
+
+# Apple, Amazon, Meta, ByteDance assistants
+User-agent: Applebot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: Amazonbot
+Allow: /
+
+User-agent: meta-externalagent
+Allow: /
+
+User-agent: Bytespider
 Allow: /
 
 Sitemap: https://www.opennolan.com/sitemap.xml

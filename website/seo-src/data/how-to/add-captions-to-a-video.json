@@ -1,0 +1,98 @@
+{
+  "cluster": "how-to",
+  "slug": "add-captions-to-a-video",
+  "targetKeyword": "how to add captions to a video",
+  "title": "How to Add Captions to a Video (Founder Guide)",
+  "metaDescription": "How to add captions to a video the right way: burned-in vs soft, mobile styling, and timing. Plus how OpenNolan writes and syncs captions for you.",
+  "eyebrow": "How-to guide",
+  "h1": "How to add captions to a video that gets watched on mute",
+  "h1Accent": "watched on mute",
+  "breadcrumbLabel": "Add captions to a video",
+  "hubCardTitle": "How to add captions to a video",
+  "hubCardDesc": "Burned-in vs soft captions, mobile styling, and timing — plus how OpenNolan writes and syncs captions for you automatically.",
+  "lede": "Around 85% of short-form video is watched with the sound off, so captions are not a nice-to-have — they carry your message. Here is how to add captions that actually get read, and how OpenNolan does it for you.",
+  "intro": [
+    "Captions are the difference between a video that lands on mute and one that gets scrolled past. The mechanics are simple, but the details — where the words sit, how fast they change, whether they survive a phone screen in bright sunlight — are what separate captions that get read from captions that get ignored.",
+    "This guide covers the durable playbook: the two kinds of captions, how to style them for mobile, and how to time them so they reinforce your cuts. Then it shows how **OpenNolan** writes, styles, and syncs **burned-in captions** for you — so you get caption-perfect video without doing it by hand."
+  ],
+  "sections": [
+    {
+      "h2": "Burned-in captions vs soft captions: which to use",
+      "body": [
+        "There are two ways to put words on a video. **Burned-in captions** are part of the picture — they always show, on any platform, with the styling you chose. **Soft captions** (a separate subtitle or SRT track) can be toggled on or off and are great for accessibility and search, but the viewer has to turn them on, and most never do.",
+        "For short-form that lives on Reels, TikTok, and Shorts, burned-in captions win, because the goal is to be understood instantly by someone watching on mute. Many creators do both: burned-in captions for the feed, plus an uploaded transcript or SRT for accessibility and indexing."
+      ],
+      "checks": [
+        "Burned-in: always visible, styled by you, best for the feed",
+        "Soft / SRT: toggleable, good for accessibility and search",
+        "For Reels, TikTok, and Shorts, default to burned-in",
+        "See the full definition in [burned-in captions](/learn/burned-in-captions)"
+      ]
+    },
+    {
+      "h2": "Style captions for a phone, not a desktop",
+      "body": [
+        "Captions are read on a small, bright, vertical screen — sometimes one-handed, in motion. So style for the worst case: a large, heavy font; high contrast (white text with a dark outline or a solid pill behind it); and placement in the middle third of the frame, clear of the platform's UI at the very top and bottom.",
+        "Keep each caption to a few words at a time. Walls of text get skipped; short, punchy chunks that change with the speech get read. If you emphasize a word — color, scale, a quick pop — do it sparingly, on the word that carries the line."
+      ]
+    },
+    {
+      "h2": "Time captions to the speech and the cuts",
+      "body": [
+        "Good captions feel synced. Each chunk should appear as the word is spoken and clear before the next one, so the eye never lags the audio. When you cut on a beat, let the caption change land with it — captions and cuts reinforcing each other is what makes short-form feel tight.",
+        "Doing this by hand means transcribing, breaking the transcript into on-screen chunks, positioning and styling each one, then nudging timings frame by frame. It is the slowest, fiddliest part of editing — which is exactly the part OpenNolan automates."
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "title": "Choose burned-in captions for the feed",
+      "body": "Decide up front: for Reels, TikTok, and Shorts, use **burned-in** captions so they always show on mute. Add a soft/SRT track too if you want accessibility and search benefits."
+    },
+    {
+      "title": "Transcribe the audio accurately",
+      "body": "Get an accurate transcript of what is said. Accuracy matters — a wrong word on screen is worse than no caption, because the viewer is reading, not listening."
+    },
+    {
+      "title": "Break it into short on-screen chunks",
+      "body": "Split the transcript into a few words at a time, the way the line is actually spoken. Short, punchy chunks get read; full sentences on screen get skipped."
+    },
+    {
+      "title": "Style for mobile: big, high-contrast, safe-area",
+      "body": "Use a large, heavy font with strong contrast (outline or a solid pill), placed in the middle third of the 9:16 frame, clear of the platform UI at the top and bottom."
+    },
+    {
+      "title": "Sync each chunk to the speech and the cuts",
+      "body": "Time each caption to appear as the word is spoken and clear before the next. Let caption changes land on your cuts so captions and pacing reinforce each other."
+    },
+    {
+      "title": "Check it on a real phone before posting",
+      "body": "Watch the video on a phone with the sound off. If you can follow the whole message on mute, in motion, the captions are doing their job. Fix anything that lags or crowds the edges."
+    }
+  ],
+  "stepsHeading": "How to add captions, step by step",
+  "faqs": [
+    {
+      "q": "What is the best way to add captions to a short-form video?",
+      "a": "For Instagram Reels, TikTok, and YouTube Shorts, use **burned-in captions** — words rendered into the video itself so they always show on mute. Keep them short, high-contrast, placed in the middle third of the frame, and timed to the speech. Optionally add a soft/SRT track for accessibility and search."
+    },
+    {
+      "q": "Should captions be burned in or a separate subtitle track?",
+      "a": "Both have a place. Burned-in captions always show and are best for the feed, where most people watch on mute and never toggle subtitles on. Soft captions (a separate SRT track) are toggleable and great for accessibility and search. Many creators ship burned-in captions plus an uploaded transcript."
+    },
+    {
+      "q": "Why do captions matter so much for short-form video?",
+      "a": "Around 85% of short-form video is watched with the sound off. Without captions, a muted viewer gets no message and scrolls. Burned-in captions carry the point in the first second and keep people watching — they are one of the highest-leverage things you can add to a reel."
+    },
+    {
+      "q": "How does OpenNolan add captions?",
+      "a": "OpenNolan's AI agent writes, styles, and syncs **burned-in captions** for you as part of making the whole vertical reel — accurate transcription, short on-screen chunks, mobile-ready styling, and timing matched to the speech and your cuts. You can adjust any of it afterward on a real timeline."
+    },
+    {
+      "q": "Can I edit the captions OpenNolan generates?",
+      "a": "Yes. The agent produces caption-ready video as a first pass; you can then fix wording, restyle, reposition, or retime captions on a real timeline, and most edits preview instantly. See related guides like [how to make Instagram Reels](/how-to/instagram-reels)."
+    }
+  ],
+  "ctaHeading": "Get caption-perfect video without doing it by hand",
+  "ctaSub": "Join the waitlist for the Mac app that writes, styles, and syncs your captions for you."
+}

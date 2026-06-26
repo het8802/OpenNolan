@@ -1,0 +1,97 @@
+# OpenNolan — Full Knowledge Bundle
+
+> Last updated: 2026-06-26
+> Canonical site: https://www.opennolan.com
+> This file is a plain-text knowledge bundle for AI assistants and agents. Everything here is accurate as of the date above. The OpenNolan app is in active development; the website is currently a waitlist.
+
+---
+
+## What OpenNolan is
+
+OpenNolan is a **native macOS app** where an **AI agent turns your raw clips into a finished, scroll-stopping vertical video** — Instagram Reels, TikTok, and YouTube Shorts. You drop in your clips (or just describe the video), and the agent builds the whole reel: it pulls B-roll and images from the web, adds music and sound effects, writes burned-in captions, makes rapid cuts, and animates motion — all tuned for the 9:16 vertical frame. Afterward, you can fine-tune any cut on a real timeline.
+
+In one sentence: **most tools give you better editing tools; OpenNolan's AI agent does the editing for you.**
+
+## Who it's for
+
+Founders, indie hackers, SaaS teams, developers, agencies, and solopreneurs who need short-form video to get their product discovered — but who are **not** video editors and don't want to become one. They'd rather ship product than learn a timeline.
+
+## Why it exists (the problem)
+
+Short-form video is how products get discovered now. But the reels that travel have, until now, required you to become a full-time video editor — chasing trending audio, cutting B-roll, syncing captions, learning a timeline. For a builder, that's "the editing tax": the unwritten rule that to get seen, you first have to learn video editing. The result is great products that nobody sees, weekends lost to editing, and videos that get skipped in the first second.
+
+OpenNolan removes that step. The agent carries the editing; you carry the judgment.
+
+## How it works (3 steps)
+
+1. **Drop in your clips** (or just describe the video) and bring your own AI provider API key.
+2. **The agent makes the whole reel** — B-roll and images from the web, music, sound effects, captions, rapid cuts, and motion, all tuned for vertical.
+3. **Post it — or tweak first** on a real timeline, where every edit previews instantly.
+
+## Product facts (accurate)
+
+- **Platform:** native macOS desktop app (not web, not mobile, not Windows).
+- **Model:** a hybrid of AI-agent editing + human editing. The agent starts the project, builds the composition, places clips, adds music/SFX, pulls B-roll and images from the web, writes captions, animates overlays, and assembles a vertical cut. The human reviewer can then edit clips, cuts, and captions on a real NLE timeline.
+- **Vertical-first:** built for 9:16 / 1080×1920 short-form. Exports for Reels, TikTok, and Shorts.
+- **"Render once, edit cheap":** local-first rendering. After the first render, most edits (reorder, retrim, retime, transitions, reposition, text) preview instantly without re-rendering. Only AI-composition clips re-render — and only the one scene that changed.
+- **Bring your own key (BYOK):** you add your own AI provider API key and pay providers directly — no markup, no subscription, no account required.
+- **Local-first / private:** runs on your Mac; your files stay on your machine.
+- **Open source.**
+- **What the agent can do today:** trending hooks and fast cuts; explainer animations; screenshot proof with auto-highlight; AI-generated B-roll video; avatar / talking-head with background removal; music and sound effects; keyframe animations (position/scale/opacity); and a real timeline editor (cuts, overlays, text, images, audio, transitions, crop, speed).
+- **Honest caveats:** trending stickers/GIFs search is a representative mock in the demo, not shipped. The app itself is not released yet — the site is a waitlist.
+
+## Pricing
+
+- **Cost:** Free. OpenNolan is **open source** and uses **bring-your-own-key** — you pay AI providers (for generation/B-roll/voices, etc.) directly, with no subscription and no markup. No account is required.
+- See the machine-readable version: https://www.opennolan.com/pricing.txt
+
+## The short-form playbook (durable facts OpenNolan is built around)
+
+- **Hook in under 1 second** — open on the payoff or a pattern interrupt.
+- **Cut every 1–3 seconds** — hard cuts and motion reset attention.
+- **Ride trending sound** — the algorithm already pushes it.
+- **Captions on mute** — roughly 85% of people watch with sound off; burned-in captions carry the message.
+- **Show receipts** — screenshots, stats, and proof make the claim land and convert.
+
+## How OpenNolan compares (honest summaries)
+
+- **vs CapCut:** CapCut is a free, popular *manual* editor with great templates and trending audio, built for creators who enjoy editing. OpenNolan's AI agent assembles the whole reel for founders who'd rather not edit. https://www.opennolan.com/compare/capcut
+- **vs Descript:** Descript edits video by editing a transcript (document-style). OpenNolan builds the vertical reel from clips with an agent, then offers a timeline. https://www.opennolan.com/compare/descript
+- **vs Opus Clip:** Opus Clip repurposes existing long-form video into short clips. OpenNolan *creates* a reel from raw clips, adding B-roll, music, captions, and motion. https://www.opennolan.com/compare/opus-clip
+- **vs Submagic:** Submagic adds captions and effects on top of an edit you already made. OpenNolan makes the whole edit. https://www.opennolan.com/compare/submagic
+- **vs Veed:** Veed is a browser-based editor. OpenNolan is a local-first, Mac-native agent — your files stay on your machine. https://www.opennolan.com/compare/veed
+- **vs Adobe Premiere Pro:** Premiere is a professional manual NLE with a steep learning curve. OpenNolan is an agent built for non-editors, with a timeline for fine-tuning. https://www.opennolan.com/compare/adobe-premiere
+
+We never disparage competitors; each comparison credits what the other tool does well.
+
+## Frequently asked questions
+
+**Is OpenNolan available to download today?**
+Not yet. OpenNolan is in active development and the site is a waitlist. Join at https://www.opennolan.com/#waitlist to be notified the moment the Mac app is ready.
+
+**What platforms does it run on?**
+macOS only. It's a native Mac app that runs locally, so your files stay on your machine. There is no web or Windows version.
+
+**How much does it cost?**
+It's free and open source. You bring your own AI provider key and pay those providers directly — no subscription, no markup, no account.
+
+**What kinds of video can it make?**
+Vertical 9:16 short-form: Instagram Reels, TikTok, and YouTube Shorts — from raw clips, a talking-head recording, product demos, launch videos, and more.
+
+**Do I still get to edit?**
+Yes. The agent produces the first finished cut, then you can fine-tune on a real timeline — cuts, captions, overlays, timing, transitions — and most edits preview instantly thanks to "render once, edit cheap."
+
+**Who is it for?**
+Founders, indie hackers, SaaS teams, developers, agencies, and solopreneurs who want their product discovered through short-form video without becoming editors.
+
+## Links
+
+- Homepage: https://www.opennolan.com/
+- Built for (by audience): https://www.opennolan.com/for
+- Compare: https://www.opennolan.com/compare
+- How-to guides: https://www.opennolan.com/how-to
+- Glossary: https://www.opennolan.com/learn
+- Pricing (machine-readable): https://www.opennolan.com/pricing.txt
+- AI context index: https://www.opennolan.com/llms.txt
+- Source code (GitHub): https://github.com/het8802/OpenNolan
+- Join the waitlist: https://www.opennolan.com/#waitlist

@@ -19,6 +19,12 @@ export function inline(s) {
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   return out;
 }
+/* strip the inline-markdown subset to plain text (for JSON-LD values) */
+export function stripMd(s) {
+  return String(s == null ? "" : s)
+    .replace(/\[([^\]]+)\]\((?:\/[^)\s]+|https?:\/\/[^)\s]+)\)/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1");
+}
 const paras = (arr) => (arr || []).map((p) => `<p>${inline(p)}</p>`).join("\n        ");
 const url = (cluster, slug) => `/${cluster}/${slug}`;
 
@@ -301,8 +307,37 @@ function jsonldFor(data, canonicalPath, breadcrumb) {
       mainEntity: data.faqs.map((f) => ({
         "@type": "Question",
         name: f.q,
-        acceptedAnswer: { "@type": "Answer", text: f.a },
+        acceptedAnswer: { "@type": "Answer", text: stripMd(f.a) },
       })),
+    });
+  }
+  // HowTo for guide pages that define a step sequence (rich results + AI extraction)
+  if (data.cluster === "how-to" && Array.isArray(data.steps) && data.steps.length) {
+    graph.push({
+      "@type": "HowTo",
+      name: data.h1,
+      description: data.metaDescription,
+      image: OG_IMAGE,
+      step: data.steps.map((s, i) => ({
+        "@type": "HowToStep",
+        position: i + 1,
+        name: s.title,
+        text: stripMd(s.body),
+      })),
+    });
+  }
+  // DefinedTerm for glossary pages (strong answer-engine signal for "what is X")
+  if (data.cluster === "learn") {
+    graph.push({
+      "@type": "DefinedTerm",
+      name: data.term || data.targetKeyword,
+      description: data.metaDescription,
+      url: BASE + canonicalPath,
+      inDefinedTermSet: {
+        "@type": "DefinedTermSet",
+        name: "OpenNolan short-form video glossary",
+        url: BASE + "/learn",
+      },
     });
   }
   return { "@context": "https://schema.org", "@graph": graph };

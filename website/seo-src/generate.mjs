@@ -34,7 +34,7 @@ export const CLUSTERS = {
   },
   "compare": {
     slug: "compare", crumb: "Compare",
-    order: ["capcut", "descript", "opus-clip", "submagic", "veed", "adobe-premiere"],
+    order: ["capcut", "descript", "opus-clip", "submagic", "veed", "adobe-premiere", "final-cut-pro"],
     hubEyebrow: "Honest comparisons",
     hubH1: "OpenNolan vs the tools you're weighing",
     hubLede: "Every editor is good at something. Here's where OpenNolan fits — a Mac-native app where an AI agent makes the whole vertical video, bring-your-own-key, no subscription.",
@@ -49,7 +49,7 @@ export const CLUSTERS = {
   },
   "how-to": {
     slug: "how-to", crumb: "Guides",
-    order: ["instagram-reels", "tiktoks", "youtube-shorts", "product-demo-video", "launch-video", "talking-head-video"],
+    order: ["instagram-reels", "tiktoks", "youtube-shorts", "product-demo-video", "launch-video", "talking-head-video", "add-captions-to-a-video"],
     hubEyebrow: "How-to guides",
     hubH1: "How to make short-form that actually gets watched",
     hubLede: "Practical playbooks for the videos founders actually need — Reels, TikToks, Shorts, demos and launch videos — plus how OpenNolan makes each one for you.",

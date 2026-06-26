@@ -1,0 +1,127 @@
+{
+  "cluster": "compare",
+  "slug": "final-cut-pro",
+  "targetKeyword": "OpenNolan vs Final Cut Pro",
+  "title": "OpenNolan vs Final Cut Pro: Agent vs Pro Editor",
+  "metaDescription": "OpenNolan vs Final Cut Pro: Final Cut is a pro Mac editor you operate; OpenNolan's AI agent makes the whole vertical reel for founders. See the difference.",
+  "eyebrow": "vs Final Cut Pro",
+  "h1": "OpenNolan vs Final Cut Pro: who actually does the editing?",
+  "h1Accent": "does the editing",
+  "breadcrumbLabel": "vs Final Cut Pro",
+  "hubCardTitle": "OpenNolan vs Final Cut Pro",
+  "hubCardDesc": "Final Cut Pro is a powerful manual editor for Mac. OpenNolan's AI agent makes the whole reel — built for founders, not editors.",
+  "lede": "You want your product discovered through short-form video — without taking on a second job as a video editor. Final Cut Pro is a superb professional editor, but it is built for people whose job is editing, and it still expects you to make every cut.",
+  "intro": [
+    "Here is the honest version. **Final Cut Pro is genuinely excellent.** It is a fast, Mac-native professional editor with magnetic timeline, deep color tools, and the headroom to cut anything from a YouTube video to a short film. If your craft is editing, it is one of the best tools you can own.",
+    "The catch is who it is for. Final Cut is a professional non-linear editor — it hands you an enormously capable timeline and assumes you already know how to edit, or are willing to climb the learning curve. For a founder who would rather ship product than master an NLE, that is the editing tax: to get seen, you first have to become an editor.",
+    "OpenNolan starts from the other end. Instead of a better professional timeline, an **AI agent does the editing** — it assembles the whole vertical reel from your raw clips, then hands you a real timeline only if you want to fine-tune. Both are Mac-native and local, so the difference is not the platform. It is who makes the cuts."
+  ],
+  "sections": [
+    {
+      "h2": "The real difference: an AI agent vs a professional editor",
+      "body": [
+        "Final Cut Pro is a manual, professional editing application. You import footage, build a project on the magnetic timeline, trim and arrange every clip, add titles and effects, grade color, and mix audio. The tools are deep and fast — and every editing decision and keystroke is yours. That is exactly what a professional editor wants.",
+        "OpenNolan is not a lighter-weight NLE — it is a different model. You drop in your clips (or just describe the video), and the agent builds the composition, places clips, pulls B-roll and images from the web, adds music and sound effects, writes captions, animates overlays, and assembles a vertical cut. The finished reel is the starting point, not the payoff at the end of a long edit."
+      ],
+      "checks": [
+        "Final Cut Pro: you do the editing, with professional-grade tools",
+        "OpenNolan: the agent makes the whole reel, then you review",
+        "Both are native macOS apps that run and render locally",
+        "OpenNolan is vertical-first 9:16; Final Cut handles any format you set up"
+      ]
+    },
+    {
+      "h2": "Built for founders, not for editors",
+      "body": [
+        "Final Cut Pro rewards investment. The magnetic timeline, keyword collections, and roles are powerful once you know them, and there is a real learning curve to get there. Editors and creators happily make that investment because editing is the work.",
+        "OpenNolan assumes the opposite: that your real work is your product, and video is the thing standing between you and getting discovered. So the workflow is built for someone whose main job is not video — drop in clips, let the agent make the reel, post it, or tweak on a timeline where every edit previews instantly."
+      ],
+      "quote": "Final Cut gives you the editor's timeline. OpenNolan gives you the edit."
+    },
+    {
+      "h2": "Both Mac-native — the difference is the model and the price",
+      "body": [
+        "On platform, these two are close cousins: both are native macOS apps that run locally, so your footage stays on your machine and rendering does not depend on a browser tab. If you are committed to a Mac-native workflow, neither pushes you to the cloud.",
+        "The models diverge on cost and openness. Final Cut Pro is a paid professional app bought as a one-time purchase. OpenNolan is **open source** and **bring-your-own-key**: you add your own AI provider key and pay those providers directly, with no markup, no subscription, and no account required. If you are weighing other manual editors too, the [comparison with Adobe Premiere Pro](/compare/adobe-premiere) covers the other pro NLE, and [OpenNolan vs CapCut](/compare/capcut) covers the popular free editor."
+      ],
+      "checks": [
+        "Native macOS app, local-first rendering, files stay on your Mac",
+        "Open source and bring-your-own-key — pay providers directly, no subscription",
+        "An AI agent makes the first cut; a real timeline is there to fine-tune",
+        "Built for founders and builders, not professional editors"
+      ]
+    },
+    {
+      "h2": "What success looks like for a founder",
+      "body": [
+        "The goal is not to win an editing contest or master a professional NLE. It is to ship scroll-stopping short-form as fast as you ship product, so the product actually gets discovered. With Final Cut Pro, the path to that runs through you becoming a capable editor. With OpenNolan, the agent carries the editing and you carry the judgment.",
+        "Because OpenNolan renders once and edits cheap, the timeline is there when your taste says a cut should land a beat later or a caption should read differently. Most edits — reorder, retrim, retime, reposition, text — preview instantly without re-rendering, so refining stays quick instead of turning into a full edit session."
+      ]
+    }
+  ],
+  "comparison": {
+    "competitor": "Final Cut Pro",
+    "intro": "Final Cut Pro is Apple's professional video editor for Mac — fast, deep, and beloved by editors and creators. OpenNolan takes a different approach: an AI agent assembles the whole vertical reel for founders who would rather not edit.",
+    "rows": [
+      {
+        "feature": "Who it's for",
+        "openNolan": "Founders, builders, and indie hackers who are not editors",
+        "competitor": "Professional editors and serious creators"
+      },
+      {
+        "feature": "How editing happens",
+        "openNolan": "An AI agent assembles the whole reel for you",
+        "competitor": "Manual — you make every cut on a pro timeline"
+      },
+      {
+        "feature": "Learning curve",
+        "openNolan": "Drop in clips and review; no NLE skills needed",
+        "competitor": "Real learning curve to use it well"
+      },
+      {
+        "feature": "Platform",
+        "openNolan": "Native macOS app, local-first",
+        "competitor": "Native macOS app, local-first"
+      },
+      {
+        "feature": "Pricing model",
+        "openNolan": "Open source, bring your own key — no subscription",
+        "competitor": "Paid professional app (one-time purchase)"
+      },
+      {
+        "feature": "Vertical short-form focus",
+        "openNolan": "Vertical-first 9:16 for Reels, TikTok, Shorts",
+        "competitor": "Any format — general-purpose professional editing"
+      },
+      {
+        "feature": "Open source",
+        "openNolan": "Yes",
+        "competitor": "No"
+      }
+    ]
+  },
+  "faqs": [
+    {
+      "q": "Is OpenNolan a Final Cut Pro alternative I can download now?",
+      "a": "Not yet. OpenNolan is in active development and this site is a **waitlist** — you cannot download it today. Final Cut Pro is available now if you need a professional Mac editor immediately. Join the waitlist and we will let you know the moment the OpenNolan Mac app is ready to try."
+    },
+    {
+      "q": "What is the main difference between OpenNolan and Final Cut Pro?",
+      "a": "Final Cut Pro is a professional editor: it gives you a powerful timeline and you do the editing. OpenNolan is an AI agent that does the editing for you — it assembles the whole vertical reel from your clips, then hands you a real timeline only if you want to fine-tune the result."
+    },
+    {
+      "q": "Do I need editing experience to use OpenNolan?",
+      "a": "No. That is the point. Final Cut Pro rewards editing skill and has a learning curve. OpenNolan is built for founders and builders who are not editors — you drop in your clips or describe the video, and the agent makes the reel. You only touch the timeline if you want to tweak something."
+    },
+    {
+      "q": "How does pricing compare?",
+      "a": "Final Cut Pro is a paid professional app sold as a one-time purchase. OpenNolan is open source and uses bring-your-own-key: you add your own AI provider key and pay those providers directly, with no markup, no subscription, and no account required."
+    },
+    {
+      "q": "Are both apps Mac-native?",
+      "a": "Yes. Both OpenNolan and Final Cut Pro are native macOS apps that run locally, so your footage stays on your machine. The difference is not the platform — it is that OpenNolan's agent makes the whole vertical reel for you, while Final Cut expects you to edit it yourself. See the [features overview](/#features)."
+    }
+  ],
+  "ctaHeading": "Let the agent do the editing Final Cut leaves to you",
+  "ctaSub": "Join the waitlist and be first to try the Mac app that makes the whole reel for you."
+}

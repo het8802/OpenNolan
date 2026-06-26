@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>How to Add Captions to a Video (Founder Guide)</title>
+  <meta name="description" content="How to add captions to a video the right way: burned-in vs soft, mobile styling, and timing. Plus how OpenNolan writes and syncs captions for you." />
+  <link rel="canonical" href="https://www.opennolan.com/how-to/add-captions-to-a-video" />
+  <meta name="robots" content="index, follow" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.opennolan.com/how-to/add-captions-to-a-video" />
+  <meta property="og:title" content="How to Add Captions to a Video (Founder Guide)" />
+  <meta property="og:description" content="How to add captions to a video the right way: burned-in vs soft, mobile styling, and timing. Plus how OpenNolan writes and syncs captions for you." />
+  <meta property="og:site_name" content="OpenNolan" />
+  <meta property="og:image" content="https://www.opennolan.com/assets/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="OpenNolan — the Mac app that turns your raw clips into a finished, scroll-stopping Reel or TikTok." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="How to Add Captions to a Video (Founder Guide)" />
+  <meta name="twitter:description" content="How to add captions to a video the right way: burned-in vs soft, mobile styling, and timing. Plus how OpenNolan writes and syncs captions for you." />
+  <meta name="twitter:image" content="https://www.opennolan.com/assets/og-image.png" />
+  <meta name="theme-color" content="#FBF8F1" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23D9694A'/%3E%3Cpath d='M13 10.5l9 5.5-9 5.5z' fill='%23FBF8F1'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;450;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/site.css" />
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "OpenNolan",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "macOS",
+      "description": "How to add captions to a video the right way: burned-in vs soft, mobile styling, and timing. Plus how OpenNolan writes and syncs captions for you.",
+      "url": "https://www.opennolan.com/how-to/add-captions-to-a-video",
+      "image": "https://www.opennolan.com/assets/og-image.png",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://www.opennolan.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Guides",
+          "item": "https://www.opennolan.com/how-to"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Add captions to a video",
+          "item": "https://www.opennolan.com/how-to/add-captions-to-a-video"
+        }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is the best way to add captions to a short-form video?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "For Instagram Reels, TikTok, and YouTube Shorts, use burned-in captions — words rendered into the video itself so they always show on mute. Keep them short, high-contrast, placed in the middle third of the frame, and timed to the speech. Optionally add a soft/SRT track for accessibility and search."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Should captions be burned in or a separate subtitle track?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Both have a place. Burned-in captions always show and are best for the feed, where most people watch on mute and never toggle subtitles on. Soft captions (a separate SRT track) are toggleable and great for accessibility and search. Many creators ship burned-in captions plus an uploaded transcript."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why do captions matter so much for short-form video?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Around 85% of short-form video is watched with the sound off. Without captions, a muted viewer gets no message and scrolls. Burned-in captions carry the point in the first second and keep people watching — they are one of the highest-leverage things you can add to a reel."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does OpenNolan add captions?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "OpenNolan's AI agent writes, styles, and syncs burned-in captions for you as part of making the whole vertical reel — accurate transcription, short on-screen chunks, mobile-ready styling, and timing matched to the speech and your cuts. You can adjust any of it afterward on a real timeline."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I edit the captions OpenNolan generates?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. The agent produces caption-ready video as a first pass; you can then fix wording, restyle, reposition, or retime captions on a real timeline, and most edits preview instantly. See related guides like how to make Instagram Reels."
+          }
+        }
+      ]
+    },
+    {
+      "@type": "HowTo",
+      "name": "How to add captions to a video that gets watched on mute",
+      "description": "How to add captions to a video the right way: burned-in vs soft, mobile styling, and timing. Plus how OpenNolan writes and syncs captions for you.",
+      "image": "https://www.opennolan.com/assets/og-image.png",
+      "step": [
+        {
+          "@type": "HowToStep",
+          "position": 1,
+          "name": "Choose burned-in captions for the feed",
+          "text": "Decide up front: for Reels, TikTok, and Shorts, use burned-in captions so they always show on mute. Add a soft/SRT track too if you want accessibility and search benefits."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 2,
+          "name": "Transcribe the audio accurately",
+          "text": "Get an accurate transcript of what is said. Accuracy matters — a wrong word on screen is worse than no caption, because the viewer is reading, not listening."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 3,
+          "name": "Break it into short on-screen chunks",
+          "text": "Split the transcript into a few words at a time, the way the line is actually spoken. Short, punchy chunks get read; full sentences on screen get skipped."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 4,
+          "name": "Style for mobile: big, high-contrast, safe-area",
+          "text": "Use a large, heavy font with strong contrast (outline or a solid pill), placed in the middle third of the 9:16 frame, clear of the platform UI at the top and bottom."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 5,
+          "name": "Sync each chunk to the speech and the cuts",
+          "text": "Time each caption to appear as the word is spoken and clear before the next. Let caption changes land on your cuts so captions and pacing reinforce each other."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 6,
+          "name": "Check it on a real phone before posting",
+          "text": "Watch the video on a phone with the sound off. If you can follow the whole message on mute, in motion, the captions are doing their job. Fix anything that lags or crowds the edges."
+        }
+      ]
+    }
+  ]
+}
+  </script>
+</head>
+<body>
+  <header class="nav" id="nav">
+    <div class="wrap nav-inner">
+      <a href="/" class="brand" aria-label="OpenNolan home">
+        <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#D9694A"/><path d="M13 10.2l9.2 5.8-9.2 5.8z" fill="#FBF8F1"/></svg>
+        OpenNolan
+      </a>
+      <nav class="nav-links">
+        <a href="/for" class="navlink">Built for</a>
+        <a href="/compare" class="navlink">Compare</a>
+        <a href="/how-to" class="navlink">Guides</a>
+        <a href="https://github.com/het8802/OpenNolan" class="navlink" data-github hidden>GitHub</a>
+      </nav>
+      <div class="nav-cta">
+        <a href="https://github.com/het8802/OpenNolan" class="btn btn-ghost" data-github hidden style="padding:10px 16px;">GitHub</a>
+        <a href="#waitlist" class="btn btn-primary">Join the waitlist</a>
+      </div>
+    </div>
+  </header>
+  <main id="top">
+  <nav class="crumbs" aria-label="Breadcrumb"><div class="wrap"><ol><li><a href="/">Home</a></li><li><a href="/how-to">Guides</a></li><li aria-current="page">Add captions to a video</li></ol></div></nav>
+    <section class="page-hero">
+      <div class="wrap read">
+        <span class="eyebrow">How-to guide</span>
+        <h1>How to add captions to a video that gets <span class="accent">watched on mute</span></h1>
+        <p class="lede">Around 85% of short-form video is watched with the sound off, so captions are not a nice-to-have — they carry your message. Here is how to add captions that actually get read, and how OpenNolan does it for you.</p>
+        <form class="waitlist-form" data-analytics-placement="how-to_add-captions-to-a-video" novalidate>
+          <div class="field-row">
+            <input type="email" name="email" placeholder="you@startup.com" autocomplete="email" required aria-label="Email address" />
+            <input type="text" name="company" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+            <button type="submit" class="btn btn-primary">Join the waitlist</button>
+          </div>
+          <p class="form-note">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            Be first when the Mac app ships. No spam — just the launch.
+          </p>
+          <p class="form-status" role="status" aria-live="polite"></p>
+        </form>
+        <div class="form-success-card" role="status">
+          <p class="fs-h">You're on the list 🎬</p>
+          <p>Check your inbox — we just sent a confirmation. We'll email you the moment OpenNolan is ready to download.</p>
+        </div>
+        <div class="hero-actions">
+          <a href="/#features" class="btn btn-ghost">See it in action</a>
+        </div>
+      </div>
+    </section>
+
+    <div class="prose">
+      <div class="wrap read">
+        <section class="reveal">
+        <p>Captions are the difference between a video that lands on mute and one that gets scrolled past. The mechanics are simple, but the details — where the words sit, how fast they change, whether they survive a phone screen in bright sunlight — are what separate captions that get read from captions that get ignored.</p>
+        <p>This guide covers the durable playbook: the two kinds of captions, how to style them for mobile, and how to time them so they reinforce your cuts. Then it shows how <strong>OpenNolan</strong> writes, styles, and syncs <strong>burned-in captions</strong> for you — so you get caption-perfect video without doing it by hand.</p>
+        </section>
+      <section class="reveal">
+        <h2>Burned-in captions vs soft captions: which to use</h2>
+        <p>There are two ways to put words on a video. <strong>Burned-in captions</strong> are part of the picture — they always show, on any platform, with the styling you chose. <strong>Soft captions</strong> (a separate subtitle or SRT track) can be toggled on or off and are great for accessibility and search, but the viewer has to turn them on, and most never do.</p>
+        <p>For short-form that lives on Reels, TikTok, and Shorts, burned-in captions win, because the goal is to be understood instantly by someone watching on mute. Many creators do both: burned-in captions for the feed, plus an uploaded transcript or SRT for accessibility and indexing.</p>
+        <ul class="checks">
+          <li>Burned-in: always visible, styled by you, best for the feed</li>
+          <li>Soft / SRT: toggleable, good for accessibility and search</li>
+          <li>For Reels, TikTok, and Shorts, default to burned-in</li>
+          <li>See the full definition in <a href="/learn/burned-in-captions">burned-in captions</a></li>
+        </ul>
+      </section>
+      <section class="reveal">
+        <h2>Style captions for a phone, not a desktop</h2>
+        <p>Captions are read on a small, bright, vertical screen — sometimes one-handed, in motion. So style for the worst case: a large, heavy font; high contrast (white text with a dark outline or a solid pill behind it); and placement in the middle third of the frame, clear of the platform&#39;s UI at the very top and bottom.</p>
+        <p>Keep each caption to a few words at a time. Walls of text get skipped; short, punchy chunks that change with the speech get read. If you emphasize a word — color, scale, a quick pop — do it sparingly, on the word that carries the line.</p>
+      </section>
+      <section class="reveal">
+        <h2>Time captions to the speech and the cuts</h2>
+        <p>Good captions feel synced. Each chunk should appear as the word is spoken and clear before the next one, so the eye never lags the audio. When you cut on a beat, let the caption change land with it — captions and cuts reinforcing each other is what makes short-form feel tight.</p>
+        <p>Doing this by hand means transcribing, breaking the transcript into on-screen chunks, positioning and styling each one, then nudging timings frame by frame. It is the slowest, fiddliest part of editing — which is exactly the part OpenNolan automates.</p>
+      </section>
+
+      <section class="reveal">
+        <h2>How to add captions, step by step</h2>
+        <ol class="steps-list">
+          <li><h3>Choose burned-in captions for the feed</h3><p>Decide up front: for Reels, TikTok, and Shorts, use <strong>burned-in</strong> captions so they always show on mute. Add a soft/SRT track too if you want accessibility and search benefits.</p></li>
+          <li><h3>Transcribe the audio accurately</h3><p>Get an accurate transcript of what is said. Accuracy matters — a wrong word on screen is worse than no caption, because the viewer is reading, not listening.</p></li>
+          <li><h3>Break it into short on-screen chunks</h3><p>Split the transcript into a few words at a time, the way the line is actually spoken. Short, punchy chunks get read; full sentences on screen get skipped.</p></li>
+          <li><h3>Style for mobile: big, high-contrast, safe-area</h3><p>Use a large, heavy font with strong contrast (outline or a solid pill), placed in the middle third of the 9:16 frame, clear of the platform UI at the top and bottom.</p></li>
+          <li><h3>Sync each chunk to the speech and the cuts</h3><p>Time each caption to appear as the word is spoken and clear before the next. Let caption changes land on your cuts so captions and pacing reinforce each other.</p></li>
+          <li><h3>Check it on a real phone before posting</h3><p>Watch the video on a phone with the sound off. If you can follow the whole message on mute, in motion, the captions are doing their job. Fix anything that lags or crowds the edges.</p></li>
+        </ol>
+      </section>
+      <section class="reveal">
+        <h2>Frequently asked questions</h2>
+        <div class="faq">
+          <details><summary>What is the best way to add captions to a short-form video?</summary><p>For Instagram Reels, TikTok, and YouTube Shorts, use <strong>burned-in captions</strong> — words rendered into the video itself so they always show on mute. Keep them short, high-contrast, placed in the middle third of the frame, and timed to the speech. Optionally add a soft/SRT track for accessibility and search.</p></details>
+          <details><summary>Should captions be burned in or a separate subtitle track?</summary><p>Both have a place. Burned-in captions always show and are best for the feed, where most people watch on mute and never toggle subtitles on. Soft captions (a separate SRT track) are toggleable and great for accessibility and search. Many creators ship burned-in captions plus an uploaded transcript.</p></details>
+          <details><summary>Why do captions matter so much for short-form video?</summary><p>Around 85% of short-form video is watched with the sound off. Without captions, a muted viewer gets no message and scrolls. Burned-in captions carry the point in the first second and keep people watching — they are one of the highest-leverage things you can add to a reel.</p></details>
+          <details><summary>How does OpenNolan add captions?</summary><p>OpenNolan&#39;s AI agent writes, styles, and syncs <strong>burned-in captions</strong> for you as part of making the whole vertical reel — accurate transcription, short on-screen chunks, mobile-ready styling, and timing matched to the speech and your cuts. You can adjust any of it afterward on a real timeline.</p></details>
+          <details><summary>Can I edit the captions OpenNolan generates?</summary><p>Yes. The agent produces caption-ready video as a first pass; you can then fix wording, restyle, reposition, or retime captions on a real timeline, and most edits preview instantly. See related guides like <a href="/how-to/instagram-reels">how to make Instagram Reels</a>.</p></details>
+        </div>
+      </section>
+      </div>
+    </div>
+  <section class="related reveal">
+    <div class="wrap read">
+      <h2>Keep exploring</h2>
+      <p class="sub">More ways OpenNolan helps you ship short-form that gets seen.</p>
+      <div class="rel-grid">
+          <a class="rel-card" href="/how-to/tiktoks"><span class="rl">Guides</span><span class="rt">How to make TikToks</span><span class="rd">The native-feel TikTok playbook: hook, trending sounds, pacing, captions, and a cadence you can keep.</span></a>
+          <a class="rel-card" href="/how-to/youtube-shorts"><span class="rl">Guides</span><span class="rt">How to make YouTube Shorts</span><span class="rd">Specs, hooks, captions, and the loop — the real Shorts playbook for founders who&#39;d rather ship product.</span></a>
+          <a class="rel-card" href="/for/founders"><span class="rl">Built for</span><span class="rt">AI video editor for founders</span><span class="rd">Turn launches and build-in-public updates into scroll-stopping reels — without becoming the editor.</span></a>
+          <a class="rel-card" href="/compare/final-cut-pro"><span class="rl">Compare</span><span class="rt">OpenNolan vs Final Cut Pro</span><span class="rd">Final Cut Pro is a powerful manual editor for Mac. OpenNolan&#39;s AI agent makes the whole reel — built for founders, not editors.</span></a>
+      </div>
+    </div>
+  </section>
+  </main>
+  <section class="cta-final" id="waitlist">
+    <div class="wrap">
+      <div class="cta-card reveal">
+        <span class="eyebrow" style="display:inline-flex;">Coming soon to Mac</span>
+        <h2>Get caption-perfect video without doing it by hand</h2>
+        <p>Join the waitlist for the Mac app that writes, styles, and syncs your captions for you.</p>
+        <form class="waitlist-form center" data-analytics-placement="how-to_add-captions-to-a-video" novalidate>
+          <div class="field-row">
+            <input type="email" name="email" placeholder="you@startup.com" autocomplete="email" required aria-label="Email address" />
+            <input type="text" name="company" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+            <button type="submit" class="btn btn-primary">Join the waitlist</button>
+          </div>
+          <p class="form-note center">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            Be first when the Mac app ships. No spam — just the launch.
+          </p>
+          <p class="form-status" role="status" aria-live="polite"></p>
+        </form>
+        <div class="form-success-card center" role="status">
+          <p class="fs-h">You're on the list 🎬</p>
+          <p>Check your inbox — we just sent a confirmation. We'll email you the moment OpenNolan is ready to download.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+  <footer>
+    <div class="wrap">
+      <div class="foot-grid">
+        <div class="foot-brand">
+          <a href="/" class="brand" style="font-size:20px;">
+            <svg class="mark" viewBox="0 0 32 32" aria-hidden="true" style="width:28px;height:28px;"><rect width="32" height="32" rx="9" fill="#D9694A"/><path d="M13 10.2l9.2 5.8-9.2 5.8z" fill="#FBF8F1"/></svg>
+            OpenNolan
+          </a>
+          <p>The Mac app that makes the whole reel for you — drop in your clips, the AI agent does the rest.</p>
+          <span class="badge-progress" style="margin-top:16px;"><span class="dot-live"></span> In active development</span>
+        </div>
+        <div class="foot-cols">
+          <div class="foot-col">
+            <h3>Product</h3>
+            <a href="/#problem">Why OpenNolan</a>
+            <a href="/#playbook">The playbook</a>
+            <a href="/#features">Features</a>
+            <a href="/#waitlist">Join the waitlist</a>
+          </div>
+          <div class="foot-col">
+            <h3>Built for</h3>
+            <a href="/for/founders">Founders</a>
+            <a href="/for/indie-hackers">Indie hackers</a>
+            <a href="/for/saas">SaaS</a>
+            <a href="/for">All audiences →</a>
+          </div>
+          <div class="foot-col">
+            <h3>Compare</h3>
+            <a href="/compare/capcut">vs CapCut</a>
+            <a href="/compare/descript">vs Descript</a>
+            <a href="/compare/opus-clip">vs Opus Clip</a>
+            <a href="/compare">All comparisons →</a>
+          </div>
+          <div class="foot-col">
+            <h3>Resources</h3>
+            <a href="/how-to">How-to guides</a>
+            <a href="/learn">Glossary</a>
+            <a href="https://github.com/het8802/OpenNolan" data-github hidden>GitHub</a>
+          </div>
+        </div>
+      </div>
+      <div class="foot-bottom">
+        <span>© <span id="year">2026</span> OpenNolan. Open source.</span>
+        <span>The Mac app is in active development — join the waitlist for launch.</span>
+      </div>
+    </div>
+  </footer>
+  <script src="/assets/posthog.js"></script>
+  <script src="/assets/waitlist.js"></script>
+  <script defer src="/_vercel/insights/script.js"></script>
+</body>
+</html>

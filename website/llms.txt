@@ -1,0 +1,63 @@
+# OpenNolan
+
+> OpenNolan is a Mac app where an AI agent turns your raw clips into a finished, scroll-stopping vertical video — Instagram Reels, TikTok, and YouTube Shorts. The agent adds B-roll and images from the web, music, sound effects, burned-in captions, rapid cuts, and motion, all tuned for 9:16. You can fine-tune any cut afterward on a real timeline. It's built for founders and builders who need short-form video to get their product discovered but don't want to become video editors. Bring-your-own-key (you pay AI providers directly — no subscription, no markup), local-first and private, and open source. The app is in active development; the site is currently a waitlist.
+
+## What OpenNolan is
+
+- One sentence: a native macOS app where an AI agent makes the *whole* vertical reel from your clips, then hands you a real timeline if you want to tweak it.
+- Who it's for: founders, indie hackers, SaaS teams, developers, agencies, and solopreneurs who'd rather ship product than learn video editing.
+- How it's different: most tools give you better editing *tools*; OpenNolan's agent does the editing *for* you.
+- Pricing model: bring-your-own-key — add your own AI provider API key and pay providers directly. No subscription, no markup, no account required. Open source.
+- Status: in active development — [join the waitlist](https://www.opennolan.com/#waitlist) to be notified at launch.
+
+## Key pages
+
+- [Homepage](https://www.opennolan.com/): What OpenNolan is, how it works, the in-app studio, and the waitlist.
+- [Built for (by audience)](https://www.opennolan.com/for): How OpenNolan fits different builders.
+- [Compare](https://www.opennolan.com/compare): Honest, side-by-side comparisons vs other video tools.
+- [How-to guides](https://www.opennolan.com/how-to): Step-by-step playbooks for Reels, TikToks, Shorts, demos, and launch videos.
+- [Short-form glossary](https://www.opennolan.com/learn): Plain-English definitions of the terms behind videos that travel.
+
+## Built for
+
+- [Founders](https://www.opennolan.com/for/founders): Ship scroll-stopping short-form as fast as you ship product.
+- [Indie hackers](https://www.opennolan.com/for/indie-hackers): Make the whole reel without a subscription — bring your own key.
+- [SaaS teams](https://www.opennolan.com/for/saas): Turn product clips into vertical video that gets discovered.
+- [Developers](https://www.opennolan.com/for/developers): A local-first, open-source, BYOK video tool for people who ship code.
+- [Agencies](https://www.opennolan.com/for/agencies): Produce more short-form per client without scaling an edit team.
+- [Solopreneurs](https://www.opennolan.com/for/solopreneurs): One person, a finished reel — the agent does the editing.
+
+## Compare
+
+- [OpenNolan vs CapCut](https://www.opennolan.com/compare/capcut): AI agent that makes the whole reel vs a manual editor with templates.
+- [OpenNolan vs Descript](https://www.opennolan.com/compare/descript): Agent-built reel vs transcript/document-based editing.
+- [OpenNolan vs Opus Clip](https://www.opennolan.com/compare/opus-clip): Create a reel from raw clips vs repurpose long video into clips.
+- [OpenNolan vs Submagic](https://www.opennolan.com/compare/submagic): The whole vertical video vs captions-and-effects on your edit.
+- [OpenNolan vs Veed](https://www.opennolan.com/compare/veed): Local Mac agent vs a browser-based editor.
+- [OpenNolan vs Adobe Premiere Pro](https://www.opennolan.com/compare/adobe-premiere): An agent for founders vs a pro manual NLE.
+- [OpenNolan vs Final Cut Pro](https://www.opennolan.com/compare/final-cut-pro): A Mac-native AI agent for founders vs Apple's pro manual editor.
+
+## How-to guides
+
+- [How to make Instagram Reels that get reach](https://www.opennolan.com/how-to/instagram-reels)
+- [How to make TikToks for your product](https://www.opennolan.com/how-to/tiktoks)
+- [How to make YouTube Shorts](https://www.opennolan.com/how-to/youtube-shorts)
+- [How to make a product demo video that converts](https://www.opennolan.com/how-to/product-demo-video)
+- [How to make a product launch video](https://www.opennolan.com/how-to/launch-video)
+- [How to make a talking-head video](https://www.opennolan.com/how-to/talking-head-video)
+- [How to add captions to a video](https://www.opennolan.com/how-to/add-captions-to-a-video)
+
+## Glossary
+
+- [What is short-form video?](https://www.opennolan.com/learn/short-form-video)
+- [What is a video hook?](https://www.opennolan.com/learn/what-is-a-hook)
+- [What is B-roll?](https://www.opennolan.com/learn/b-roll)
+- [What is a jump cut?](https://www.opennolan.com/learn/jump-cut)
+- [What are burned-in captions?](https://www.opennolan.com/learn/burned-in-captions)
+- [What is vertical video (9:16)?](https://www.opennolan.com/learn/vertical-video)
+
+## More
+
+- [Pricing (machine-readable)](https://www.opennolan.com/pricing.txt): Free, open source, bring-your-own-key.
+- [Full knowledge bundle](https://www.opennolan.com/llms-full.txt): Everything above in one plain-text file for ingestion.
+- [Source code (GitHub)](https://github.com/het8802/OpenNolan)

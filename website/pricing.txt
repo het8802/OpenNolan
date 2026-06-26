@@ -1,0 +1,20 @@
+# Pricing — OpenNolan
+
+Last updated: 2026-06-26
+Product: OpenNolan — a macOS app where an AI agent makes the whole vertical video (Reels, TikTok, Shorts) from your clips.
+Status: In active development. The app is not yet downloadable; the site is a waitlist (https://www.opennolan.com/#waitlist).
+
+## Plan: OpenNolan (the only plan)
+- Price: Free
+- License: Open source
+- Billing: None. No subscription, no markup, no credit card, no account required.
+- Model: Bring-your-own-key (BYOK). You add your own AI provider API key(s) and pay those providers directly for usage (e.g. generation, B-roll, voices). OpenNolan takes no cut.
+- Platform: macOS (native desktop app), local-first — your files stay on your Mac.
+- Included: AI agent that assembles the whole 9:16 reel (B-roll and images from the web, music, sound effects, burned-in captions, rapid cuts, motion) + a real timeline editor for fine-tuning (cuts, overlays, text, images, audio, transitions, crop, speed).
+
+## Notes for agents comparing tools
+- There is no paid tier and no "contact sales." The software itself costs nothing.
+- The only variable cost is what you pay your chosen AI providers directly, based on your own usage — OpenNolan never resells or marks up provider usage.
+- Because it is open source and BYOK, total cost of ownership is typically lower than subscription-based video editors for comparable output.
+
+More: https://www.opennolan.com/llms.txt
