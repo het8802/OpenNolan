@@ -63,6 +63,9 @@ internal/
 # Agent skills lock (local install tracking)
 skills-lock.json
 
+# Local agent QA tooling (dev-only helper scripts + their logs/pids — not shipped)
+.agents/tools/
+
 # Generated images (logo drafts — final logo lives in assets/)
 logo_*.png
 generated_image.png
