@@ -54,6 +54,41 @@
         "image": "https://www.opennolan.com/assets/og-image.png",
         "publisher": { "@id": "https://www.opennolan.com/#org" },
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is OpenNolan?",
+            "acceptedAnswer": { "@type": "Answer", "text": "OpenNolan is a Mac app where an AI agent turns your raw clips into a finished, scroll-stopping vertical video — Instagram Reels, TikTok, and YouTube Shorts. It adds B-roll, music, sound effects, captions, and motion for you, then lets you fine-tune any cut on a real timeline." }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I download OpenNolan yet?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Not yet — OpenNolan is in active development and this page is a waitlist. Join the waitlist and we'll email you the moment the Mac app is ready to download. No spam, just the launch." }
+          },
+          {
+            "@type": "Question",
+            "name": "How much does OpenNolan cost?",
+            "acceptedAnswer": { "@type": "Answer", "text": "It's free and open source. OpenNolan uses bring-your-own-key: you add your own AI provider key and pay those providers directly, with no subscription, no markup, and no account required." }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need to know how to edit video?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. That's the whole point. The AI agent makes the entire reel from your clips — you don't touch a timeline unless you want to. It's built for founders and builders who'd rather ship product than become video editors." }
+          },
+          {
+            "@type": "Question",
+            "name": "What can the AI agent actually do?",
+            "acceptedAnswer": { "@type": "Answer", "text": "It pulls B-roll and images from the web, adds music and sound effects, writes and styles burned-in captions, makes rapid cuts, and animates motion — all tuned for the vertical 9:16 frame. You can adjust anything afterward on a real timeline." }
+          },
+          {
+            "@type": "Question",
+            "name": "Where does my footage live — is it private?",
+            "acceptedAnswer": { "@type": "Answer", "text": "OpenNolan is a native macOS app that runs locally, so your footage stays on your machine. It's local-first and private — nothing is uploaded to our servers to make your video." }
+          }
+        ]
       }
     ]
   }
@@ -891,6 +926,55 @@
             <p>Plain-English definitions — the hook, B-roll, jump cuts, captions and vertical video.</p>
             <span class="go">Learn the terms →</span>
           </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <style>
+      #faq .home-faq{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:12px;}
+      #faq .home-faq-item{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;transition:border-color .18s,box-shadow .18s;}
+      #faq .home-faq-item[open]{border-color:var(--coral-soft);box-shadow:var(--shadow-sm);}
+      #faq .home-faq-item summary{list-style:none;cursor:pointer;padding:18px 22px;font-family:var(--serif);font-weight:600;font-size:18px;color:var(--ink);display:flex;align-items:center;justify-content:space-between;gap:16px;}
+      #faq .home-faq-item summary::-webkit-details-marker{display:none;}
+      #faq .home-faq-item summary::after{content:"";flex:none;width:10px;height:10px;border-right:2px solid var(--coral);border-bottom:2px solid var(--coral);transform:rotate(45deg);transition:transform .2s;margin-top:-5px;}
+      #faq .home-faq-item[open] summary::after{transform:rotate(-135deg);margin-top:3px;}
+      #faq .home-faq-item summary:hover{color:var(--coral-strong);}
+      #faq .home-faq-item .ans{padding:0 22px 20px;color:var(--ink-soft);font-size:16px;line-height:1.65;}
+      @media (max-width:560px){#faq .home-faq-item summary{font-size:16.5px;padding:16px 18px;}#faq .home-faq-item .ans{padding:0 18px 18px;}}
+    </style>
+    <section id="faq" style="padding-top:0;">
+      <div class="wrap">
+        <div class="section-head center reveal" style="margin-bottom:34px;">
+          <span class="eyebrow">Before you join</span>
+          <h2>Questions, answered.</h2>
+          <p>The things founders ask before getting on the waitlist.</p>
+        </div>
+        <div class="home-faq reveal">
+          <details class="home-faq-item">
+            <summary>What is OpenNolan?</summary>
+            <p class="ans">OpenNolan is a Mac app where an AI agent turns your raw clips into a finished, scroll-stopping vertical video — Instagram Reels, TikTok, and YouTube Shorts. It adds B-roll, music, sound effects, captions, and motion for you, then lets you fine-tune any cut on a real timeline.</p>
+          </details>
+          <details class="home-faq-item">
+            <summary>Can I download OpenNolan yet?</summary>
+            <p class="ans">Not yet — OpenNolan is in active development and this page is a waitlist. Join the waitlist and we'll email you the moment the Mac app is ready to download. No spam, just the launch.</p>
+          </details>
+          <details class="home-faq-item">
+            <summary>How much does it cost?</summary>
+            <p class="ans">It's free and open source. OpenNolan uses bring-your-own-key: you add your own AI provider key and pay those providers directly, with no subscription, no markup, and no account required.</p>
+          </details>
+          <details class="home-faq-item">
+            <summary>Do I need to know how to edit video?</summary>
+            <p class="ans">No. That's the whole point. The AI agent makes the entire reel from your clips — you don't touch a timeline unless you want to. It's built for founders and builders who'd rather ship product than become video editors.</p>
+          </details>
+          <details class="home-faq-item">
+            <summary>What can the AI agent actually do?</summary>
+            <p class="ans">It pulls B-roll and images from the web, adds music and sound effects, writes and styles burned-in captions, makes rapid cuts, and animates motion — all tuned for the vertical 9:16 frame. You can adjust anything afterward on a real timeline.</p>
+          </details>
+          <details class="home-faq-item">
+            <summary>Where does my footage live — is it private?</summary>
+            <p class="ans">OpenNolan is a native macOS app that runs locally, so your footage stays on your machine. It's local-first and private — nothing is uploaded to our servers to make your video.</p>
+          </details>
         </div>
       </div>
     </section>

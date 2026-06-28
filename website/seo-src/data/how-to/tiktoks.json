@@ -33,36 +33,6 @@
       "quote": "On TikTok, looking native beats looking polished. Belonging is the production value."
     },
     {
-      "h2": "How to make a TikTok: the real step-by-step",
-      "stepsHeading": "Five steps from raw clips to a TikTok that travels",
-      "body": [
-        "This is the process whether you edit it by hand in CapCut or let an agent do it. Each step is what actually separates a TikTok that lands from one that dies in the first second.",
-        "Below each step is how OpenNolan handles it for you — so the playbook runs without you studying it or sitting at a timeline."
-      ],
-      "steps": [
-        {
-          "title": "Lead with the payoff in under a second",
-          "body": "The first frame decides everything. Open on the result, a pattern interrupt, or the boldest claim — never a slow intro or a logo. If your hook is 'here's a tool I built,' you've already lost; 'I replaced my whole video editor with this' stops the thumb. OpenNolan: the agent opens on the payoff and writes a [hook](/learn/what-is-a-hook) built to stop the scroll, drawn from trending hook patterns."
-        },
-        {
-          "title": "Ride a trending sound",
-          "body": "TikTok's algorithm actively pushes videos using sounds that are spiking. A trending audio bed gives your clip distribution it wouldn't earn on its own, and it sets the rhythm you cut to. Pick a sound that fits the energy, not just the most popular one. OpenNolan: the agent adds music and sound effects (via ElevenLabs) and cuts the video to the beat, so the pacing and the sound move together."
-        },
-        {
-          "title": "Cut hard every 1–3 seconds",
-          "body": "Motion resets attention. Hard cuts, zoom punches, and B-roll inserts keep the viewer from drifting. A static talking head that runs ten seconds without a cut is a desktop habit the feed punishes. OpenNolan: the agent assembles rapid cuts and keyframe motion (position, scale, opacity), pulls B-roll and images from the web, and tunes the whole sequence for vertical."
-        },
-        {
-          "title": "Burn in captions for the mute majority",
-          "body": "Around 85% of viewers watch with sound off, so the message has to carry visually. Captions should be large, high-contrast, and timed to the words — not a passive subtitle track. OpenNolan: the agent writes and burns in captions synced to the cut, styled for the feed, so the point lands whether the sound is on or off."
-        },
-        {
-          "title": "Show receipts, then post and tweak",
-          "body": "Proof converts. Drop in a screenshot, a stat, or a result so the claim isn't just talk. Then post — and if a beat is off, fix it fast rather than re-exporting for an hour. OpenNolan: it adds screenshot proof with auto-highlight, and its render-once model lets you tweak any cut on a real timeline with edits previewing instantly — no full re-render."
-        }
-      ]
-    },
-    {
       "h2": "Hooks, series, and a posting cadence you can actually keep",
       "body": [
         "One great TikTok is luck; a cadence is a strategy. The accounts that win post consistently and lean on series — repeatable formats like 'building my product, day N,' 'things I wish I knew,' or a recurring hook you can refill with new footage. A series trains both the algorithm and your audience to expect you, and it turns the hard part (inventing a format) into a one-time decision.",
@@ -83,6 +53,29 @@
         "Every one of these traces back to the editing tax. When each video is expensive to make, you make fewer, bury the hook to save effort, and reuse one cut everywhere. Make editing cheap and the mistakes fix themselves: you can afford a real hook, a native cut per platform, and the volume that TikTok actually rewards.",
         "The transformation is the point — from the reluctant editor whose product nobody sees, to the founder whose work travels on the For You page, with TikToks made in minutes instead of evenings."
       ]
+    }
+  ],
+  "stepsHeading": "How to make a TikTok: five steps from raw clips to a video that travels",
+  "steps": [
+    {
+      "title": "Lead with the payoff in under a second",
+      "body": "The first frame decides everything. Open on the result, a pattern interrupt, or the boldest claim — never a slow intro or a logo. If your hook is 'here's a tool I built,' you've already lost; 'I replaced my whole video editor with this' stops the thumb. OpenNolan: the agent opens on the payoff and writes a [hook](/learn/what-is-a-hook) built to stop the scroll, drawn from trending hook patterns."
+    },
+    {
+      "title": "Ride a trending sound",
+      "body": "TikTok's algorithm actively pushes videos using sounds that are spiking. A trending audio bed gives your clip distribution it wouldn't earn on its own, and it sets the rhythm you cut to. Pick a sound that fits the energy, not just the most popular one. OpenNolan: the agent adds music and sound effects (via ElevenLabs) and cuts the video to the beat, so the pacing and the sound move together."
+    },
+    {
+      "title": "Cut hard every 1–3 seconds",
+      "body": "Motion resets attention. Hard cuts, zoom punches, and B-roll inserts keep the viewer from drifting. A static talking head that runs ten seconds without a cut is a desktop habit the feed punishes. OpenNolan: the agent assembles rapid cuts and keyframe motion (position, scale, opacity), pulls B-roll and images from the web, and tunes the whole sequence for vertical."
+    },
+    {
+      "title": "Burn in captions for the mute majority",
+      "body": "Around 85% of viewers watch with sound off, so the message has to carry visually. Captions should be large, high-contrast, and timed to the words — not a passive subtitle track. OpenNolan: the agent writes and burns in captions synced to the cut, styled for the feed, so the point lands whether the sound is on or off. See [burned-in captions](/learn/burned-in-captions)."
+    },
+    {
+      "title": "Show receipts, then post and tweak",
+      "body": "Proof converts. Drop in a screenshot, a stat, or a result so the claim isn't just talk. Then post — and if a beat is off, fix it fast rather than re-exporting for an hour. OpenNolan: it adds screenshot proof with auto-highlight, and its render-once model lets you tweak any cut on a real timeline with edits previewing instantly — no full re-render."
     }
   ],
   "faqs": [
