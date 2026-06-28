@@ -10,6 +10,8 @@
     "dev": "ELECTRON_DEV=1 electron ."
   },
   "devDependencies": {
-    "electron": "^42.0.0"
+    "@playwright/test": "^1.61.1",
+    "electron": "^42.0.0",
+    "playwright": "^1.61.1"
   }
 }
