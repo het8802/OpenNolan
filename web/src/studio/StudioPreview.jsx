@@ -119,6 +119,17 @@ export default function StudioPreview({
   }, [previewMode, canvas.width, canvas.height])
   const scale = frameSize.w > 0 && canvas.width > 0 ? frameSize.w / canvas.width : 0
 
+  // Intrinsic pixel size of each image/video asset (keyed by asset_id), measured on load. An overlay
+  // that carries no explicit width is sized in CANVAS px from the asset's intrinsic size — exactly
+  // like the FFmpeg renderer (which probes native dims and applies `scale` on top) — so preview
+  // matches export. Without this the browser would paint the asset at its intrinsic px 1:1, ignoring
+  // the frame zoom (`scale`), making it ~1/scale× too big in the shrunk preview frame.
+  const [natDims, setNatDims] = useState({}) // asset_id → { w, h } intrinsic px
+  const measureNat = (assetId, w, h) => {
+    if (!assetId || !w || !h) return
+    setNatDims(d => (d[assetId]?.w === w && d[assetId]?.h === h) ? d : { ...d, [assetId]: { w, h } })
+  }
+
   // Audio to play alongside the source clip (unchanged).
   const audioTracks = useMemo(() => previewAudioTracks(doc), [doc])
   const audioEls = useRef(new Map())
@@ -358,9 +369,15 @@ export default function StudioPreview({
     // object position (or asset overlay): top-left in canvas px → frame px.
     const x = (kfx != null ? kfx : (pos?.x ?? 0)) * scale
     const y = (kfy != null ? kfy : (pos?.y ?? 0)) * scale
+    // Overlay box width in CANVAS px: an explicit width wins; otherwise the asset's intrinsic width
+    // (once measured on load). Multiply by the frame zoom `scale` — the same mapping positions and
+    // text use — and leave height auto so aspect is preserved, mirroring the renderer's `scale=w:-2` /
+    // native sizing. `transform: scale(kfs)` then applies the keyframe scale center-anchored, matching
+    // FFmpeg's center-anchored scale, so the previewed size AND position match the export.
+    const boxW = pos?.width != null ? pos.width : natDims[o.asset_id]?.w
     common.style = {
       ...common.style, position: 'absolute', left: x, top: y,
-      width: pos?.width != null ? pos.width * scale : undefined,
+      width: boxW != null ? boxW * scale : undefined,
       transform: kfs != null && kfs !== 1 ? `scale(${kfs})` : undefined,
       transformOrigin: 'center',
     }
@@ -376,10 +393,12 @@ export default function StudioPreview({
           muted={!o.audio_mix?.enabled}
           playsInline
           preload="auto"
+          onLoadedMetadata={(e) => measureNat(o.asset_id, e.target.videoWidth, e.target.videoHeight)}
         />
       )
     }
-    return <img key={i} {...common} src={api.sourceUrl(projectId, o.asset_id)} alt="" draggable={false} />
+    return <img key={i} {...common} src={api.sourceUrl(projectId, o.asset_id)} alt="" draggable={false}
+      onLoad={(e) => measureNat(o.asset_id, e.target.naturalWidth, e.target.naturalHeight)} />
   }
 
   return (

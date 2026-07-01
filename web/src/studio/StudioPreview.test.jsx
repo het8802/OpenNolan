@@ -60,6 +60,25 @@ describe('WYSIWYG canvas', () => {
     expect(items[1].tagName.toLowerCase()).toBe('img')
   })
 
+  it('sizes an intrinsic (no explicit width) image overlay at naturalWidth × frame-zoom, matching export', () => {
+    // Canvas is 2× the mocked frame rect (1080) → frame zoom `scale` = 0.5. An overlay with no
+    // explicit width must be sized from the asset's intrinsic px (like the FFmpeg renderer), THEN
+    // mapped to the frame by that zoom — not painted at intrinsic px 1:1 (the bug: too big).
+    const bigCanvas = { ...base, canvas: { width: 2160, height: 3840 } }
+    const doc = {
+      cuts: [videoCut],
+      overlays: [{ type: 'image', asset_id: 'card.png', start_seconds: 0, end_seconds: 3, position: { x: 100, y: 200 }, track: 0 }],
+    }
+    const { container } = render(<StudioPreview {...bigCanvas} doc={doc} />)
+    const img = container.querySelector('img.st-ov-canvas')
+    expect(img.style.width).toBe('')       // intrinsic size unknown until load → no forced width (avoids a wrong size)
+    Object.defineProperty(img, 'naturalWidth', { value: 300, configurable: true })
+    Object.defineProperty(img, 'naturalHeight', { value: 120, configurable: true })
+    fireEvent.load(img)
+    expect(img.style.width).toBe('150px')  // 300 intrinsic × 0.5 zoom (bug would paint 300px)
+    expect(img.style.left).toBe('50px')    // x=100 canvas × 0.5 zoom
+  })
+
   it('renders a video overlay as a playable <video> (preload=auto; muted unless audio_mix is on)', () => {
     const mk = (audioMix) => ({
       cuts: [videoCut],
