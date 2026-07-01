@@ -410,12 +410,20 @@ def create_app(
 
         `ref` is a cut's `source` value (asset_id or path); resolution mirrors video_compose
         and is confined to the project dir. FileResponse honors Range requests, so the
-        browser can seek the <video> for smooth scrubbing without a render."""
+        browser can seek the <video> for smooth scrubbing without a render.
+
+        ProRes .mov overlays (HyperFrames alpha renders) are transcoded on first request to
+        VP9/WebM with alpha preserved — the only alpha-capable format Chromium can decode.
+        The proxy is cached in <project>/.browser_cache/ for instant subsequent loads."""
         if get_project_record(pdir, project_id) is None:
             raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
         target = editor_mod.resolve_source_path(pdir, project_id, ref)
         if target is None:
             raise HTTPException(status_code=404, detail="source not found within project")
+        cache_dir = Path(pdir) / project_id / ".browser_cache"
+        preview = editor_mod.browser_preview_path(target, cache_dir)
+        if preview is not None:
+            return FileResponse(str(preview), media_type="video/webm")
         return FileResponse(str(target))
 
     @app.get("/api/projects/{project_id}/source_meta")

@@ -251,6 +251,7 @@ To extend the library, append entries to `scripts/generate_educational_sfx.py` a
 |----------|----------|-----------|
 | `animated-explainer` | Topic to fully generated explainer | production |
 | `talking-head` | Footage-led speaker videos | beta |
+| `instagram-fast-reel` | Your talking-head clips → fast-paced vertical reel: tight jump cuts (dead air/filler removed), keyframe-animated overlays, meme GIFs, and word-by-word motion-graphic captions. Lean flow (idea→script→assets→edit→compose→qa) with a final QA gate that inspects the hook at 5 fps, the whole reel at 2 fps, and all technicals. Reuses the Edits-parity toolset; ffmpeg runtime default. | beta |
 | `animation-talking-head-50-50` | Split-screen animated explainer: talking head bottom 45%, Greg-style animated panels top 55%, with full-frame modes per cut. HyperFrames + FFmpeg two-pass. Talking head video untouched (no color conversion). | beta |
 | `anthropic-style-animated-talking-head` | Creator talking-head explainers intercut with Anthropic-editorial motion graphics. Smart per-beat shot selection (full face / overlay / 50-50 split / full animation), claim-triggered research (finds a credible article + highlights the claim), VO copied through untouched. HyperFrames assets + FFmpeg segment-rebuild. | beta |
 | `screen-demo` | Screen recordings and walkthroughs | production |
