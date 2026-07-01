@@ -97,3 +97,5 @@ remotion-composer/public/demo-props/caption-burn-*
 
 demos/
 .claude/launch.json
+
+graphify-out/

@@ -9,6 +9,8 @@ The current focus for this app is the following:
 
 ICP: Our ICP is founder/builders/tech people trying to create videos for their instagram/tiktok to get reach. and hence we want to keep the UI/UX and features focused for them first.
 
+MISSION: To revolutionize videos forever. No builder should ever worry about creating the perfect looking content ever. They just drop assets (or tell the agent to generate assets) and that's it. the ai should have the knowledge, taste and understanding of human psychology and latest viewer behavior in the world to create content.
+
 # RULES — Desktop Editing App
 
 Coding contract for the from-scratch editing UI (`web/src/studio/`) on top of the pure,
@@ -86,6 +88,8 @@ HTML5 DnD — `dataTransfer` type `application/x-opennolan-asset`, dropped via `
 - Do not commit until the user tells you to commit explicitly.
 - If there is any issue in this [RULES.md](http://RULES.md) that contradicts the actual repo or what the user tells you to do, then instead of silently failing, flag it to the user for confirmation to either change the [RULES.md](http://RULES.md) file or rethink on what the user wants.
 - We want an aesthetic UI, so don't add unnecessary emojis to the UI. Use aesthetic icons instead.
+- The programmer creating this software (the one prompting you) is new to this world of video editing. He doesn't have much experience on how ffmpeg works, how is HDR different from SDR, what are the different codecs. However, they are willing to spend time with someone to explain them about all these things in the world of videos.
+- We need to improve the observability in the app for the developer, whether it be tracing the ai agent working on the video or whether it be the editing tools used by the user in edit window. the overall app needs more observability for the developer.
 
 ### Editor feature conventions
 

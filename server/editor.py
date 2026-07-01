@@ -16,6 +16,8 @@ schema failure raises `EditDecisionsInvalid` WITHOUT touching the file on disk.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
@@ -133,3 +135,60 @@ def read_asset_manifest(projects_dir: Path | str, project_id: str) -> dict[str, 
         return data if isinstance(data, dict) and data.get("assets") is not None else {"assets": []}
     except Exception:
         return {"assets": []}
+
+
+def browser_preview_path(source_path: Path, cache_dir: Path) -> Optional[Path]:
+    """Return a browser-decodable WebM/VP9 proxy for ProRes .mov files.
+
+    Chromium (and Electron) cannot decode ProRes. HyperFrames overlay renders use
+    ProRes 4444 with alpha (yuva444p12le), so the preview <video> elements load
+    silently. This function detects that case and returns a VP9/WebM proxy that
+    Chrome can play — with the alpha channel preserved so the overlay composites
+    correctly over the main clip.
+
+    The proxy is transcoded once and cached at `cache_dir/<stem>.webm`. Subsequent
+    calls return the cached path instantly. Returns None if the source is already
+    browser-compatible, if ffprobe/ffmpeg are unavailable, or if transcoding fails
+    (caller falls back to serving the original file).
+    """
+    if source_path.suffix.lower() != ".mov":
+        return None
+    if shutil.which("ffprobe") is None or shutil.which("ffmpeg") is None:
+        return None
+
+    # Detect ProRes codec (prores / prores_aw / prores_ap, etc.)
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=codec_name",
+         "-of", "default=noprint_wrappers=1:nokey=1",
+         str(source_path)],
+        capture_output=True, text=True,
+    )
+    if probe.returncode != 0:
+        return None
+    codec = probe.stdout.strip().lower()
+    if not codec.startswith("prores"):
+        return None
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out = cache_dir / (source_path.stem + ".webm")
+    if out.is_file() and out.stat().st_size > 0:
+        return out  # cache hit
+
+    # Transcode: VP9 with alpha (yuva420p), fast preset for live preview use.
+    # -deadline realtime -cpu-used 8 trades quality for speed (~2-4x realtime on M1).
+    tmp = out.with_suffix(".tmp.webm")
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-i", str(source_path),
+         "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p",
+         "-b:v", "0", "-crf", "30",
+         "-deadline", "realtime", "-cpu-used", "8",
+         "-an", str(tmp)],
+        capture_output=True,
+    )
+    if proc.returncode != 0 or not tmp.is_file() or tmp.stat().st_size == 0:
+        tmp.unlink(missing_ok=True)
+        return None
+
+    tmp.rename(out)
+    return out
