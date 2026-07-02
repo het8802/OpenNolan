@@ -3,15 +3,80 @@
   "version": "0.1.0",
   "private": true,
   "description": "OpenNolan desktop app (Electron shell over the local Mission Control backend).",
+  "author": "OpenNolan",
   "main": "main.js",
   "scripts": {
     "prestart": "npm --prefix ../web run build",
     "start": "electron .",
-    "dev": "ELECTRON_DEV=1 electron ."
+    "dev": "ELECTRON_DEV=1 electron .",
+    "fetch-python": "node ../scripts/fetch-python.mjs",
+    "dist": "node ../scripts/fetch-python.mjs && npm --prefix ../web run build && electron-builder --mac --arm64",
+    "dist:dir": "node ../scripts/fetch-python.mjs && npm --prefix ../web run build && electron-builder --mac --arm64 --dir"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
     "electron": "^42.0.0",
+    "electron-builder": "^26.0.12",
     "playwright": "^1.61.1"
+  },
+  "build": {
+    "appId": "ai.opennolan.desktop",
+    "productName": "OpenNolan",
+    "copyright": "Copyright © 2026 OpenNolan",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "extraResources": [
+      { "from": "../server", "to": "backend/server" },
+      { "from": "../lib", "to": "backend/lib" },
+      { "from": "../tools", "to": "backend/tools" },
+      { "from": "../schemas", "to": "backend/schemas" },
+      { "from": "../pipeline_defs", "to": "backend/pipeline_defs" },
+      { "from": "../skills", "to": "backend/skills" },
+      { "from": "../scripts", "to": "backend/scripts" },
+      { "from": "../assets", "to": "backend/assets" },
+      { "from": "../templates", "to": "backend/templates" },
+      { "from": "../styles", "to": "backend/styles" },
+      { "from": "../AGENT_GUIDE.md", "to": "backend/AGENT_GUIDE.md" },
+      { "from": "../RULES.md", "to": "backend/RULES.md" },
+      { "from": "../config.yaml", "to": "backend/config.yaml" },
+      { "from": "../requirements.txt", "to": "backend/requirements.txt" },
+      { "from": "../requirements-ui.txt", "to": "backend/requirements-ui.txt" },
+      { "from": "../requirements-audio.txt", "to": "backend/requirements-audio.txt" },
+      { "from": "../requirements-gpu.txt", "to": "backend/requirements-gpu.txt" },
+      { "from": "../requirements-dev.txt", "to": "backend/requirements-dev.txt" },
+      { "from": "../web/dist", "to": "backend/web/dist" },
+      { "from": "resources/python", "to": "python" }
+    ],
+    "mac": {
+      "category": "public.app-category.video",
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["arm64"] }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": true,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "OpenNolan records audio for your videos.",
+        "NSCameraUsageDescription": "OpenNolan captures video for your projects."
+      }
+    },
+    "dmg": {
+      "title": "OpenNolan ${version}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "OWNER_PLACEHOLDER",
+        "repo": "REPO_PLACEHOLDER"
+      }
+    ]
   }
 }

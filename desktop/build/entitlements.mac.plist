@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Load pip-installed third-party dylibs (torch / onnxruntime / numba *.dylib, *.so) that are
+       NOT signed by our Developer ID. Without this the notarized, hardened Python process is killed
+       with a library-validation error the first time it dlopen()s one. THE load-bearing key. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+
+  <!-- Hardened runtime scrubs DYLD_* / PYTHON* env unless this is set; the bundled interpreter and
+       the first-run venv activation rely on them. -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+
+  <!-- Writable+executable (W^X-relaxed) pages: numba/llvmlite and torch inductor emit machine code
+       into RWX pages at runtime. -->
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!-- Explicit MAP_JIT permission for JIT engines: V8 in the renderer AND numba/torch codegen. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+</dict>
+</plist>

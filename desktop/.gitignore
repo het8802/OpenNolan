@@ -1,3 +1,10 @@
 node_modules/
 dist/
 out/
+resources/
+
+# The root .gitignore ignores `build/`, but desktop/build/ is electron-builder's
+# buildResources dir and holds COMMITTED config (entitlements). Re-include it here;
+# only the generated/binary icon stays ignored.
+!build/
+build/icon.icns

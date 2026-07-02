@@ -20,7 +20,18 @@ const fs = require('node:fs');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const DEV = process.env.ELECTRON_DEV === '1';
-const WEB_DIST_INDEX = path.join(REPO_ROOT, 'web', 'dist', 'index.html');
+
+// Read-only backend/code tree. Dev: the git checkout (repo root). Packaged: the extraResources
+// 'backend' dir the electron-builder config emits (Contents/Resources/backend). Branch on
+// app.isPackaged — NOT DEV — because process.resourcesPath is only meaningful in a packaged app.
+function codeRoot() {
+  return app.isPackaged ? path.join(process.resourcesPath, 'backend') : REPO_ROOT;
+}
+// The built UI ships INSIDE the backend tree (Resources/backend/web/dist) because the FastAPI
+// backend serves it from code_root()/web/dist (server/app.py:717). Keep these in lockstep.
+function webDistIndex() {
+  return path.join(codeRoot(), 'web', 'dist', 'index.html');
+}
 
 let backend = null;        // uvicorn child process (null if we don't own one)
 let backendPort = null;
@@ -39,12 +50,37 @@ function fatal(title, message) {
   app.quit();
 }
 
-// Explicit override wins, then the repo venv, then PATH.
+// Which Python runs the backend. Explicit override wins. Packaged: the bundled, signed
+// python-build-standalone interpreter (Contents/Resources/python/bin/python3). Dev: the repo
+// .venv, then PATH — unchanged. (Lane E will later prefer the managed venv under OPENNOLAN_HOME.)
 function pythonBin() {
   if (process.env.OPENNOLAN_PYTHON) return process.env.OPENNOLAN_PYTHON;
+  if (app.isPackaged) return path.join(process.resourcesPath, 'python', 'bin', 'python3');
   const venv = path.join(REPO_ROOT, '.venv', 'bin', 'python');
   if (fs.existsSync(venv)) return venv;
   return 'python3';
+}
+
+// Auto-update (packaged builds only). electron-updater checks the GitHub Releases feed (build.publish),
+// downloads a newer SIGNED build, and installs on quit. Lazy-required so a dev machine without the dep
+// (or without a packaged build) never touches it; NEVER runs in dev.
+function initAutoUpdate() {
+  if (!app.isPackaged) return;
+  try {
+    const { autoUpdater } = require('electron-updater');
+    autoUpdater.autoDownload = true;
+    autoUpdater.on('error', (e) => console.error('[updater] ' + (e && e.message)));
+    autoUpdater.on('update-available', (i) => console.log('[updater] update available: ' + (i && i.version)));
+    autoUpdater.on('update-downloaded', (i) => console.log('[updater] downloaded, will install on quit: ' + (i && i.version)));
+    // MUST .catch(): checkForUpdatesAndNotify() returns a promise that REJECTS on any feed failure
+    // (e.g. the build.publish owner/repo placeholders 404 until they're set). The 'error' event
+    // listener does NOT consume this promise, so without the catch every packaged launch throws an
+    // unhandledRejection. Self-update also only works on a SIGNED build (Squirrel.Mac verifies the
+    // signature); on an unsigned interim build the download silently won't install — expected.
+    autoUpdater.checkForUpdatesAndNotify().catch((e) => console.error('[updater] check failed: ' + (e && e.message)));
+  } catch (e) {
+    console.error('[updater] disabled: ' + (e && e.message));
+  }
 }
 
 // Grab an OS-assigned free port (prod). Small TOCTOU window before uvicorn binds —
@@ -100,23 +136,25 @@ function recordStderr(buf) {
 
 function startBackend(port) {
   const bin = pythonBin();
+  const CODE_ROOT = codeRoot();
   const args = ['-m', 'uvicorn', 'server.app:app', '--host', '127.0.0.1', '--port', String(port)];
-  // Where the backend writes user data. Dev (running from the checkout): keep it repo-relative,
-  // exactly as before. Packaged (read-only .app): route everything (projects, BYOK .env, the
-  // managed venv, caches) to ~/Library/Application Support via OPENNOLAN_HOME — the app bundle is
-  // read-only and gets replaced on update, so nothing writable may live inside it. lib/app_paths.py
-  // is the single source of truth that reads these vars; see docs/plans/publish-mac-app.md (P0).
-  // NOTE (lane D): OPENNOLAN_CODE_ROOT (the read-only backend tree) is set once the backend ships
-  // inside the bundle; until then cwd=REPO_ROOT keeps lib.*/server.*/tools.* importable in dev.
+  // Where the backend reads CODE vs writes DATA. Dev (from the checkout): repo-relative, unchanged.
+  // Packaged (read-only .app): CODE_ROOT is the bundled backend tree (Resources/backend, on cwd so
+  // lib.*/server.*/tools.* import), and user data (projects, BYOK .env, the managed venv, caches)
+  // goes to ~/Library/Application Support via OPENNOLAN_HOME. lib/app_paths.py reads these vars;
+  // see docs/plans/publish-mac-app.md.
   const runtimeEnv = { ...process.env };
   if (app.isPackaged) {
-    runtimeEnv.OPENNOLAN_HOME = process.env.OPENNOLAN_HOME || app.getPath('userData');
+    const home = process.env.OPENNOLAN_HOME || app.getPath('userData');
+    runtimeEnv.OPENNOLAN_HOME = home;
+    runtimeEnv.OPENNOLAN_CODE_ROOT = CODE_ROOT;
+    runtimeEnv.OPENNOLAN_PROJECTS_DIR = process.env.OPENNOLAN_PROJECTS_DIR || path.join(home, 'projects');
   } else {
     runtimeEnv.OPENNOLAN_PROJECTS_DIR =
       process.env.OPENNOLAN_PROJECTS_DIR || path.join(REPO_ROOT, 'projects');
   }
   const child = spawn(bin, args, {
-    cwd: REPO_ROOT, // top-level package imports (lib.*, server.*, tools.*) need repo root on the path
+    cwd: CODE_ROOT, // dev: repo root (unchanged); packaged: Resources/backend — imports lib.*/server.*/tools.*
     env: runtimeEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -132,7 +170,9 @@ function startBackend(port) {
         'The local backend exited (code ' + code + ', signal ' + signal + ').\n\n' +
         (tail
           ? 'Last backend output:\n' + tail
-          : 'No output captured. Check that the repo .venv has the UI deps:\n  pip install -r requirements-ui.txt')
+          : (app.isPackaged
+              ? 'No output captured. Try reopening OpenNolan; if it persists, reinstall the app.'
+              : 'No output captured. Check that the repo .venv has the UI deps:\n  pip install -r requirements-ui.txt'))
       );
     }
   });
@@ -223,13 +263,14 @@ async function boot() {
       }
       createWindow(rendererUrl());
     } else {
-      if (!fs.existsSync(WEB_DIST_INDEX)) {
+      if (!fs.existsSync(webDistIndex())) {
         return fatal('UI not built', 'The web UI has not been built.\n\nRun:\n  npm --prefix web run build\n\nthen start the app again. (`npm start` does this automatically.)');
       }
       backendPort = await freePort();
       backend = startBackend(backendPort);
       await waitForHealth(backendPort);
       createWindow(rendererUrl());
+      initAutoUpdate();
     }
   } catch (err) {
     const tail = stderrTail.slice(-20).join('\n');

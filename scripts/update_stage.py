@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from lib import app_paths
 from lib.checkpoint import write_checkpoint
 
 VALID = {"in_progress", "completed", "awaiting_human", "failed"}
@@ -38,8 +39,11 @@ def main():
         print(f"ERROR: status must be one of {VALID}, got {status!r}", file=sys.stderr)
         sys.exit(1)
 
+    # Resolve the writable projects dir via app_paths (honors OPENNOLAN_PROJECTS_DIR / OPENNOLAN_HOME),
+    # NOT a bare relative "projects" — in the packaged app cwd is the READ-ONLY bundle, so a relative
+    # path would write into the bundle and silently fail. Dev is unchanged (defaults to repo/projects).
     path = write_checkpoint(
-        Path("projects"),
+        app_paths.projects_dir(),
         project_id,
         stage,
         status,
