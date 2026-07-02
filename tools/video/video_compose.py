@@ -2780,11 +2780,23 @@ class VideoCompose(BaseTool):
     # whose own audio must survive should carry it as a narration stem (e.g.
     # asset_id referencing the source clip), which is the existing convention.
     @staticmethod
+    def _music_regions(audio: dict[str, Any]) -> list[dict[str, Any]]:
+        """Normalize `audio.music` to a LIST of region dicts. The schema allows a single OBJECT
+        (one bed — legacy/agent shape) OR an ARRAY of region objects (multiple beds, e.g. after a
+        timeline split). Each region may carry a [start_seconds, end_seconds] window. Returns []
+        when there's no music."""
+        m = (audio or {}).get("music")
+        if m is None:
+            return []
+        seq = m if isinstance(m, list) else [m]
+        return [r for r in seq if isinstance(r, dict)]
+
+    @staticmethod
     def _has_structured_audio(audio: dict[str, Any]) -> bool:
         """True if `audio` carries any resolvable stem (music / narration / sfx)."""
         if not isinstance(audio, dict):
             return False
-        if (audio.get("music") or {}).get("asset_id"):
+        if any(r.get("asset_id") for r in VideoCompose._music_regions(audio)):
             return True
         if any((s or {}).get("asset_id") for s in (audio.get("narration") or {}).get("segments") or []):
             return True
@@ -2814,19 +2826,34 @@ class VideoCompose(BaseTool):
                 "start_seconds": max(0.0, float(seg.get("start_seconds") or 0)),
             })
 
-        music = audio.get("music") or {}
+        # Music: one track PER REGION. Each region can carry a [start_seconds, end_seconds] window
+        # (delay to start + truncate to the window length) plus its own volume/fades. Ducking is
+        # taken from the first region that specifies it (music ducks under speech, all beds together).
+        music_regions = VideoCompose._music_regions(audio)
         has_music = False
-        mp = resolve(music.get("asset_id"))
-        if mp:
+        duck_raw: Any = None
+        for region in music_regions:
+            mp = resolve(region.get("asset_id"))
+            if not mp:
+                continue
             has_music = True
             mt: dict[str, Any] = {"path": mp, "role": "music"}
-            if music.get("volume") is not None:
-                mt["volume"] = float(music["volume"])
-            if music.get("fade_in_seconds"):
-                mt["fade_in_seconds"] = float(music["fade_in_seconds"])
-            if music.get("fade_out_seconds"):
-                mt["fade_out_seconds"] = float(music["fade_out_seconds"])
+            if region.get("volume") is not None:
+                mt["volume"] = float(region["volume"])
+            if region.get("fade_in_seconds"):
+                mt["fade_in_seconds"] = float(region["fade_in_seconds"])
+            if region.get("fade_out_seconds"):
+                mt["fade_out_seconds"] = float(region["fade_out_seconds"])
+            start = max(0.0, float(region.get("start_seconds") or 0))
+            if start > 0:
+                mt["start_seconds"] = start
+            if region.get("end_seconds") is not None:
+                dur = float(region["end_seconds"]) - start
+                if dur > 0:
+                    mt["duration_seconds"] = dur
             tracks.append(mt)
+            if duck_raw is None and region.get("ducking") is not None:
+                duck_raw = region.get("ducking")
 
         for fx in audio.get("sfx") or []:
             p = resolve((fx or {}).get("asset_id"))
@@ -2844,8 +2871,7 @@ class VideoCompose(BaseTool):
             return None
 
         # Duck the music under speech only when there's both a bed AND a ducking
-        # request. `music.ducking` is a bool or an object (attack_ms / release_ms).
-        duck_raw = music.get("ducking")
+        # request. `duck_raw` (a region's `ducking`) is a bool or an object (attack_ms / release_ms).
         ducking: dict[str, Any] = {"enabled": False}
         if has_music and duck_raw:
             if isinstance(duck_raw, dict):
@@ -2884,7 +2910,7 @@ class VideoCompose(BaseTool):
         if base_audio_path:
             # Base VO first so full_mix treats it as the speech anchor (music ducks under it).
             tracks = [{"path": str(base_audio_path), "role": "speech"}] + tracks
-            if audio.get("music", {}).get("asset_id") or (isinstance(audio.get("music"), dict) and audio["music"].get("asset_id")):
+            if any(r.get("asset_id") for r in VideoCompose._music_regions(audio)):
                 ducking = ducking if ducking.get("enabled") else {"enabled": True}
         if not tracks:
             return None

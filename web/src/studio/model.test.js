@@ -217,14 +217,24 @@ describe('previewAudioTracks (source-preview <audio> elements)', () => {
       sfx: [{ asset_id: 'whoosh.mp3', start_seconds: 6, volume: 0.5 }],
     } }
     expect(previewAudioTracks(doc)).toEqual([
-      { key: 'music', kind: 'music', src: 'bed.mp3', start: 0, end: Infinity, volume: 0.6 },
+      { key: 'music0', kind: 'music', src: 'bed.mp3', start: 0, end: Infinity, volume: 0.6 },
       { key: 'n0', kind: 'narration', src: 'vo.mp3', start: 1, end: 4, volume: 1 },
       { key: 's0', kind: 'sfx', src: 'whoosh.mp3', start: 6, end: Infinity, volume: 0.5 },
     ])
   })
+  it('emits one windowed track per music region when music is an array (post-split)', () => {
+    const doc = { audio: { music: [
+      { asset_id: 'a.mp3', start_seconds: 0, end_seconds: 4 },
+      { asset_id: 'b.mp3', start_seconds: 4, end_seconds: 9, volume: 0.3 },
+    ] } }
+    expect(previewAudioTracks(doc)).toEqual([
+      { key: 'music0', kind: 'music', src: 'a.mp3', start: 0, end: 4, volume: 1 },
+      { key: 'music1', kind: 'music', src: 'b.mp3', start: 4, end: 9, volume: 0.3 },
+    ])
+  })
   it('defaults volume to 1, uses legacy top-level music, and skips items with no asset_id', () => {
     expect(previewAudioTracks({ music: { asset_id: 'legacy.mp3' } })[0])
-      .toEqual({ key: 'music', kind: 'music', src: 'legacy.mp3', start: 0, end: Infinity, volume: 1 })
+      .toEqual({ key: 'music0', kind: 'music', src: 'legacy.mp3', start: 0, end: Infinity, volume: 1 })
     const doc = { audio: { sfx: [{ start_seconds: 2 }, { asset_id: 'x.mp3', start_seconds: 3 }] } }
     expect(previewAudioTracks(doc).map(t => t.src)).toEqual(['x.mp3']) // the no-asset sfx is skipped
   })

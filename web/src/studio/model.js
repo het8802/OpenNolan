@@ -200,8 +200,21 @@ export function isFfmpeg(doc) {
 export function previewAudioTracks(doc) {
   const a = doc?.audio || {}
   const list = []
-  const music = a.music || doc?.music
-  if (music?.asset_id) list.push({ key: 'music', kind: 'music', src: music.asset_id, start: 0, end: Infinity, volume: music.volume ?? 1 })
+  // Music: one <audio> per region (audio.music may be a single object OR an array; legacy
+  // top-level doc.music is the fallback). Each carries its [start,end] window so a trimmed/split
+  // region only plays inside it (StudioPreview's syncAudioEls honors the end). Unset end ⇒ plays to
+  // the asset end (Infinity here; the element's own duration bounds it).
+  const rawMusic = a.music != null ? a.music : doc?.music
+  const musicList = (rawMusic == null ? [] : Array.isArray(rawMusic) ? rawMusic : [rawMusic]).filter(r => r && typeof r === 'object')
+  musicList.forEach((m, i) => {
+    if (!m.asset_id) return
+    list.push({
+      key: `music${i}`, kind: 'music', src: m.asset_id,
+      start: Math.max(0, Number(m.start_seconds) || 0),
+      end: m.end_seconds != null ? Number(m.end_seconds) : Infinity,
+      volume: m.volume ?? 1,
+    })
+  })
   ;(a.narration?.segments || []).forEach((s, i) => {
     if (s?.asset_id) list.push({ key: `n${i}`, kind: 'narration', src: s.asset_id, start: Math.max(0, Number(s.start_seconds) || 0), end: s.end_seconds != null ? Number(s.end_seconds) : Infinity, volume: 1 })
   })

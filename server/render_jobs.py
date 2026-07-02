@@ -149,10 +149,22 @@ class RenderJobStore:
         if isinstance(audio, dict):
             a2 = dict(audio)
             music = a2.get("music")
-            if isinstance(music, dict) and music.get("asset_id"):
-                r = absolute(music["asset_id"])
-                if r != music["asset_id"]:
-                    a2["music"] = dict(music, asset_id=r); changed = True
+
+            def _abs_music(region: dict[str, Any]) -> dict[str, Any]:
+                nonlocal changed
+                aid = region.get("asset_id")
+                if not aid:
+                    return region
+                r = absolute(aid)
+                if r != aid:
+                    changed = True
+                    return dict(region, asset_id=r)
+                return region
+
+            if isinstance(music, dict):  # single bed (legacy / one region)
+                a2["music"] = _abs_music(music)
+            elif isinstance(music, list):  # multiple regions (after a split)
+                a2["music"] = [_abs_music(m) if isinstance(m, dict) else m for m in music]
             narr = a2.get("narration")
             if isinstance(narr, dict) and narr.get("segments"):
                 segs = []

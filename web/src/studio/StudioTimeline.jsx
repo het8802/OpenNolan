@@ -1,12 +1,15 @@
 // Studio timeline — a real pixels-per-second timeline (zoom + scroll). Top to bottom:
 // stacked OVERLAY TRACK lanes (highest track on top = highest z, matching the renderer's
 // ascending-track compositing), then the MAIN clips lane (cuts: drag-reorder + edge trim),
-// then the audio lane. Overlays drag horizontally (move on absolute time) and vertically
-// (change track), and have edge-trim handles — same pure pointer-event model as cuts (no
-// HTML5 dnd for in-timeline manipulation; listeners attach on pointerdown, tear down on
-// pointerup/cancel/unmount). The ONE sanctioned HTML5-DnD path is a cross-panel asset drop
-// from the Assets tab onto a lane. All clamping/structure lives in interp.js — this file is
-// pointer math + layout only.
+// then the audio lanes (music / narration / sfx). Every lane carries a STICKY left-hand LABEL
+// (pinned during horizontal scroll, like a spreadsheet's frozen first column) with an eye toggle
+// that hides that track from the PREVIEW canvas (view-only; the doc/export are untouched).
+// Overlays, music regions and narration drag horizontally (move on absolute time) and have
+// edge-trim handles; music regions also carry a draggable gain line (↕ volume). Same pure
+// pointer-event model as cuts (no HTML5 dnd for in-timeline manipulation; listeners attach on
+// pointerdown, tear down on pointerup/cancel/unmount). The ONE sanctioned HTML5-DnD path is a
+// cross-panel asset drop from the Assets tab onto a lane. All clamping/structure lives in
+// interp.js — this file is pointer math + layout only.
 
 import { useEffect, useRef, useState } from 'react'
 import * as interp from '../editor/interp.js'
@@ -14,9 +17,11 @@ import { fmtTime, overlayType, groupAudioLanes } from './model.js'
 
 const ASSET_DND = 'application/x-opennolan-asset'
 
-const LANE_PAD = 12          // px gutter at the left of the lanes
+const LABEL_W = 128          // px width of the sticky track-label gutter on the left
+const LANE_PAD = LABEL_W + 14 // px gutter before t=0: reserves the label column + a small gap
 const DRAG_THRESHOLD = 4     // px before a press becomes a drag
 const OV_LANE_H = 28         // px height of one overlay-track lane row (drives dy → track math)
+const MUSIC_LANE_H = 44      // px height of the music lane (taller: carries a draggable gain line)
 
 function niceStep(pxPerSec) {
   const target = 90 / pxPerSec // seconds per ~90px
@@ -26,16 +31,30 @@ function niceStep(pxPerSec) {
 
 const baseName = (p) => String(p || '').split('/').pop() || p
 
-const MUSIC_LANE_H = 44       // px height of the music lane (taller: carries a draggable gain line)
+// Aesthetic inline icons (no emoji per the studio UI convention).
+const ICON_EYE = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" />
+  </svg>
+)
+const ICON_EYE_OFF = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+    <line x1="1" y1="1" x2="23" y2="23" />
+  </svg>
+)
 
 export default function StudioTimeline({
   doc, dur, zoom, playhead, selection, sourceMetas, playing,
   onSeek, onSelect, onTrim, onTrimBegin, onReorder, onZoom, onAssetDrop,
   onOverlayMove, onOverlayTrim, onOverlayDragBegin, onOverlayResolve, onAutoArrange,
-  onAudioDragBegin, onMoveSfx, onMoveNarration, onTrimNarration, onSetMusicLevels,
+  onAudioDragBegin, onMoveSfx, onMoveNarration, onTrimNarration,
+  onSetMusicLevels, onTrimMusic, onMoveMusic,
+  hidden, onToggleHidden,
   onTogglePlay, onSplit, onDuplicate, onDelete,
 }) {
-  const hasCut = selection?.kind === 'cut'
   const hasSel = !!selection
   const scrollRef = useRef(null)
   const dragCleanup = useRef(null) // teardown for an in-flight drag (also runs on unmount)
@@ -48,7 +67,6 @@ export default function StudioTimeline({
   const overlays = doc?.overlays || []
   const audio = interp.audioClips(doc)
   const audioLanes = groupAudioLanes(audio) // one row per kind (music / narration / sfx)
-  const music = doc?.audio?.music || doc?.music || {} // bed level/fades for the music-lane controls
   const starts = interp.cutStarts(doc)
   const { max: maxTrack } = interp.overlayTracks(doc)
   // Lanes drawn for overlays: tracks max..0 PLUS one empty lane on top (track max+1) that
@@ -56,6 +74,8 @@ export default function StudioTimeline({
   const topTrack = maxTrack + 1
   const trackRows = []
   for (let t = topTrack; t >= 0; t--) trackRows.push(t)
+
+  const isHidden = (key) => !!(hidden && hidden.has && hidden.has(key))
 
   const contentW = Math.max(dur * zoom, 600) + LANE_PAD * 2
   const step = niceStep(zoom)
@@ -70,8 +90,28 @@ export default function StudioTimeline({
     return Math.max(0, Math.min(dur, px / zoom))
   }
 
+  // A sticky left-hand label for a lane (frozen during horizontal scroll). `hideKey` (when given)
+  // wires the eye toggle → hide/show this track in the PREVIEW (view state, not the doc).
+  const laneLabel = (name, hideKey, extraClass = '') => {
+    const off = hideKey ? isHidden(hideKey) : false
+    return (
+      <div className={`st-lane-label${off ? ' off' : ''} ${extraClass}`} onPointerDown={(e) => e.stopPropagation()}>
+        <span className="st-lane-name">{name}</span>
+        {hideKey && (
+          <button className="st-lane-eye" aria-pressed={off}
+            title={off ? 'Show this track in the preview' : 'Hide this track from the preview'}
+            aria-label={off ? `Show ${name}` : `Hide ${name}`}
+            onClick={() => onToggleHidden?.(hideKey)}>
+            {off ? ICON_EYE_OFF : ICON_EYE}
+          </button>
+        )}
+      </div>
+    )
+  }
+
   // One synchronous drag setup. Cut modes: scrub | trim-in | trim-out | press(→reorder).
   // Overlay modes (spec.kind==='overlay'): ov-press(→ov-move) | ov-trim-in | ov-trim-out.
+  // Audio modes: aud-press(→sfx/narr/music move) | aud-narr-trim-* | aud-music-trim-* | aud-music-gain.
   // Snapshots everything it needs at pointerdown, so mid-drag re-renders don't disturb it.
   const beginDrag = (e, spec) => {
     e.preventDefault()
@@ -81,8 +121,9 @@ export default function StudioTimeline({
     let mode = spec.mode
     const cut = spec.cut
     const ov = spec.ov
+    const aud = spec.aud
     const index = spec.index
-    let didSnap = false // for overlay body moves: snapshot lazily on the first real move
+    let didSnap = false // for body moves: snapshot lazily on the first real move
 
     const teardown = () => {
       window.removeEventListener('pointermove', onMove)
@@ -92,7 +133,7 @@ export default function StudioTimeline({
       dragCleanup.current = null
     }
     // Snapshot LAZILY on the first real move (not at pointerdown) so a bare CLICK on a trim
-    // handle / overlay is a pure select and adds no undo entry (and never wipes the redo stack).
+    // handle / block is a pure select and adds no undo entry (and never wipes the redo stack).
     const snapOnce = () => { if (!didSnap) { spec.onBegin?.(); didSnap = true } }
     const onMove = (ev) => {
       const dx = ev.clientX - startX
@@ -130,8 +171,7 @@ export default function StudioTimeline({
         const nt = Math.max(0, Math.min(topTrack, (Math.round(Number(ov.track) || 0)) + dTrack))
         onOverlayMove(index, { start: ns, track: nt }); return
       }
-      // ── audio modes ── (sfx/narration move + narration edge-trim + music gain/fade)
-      const aud = spec.aud
+      // ── audio modes ── (sfx/narration/music move + narration/music edge-trim + music gain)
       if (mode === 'aud-press' && spec.moveMode && (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD)) {
         mode = spec.moveMode
         snapOnce()
@@ -150,19 +190,21 @@ export default function StudioTimeline({
         snapOnce()
         onTrimNarration(index, { end_seconds: Math.max(0, (Number(aud.end_seconds) || 0) + dx / zoom) }); return
       }
+      if (mode === 'aud-music-move') {
+        onMoveMusic(index, Math.max(0, (Number(aud.start_seconds) || 0) + dx / zoom)); return
+      }
+      if (mode === 'aud-music-trim-in') {
+        snapOnce()
+        onTrimMusic(index, { start_seconds: Math.max(0, (Number(aud.start_seconds) || 0) + dx / zoom) }); return
+      }
+      if (mode === 'aud-music-trim-out') {
+        snapOnce()
+        onTrimMusic(index, { end_seconds: Math.max(0, (Number(aud.end_seconds) || 0) + dx / zoom) }); return
+      }
       if (mode === 'aud-music-gain') {
         snapOnce()
         // drag UP (dy<0) → louder. Map the drag over the gain track height to [0,1].
-        onSetMusicLevels({ volume: Math.max(0, Math.min(1, spec.origVol - dy / spec.gainH)) }); return
-      }
-      if (mode === 'aud-music-fadein') {
-        snapOnce()
-        onSetMusicLevels({ fade_in_seconds: Math.max(0, (spec.origFade || 0) + dx / zoom) }); return
-      }
-      if (mode === 'aud-music-fadeout') {
-        snapOnce()
-        // fade-out handle sits at the RIGHT edge — drag LEFT (dx<0) lengthens the fade.
-        onSetMusicLevels({ fade_out_seconds: Math.max(0, (spec.origFade || 0) - dx / zoom) }); return
+        onSetMusicLevels(index, { volume: Math.max(0, Math.min(1, spec.origVol - dy / spec.gainH)) }); return
       }
     }
     const onUp = (ev) => {
@@ -186,7 +228,7 @@ export default function StudioTimeline({
       if (didSnap && (finalMode === 'ov-move' || finalMode === 'ov-trim-in' || finalMode === 'ov-trim-out')) {
         onOverlayResolve?.(index)
       }
-      // ov-move / ov-trim-* / trim-* already live-applied; the start-of-drag snapshot owns undo.
+      // move / trim / gain already live-applied; the start-of-drag snapshot owns undo.
     }
     const onCancel = () => teardown() // pointercancel: abandon the drag, keep last live value
     window.addEventListener('pointermove', onMove)
@@ -218,8 +260,9 @@ export default function StudioTimeline({
     <div className="st-timeline">
       <div className="st-tl-head">
         <div className="st-tl-ops">
-          <button className="st-btn" onClick={onSplit} title="Split at playhead (S)">✂ Split</button>
-          <button className="st-btn" onClick={onDuplicate} disabled={!hasCut} title="Duplicate clip">⧉ Duplicate</button>
+          <button className="st-btn" onClick={onSplit} disabled={!hasSel && cuts.length === 0}
+            title="Split the selected clip / overlay / music / narration at the playhead (S)">✂ Split</button>
+          <button className="st-btn" onClick={onDuplicate} disabled={selection?.kind !== 'cut'} title="Duplicate clip">⧉ Duplicate</button>
           <button className="st-btn st-danger" onClick={onDelete} disabled={!hasSel} title="Delete selection (⌫)">🗑 Delete</button>
           <button className="st-btn" onClick={onAutoArrange} disabled={overlays.length < 2}
             title="Auto-arrange overlapping overlays into separate tracks">⇅ Arrange</button>
@@ -239,15 +282,16 @@ export default function StudioTimeline({
         </div>
       </div>
 
-      {/* Click anywhere in the timeline that ISN'T a clip/overlay/audio block (or the ruler,
+      {/* Click anywhere in the timeline that ISN'T a clip/overlay/audio block/label (or the ruler,
           which scrubs) → deselect, so the properties panel falls through to the Assets tab. */}
       <div className={`st-tl-scroll${dropping ? ' drop' : ''}`} ref={scrollRef}
-        onPointerDown={(e) => { if (!e.target.closest('.st-clip, .st-ov, .st-aud, .st-ruler')) onSelect(null) }}
+        onPointerDown={(e) => { if (!e.target.closest('.st-clip, .st-ov, .st-aud, .st-ruler, .st-lane-label')) onSelect(null) }}
         onDragOver={dragOver}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false) }}>
-        <div className="st-tl-content" style={{ width: contentW }}>
-          {/* ruler — click/drag to scrub */}
-          <div className="st-ruler" onPointerDown={(e) => { onSeek(xToTime(e.clientX)); beginDrag(e, { mode: 'scrub' }) }}>
+        <div className="st-tl-content" style={{ width: contentW, '--st-label-w': `${LABEL_W}px` }}>
+          {/* ruler — click/drag to scrub. Its sticky corner freezes the top-left over the label gutter. */}
+          <div className="st-ruler" onPointerDown={(e) => { if (e.target.closest('.st-lane-label')) return; onSeek(xToTime(e.clientX)); beginDrag(e, { mode: 'scrub' }) }}>
+            <div className="st-lane-label st-ruler-corner" onPointerDown={(e) => e.stopPropagation()} />
             {ticks.map((t, i) => (
               <span key={i} className="st-tick" style={{ left: LANE_PAD + t * zoom }}>{fmtTime(t)}</span>
             ))}
@@ -260,14 +304,17 @@ export default function StudioTimeline({
               .map((o, i) => ({ o, i }))
               .filter(({ o }) => (Math.round(Number(o.track) || 0)) === track)
             const isNewLane = track === topTrack
+            const hideKey = `ov:${track}`
+            const laneOff = !isNewLane && isHidden(hideKey)
             return (
               <div
                 key={`ovlane-${track}`}
-                className={`st-lane st-lane-ov${isNewLane ? ' st-lane-ov-new' : ''}`}
+                className={`st-lane st-lane-ov${isNewLane ? ' st-lane-ov-new' : ''}${laneOff ? ' st-lane-off' : ''}`}
                 style={{ height: OV_LANE_H }}
                 onDragOver={dragOver}
                 onDrop={(e) => onLaneDrop(e, 'overlay', track)}
               >
+                {isNewLane ? laneLabel('New track', null, 'muted') : laneLabel(`Overlay ${track + 1}`, hideKey)}
                 {inTrack.map(({ o, i }) => {
                   const s = Number(o.start_seconds) || 0
                   const e2 = Number(o.end_seconds) || s
@@ -295,13 +342,14 @@ export default function StudioTimeline({
                     </div>
                   )
                 })}
-                {isNewLane && <span className="st-lane-empty">+ drop here (or drag an overlay up) for a new track</span>}
+                {isNewLane && <span className="st-lane-empty" style={{ left: LANE_PAD }}>+ drop here (or drag an overlay up) for a new track</span>}
               </div>
             )
           })}
 
           {/* MAIN clips lane (the base video track) */}
-          <div className="st-lane st-lane-cuts" onDragOver={dragOver} onDrop={(e) => onLaneDrop(e, 'cuts')}>
+          <div className={`st-lane st-lane-cuts${isHidden('main') ? ' st-lane-off' : ''}`} onDragOver={dragOver} onDrop={(e) => onLaneDrop(e, 'cuts')}>
+            {laneLabel('Video', 'main')}
             {cuts.map((c, i) => {
               const left = LANE_PAD + starts[i] * zoom
               const w = Math.max(8, interp.cutDuration(c) * zoom)
@@ -328,41 +376,48 @@ export default function StudioTimeline({
             })}
           </div>
 
-          {/* audio lanes — one row PER KIND (music / narration / sfx) so a full-width music bed
-              and a full-width narration segment don't stack in one row and hide each other.
-              Blocks are DRAGGABLE on the timeline (same pointer model as cuts/overlays): SFX move
-              in time, narration moves + edge-trims, and the music bed carries a draggable gain
-              line (↕ volume) + fade-in/out handles (↔). A bare tap selects → properties panel. */}
-          {audioLanes.length ? audioLanes.map((row) => (
-            <div key={`aud-${row.kind}`} className={`st-lane st-lane-audio st-lane-audio-${row.kind}`}
+          {/* audio lanes — one row PER KIND (music / narration / sfx). Music regions are trimmable
+              (edge handles) + moveable (drag the body) + split-able, and carry a draggable gain line
+              (↕ volume) with a non-interactive fade-shape preview (fades edited in the properties
+              panel). Narration blocks move + edge-trim; SFX are draggable point markers. A bare tap
+              selects → properties panel. */}
+          {audioLanes.length ? audioLanes.map((row) => {
+            const hideKey = `aud:${row.kind}`
+            const laneName = row.kind === 'music' ? 'Music' : row.kind === 'narration' ? 'Narration' : 'SFX'
+            return (
+            <div key={`aud-${row.kind}`} className={`st-lane st-lane-audio st-lane-audio-${row.kind}${isHidden(hideKey) ? ' st-lane-off' : ''}`}
               style={row.kind === 'music' ? { height: MUSIC_LANE_H } : undefined}
               onDragOver={dragOver} onDrop={(e) => onLaneDrop(e, 'audio')}>
+              {laneLabel(laneName, hideKey)}
               {row.items.map((a) => {
                 const left = LANE_PAD + a.start_seconds * zoom
                 const w = a.point ? 12 : Math.max(8, (a.end_seconds - a.start_seconds) * zoom)
                 const sel = selection?.kind === 'audio' && selection.audioKind === a.kind && selection.index === a.index
 
                 if (a.kind === 'music') {
-                  const vol = music.volume != null ? Math.max(0, Math.min(1, Number(music.volume))) : 1
-                  const fadeIn = Math.max(0, Number(music.fade_in_seconds) || 0)
-                  const fadeOut = Math.max(0, Number(music.fade_out_seconds) || 0)
+                  const vol = a.volume != null ? Math.max(0, Math.min(1, Number(a.volume))) : 1
+                  const fadeIn = Math.max(0, Number(a.fade_in_seconds) || 0)
+                  const fadeOut = Math.max(0, Number(a.fade_out_seconds) || 0)
                   const bedTop = 6, bedH = MUSIC_LANE_H - 12, gainTravel = bedH - 6
                   const gainY = bedTop + (1 - vol) * gainTravel
                   return (
-                    <div key="music" className={`st-aud st-aud-music${sel ? ' sel' : ''}`}
+                    <div key={`m-${a.index}`} className={`st-aud st-aud-music${sel ? ' sel' : ''}`}
                       style={{ left, width: w, top: bedTop, height: bedH }}
-                      title={`music · ${baseName(a.asset_id)} · vol ${Math.round(vol * 100)}%`}
-                      onPointerDown={(ev) => beginDrag(ev, { mode: 'aud-press', audioKind: 'music', aud: a, index: a.index, onBegin: onAudioDragBegin })}>
-                      <span className="st-aud-fade st-aud-fade-in" style={{ width: Math.max(6, fadeIn * zoom) }}
-                        title={`fade in ${fadeIn.toFixed(2)}s — drag →`}
-                        onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { mode: 'aud-music-fadein', origFade: fadeIn, onBegin: onAudioDragBegin }) }} />
-                      <span className="st-aud-fade st-aud-fade-out" style={{ width: Math.max(6, fadeOut * zoom) }}
-                        title={`fade out ${fadeOut.toFixed(2)}s — drag ←`}
-                        onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { mode: 'aud-music-fadeout', origFade: fadeOut, onBegin: onAudioDragBegin }) }} />
+                      title={`music · ${baseName(a.asset_id)} · vol ${Math.round(vol * 100)}% — drag to move, edges to trim`}
+                      onPointerDown={(ev) => {
+                        if (ev.target.classList.contains('st-trim') || ev.target.classList.contains('st-aud-gain')) return
+                        beginDrag(ev, { mode: 'aud-press', moveMode: 'aud-music-move', audioKind: 'music', aud: a, index: a.index, onBegin: onAudioDragBegin })
+                      }}>
+                      {fadeIn > 0 && <span className="st-aud-fade st-aud-fade-in" style={{ width: Math.max(4, fadeIn * zoom) }} />}
+                      {fadeOut > 0 && <span className="st-aud-fade st-aud-fade-out" style={{ width: Math.max(4, fadeOut * zoom) }} />}
+                      <span className="st-aud-name">{baseName(a.asset_id)}</span>
                       <span className="st-aud-gain" style={{ top: gainY }}
                         title={`volume ${Math.round(vol * 100)}% — drag ↕`}
-                        onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { mode: 'aud-music-gain', origVol: vol, gainH: gainTravel, onBegin: onAudioDragBegin }) }} />
-                      <span className="st-aud-name">{baseName(a.asset_id)}</span>
+                        onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { mode: 'aud-music-gain', origVol: vol, gainH: gainTravel, index: a.index, onBegin: onAudioDragBegin }) }} />
+                      <span className="st-trim st-trim-l"
+                        onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { mode: 'aud-music-trim-in', aud: a, index: a.index, onBegin: onAudioDragBegin }) }} />
+                      <span className="st-trim st-trim-r"
+                        onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { mode: 'aud-music-trim-out', aud: a, index: a.index, onBegin: onAudioDragBegin }) }} />
                     </div>
                   )
                 }
@@ -394,9 +449,11 @@ export default function StudioTimeline({
                 )
               })}
             </div>
-          )) : (
+            )
+          }) : (
             <div className="st-lane st-lane-audio" onDragOver={dragOver} onDrop={(e) => onLaneDrop(e, 'audio')}>
-              <span className="st-lane-empty">no audio — music / narration / SFX appear here</span>
+              {laneLabel('Audio', null, 'muted')}
+              <span className="st-lane-empty" style={{ left: LANE_PAD }}>no audio — music / narration / SFX appear here</span>
             </div>
           )}
 

@@ -912,29 +912,37 @@ class AudioMixer(BaseTool):
     def _per_track_chain(self, index: int, track: dict[str, Any]) -> str:
         """Build the per-track filter chain '[i:a]...[ai]' for mix/full_mix.
 
+        `duration_seconds` (optional) truncates the source to a window LENGTH first
+        (a trimmed music region) via atrim; fades then act on the trimmed audio.
         Fades are applied BEFORE adelay so they act on the actual audio (not
         the silence pad), and afade t=out gets an explicit st= computed from
-        the probed track duration — FFmpeg defaults st=0, which fades the
-        track to silence over its FIRST N seconds and keeps it muted.
+        the truncated length (or the probed track duration) — FFmpeg defaults
+        st=0, which fades the track to silence over its FIRST N seconds and keeps
+        it muted.
         """
         volume = track.get("volume", 1.0)
         delay_ms = int(track.get("start_seconds", 0) * 1000)
         fade_in = track.get("fade_in_seconds", 0)
         fade_out = track.get("fade_out_seconds", 0)
+        trim_dur = track.get("duration_seconds")
+        trimmed = trim_dur is not None and float(trim_dur) > 0
 
         filters = []
+        if trimmed:
+            # Truncate to the region length, then reset PTS so downstream fades/adelay start at 0.
+            filters.append(f"atrim=0:{float(trim_dur)},asetpts=PTS-STARTPTS")
         if volume != 1.0:
             filters.append(f"volume={volume}")
         if fade_in > 0:
             filters.append(f"afade=t=in:st=0:d={fade_in}")
         if fade_out > 0:
-            duration = self._audio_duration(Path(track["path"]))
-            if duration is None:
+            base_dur = float(trim_dur) if trimmed else self._audio_duration(Path(track["path"]))
+            if base_dur is None:
                 raise _MixInputError(
                     f"fade_out_seconds requires a probeable duration; "
                     f"could not probe {track['path']}"
                 )
-            st = max(0.0, round(duration - fade_out, 3))
+            st = max(0.0, round(base_dur - fade_out, 3))
             filters.append(f"afade=t=out:st={st}:d={fade_out}")
         if delay_ms > 0:
             filters.append(f"adelay={delay_ms}|{delay_ms}")

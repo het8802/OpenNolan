@@ -950,11 +950,36 @@ body.st-scrubbing, body.st-scrubbing * { cursor: ew-resize !important; user-sele
 .st-tl-scroll.drop { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-soft); }
 .st-tl-content { position: relative; }
 /* Sticky so the time labels stay pinned to the top while scrolling the lanes vertically; it still
-   scrolls horizontally with the content so ticks stay aligned. z below the playhead (3), above lanes. */
-.st-ruler { position: sticky; top: 0; z-index: 2; height: 22px; background: var(--panel);
+   scrolls horizontally with the content so ticks stay aligned. z ABOVE the sticky lane labels (4)
+   so a label scrolling upward passes UNDER the ruler, not over it. */
+.st-ruler { position: sticky; top: 0; z-index: 6; height: 22px; background: var(--panel);
   border-bottom: 1px solid var(--line); cursor: ew-resize; user-select: none; }
 .st-tick { position: absolute; top: 3px; transform: translateX(-2px); font-size: 0.64rem; color: var(--muted);
   border-left: 1px solid var(--line); padding-left: 3px; font-variant-numeric: tabular-nums; }
+/* Frozen top-left corner: the ruler is sticky-top, this is sticky-left within it → stays put in
+   both axes, covering the ticks that scroll beneath the label gutter. */
+.st-ruler-corner { z-index: 2; cursor: default; border-bottom: none; }
+
+/* ── Sticky track-label gutter (frozen first column) ─────────────────────────
+   One label per lane, pinned to the left edge during horizontal scroll (like a spreadsheet's
+   frozen column) and scrolling vertically WITH its lane. Reserves LANE_PAD on the time axis so it
+   never covers a clip at scroll 0. Carries the eye toggle that hides the track from the preview. */
+.st-lane-label { position: sticky; left: 0; z-index: 4; box-sizing: border-box;
+  width: var(--st-label-w, 128px); height: 100%; background: var(--panel);
+  border-right: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between;
+  gap: 6px; padding: 0 6px 0 10px; cursor: default; user-select: none; }
+.st-lane-name { font-size: 0.68rem; font-weight: 600; color: var(--ink); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.st-lane-label.muted .st-lane-name { font-weight: 500; color: var(--muted); }
+.st-lane-label.off .st-lane-name { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+.st-lane-eye { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 20px; padding: 0; border: none; border-radius: 5px; background: transparent;
+  color: var(--muted); cursor: pointer; }
+.st-lane-eye:hover { background: var(--accent-soft); color: var(--ink); }
+.st-lane-eye[aria-pressed="true"] { color: var(--accent); }
+/* A hidden track dims its BLOCKS (not its label, which stays clickable to un-hide). */
+.st-lane-off .st-clip, .st-lane-off .st-ov, .st-lane-off .st-aud { opacity: 0.32; }
+
 .st-lane { position: relative; border-bottom: 1px solid var(--line); }
 .st-lane-cuts { height: 58px; background: #fbf7f0; }
 .st-lane-ov { height: 28px; } /* one overlay TRACK row; height also set inline (OV_LANE_H) */
@@ -996,6 +1021,7 @@ body.st-scrubbing, body.st-scrubbing * { cursor: ew-resize !important; user-sele
 .st-aud.pt { padding: 0; justify-content: center; border-radius: 50%; }
 .st-aud.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .st-aud-narration:hover .st-trim { background: linear-gradient(#9fb08a, #9fb08a); opacity: 0.5; }
+.st-aud-music:hover .st-trim { background: linear-gradient(#caa57d, #caa57d); opacity: 0.55; }
 
 /* music bed: taller block carrying a draggable gain line (↕ volume) + fade-in/out handles (↔).
    The name sits pinned at the bottom-left so the gain line has room above it. */
@@ -1005,7 +1031,8 @@ body.st-scrubbing, body.st-scrubbing * { cursor: ew-resize !important; user-sele
   border-radius: 2px; cursor: ns-resize; touch-action: none; }
 .st-aud-gain::after { content: ''; position: absolute; right: 5px; top: -3px; width: 9px; height: 9px;
   border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px #fff8; }
-.st-aud-fade { position: absolute; top: 0; bottom: 0; cursor: ew-resize; touch-action: none;
+/* fade-shape preview only (edited in the properties panel) — never intercepts the edge trim grips. */
+.st-aud-fade { position: absolute; top: 0; bottom: 0; pointer-events: none;
   background: rgba(202,165,125,0.45); }
 .st-aud-fade-in { left: 0; border-right: 1px solid #caa57d; border-radius: 6px 0 0 6px;
   clip-path: polygon(0 0, 100% 100%, 0 100%); }        /* ramp UP from left */

@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import StudioTimeline from './StudioTimeline.jsx'
 
-const LANE_PAD = 12
+const LANE_PAD = 142 // LABEL_W (128) + 14 gap — reserves the sticky track-label gutter before t=0
 const ZOOM = 80
 
 const noop = () => {}
@@ -16,7 +16,8 @@ const baseProps = {
   onSeek: noop, onSelect: noop, onTrim: noop, onTrimBegin: noop, onReorder: noop, onZoom: noop,
   onTogglePlay: noop, onSplit: noop, onDuplicate: noop, onDelete: noop, onAutoArrange: noop,
   onOverlayMove: noop, onOverlayTrim: noop, onOverlayDragBegin: noop, onOverlayResolve: noop,
-  onAudioDragBegin: noop, onMoveSfx: noop, onMoveNarration: noop, onTrimNarration: noop, onSetMusicLevels: noop,
+  onAudioDragBegin: noop, onMoveSfx: noop, onMoveNarration: noop, onTrimNarration: noop,
+  onSetMusicLevels: noop, onTrimMusic: noop, onMoveMusic: noop, onToggleHidden: noop,
 }
 
 function renderTimeline(doc, dur) {
@@ -188,19 +189,35 @@ describe('audio lane (feature: SFX / music / narration visible on the timeline)'
     expect(container.querySelectorAll('.st-aud')).toHaveLength(0)
     expect(container.querySelector('.st-lane-audio .st-lane-empty')).toBeInTheDocument()
   })
-  it('the music bed carries a draggable gain line + fade-in/out handles', () => {
+  it('the music region carries a gain line, edge trim handles, and a fade-shape preview', () => {
     const doc = {
       cuts: fullDoc.cuts,
       audio: { music: { asset_id: 'music/bed.mp3', volume: 0.5, fade_in_seconds: 1, fade_out_seconds: 2 } },
     }
     const { container } = renderTimeline(doc, 5)
     const bed = container.querySelector('.st-aud-music')
-    expect(bed.querySelector('.st-aud-gain')).toBeInTheDocument()
-    expect(bed.querySelector('.st-aud-fade-in')).toBeInTheDocument()
+    expect(bed.querySelector('.st-aud-gain')).toBeInTheDocument()      // ↕ volume (draggable)
+    expect(bed.querySelectorAll('.st-trim')).toHaveLength(2)           // ↔ edge-trim handles
+    expect(bed.querySelector('.st-aud-fade-in')).toBeInTheDocument()   // fade-shape preview (visual)
     expect(bed.querySelector('.st-aud-fade-out')).toBeInTheDocument()
-    // fade handle widths follow the durations (fade_in 1s, fade_out 2s at ZOOM px/s)
+    // fade-shape widths follow the durations (fade_in 1s, fade_out 2s at ZOOM px/s)
     expect(bed.querySelector('.st-aud-fade-in').style.width).toBe(`${1 * ZOOM}px`)
     expect(bed.querySelector('.st-aud-fade-out').style.width).toBe(`${2 * ZOOM}px`)
+  })
+  it('renders one block per music region (array form) at its own window', () => {
+    const doc = {
+      cuts: fullDoc.cuts,
+      audio: { music: [
+        { asset_id: 'music/a.mp3', start_seconds: 0, end_seconds: 2 },
+        { asset_id: 'music/b.mp3', start_seconds: 2, end_seconds: 5 },
+      ] },
+    }
+    const { container } = renderTimeline(doc, 5)
+    const beds = container.querySelectorAll('.st-aud-music')
+    expect(beds).toHaveLength(2)
+    expect(beds[0].style.left).toBe(`${LANE_PAD}px`)
+    expect(beds[1].style.left).toBe(`${LANE_PAD + 2 * ZOOM}px`)
+    expect(beds[1].style.width).toBe(`${3 * ZOOM}px`)
   })
   it('audio blocks are pointer-draggable divs (not buttons)', () => {
     const { container } = renderTimeline(fullDoc, 5)
@@ -218,14 +235,14 @@ describe('audio lane is selectable + deselect-on-empty (the two reported bugs)',
     const { container } = render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} onSelect={onSelect} />)
     fireEvent.pointerDown(container.querySelector('.st-aud-music'))
     fireEvent.pointerUp(window)
-    expect(onSelect).toHaveBeenCalledWith({ kind: 'audio', audioKind: 'music', index: null })
+    expect(onSelect).toHaveBeenCalledWith({ kind: 'audio', audioKind: 'music', index: 0 })
     fireEvent.pointerDown(container.querySelector('.st-aud-sfx'))
     fireEvent.pointerUp(window)
     expect(onSelect).toHaveBeenCalledWith({ kind: 'audio', audioKind: 'sfx', index: 0 })
   })
   it('marks the selected audio item', () => {
     const { container } = render(
-      <StudioTimeline doc={fullDoc} dur={5} {...baseProps} selection={{ kind: 'audio', audioKind: 'music', index: null }} />)
+      <StudioTimeline doc={fullDoc} dur={5} {...baseProps} selection={{ kind: 'audio', audioKind: 'music', index: 0 }} />)
     expect(container.querySelector('.st-aud-music').className).toContain('sel')
   })
   it('clicking empty timeline background deselects (→ Assets tab)', () => {
@@ -310,5 +327,39 @@ describe('ruler + playhead', () => {
     const { container } = renderTimeline(fullDoc, 5)
     expect(container.querySelector('.st-tl-dur').textContent).toContain('0:05.0')
     expect(container.querySelectorAll('.st-tick').length).toBeGreaterThan(0)
+  })
+})
+
+describe('sticky track labels + preview-hide eye toggle (request 3)', () => {
+  it('labels every track lane on the left (Video / Music / Narration / SFX / Overlay N)', () => {
+    const { container } = renderTimeline(fullDoc, 5)
+    const names = [...container.querySelectorAll('.st-lane-name')].map(n => n.textContent)
+    expect(names).toContain('Video')
+    expect(names).toContain('Music')
+    expect(names).toContain('Narration')
+    expect(names).toContain('SFX')
+    expect(names.some(n => /^Overlay \d+$/.test(n))).toBe(true)
+  })
+  it('clicking a lane eye calls onToggleHidden with that track key', () => {
+    const onToggleHidden = vi.fn()
+    const { container } = render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} onToggleHidden={onToggleHidden} />)
+    const musicLane = container.querySelector('.st-lane-audio-music')
+    fireEvent.click(musicLane.querySelector('.st-lane-eye'))
+    expect(onToggleHidden).toHaveBeenCalledWith('aud:music')
+    fireEvent.click(container.querySelector('.st-lane-cuts .st-lane-eye'))
+    expect(onToggleHidden).toHaveBeenCalledWith('main')
+  })
+  it('marks a hidden lane (off) and dims its blocks via .st-lane-off', () => {
+    const { container } = render(
+      <StudioTimeline doc={fullDoc} dur={5} {...baseProps} hidden={new Set(['aud:music'])} />)
+    const musicLane = container.querySelector('.st-lane-audio-music')
+    expect(musicLane.className).toContain('st-lane-off')
+    expect(musicLane.querySelector('.st-lane-label').className).toContain('off')
+  })
+  it('the label gutter does NOT deselect when clicked (eye is safe to click)', () => {
+    const onSelect = vi.fn()
+    const { container } = render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} onSelect={onSelect} />)
+    fireEvent.pointerDown(container.querySelector('.st-lane-cuts .st-lane-label'))
+    expect(onSelect).not.toHaveBeenCalled()
   })
 })
