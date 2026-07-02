@@ -104,6 +104,13 @@ class AnalyticsUpdateRequest(BaseModel):
     # True = opt OUT of product analytics.
     disabled: bool
 
+
+class FeedbackRequest(BaseModel):
+    kind: str  # "bug" | "feature" | "other"
+    message: str
+    email: Optional[str] = None       # optional, so we can reply
+    diagnostics: Optional[str] = None  # optional client-attached logs/context
+
 from lib import app_paths
 
 # Read-only code root the agent runs against (repo checkout in dev; app-bundle Resources in prod).
@@ -535,6 +542,16 @@ def create_app(
         analytics_mod.shutdown()
         analytics_mod.reset()
         return {"disabled": bool(body.disabled)}
+
+    @app.post("/api/feedback")
+    def post_feedback(body: FeedbackRequest) -> dict[str, Any]:
+        """In-app bug / feature feedback. Always stored locally (never lost); a PostHog event is
+        emitted (metadata only); emailed via Resend when configured. See server/feedback.py."""
+        from server import feedback as feedback_mod
+        try:
+            return feedback_mod.submit(body.kind, body.message, body.email, body.diagnostics)
+        except feedback_mod.FeedbackError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @app.post("/api/projects/{project_id}/chat")
     async def chat(project_id: str, body: ChatRequest):
