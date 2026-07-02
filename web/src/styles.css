@@ -931,17 +931,27 @@ body.st-scrubbing, body.st-scrubbing * { cursor: ew-resize !important; user-sele
 .st-tl-dur { font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .st-zoom { display: inline-flex; align-items: center; gap: 0.3rem; }
 .st-zoom input[type=range] { width: 130px; }
-.st-tl-scroll { flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; }
+/* Scrolls BOTH axes: horizontally through time, vertically through stacked overlay tracks +
+   the audio lanes (so nothing is clipped off the bottom when tracks pile up). */
+.st-tl-scroll { flex: 1; min-height: 0; overflow: auto; }
 .st-tl-scroll.drop { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-soft); }
 .st-tl-content { position: relative; }
-.st-ruler { position: relative; height: 22px; border-bottom: 1px solid var(--line); cursor: ew-resize; user-select: none; }
+/* Sticky so the time labels stay pinned to the top while scrolling the lanes vertically; it still
+   scrolls horizontally with the content so ticks stay aligned. z below the playhead (3), above lanes. */
+.st-ruler { position: sticky; top: 0; z-index: 2; height: 22px; background: var(--panel);
+  border-bottom: 1px solid var(--line); cursor: ew-resize; user-select: none; }
 .st-tick { position: absolute; top: 3px; transform: translateX(-2px); font-size: 0.64rem; color: var(--muted);
   border-left: 1px solid var(--line); padding-left: 3px; font-variant-numeric: tabular-nums; }
 .st-lane { position: relative; border-bottom: 1px solid var(--line); }
 .st-lane-cuts { height: 58px; background: #fbf7f0; }
 .st-lane-ov { height: 28px; } /* one overlay TRACK row; height also set inline (OV_LANE_H) */
 .st-lane-ov-new { background: repeating-linear-gradient(45deg, transparent, transparent 6px, #00000008 6px, #00000008 12px); }
+/* One row PER audio kind (music / narration / sfx). Faint per-kind wash so the stacked rows read
+   as separate tracks even where a bed and a segment both span the full width. */
 .st-lane-audio { height: 30px; }
+.st-lane-audio-music { background: #faf4ea; }
+.st-lane-audio-narration { background: #f4f6ef; }
+.st-lane-audio-sfx { background: #faf0eb; }
 .st-lane-empty { position: absolute; left: 16px; top: 7px; font-size: 0.68rem; color: var(--muted); pointer-events: none; }
 
 .st-clip { position: absolute; top: 6px; height: 46px; background: var(--blue-soft); border: 1px solid var(--blue);
@@ -962,14 +972,32 @@ body.st-scrubbing, body.st-scrubbing * { cursor: ew-resize !important; user-sele
 .st-ov.kf { border-style: dashed; }
 .st-ov:hover .st-trim { background: linear-gradient(var(--green), var(--green)); opacity: 0.4; }
 
-/* audio lane (music / narration / sfx). Warm, distinct from blue cuts/green overlays. Clickable. */
+/* audio lane (music / narration / sfx). Warm, distinct from blue cuts/green overlays. Draggable
+   (grab), same pointer model as cuts/overlays; a bare tap selects. */
 .st-aud { position: absolute; top: 5px; height: 20px; border-radius: 6px; font: inherit; font-size: 0.64rem; color: var(--ink);
-  padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; cursor: pointer; }
+  overflow: hidden; display: inline-flex; align-items: center; cursor: grab; user-select: none; touch-action: none; }
+.st-aud-name { flex: 1; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 .st-aud-music { background: #efe4d6; border: 1px solid #caa57d; }
 .st-aud-narration { background: #e7eadf; border: 1px solid #9fb08a; }
 .st-aud-sfx { background: #f3ddd5; border: 1px solid #d59685; }
 .st-aud.pt { padding: 0; justify-content: center; border-radius: 50%; }
 .st-aud.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.st-aud-narration:hover .st-trim { background: linear-gradient(#9fb08a, #9fb08a); opacity: 0.5; }
+
+/* music bed: taller block carrying a draggable gain line (↕ volume) + fade-in/out handles (↔).
+   The name sits pinned at the bottom-left so the gain line has room above it. */
+.st-aud-music { display: block; }
+.st-aud-music .st-aud-name { position: absolute; left: 7px; right: 7px; bottom: 1px; }
+.st-aud-gain { position: absolute; left: 0; right: 0; height: 3px; background: var(--accent);
+  border-radius: 2px; cursor: ns-resize; touch-action: none; }
+.st-aud-gain::after { content: ''; position: absolute; right: 5px; top: -3px; width: 9px; height: 9px;
+  border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px #fff8; }
+.st-aud-fade { position: absolute; top: 0; bottom: 0; cursor: ew-resize; touch-action: none;
+  background: rgba(202,165,125,0.45); }
+.st-aud-fade-in { left: 0; border-right: 1px solid #caa57d; border-radius: 6px 0 0 6px;
+  clip-path: polygon(0 0, 100% 100%, 0 100%); }        /* ramp UP from left */
+.st-aud-fade-out { right: 0; border-left: 1px solid #caa57d; border-radius: 0 6px 6px 0;
+  clip-path: polygon(100% 0, 100% 100%, 0 100%); }      /* ramp DOWN to right */
 
 .st-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); pointer-events: none; z-index: 3; }
 

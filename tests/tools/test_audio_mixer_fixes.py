@@ -321,3 +321,32 @@ def test_extract_mp3(tool, video_clip, tmp_path):
     })
     assert res.success, res.error
     assert _probe_stream(out)["codec_name"] == "mp3"
+
+
+@needs_ffmpeg
+def test_full_mix_ducking_speech_music_sfx(tool, tmp_path):
+    """Regression: the ducking branch (speech + music) used to consume the speech
+    filter pad multiple times and leave an orphan [speech_dup], failing with
+    'Filter output ... unconnected'. A single-speech + music + SFX full_mix must
+    now succeed and emit a real audio stream (this is exactly the shape the render's
+    _mix_structured_audio builds from edit_decisions.audio stems)."""
+    speech = _make_sine(tmp_path / "vo.wav", 3)
+    music = _make_sine(tmp_path / "music.wav", 3, gain_db=-10)
+    fx = _make_sine(tmp_path / "fx.wav", 1)
+    out = tmp_path / "mixed.m4a"
+    res = tool.execute({
+        "operation": "full_mix",
+        "tracks": [
+            {"path": str(speech), "role": "speech", "start_seconds": 0},
+            {"path": str(music), "role": "music", "volume": 0.3, "fade_in_seconds": 0.5},
+            {"path": str(fx), "role": "sfx", "start_seconds": 1.0, "volume": 0.5},
+        ],
+        "ducking": {"enabled": True, "attack_ms": 60, "release_ms": 350},
+        "normalize": True,
+        "output_path": str(out),
+    })
+    assert res.success, res.error
+    assert out.exists() and out.stat().st_size > 0
+    # _probe_stream selects the first AUDIO stream — a codec_name means the master
+    # actually carries mixed audio (the bug produced no output at all).
+    assert _probe_stream(out)["codec_name"]  # e.g. "aac" for .m4a

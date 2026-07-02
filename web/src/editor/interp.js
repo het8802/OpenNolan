@@ -648,6 +648,23 @@ export function updateNarration(doc, index, patch) {
   return { ...doc, audio: { ...(doc.audio || {}), narration: { ...(doc.audio?.narration || {}), segments } } }
 }
 
+/** Move a narration segment to a new start time, PRESERVING its duration (shifts
+ * end_seconds by the same delta when present). Start clamps to ≥ 0. No-op (same doc)
+ * if out of range. Used by the timeline drag; trimming a single edge goes through
+ * updateNarration directly. */
+export function moveNarration(doc, index, start) {
+  const segs = doc?.audio?.narration?.segments || []
+  if (index < 0 || index >= segs.length) return doc
+  const seg = segs[index]
+  const ns = Math.max(0, round3(Number(start) || 0))
+  const patch = { start_seconds: ns }
+  if (seg.end_seconds != null) {
+    const dur = Math.max(0, (Number(seg.end_seconds) || 0) - (Number(seg.start_seconds) || 0))
+    patch.end_seconds = round3(ns + dur)
+  }
+  return updateNarration(doc, index, patch)
+}
+
 /** Remove a narration segment by index. No-op (same doc) if out of range. */
 export function removeNarration(doc, index) {
   const segs = doc?.audio?.narration?.segments || []

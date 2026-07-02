@@ -211,6 +211,23 @@ export function previewAudioTracks(doc) {
   return list
 }
 
+// Fixed top→bottom order of the audio sub-lanes on the timeline. Music sits at the top (the
+// bed under everything), then narration (voice), then SFX (point cues).
+export const AUDIO_LANE_ORDER = ['music', 'narration', 'sfx']
+
+/**
+ * Group the flat `interp.audioClips(doc)` list into ONE row per audio KIND, in AUDIO_LANE_ORDER,
+ * dropping kinds with no items. The timeline draws each row on its own lane so a full-width music
+ * bed and a full-width narration segment (and SFX point markers) no longer stack in a single row
+ * and occlude each other. Pure — placement math stays in the component; this is only the split.
+ * Returns [{ kind, items }]; empty array when there's no audio at all (caller shows the hint).
+ */
+export function groupAudioLanes(audioItems = []) {
+  return AUDIO_LANE_ORDER
+    .map(kind => ({ kind, items: audioItems.filter(a => a.kind === kind) }))
+    .filter(row => row.items.length > 0)
+}
+
 /** Convert a named anchor (text-overlay form) to an {x,y,width} object — image/video
  * overlays MUST carry an object position (the renderer rejects a string anchor for them). */
 export function anchorToXY(anchor, canvas) {

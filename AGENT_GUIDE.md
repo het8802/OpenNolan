@@ -564,6 +564,30 @@ Check music availability in this order and present the options:
 
 Record the music decision in the proposal/brief artifact so the asset director knows what to do.
 
+### Audio in `edit_decisions`: EMIT STEMS, not a pre-mixed master
+
+`edit_decisions.audio` can carry audio in two shapes. **Default to structured STEMS** so the
+audio stays editable (in the manual editor and by a later agent turn) and so the render owns the mix:
+
+- **Structured stems (preferred):** `audio.music` (bed: `asset_id` + `volume`/`fade_in_seconds`/
+  `fade_out_seconds`/`ducking`), `audio.narration.segments[]` (each `asset_id` + `start_seconds`
+  [+ `end_seconds`]), and `audio.sfx[]` (each `asset_id` + `start_seconds` + `volume`). The FFmpeg
+  render (`video_compose`) now **mixes these stems into the output automatically** — music ducked/
+  faded under narration, SFX placed at their `start_seconds` — reusing `audio_mixer.full_mix`. You do
+  **not** need a manual `audio_mixer.full_mix` step at compose anymore; just emit the stems and keep
+  the individual stem files on disk (referenced by `asset_id` in `asset_manifest`). This is what the
+  manual editor edits and re-mixes on every render.
+- **Pre-mixed master (`audio.path`) — reserve for the continuous-VO case:** a single already-mixed
+  file muxed verbatim over the assembled video (it OVERRIDES per-cut/stem audio). Use ONLY when the
+  audio is inherently one continuous track — e.g. the `anthropic-style-animated-talking-head`
+  pipeline's original talking-head VO that must stay in sync across the cuts that tile it. A master
+  cannot be edited per-stem in the editor (music/SFX are already flattened), so don't use it for
+  reels that a human may want to re-score.
+
+Precedence: an explicit `audio.path` always wins; structured stems are mixed only when no master is
+set. Footage whose OWN clip audio must survive should be captured as a narration stem (an `asset_id`
+referencing the source clip) — the stem mix replaces base-clip audio, matching `audio.path` semantics.
+
 ## Pipeline Asset Expectations
 
 Each pipeline manifest's `tools_available` field declares what tools a stage can use. Use selectors for multi-provider capabilities — the selector handles routing to whatever is available. Read the pipeline manifest for the authoritative list per stage.

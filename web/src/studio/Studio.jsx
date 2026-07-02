@@ -455,6 +455,17 @@ export default function Studio({ projectId, state, onClose, chat }) {
   // new history) folds it into the one undo step the drag's start-of-move snapshot already opened.
   const onOverlayResolve = useCallback((index) => live(d => interp.resolveOverlayOverlap(d, index)), [live])
 
+  // Audio drag on the timeline (feat: full NLE audio editing) — same snapshot-once/live pattern.
+  // onAudioDragBegin snapshots once at pointerdown so the whole drag is ONE undo step; per-frame
+  // moves/trims/level-changes go through `live` (no history). These target an explicit index (the
+  // block being dragged), unlike the properties-panel onUpdateAudio which edits the selection.
+  const onAudioDragBegin = useCallback(() => snapshot(), [snapshot])
+  const onMoveSfx = useCallback((index, start) => live(d => interp.updateSfx(d, index, { start_seconds: start })), [live])
+  const onMoveNarration = useCallback((index, start) => live(d => interp.moveNarration(d, index, start)), [live])
+  const onTrimNarration = useCallback((index, patch) => live(d => interp.updateNarration(d, index, patch)), [live])
+  // Music bed level/fades dragged directly on the lane (single bed → no index).
+  const onSetMusicLive = useCallback((patch) => live(d => interp.updateMusic(d, patch)), [live])
+
   // Canvas drag-to-position (feat 4): merge {x,y} (canvas px) into the overlay's position object,
   // converting a text anchor string to an object on the first drag. Live (no per-frame history) —
   // onOverlayDragBegin already snapshotted once at pointerdown.
@@ -638,6 +649,8 @@ export default function Studio({ projectId, state, onClose, chat }) {
                 onReorder={onReorder} onZoom={setZoom} onAssetDrop={onAssetDrop}
                 onOverlayMove={onOverlayMove} onOverlayTrim={onOverlayTrim} onOverlayDragBegin={onOverlayDragBegin}
                 onOverlayResolve={onOverlayResolve}
+                onAudioDragBegin={onAudioDragBegin} onMoveSfx={onMoveSfx} onMoveNarration={onMoveNarration}
+                onTrimNarration={onTrimNarration} onSetMusicLevels={onSetMusicLive}
                 onTogglePlay={togglePlay} onSplit={onSplit} onDuplicate={onDuplicate} onDelete={onDelete}
                 onAutoArrange={onAutoArrange}
               />
