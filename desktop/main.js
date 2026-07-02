@@ -50,12 +50,37 @@ function fatal(title, message) {
   app.quit();
 }
 
-// Which Python runs the backend. Explicit override wins. Packaged: the bundled, signed
-// python-build-standalone interpreter (Contents/Resources/python/bin/python3). Dev: the repo
-// .venv, then PATH — unchanged. (Lane E will later prefer the managed venv under OPENNOLAN_HOME.)
+// The BASE interpreter used to PROVISION the managed venv (Lane E). Packaged: the bundled, signed
+// python-build-standalone (Resources/python/bin/python3). Dev: repo .venv, then PATH.
+function bundledPython() {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'python', 'bin', 'python3');
+  const venv = path.join(REPO_ROOT, '.venv', 'bin', 'python');
+  if (fs.existsSync(venv)) return venv;
+  return 'python3';
+}
+
+// The managed venv's interpreter (built at first run into OPENNOLAN_HOME/runtime/venv) — this is the
+// one with fastapi/uvicorn/etc. installed.
+function venvPython() {
+  const home = process.env.OPENNOLAN_HOME || app.getPath('userData');
+  return path.join(home, 'runtime', 'venv', 'bin', 'python');
+}
+
+// The bundled uv binary (fast installer). Dev: fall through to a PATH uv.
+function uvBin() {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'uv', 'uv');
+  return process.env.OPENNOLAN_UV || 'uv';
+}
+
+// Which Python runs the BACKEND. Explicit override wins. Packaged: the provisioned venv python if it
+// exists (ensureProvisioned() guarantees this before startBackend), else the bundled base as a
+// bootstrap fallback. Dev: repo .venv, then PATH — unchanged.
 function pythonBin() {
   if (process.env.OPENNOLAN_PYTHON) return process.env.OPENNOLAN_PYTHON;
-  if (app.isPackaged) return path.join(process.resourcesPath, 'python', 'bin', 'python3');
+  if (app.isPackaged) {
+    const vp = venvPython();
+    return fs.existsSync(vp) ? vp : bundledPython();
+  }
   const venv = path.join(REPO_ROOT, '.venv', 'bin', 'python');
   if (fs.existsSync(venv)) return venv;
   return 'python3';
@@ -80,6 +105,91 @@ function initAutoUpdate() {
     autoUpdater.checkForUpdatesAndNotify().catch((e) => console.error('[updater] check failed: ' + (e && e.message)));
   } catch (e) {
     console.error('[updater] disabled: ' + (e && e.message));
+  }
+}
+
+// ── first-run provisioning (Lane E) ───────────────────────────────────────────
+// The bundled interpreter has no packages, so on first run we build a managed venv (uv) + install
+// core deps + ffmpeg into ~/Library/Application Support/OpenNolan/runtime, driven by the bundled
+// python running scripts/provision.py. Only packaged builds provision; dev uses the repo .venv.
+
+function provisionEnv() {
+  const home = process.env.OPENNOLAN_HOME || app.getPath('userData');
+  return {
+    ...process.env,
+    OPENNOLAN_HOME: home,
+    OPENNOLAN_CODE_ROOT: codeRoot(),
+    OPENNOLAN_PYTHON: bundledPython(), // the base interpreter the venv is built from
+    OPENNOLAN_UV: uvBin(),
+  };
+}
+
+// Run scripts/provision.py with the bundled interpreter, parsing its NDJSON stdout. `onFrame` gets
+// each {type:'log'|'doctor'|'done'|'error', ...}. Resolves with the last frame; rejects on failure.
+function runProvision(args, onFrame) {
+  return new Promise((resolve, reject) => {
+    const script = path.join(codeRoot(), 'scripts', 'provision.py');
+    const child = spawn(bundledPython(), [script, ...args],
+      { cwd: codeRoot(), env: provisionEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    let buf = '';
+    let last = null;
+    child.stdout.on('data', (d) => {
+      buf += d.toString();
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const raw = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!raw) continue;
+        let frame;
+        try { frame = JSON.parse(raw); } catch (_) { frame = { type: 'log', line: raw }; }
+        last = frame;
+        if (onFrame) onFrame(frame);
+      }
+    });
+    child.stderr.on('data', (d) => { if (onFrame) onFrame({ type: 'log', line: String(d).trimEnd() }); });
+    child.on('error', reject);
+    child.on('exit', (code) => (code === 0
+      ? resolve(last)
+      : reject(new Error((last && last.error) || ('provisioning exited ' + code)))));
+  });
+}
+
+let setupWin = null;
+function createSetupWindow() {
+  return new Promise((resolve) => {
+    setupWin = new BrowserWindow({
+      width: 640, height: 480, title: 'Setting up OpenNolan', backgroundColor: '#FBF7F0', resizable: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'setup-preload.js'),
+        contextIsolation: true, nodeIntegration: false, sandbox: true,
+      },
+    });
+    setupWin.on('closed', () => { setupWin = null; });
+    setupWin.webContents.once('did-finish-load', () => resolve());
+    setupWin.loadFile(path.join(__dirname, 'setup.html'));
+  });
+}
+
+// Ensure the managed venv + core deps exist before the backend starts. Packaged only (dev has the
+// repo .venv). Shows a setup window streaming pip progress on first run; no-op once provisioned.
+async function ensureProvisioned() {
+  if (!app.isPackaged) return;
+  let doc = null;
+  try { const f = await runProvision(['--doctor']); doc = f && f.doctor; } catch (_) { /* provision below */ }
+  if (doc && doc.core_ok) return; // venv present + current
+
+  await createSetupWindow();
+  try {
+    await runProvision(['--core'], (frame) => {
+      if (setupWin && frame.type === 'log') setupWin.webContents.send('setup:progress', frame.line);
+    });
+    if (setupWin) setupWin.webContents.send('setup:done');
+    await new Promise((r) => setTimeout(r, 600)); // let the user read "done" before we swap windows
+  } catch (err) {
+    if (setupWin) setupWin.webContents.send('setup:error', String((err && err.message) || err));
+    throw err; // boot()'s catch surfaces the fatal dialog
+  } finally {
+    if (setupWin) { setupWin.close(); setupWin = null; }
   }
 }
 
@@ -149,6 +259,9 @@ function startBackend(port) {
     runtimeEnv.OPENNOLAN_HOME = home;
     runtimeEnv.OPENNOLAN_CODE_ROOT = CODE_ROOT;
     runtimeEnv.OPENNOLAN_PROJECTS_DIR = process.env.OPENNOLAN_PROJECTS_DIR || path.join(home, 'projects');
+    runtimeEnv.OPENNOLAN_UV = uvBin();       // so the backend can install capability packs on demand
+    // Downloaded ffmpeg/ffprobe live in runtime/bin — put them on PATH so shutil.which() finds them.
+    runtimeEnv.PATH = path.join(home, 'runtime', 'bin') + path.delimiter + (process.env.PATH || '');
   } else {
     runtimeEnv.OPENNOLAN_PROJECTS_DIR =
       process.env.OPENNOLAN_PROJECTS_DIR || path.join(REPO_ROOT, 'projects');
@@ -266,6 +379,7 @@ async function boot() {
       if (!fs.existsSync(webDistIndex())) {
         return fatal('UI not built', 'The web UI has not been built.\n\nRun:\n  npm --prefix web run build\n\nthen start the app again. (`npm start` does this automatically.)');
       }
+      await ensureProvisioned(); // first run (packaged): build the venv + core deps + ffmpeg before the backend
       backendPort = await freePort();
       backend = startBackend(backendPort);
       await waitForHealth(backendPort);

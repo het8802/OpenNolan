@@ -9,9 +9,9 @@
     "prestart": "npm --prefix ../web run build",
     "start": "electron .",
     "dev": "ELECTRON_DEV=1 electron .",
-    "fetch-python": "node ../scripts/fetch-python.mjs",
-    "dist": "node ../scripts/fetch-python.mjs && npm --prefix ../web run build && electron-builder --mac --arm64",
-    "dist:dir": "node ../scripts/fetch-python.mjs && npm --prefix ../web run build && electron-builder --mac --arm64 --dir"
+    "fetch-runtime": "node ../scripts/fetch-python.mjs && node ../scripts/fetch-uv.mjs",
+    "dist": "npm run fetch-runtime && npm --prefix ../web run build && electron-builder --mac --arm64",
+    "dist:dir": "npm run fetch-runtime && npm --prefix ../web run build && electron-builder --mac --arm64 --dir"
   },
   "dependencies": {
     "electron-updater": "^6.3.9"
@@ -50,7 +50,8 @@
       { "from": "../requirements-gpu.txt", "to": "backend/requirements-gpu.txt" },
       { "from": "../requirements-dev.txt", "to": "backend/requirements-dev.txt" },
       { "from": "../web/dist", "to": "backend/web/dist" },
-      { "from": "resources/python", "to": "python" }
+      { "from": "resources/python", "to": "python" },
+      { "from": "resources/uv", "to": "uv" }
     ],
     "mac": {
       "category": "public.app-category.video",

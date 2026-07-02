@@ -118,9 +118,16 @@ xcrun stapler validate OpenNolan.dmg
   or every launch's update check 404s (harmless now — logged + caught, not a crash).
 - **CI:** `.github/workflows/release-mac.yml` is a skeleton — it needs the repo secrets + icon before it
   runs green. Until then, release with `npm --prefix desktop run dist -- --publish always` on your Mac.
-- **Package install (torch/whisperx/ffmpeg):** first-run provisioning is Lane E. Lane E must also make
-  `pythonBin()` prefer the managed venv under `OPENNOLAN_HOME/runtime` — the bundled base interpreter
-  has no site-packages, so the packaged backend can't `import fastapi` until the venv is provisioned.
+- **First-run provisioning (Lane E — DONE):** on first packaged launch, `main.js` shows a setup window
+  and runs `scripts/provision.py --core` with the bundled interpreter, which uses the bundled `uv` to
+  build a venv at `OPENNOLAN_HOME/runtime/venv`, install the core deps (`requirements-ui.txt` +
+  `requirements.txt`, wheels only), and provision ffmpeg; then `pythonBin()` prefers that venv. Heavy ML
+  installs lazily as capability packs (`transcription`/`vision`/`bg-removal`/`beat-sync`/`tts`) via
+  `POST /api/provision/{pack}`; `GET /api/doctor` reports status. `OPENNOLAN_FORCE_PROVISION=1` makes the
+  doctor report everything missing so you can watch the full flow on a machine that already has the tools.
+  Remaining: the ffmpeg source URL (`ffmpeg.martin-riedl.de` arm64) should be pinned + sha-verified before
+  release, and the lazy-pack **409 gate** (auto-prompt when an agent tool needs an absent pack) still needs
+  wiring into the tool path.
 - **Bundle size:** the pruned interpreter is ~56 MB; the full unpacked `.app` was ~950 MB in testing
   (dominated by `assets/` + `tools/`). Trim non-runtime assets from `extraResources` before release.
 - **Latent:** `tools/base_tool.py` / `tools/tool_registry.py` load `.env` from a repo-relative path
