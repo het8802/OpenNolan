@@ -101,12 +101,23 @@ function recordStderr(buf) {
 function startBackend(port) {
   const bin = pythonBin();
   const args = ['-m', 'uvicorn', 'server.app:app', '--host', '127.0.0.1', '--port', String(port)];
+  // Where the backend writes user data. Dev (running from the checkout): keep it repo-relative,
+  // exactly as before. Packaged (read-only .app): route everything (projects, BYOK .env, the
+  // managed venv, caches) to ~/Library/Application Support via OPENNOLAN_HOME — the app bundle is
+  // read-only and gets replaced on update, so nothing writable may live inside it. lib/app_paths.py
+  // is the single source of truth that reads these vars; see docs/plans/publish-mac-app.md (P0).
+  // NOTE (lane D): OPENNOLAN_CODE_ROOT (the read-only backend tree) is set once the backend ships
+  // inside the bundle; until then cwd=REPO_ROOT keeps lib.*/server.*/tools.* importable in dev.
+  const runtimeEnv = { ...process.env };
+  if (app.isPackaged) {
+    runtimeEnv.OPENNOLAN_HOME = process.env.OPENNOLAN_HOME || app.getPath('userData');
+  } else {
+    runtimeEnv.OPENNOLAN_PROJECTS_DIR =
+      process.env.OPENNOLAN_PROJECTS_DIR || path.join(REPO_ROOT, 'projects');
+  }
   const child = spawn(bin, args, {
     cwd: REPO_ROOT, // top-level package imports (lib.*, server.*, tools.*) need repo root on the path
-    env: {
-      ...process.env,
-      OPENNOLAN_PROJECTS_DIR: process.env.OPENNOLAN_PROJECTS_DIR || path.join(REPO_ROOT, 'projects'),
-    },
+    env: runtimeEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout.on('data', (d) => process.stdout.write('[backend] ' + d));

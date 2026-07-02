@@ -275,9 +275,10 @@ def test_runner_shares_render_store_with_editor(tmp_path, monkeypatch):
     captured = {}
 
     class FakeRunner:
-        def __init__(self, repo_root, render_store=None):
+        def __init__(self, repo_root, projects_dir=None, render_store=None):
             self.render_store = render_store
             captured["render_store"] = render_store
+            captured["projects_dir"] = projects_dir
 
         async def run_turn(self, project_id, message, on_event=None):
             if on_event is not None:
