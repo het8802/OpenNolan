@@ -560,6 +560,48 @@ def create_app(
         except feedback_mod.FeedbackError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
+    @app.get("/api/doctor")
+    def get_doctor() -> dict[str, Any]:
+        """First-run provisioning status: is the managed venv/core/ffmpeg present, which capability
+        packs are installed. Drives the setup UI + the 'install pack' prompts. See lib/provision.py."""
+        from lib import provision
+        return provision.doctor()
+
+    @app.post("/api/provision/{pack}")
+    def post_provision(pack: str):
+        """Lazily install a capability pack (whisperx/torch, mediapipe, rembg, librosa, piper) into the
+        managed venv, streaming pip progress as NDJSON so the UI can show it. Runs in a worker thread so
+        the multi-minute torch install doesn't hold the event loop; the client reads the stream to done."""
+        import queue
+        import threading
+
+        from lib import provision
+
+        if pack not in provision.PACKS:
+            raise HTTPException(status_code=404, detail=f"unknown pack {pack!r}")
+
+        q: "queue.Queue[Optional[str]]" = queue.Queue()
+
+        def worker() -> None:
+            try:
+                provision.provision_pack(pack, lambda line: q.put(json.dumps({"type": "log", "line": line})))
+                q.put(json.dumps({"type": "done", "pack": pack}))
+            except Exception as exc:  # surface a clean error frame to the stream
+                q.put(json.dumps({"type": "error", "error": str(exc)}))
+            finally:
+                q.put(None)  # sentinel
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        def stream():
+            while True:
+                frame = q.get()
+                if frame is None:
+                    break
+                yield frame + "\n"
+
+        return StreamingResponse(stream(), media_type="application/x-ndjson")
+
     @app.post("/api/projects/{project_id}/chat")
     async def chat(project_id: str, body: ChatRequest):
         """Stream an agent turn as Server-Sent Events.
