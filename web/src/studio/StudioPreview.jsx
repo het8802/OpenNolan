@@ -7,10 +7,11 @@
 //    persistent <video> (or <img> for a still cut) is slaved to it.
 //  • RENDER: plays the composed MP4 (preview == export; overlays are already baked in).
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api.js'
 import * as interp from '../editor/interp.js'
 import { fmtTime, previewAudioTracks, overlayType, isImageSource, clipBox, clipPositionXY } from './model.js'
+import dbg from '../debug/recorder.js'
 
 const OV_DRAG_THRESHOLD = 3 // px before a press on a canvas overlay becomes a position drag
 
@@ -140,19 +141,63 @@ export default function StudioPreview({
   const liveRef = useRef(null)
   liveRef.current = { doc, previewMode, dur, onScrub, onPlayingChange, audioTracks }
 
-  // SOURCE: while paused (or scrubbing), keep the <video> paused + seeked to the playhead's
-  // source time. (Image cuts have no <video> — nothing to seek.)
+  // Paused-scrub seek: the DESIRED source time for the persistent <video>, plus a guard-ref so the
+  // chaser can tell whether it's allowed to run without re-subscribing.
+  const seekTargetRef = useRef(null)
+  const modeRef = useRef({ playing, previewMode, isImg })
+  modeRef.current = { playing, previewMode, isImg }
+
+  // Chase the desired seek target — the FIX for the intermittent stuck canvas. A plain
+  // "set currentTime on every scrub tick" pile up seeks while the element is mid-seek; the browser
+  // coalesces/drops them, so only ~10% completed and the frame froze (recorder confirmed: 35/363).
+  // Instead: only issue a seek when the element is ready AND NOT already seeking; if the target
+  // moved while a seek was in flight, the `seeked`/ready events below re-invoke this so we converge
+  // on the LATEST target — the final frame always lands and seeks never stack. Reads only refs
+  // (stable identity), so the lifecycle listeners never need to re-subscribe.
+  const chaseSeek = useCallback(() => {
+    const { playing, previewMode, isImg } = modeRef.current
+    if (playing || previewMode !== 'source' || isImg) return // playback path owns the clock while rolling
+    const v = srcRef.current
+    const target = seekTargetRef.current
+    if (!v || target == null) return
+    if (v.readyState < 1 || v.seeking) return // not ready, or a seek is in flight → its `seeked` re-chases
+    if (Math.abs(v.currentTime - target) > 0.05) {
+      dbg.event('preview.seekReq', { to: Math.round(target * 1000) / 1000, cur: Math.round(v.currentTime * 1000) / 1000, fired: true, readyState: v.readyState })
+      try { v.currentTime = target } catch { /* not ready */ }
+    }
+  }, [])
+
+  // SOURCE + paused/scrub: record the desired source time and kick the chaser. (Image cuts have no
+  // <video> — nothing to seek.) The chaser coalesces; it will defer if a seek is already running.
   useEffect(() => {
     if (previewMode !== 'source' || playing || isImg) return
     const v = srcRef.current
     if (!v) return
     try { v.pause() } catch { /* noop */ }
-    if (sourceRef == null) return
-    const seek = () => { if (Math.abs(v.currentTime - sourceTime) > 0.05) { try { v.currentTime = sourceTime } catch { /* not ready */ } } }
-    if (v.readyState >= 1) { seek(); return }
-    v.addEventListener('loadedmetadata', seek, { once: true })
-    return () => v.removeEventListener('loadedmetadata', seek)
-  }, [previewMode, sourceRef, sourceTime, playing, isImg])
+    if (sourceRef == null) { seekTargetRef.current = null; return }
+    seekTargetRef.current = sourceTime
+    chaseSeek()
+  }, [previewMode, sourceRef, sourceTime, playing, isImg, chaseSeek])
+
+  // Mirror the source <video>'s seek lifecycle into the recorder (observability), AND re-chase the
+  // latest target whenever a seek finishes or the element becomes seekable — this is what makes the
+  // chaser converge instead of dropping the final frame. No-op for recording unless a session is on.
+  useEffect(() => {
+    if (previewMode !== 'source' || isImg || sourceRef == null) return
+    const v = srcRef.current
+    if (!v) return
+    const RECHASE = new Set(['seeked', 'loadedmetadata', 'loadeddata', 'canplay'])
+    const names = ['seeking', 'seeked', 'stalled', 'waiting', 'error', 'loadedmetadata', 'loadeddata', 'canplay']
+    const handlers = names.map((name) => {
+      const h = () => {
+        dbg.event(`preview.video.${name}`, { cur: Math.round(v.currentTime * 1000) / 1000, readyState: v.readyState, seeking: v.seeking })
+        if (RECHASE.has(name)) chaseSeek()
+      }
+      v.addEventListener(name, h)
+      return [name, h]
+    })
+    return () => { for (const [name, h] of handlers) v.removeEventListener(name, h) }
+  }, [previewMode, isImg, sourceRef, chaseSeek])
 
   // RENDER: play/pause + seek the composed video.
   useEffect(() => {
