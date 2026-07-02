@@ -7,7 +7,7 @@ import {
   TRANSITIONS, SPEED_PRESETS, CANVAS_PRESETS, TEXT_ANCHORS, EASINGS,
   KF_DIMS_IMAGE, KF_DIMS_TEXT,
   overlayKind, overlayType, kfDimsFor, newTextOverlay, newImageOverlay, newVideoOverlay, presetKeyframes,
-  isFfmpeg, anchorToXY, fmtTime, round3, clamp, previewAudioTracks, isImageSource, clipType,
+  isFfmpeg, anchorToXY, fmtTime, round3, clamp, previewAudioTracks, groupAudioLanes, isImageSource, clipType,
   scrubValue, roundTo, fmtScrub, decimalsOf,
   clipFitSize, clipBox, clipDefaultPosition, clipAnchorXY, clipPositionXY,
   isScaleObject, scaleAxes,
@@ -227,6 +227,33 @@ describe('previewAudioTracks (source-preview <audio> elements)', () => {
       .toEqual({ key: 'music', kind: 'music', src: 'legacy.mp3', start: 0, end: Infinity, volume: 1 })
     const doc = { audio: { sfx: [{ start_seconds: 2 }, { asset_id: 'x.mp3', start_seconds: 3 }] } }
     expect(previewAudioTracks(doc).map(t => t.src)).toEqual(['x.mp3']) // the no-asset sfx is skipped
+  })
+})
+
+describe('groupAudioLanes (one timeline row per audio kind)', () => {
+  it('returns [] when there are no audio items', () => {
+    expect(groupAudioLanes([])).toEqual([])
+    expect(groupAudioLanes()).toEqual([])
+  })
+  it('groups items by kind in music → narration → sfx order, dropping empty kinds', () => {
+    const items = [
+      { kind: 'music', index: null, asset_id: 'bed.mp3' },
+      { kind: 'sfx', index: 0, asset_id: 'a.mp3' },
+      { kind: 'sfx', index: 1, asset_id: 'b.mp3' },
+    ]
+    const rows = groupAudioLanes(items)
+    expect(rows.map(r => r.kind)).toEqual(['music', 'sfx']) // narration absent → no row
+    expect(rows[0].items).toHaveLength(1)
+    expect(rows[1].items.map(i => i.index)).toEqual([0, 1])
+  })
+  it('keeps a full-width music bed and a full-width narration segment on SEPARATE rows', () => {
+    // The occlusion bug: both spanned the whole timeline in ONE row, so narration hid the bed.
+    const items = [
+      { kind: 'music', index: null, asset_id: 'bed.mp3', start_seconds: 0, end_seconds: 10 },
+      { kind: 'narration', index: 0, asset_id: 'vo.mp3', start_seconds: 0, end_seconds: 10 },
+    ]
+    const rows = groupAudioLanes(items)
+    expect(rows.map(r => r.kind)).toEqual(['music', 'narration'])
   })
 })
 

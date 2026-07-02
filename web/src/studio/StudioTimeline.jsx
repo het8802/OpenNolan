@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import * as interp from '../editor/interp.js'
-import { fmtTime, overlayType } from './model.js'
+import { fmtTime, overlayType, groupAudioLanes } from './model.js'
 
 const ASSET_DND = 'application/x-opennolan-asset'
 
@@ -26,10 +26,13 @@ function niceStep(pxPerSec) {
 
 const baseName = (p) => String(p || '').split('/').pop() || p
 
+const MUSIC_LANE_H = 44       // px height of the music lane (taller: carries a draggable gain line)
+
 export default function StudioTimeline({
   doc, dur, zoom, playhead, selection, sourceMetas, playing,
   onSeek, onSelect, onTrim, onTrimBegin, onReorder, onZoom, onAssetDrop,
   onOverlayMove, onOverlayTrim, onOverlayDragBegin, onOverlayResolve, onAutoArrange,
+  onAudioDragBegin, onMoveSfx, onMoveNarration, onTrimNarration, onSetMusicLevels,
   onTogglePlay, onSplit, onDuplicate, onDelete,
 }) {
   const hasCut = selection?.kind === 'cut'
@@ -44,6 +47,8 @@ export default function StudioTimeline({
   const cuts = doc?.cuts || []
   const overlays = doc?.overlays || []
   const audio = interp.audioClips(doc)
+  const audioLanes = groupAudioLanes(audio) // one row per kind (music / narration / sfx)
+  const music = doc?.audio?.music || doc?.music || {} // bed level/fades for the music-lane controls
   const starts = interp.cutStarts(doc)
   const { max: maxTrack } = interp.overlayTracks(doc)
   // Lanes drawn for overlays: tracks max..0 PLUS one empty lane on top (track max+1) that
@@ -125,6 +130,40 @@ export default function StudioTimeline({
         const nt = Math.max(0, Math.min(topTrack, (Math.round(Number(ov.track) || 0)) + dTrack))
         onOverlayMove(index, { start: ns, track: nt }); return
       }
+      // ── audio modes ── (sfx/narration move + narration edge-trim + music gain/fade)
+      const aud = spec.aud
+      if (mode === 'aud-press' && spec.moveMode && (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD)) {
+        mode = spec.moveMode
+        snapOnce()
+      }
+      if (mode === 'aud-sfx-move') {
+        onMoveSfx(index, Math.max(0, (Number(aud.start_seconds) || 0) + dx / zoom)); return
+      }
+      if (mode === 'aud-narr-move') {
+        onMoveNarration(index, Math.max(0, (Number(aud.start_seconds) || 0) + dx / zoom)); return
+      }
+      if (mode === 'aud-narr-trim-in') {
+        snapOnce()
+        onTrimNarration(index, { start_seconds: Math.max(0, (Number(aud.start_seconds) || 0) + dx / zoom) }); return
+      }
+      if (mode === 'aud-narr-trim-out') {
+        snapOnce()
+        onTrimNarration(index, { end_seconds: Math.max(0, (Number(aud.end_seconds) || 0) + dx / zoom) }); return
+      }
+      if (mode === 'aud-music-gain') {
+        snapOnce()
+        // drag UP (dy<0) → louder. Map the drag over the gain track height to [0,1].
+        onSetMusicLevels({ volume: Math.max(0, Math.min(1, spec.origVol - dy / spec.gainH)) }); return
+      }
+      if (mode === 'aud-music-fadein') {
+        snapOnce()
+        onSetMusicLevels({ fade_in_seconds: Math.max(0, (spec.origFade || 0) + dx / zoom) }); return
+      }
+      if (mode === 'aud-music-fadeout') {
+        snapOnce()
+        // fade-out handle sits at the RIGHT edge — drag LEFT (dx<0) lengthens the fade.
+        onSetMusicLevels({ fade_out_seconds: Math.max(0, (spec.origFade || 0) - dx / zoom) }); return
+      }
     }
     const onUp = (ev) => {
       const finalMode = mode
@@ -132,6 +171,7 @@ export default function StudioTimeline({
       teardown()
       if (finalMode === 'press') { onSelect({ kind: 'cut', id: cut.id }); return } // tap = select
       if (finalMode === 'ov-press') { onSelect({ kind: 'overlay', index }); return } // tap = select
+      if (finalMode === 'aud-press') { onSelect({ kind: 'audio', audioKind: spec.audioKind, index }); return } // tap = select
       if (finalMode === 'reorder') {
         const newCenter = starts[index] + interp.cutDuration(cut) / 2 + dx / zoom
         let target = 0
@@ -288,24 +328,77 @@ export default function StudioTimeline({
             })}
           </div>
 
-          {/* audio lane — music / narration / sfx; click to select + edit in the properties panel */}
-          <div className="st-lane st-lane-audio" onDragOver={dragOver} onDrop={(e) => onLaneDrop(e, 'audio')}>
-            {audio.map((a, i) => {
-              const left = LANE_PAD + a.start_seconds * zoom
-              const w = a.point ? 12 : Math.max(8, (a.end_seconds - a.start_seconds) * zoom)
-              const sel = selection?.kind === 'audio' && selection.audioKind === a.kind && selection.index === a.index
-              return (
-                <button
-                  key={`${a.kind}-${i}`}
-                  className={`st-aud st-aud-${a.kind}${a.point ? ' pt' : ''}${sel ? ' sel' : ''}`}
-                  style={{ left, width: w }}
-                  title={`${a.kind} · ${baseName(a.asset_id)}`}
-                  onClick={() => onSelect({ kind: 'audio', audioKind: a.kind, index: a.index })}
-                >{a.point ? '' : baseName(a.asset_id)}</button>
-              )
-            })}
-            {!audio.length && <span className="st-lane-empty">no audio — music / narration / SFX appear here</span>}
-          </div>
+          {/* audio lanes — one row PER KIND (music / narration / sfx) so a full-width music bed
+              and a full-width narration segment don't stack in one row and hide each other.
+              Blocks are DRAGGABLE on the timeline (same pointer model as cuts/overlays): SFX move
+              in time, narration moves + edge-trims, and the music bed carries a draggable gain
+              line (↕ volume) + fade-in/out handles (↔). A bare tap selects → properties panel. */}
+          {audioLanes.length ? audioLanes.map((row) => (
+            <div key={`aud-${row.kind}`} className={`st-lane st-lane-audio st-lane-audio-${row.kind}`}
+              style={row.kind === 'music' ? { height: MUSIC_LANE_H } : undefined}
+              onDragOver={dragOver} onDrop={(e) => onLaneDrop(e, 'audio')}>
+              {row.items.map((a) => {
+                const left = LANE_PAD + a.start_seconds * zoom
+                const w = a.point ? 12 : Math.max(8, (a.end_seconds - a.start_seconds) * zoom)
+                const sel = selection?.kind === 'audio' && selection.audioKind === a.kind && selection.index === a.index
+
+                if (a.kind === 'music') {
+                  const vol = music.volume != null ? Math.max(0, Math.min(1, Number(music.volume))) : 1
+                  const fadeIn = Math.max(0, Number(music.fade_in_seconds) || 0)
+                  const fadeOut = Math.max(0, Number(music.fade_out_seconds) || 0)
+                  const bedTop = 6, bedH = MUSIC_LANE_H - 12, gainTravel = bedH - 6
+                  const gainY = bedTop + (1 - vol) * gainTravel
+                  return (
+                    <div key="music" className={`st-aud st-aud-music${sel ? ' sel' : ''}`}
+                      style={{ left, width: w, top: bedTop, height: bedH }}
+                      title={`music · ${baseName(a.asset_id)} · vol ${Math.round(vol * 100)}%`}
+                      onPointerDown={(ev) => beginDrag(ev, { mode: 'aud-press', audioKind: 'music', aud: a, index: a.index, onBegin: onAudioDragBegin })}>
+                      <span className="st-aud-fade st-aud-fade-in" style={{ width: Math.max(6, fadeIn * zoom) }}
+                        title={`fade in ${fadeIn.toFixed(2)}s — drag →`}
+                        onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { mode: 'aud-music-fadein', origFade: fadeIn, onBegin: onAudioDragBegin }) }} />
+                      <span className="st-aud-fade st-aud-fade-out" style={{ width: Math.max(6, fadeOut * zoom) }}
+                        title={`fade out ${fadeOut.toFixed(2)}s — drag ←`}
+                        onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { mode: 'aud-music-fadeout', origFade: fadeOut, onBegin: onAudioDragBegin }) }} />
+                      <span className="st-aud-gain" style={{ top: gainY }}
+                        title={`volume ${Math.round(vol * 100)}% — drag ↕`}
+                        onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { mode: 'aud-music-gain', origVol: vol, gainH: gainTravel, onBegin: onAudioDragBegin }) }} />
+                      <span className="st-aud-name">{baseName(a.asset_id)}</span>
+                    </div>
+                  )
+                }
+
+                if (a.kind === 'narration') {
+                  return (
+                    <div key={`n-${a.index}`} className={`st-aud st-aud-narration${sel ? ' sel' : ''}`}
+                      style={{ left, width: w }}
+                      title={`narration · ${baseName(a.asset_id)}`}
+                      onPointerDown={(ev) => {
+                        if (ev.target.classList.contains('st-trim')) return
+                        beginDrag(ev, { mode: 'aud-press', moveMode: 'aud-narr-move', audioKind: 'narration', aud: a, index: a.index, onBegin: onAudioDragBegin })
+                      }}>
+                      <span className="st-trim st-trim-l"
+                        onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { mode: 'aud-narr-trim-in', aud: a, index: a.index, onBegin: onAudioDragBegin }) }} />
+                      <span className="st-aud-name">{baseName(a.asset_id)}</span>
+                      <span className="st-trim st-trim-r"
+                        onPointerDown={(ev) => { ev.stopPropagation(); beginDrag(ev, { mode: 'aud-narr-trim-out', aud: a, index: a.index, onBegin: onAudioDragBegin }) }} />
+                    </div>
+                  )
+                }
+
+                // SFX — a draggable point marker (drag to move in time).
+                return (
+                  <div key={`s-${a.index}`} className={`st-aud st-aud-sfx pt${sel ? ' sel' : ''}`}
+                    style={{ left, width: w }}
+                    title={`sfx · ${baseName(a.asset_id)} — drag to move`}
+                    onPointerDown={(ev) => beginDrag(ev, { mode: 'aud-press', moveMode: 'aud-sfx-move', audioKind: 'sfx', aud: a, index: a.index, onBegin: onAudioDragBegin })} />
+                )
+              })}
+            </div>
+          )) : (
+            <div className="st-lane st-lane-audio" onDragOver={dragOver} onDrop={(e) => onLaneDrop(e, 'audio')}>
+              <span className="st-lane-empty">no audio — music / narration / SFX appear here</span>
+            </div>
+          )}
 
           {/* playhead */}
           <div className="st-playhead" style={{ left: LANE_PAD + playhead * zoom }} />

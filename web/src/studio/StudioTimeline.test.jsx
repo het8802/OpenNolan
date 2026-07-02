@@ -16,6 +16,7 @@ const baseProps = {
   onSeek: noop, onSelect: noop, onTrim: noop, onTrimBegin: noop, onReorder: noop, onZoom: noop,
   onTogglePlay: noop, onSplit: noop, onDuplicate: noop, onDelete: noop, onAutoArrange: noop,
   onOverlayMove: noop, onOverlayTrim: noop, onOverlayDragBegin: noop, onOverlayResolve: noop,
+  onAudioDragBegin: noop, onMoveSfx: noop, onMoveNarration: noop, onTrimNarration: noop, onSetMusicLevels: noop,
 }
 
 function renderTimeline(doc, dur) {
@@ -168,29 +169,58 @@ describe('audio lane (feature: SFX / music / narration visible on the timeline)'
     expect(fx.style.left).toBe(`${LANE_PAD + 3 * ZOOM}px`)
     expect(fx.style.width).toBe('12px')
   })
-  it('sorts audio items by start time across kinds', () => {
+  it('draws one lane PER kind so a full-width bed + segment do not occlude each other', () => {
+    // The reported bug: music (bed, 0→dur) and narration (0.5→2) were crammed in ONE row and the
+    // narration block painted over the bed. Each kind must now own a separate .st-lane-audio row.
     const { container } = renderTimeline(fullDoc, 5)
-    const auds = [...container.querySelectorAll('.st-aud')]
-    expect(auds.map(a => parseFloat(a.style.left))).toEqual([
-      LANE_PAD,              // music @0
-      LANE_PAD + 0.5 * ZOOM, // narration @0.5
-      LANE_PAD + 3 * ZOOM,   // sfx @3
-    ])
+    const lanes = [...container.querySelectorAll('.st-lane-audio')]
+    expect(lanes).toHaveLength(3)
+    expect(lanes.map(l => l.className.match(/st-lane-audio-(\w+)/)?.[1])).toEqual(['music', 'narration', 'sfx'])
+    // music + narration live in DIFFERENT lane elements (the fix).
+    const musicLane = container.querySelector('.st-lane-audio-music')
+    const voLane = container.querySelector('.st-lane-audio-narration')
+    expect(musicLane.querySelector('.st-aud-music')).toBeInTheDocument()
+    expect(voLane.querySelector('.st-aud-narration')).toBeInTheDocument()
+    expect(musicLane).not.toBe(voLane)
   })
   it('shows the empty hint when there is no audio', () => {
     const { container } = renderTimeline({ cuts: fullDoc.cuts }, 5)
     expect(container.querySelectorAll('.st-aud')).toHaveLength(0)
     expect(container.querySelector('.st-lane-audio .st-lane-empty')).toBeInTheDocument()
   })
+  it('the music bed carries a draggable gain line + fade-in/out handles', () => {
+    const doc = {
+      cuts: fullDoc.cuts,
+      audio: { music: { asset_id: 'music/bed.mp3', volume: 0.5, fade_in_seconds: 1, fade_out_seconds: 2 } },
+    }
+    const { container } = renderTimeline(doc, 5)
+    const bed = container.querySelector('.st-aud-music')
+    expect(bed.querySelector('.st-aud-gain')).toBeInTheDocument()
+    expect(bed.querySelector('.st-aud-fade-in')).toBeInTheDocument()
+    expect(bed.querySelector('.st-aud-fade-out')).toBeInTheDocument()
+    // fade handle widths follow the durations (fade_in 1s, fade_out 2s at ZOOM px/s)
+    expect(bed.querySelector('.st-aud-fade-in').style.width).toBe(`${1 * ZOOM}px`)
+    expect(bed.querySelector('.st-aud-fade-out').style.width).toBe(`${2 * ZOOM}px`)
+  })
+  it('audio blocks are pointer-draggable divs (not buttons)', () => {
+    const { container } = renderTimeline(fullDoc, 5)
+    for (const sel of ['.st-aud-music', '.st-aud-narration', '.st-aud-sfx']) {
+      expect(container.querySelector(sel).tagName).toBe('DIV')
+    }
+  })
 })
 
 describe('audio lane is selectable + deselect-on-empty (the two reported bugs)', () => {
-  it('clicking an audio item selects it with kind + doc index', () => {
+  it('tapping an audio block (pointerdown+up, no move) selects it with kind + doc index', () => {
+    // Audio blocks are pointer-draggable (like cuts/overlays); a bare TAP selects. The drag
+    // itself needs layout (xToTime) so it's E2E — a tap is layout-free and testable here.
     const onSelect = vi.fn()
     const { container } = render(<StudioTimeline doc={fullDoc} dur={5} {...baseProps} onSelect={onSelect} />)
-    fireEvent.click(container.querySelector('.st-aud-music'))
+    fireEvent.pointerDown(container.querySelector('.st-aud-music'))
+    fireEvent.pointerUp(window)
     expect(onSelect).toHaveBeenCalledWith({ kind: 'audio', audioKind: 'music', index: null })
-    fireEvent.click(container.querySelector('.st-aud-sfx'))
+    fireEvent.pointerDown(container.querySelector('.st-aud-sfx'))
+    fireEvent.pointerUp(window)
     expect(onSelect).toHaveBeenCalledWith({ kind: 'audio', audioKind: 'sfx', index: 0 })
   })
   it('marks the selected audio item', () => {

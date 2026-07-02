@@ -138,6 +138,43 @@ class RenderJobStore:
                     o = dict(o, asset_id=new); changed = True
                 new_overlays.append(o)
 
+        # Structured audio stems (music bed / narration segments / sfx) are stored as
+        # asset-manifest ids or project-relative refs too. The render mixes them into a
+        # master (video_compose._mix_structured_audio) but the assemble pass gets an
+        # EMPTY manifest, so resolve them to absolute paths HERE (same resolver the
+        # scrub preview uses) — otherwise the editor's render would silently drop
+        # music/SFX. audio.path (a pre-mixed master) already resolves from the repo cwd.
+        new_audio = None
+        audio = edit_decisions.get("audio")
+        if isinstance(audio, dict):
+            a2 = dict(audio)
+            music = a2.get("music")
+            if isinstance(music, dict) and music.get("asset_id"):
+                r = absolute(music["asset_id"])
+                if r != music["asset_id"]:
+                    a2["music"] = dict(music, asset_id=r); changed = True
+            narr = a2.get("narration")
+            if isinstance(narr, dict) and narr.get("segments"):
+                segs = []
+                for s in narr["segments"]:
+                    aid = (s or {}).get("asset_id")
+                    r = absolute(aid) if aid else aid
+                    if aid and r != aid:
+                        s = dict(s, asset_id=r); changed = True
+                    segs.append(s)
+                a2["narration"] = dict(narr, segments=segs)
+            sfx = a2.get("sfx")
+            if isinstance(sfx, list) and sfx:
+                new_sfx = []
+                for s in sfx:
+                    aid = (s or {}).get("asset_id")
+                    r = absolute(aid) if aid else aid
+                    if aid and r != aid:
+                        s = dict(s, asset_id=r); changed = True
+                    new_sfx.append(s)
+                a2["sfx"] = new_sfx
+            new_audio = a2
+
         # The project background image is also stored as a project-relative ref /
         # asset id (metadata.background.asset_id, type=="image"). The renderer reads
         # it from disk during the assemble pass, so resolve it the same way. Color
@@ -158,6 +195,8 @@ class RenderJobStore:
         out = dict(edit_decisions, cuts=cuts)
         if new_overlays is not None:
             out["overlays"] = new_overlays
+        if new_audio is not None:
+            out["audio"] = new_audio
         if new_metadata is not None:
             out["metadata"] = new_metadata
         return out

@@ -5,7 +5,7 @@ import {
   cutDuration, cutStarts, cutAtTime, trimCut, splitCutAtPlayhead, MIN_SOURCE_SPAN,
   removeCut, duplicateCut, reorderCut, addCut, addOverlay, removeOverlay,
   setCanvas, canvasOf, audioClips, setBackground, getBackground, clearBackground,
-  setMusic, updateMusic, removeMusic, addSfx, updateSfx, removeSfx, updateNarration, removeNarration,
+  setMusic, updateMusic, removeMusic, addSfx, updateSfx, removeSfx, updateNarration, removeNarration, moveNarration,
   overlayTracks, moveOverlay, trimOverlay, MIN_OVERLAY_SPAN,
   placeOverlayTrack, autoArrangeOverlays, resolveOverlayOverlap,
 } from './interp.js'
@@ -437,6 +437,20 @@ describe('audio mutators (music bed / narration / sfx)', () => {
   it('audio mutators drop fields the schema does not allow (whitelist)', () => {
     const d = updateSfx({ audio: { sfx: [{ asset_id: 'a.mp3', start_seconds: 1 }] } }, 0, { hacker: true, volume: 0.5 })
     expect(d.audio.sfx[0]).toEqual({ asset_id: 'a.mp3', start_seconds: 1, volume: 0.5 })
+  })
+  it('moveNarration shifts a segment preserving duration, clamps start ≥ 0', () => {
+    const d0 = { audio: { narration: { segments: [
+      { asset_id: 'v.mp3', start_seconds: 2, end_seconds: 5 },   // 3s long
+    ] } } }
+    const d1 = moveNarration(d0, 0, 4)
+    expect(d1.audio.narration.segments[0]).toEqual({ asset_id: 'v.mp3', start_seconds: 4, end_seconds: 7 })
+    // clamp to 0 keeps duration (start 0, end = 0 + 3)
+    expect(moveNarration(d0, 0, -1).audio.narration.segments[0]).toEqual({ asset_id: 'v.mp3', start_seconds: 0, end_seconds: 3 })
+    expect(moveNarration(d0, 9, 1)).toBe(d0)                       // out-of-range no-op
+  })
+  it('moveNarration leaves a segment with no end_seconds as a point (only start moves)', () => {
+    const d0 = { audio: { narration: { segments: [{ asset_id: 'v.mp3', start_seconds: 1 }] } } }
+    expect(moveNarration(d0, 0, 3).audio.narration.segments[0]).toEqual({ asset_id: 'v.mp3', start_seconds: 3 })
   })
 })
 

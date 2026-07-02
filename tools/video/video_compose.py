@@ -2768,6 +2768,207 @@ class VideoCompose(BaseTool):
             "colorspace": target["colorspace"], "tag": "hvc1", "vf_prefix": "",
         }
 
+    # ── Structured-audio stem mixing (music bed + narration + sfx → one master) ──
+    # When edit_decisions.audio carries STRUCTURED stems instead of a pre-mixed
+    # `path`, the render mixes them here into a single master via the audio_mixer
+    # full_mix engine and muxes that. This is what lets a timeline edited in the
+    # MANUAL EDITOR (which has no agent to run audio_mixer.full_mix by hand)
+    # produce music/SFX in the rendered output — and lets pipeline directors just
+    # emit stems and rely on the render to mix. An explicit audio.path always wins
+    # (see the caller); this only fires when no pre-mixed master is present. The
+    # master REPLACES the base-clip audio, matching audio.path semantics — footage
+    # whose own audio must survive should carry it as a narration stem (e.g.
+    # asset_id referencing the source clip), which is the existing convention.
+    @staticmethod
+    def _has_structured_audio(audio: dict[str, Any]) -> bool:
+        """True if `audio` carries any resolvable stem (music / narration / sfx)."""
+        if not isinstance(audio, dict):
+            return False
+        if (audio.get("music") or {}).get("asset_id"):
+            return True
+        if any((s or {}).get("asset_id") for s in (audio.get("narration") or {}).get("segments") or []):
+            return True
+        if any((s or {}).get("asset_id") for s in audio.get("sfx") or []):
+            return True
+        return False
+
+    @staticmethod
+    def _structured_audio_tracks(
+        audio: dict[str, Any], resolve
+    ) -> Optional[dict[str, Any]]:
+        """Map a structured `edit_decisions.audio` block → {tracks, ducking} for the
+        audio_mixer `full_mix` operation. `resolve(asset_id) -> path | None` turns a
+        stem ref into an on-disk file (returns None for missing/unresolvable stems,
+        which are skipped). Narration segments become speech tracks anchored at their
+        `start_seconds`; the music bed a single music track (volume + fades); each SFX
+        an sfx track at its `start_seconds`. Ducking is derived from `music.ducking`
+        (bool | object). Returns None when nothing resolves. Pure (no I/O)."""
+        tracks: list[dict[str, Any]] = []
+
+        for seg in (audio.get("narration") or {}).get("segments") or []:
+            p = resolve((seg or {}).get("asset_id"))
+            if not p:
+                continue
+            tracks.append({
+                "path": p, "role": "speech",
+                "start_seconds": max(0.0, float(seg.get("start_seconds") or 0)),
+            })
+
+        music = audio.get("music") or {}
+        has_music = False
+        mp = resolve(music.get("asset_id"))
+        if mp:
+            has_music = True
+            mt: dict[str, Any] = {"path": mp, "role": "music"}
+            if music.get("volume") is not None:
+                mt["volume"] = float(music["volume"])
+            if music.get("fade_in_seconds"):
+                mt["fade_in_seconds"] = float(music["fade_in_seconds"])
+            if music.get("fade_out_seconds"):
+                mt["fade_out_seconds"] = float(music["fade_out_seconds"])
+            tracks.append(mt)
+
+        for fx in audio.get("sfx") or []:
+            p = resolve((fx or {}).get("asset_id"))
+            if not p:
+                continue
+            st: dict[str, Any] = {
+                "path": p, "role": "sfx",
+                "start_seconds": max(0.0, float((fx or {}).get("start_seconds") or 0)),
+            }
+            if (fx or {}).get("volume") is not None:
+                st["volume"] = float(fx["volume"])
+            tracks.append(st)
+
+        if not tracks:
+            return None
+
+        # Duck the music under speech only when there's both a bed AND a ducking
+        # request. `music.ducking` is a bool or an object (attack_ms / release_ms).
+        duck_raw = music.get("ducking")
+        ducking: dict[str, Any] = {"enabled": False}
+        if has_music and duck_raw:
+            if isinstance(duck_raw, dict):
+                ducking = {"enabled": bool(duck_raw.get("enabled", True))}
+                for k in ("attack_ms", "release_ms"):
+                    if duck_raw.get(k) is not None:
+                        ducking[k] = duck_raw[k]
+            else:
+                ducking = {"enabled": bool(duck_raw)}
+        return {"tracks": tracks, "ducking": ducking}
+
+    def _mix_structured_audio(
+        self, audio: dict[str, Any], asset_lookup: dict[str, Any], workdir: Path,
+        base_audio_path: Optional[str] = None,
+    ) -> Optional[str]:
+        """Mix the structured stems into a single master file and return its path
+        (or None if nothing resolved / the mix failed). `asset_lookup` maps asset_id →
+        manifest entry; a ref that isn't a manifest id is treated as a literal path (so
+        the editor path, which pre-resolves stems to absolute paths, also works).
+        `base_audio_path`, when given, is layered in as a speech track (the footage VO
+        the render already assembled) so music ducks under it and it isn't lost — used
+        when there's no narration stem to act as the voice. Reuses AudioMixer.full_mix."""
+        def resolve(asset_id: Any) -> Optional[str]:
+            if not asset_id:
+                return None
+            info = asset_lookup.get(asset_id)
+            cand = info.get("path") if isinstance(info, dict) and info.get("path") else asset_id
+            try:
+                return str(cand) if cand and Path(cand).exists() else None
+            except OSError:
+                return None
+
+        spec = self._structured_audio_tracks(audio, resolve)
+        tracks = list(spec["tracks"]) if spec else []
+        ducking = spec["ducking"] if spec else {"enabled": False}
+        if base_audio_path:
+            # Base VO first so full_mix treats it as the speech anchor (music ducks under it).
+            tracks = [{"path": str(base_audio_path), "role": "speech"}] + tracks
+            if audio.get("music", {}).get("asset_id") or (isinstance(audio.get("music"), dict) and audio["music"].get("asset_id")):
+                ducking = ducking if ducking.get("enabled") else {"enabled": True}
+        if not tracks:
+            return None
+        out = Path(workdir) / "structured_mix.m4a"
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            from tools.audio.audio_mixer import AudioMixer
+            res = AudioMixer().execute({
+                "operation": "full_mix",
+                "tracks": tracks,
+                "ducking": ducking,
+                "normalize": True,
+                "output_path": str(out),
+            })
+        except Exception:
+            return None
+        if not getattr(res, "success", False) or not out.exists():
+            return None
+        return str(out)
+
+    def _apply_structured_audio_mix(
+        self, output_path: Path, edit_decisions: dict[str, Any],
+        asset_manifest: Optional[dict[str, Any]], inputs: dict[str, Any],
+    ) -> Optional[str]:
+        """POST-assemble audio pass: when edit_decisions.audio carries structured stems
+        (and no pre-mixed audio.path was muxed), mix music/narration/sfx and remux over
+        the finished video. Two behaviors, chosen automatically:
+          • narration stem present → that IS the voice: master = narration+music+sfx,
+            REPLACING the base-clip audio (matches audio.path semantics).
+          • no narration stem → the voice lives in the base clips (footage): extract the
+            assembled audio and LAYER music+sfx over it (music ducks under the VO), so
+            the footage audio survives.
+        Returns a warning string on a non-fatal failure (mix skipped), else None. The
+        video stream is copied (no re-encode → HDR-safe)."""
+        audio = edit_decisions.get("audio") or {}
+        if not isinstance(audio, dict) or inputs.get("audio_path") or audio.get("path"):
+            return None  # a pre-mixed master already owns the output audio
+        if not self._has_structured_audio(audio):
+            return None
+        asset_lookup = {a["id"]: a for a in (asset_manifest or {}).get("assets", [])}
+        narration_present = any(
+            (s or {}).get("asset_id") for s in (audio.get("narration") or {}).get("segments") or []
+        )
+        workdir = output_path.parent
+        base_audio: Optional[str] = None
+        if not narration_present and self._has_audio_stream(output_path):
+            base_audio = str(workdir / "base_audio.m4a")
+            try:
+                self.run_command(["ffmpeg", "-y", "-v", "error", "-i", str(output_path),
+                                  "-vn", "-c:a", "aac", "-b:a", "192k", base_audio])
+            except Exception:
+                base_audio = None
+        master = self._mix_structured_audio(audio, asset_lookup, workdir, base_audio_path=base_audio)
+        if not master:
+            return "structured audio present but no stems resolved — output kept base-clip audio only"
+        muxed = workdir / f"{output_path.stem}_amix{output_path.suffix}"
+        try:
+            self.run_command(["ffmpeg", "-y", "-v", "error", "-i", str(output_path), "-i", master,
+                              "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac",
+                              "-shortest", str(muxed)])
+            muxed.replace(output_path)
+        except Exception as exc:
+            return f"structured audio mix failed to remux ({exc}); output kept base-clip audio"
+        finally:
+            for tmp in (base_audio, master):
+                try:
+                    if tmp:
+                        Path(tmp).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        return None
+
+    def _has_audio_stream(self, path: Path) -> bool:
+        """True if `path` has at least one audio stream (ffprobe). Best-effort."""
+        try:
+            out = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+                 "stream=index", "-of", "csv=p=0", str(path)],
+                capture_output=True, text=True,
+            )
+            return bool(out.stdout.strip())
+        except Exception:
+            return False
+
     def _render_via_ffmpeg(
         self,
         *,
@@ -2832,6 +3033,10 @@ class VideoCompose(BaseTool):
             _ed_audio_path = _ed_audio.get("path") if isinstance(_ed_audio, dict) else None
             if _ed_audio_path and Path(_ed_audio_path).exists():
                 inputs = dict(inputs, audio_path=_ed_audio_path)
+            # Structured stems (music/narration/sfx, no pre-mixed master) are mixed AFTER
+            # the assemble, in _apply_structured_audio_mix — so it can LAYER music/SFX over
+            # the base-clip audio (footage VO) or REPLACE it (when a narration stem is the
+            # voice). Doing it pre-compose could only replace, which would drop a footage VO.
 
         subtitle_path = inputs.get("subtitle_path")
         if subtitle_burn and not subtitle_path:
@@ -3022,6 +3227,16 @@ class VideoCompose(BaseTool):
         finally:
             if pip_temp_dir is not None:
                 self._cleanup_dir(pip_temp_dir)
+
+        # Structured-audio stems (no pre-mixed audio.path): mix music/narration/sfx and
+        # remux over the finished video (layer over the footage VO, or replace it when a
+        # narration stem is the voice). Runs before the review so it sees the final audio.
+        if render_result.success and output_path.exists():
+            _audio_warn = self._apply_structured_audio_mix(output_path, edit_decisions, asset_manifest, inputs)
+            if _audio_warn:
+                if render_result.data is None:
+                    render_result.data = {}
+                render_result.data.setdefault("warnings", []).append(_audio_warn)
 
         if render_result.success and output_path.exists():
             final_review = self._run_final_review(
