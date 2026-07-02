@@ -15,8 +15,11 @@ from typing import Optional
 
 from dotenv import dotenv_values, load_dotenv, set_key
 
-# The repo-root .env — the exact file lib.env_loader.load_env() reads at startup.
-ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+from lib import app_paths
+
+# The BYOK .env — the exact file lib.env_loader.load_env() reads at startup. Repo `.env` in dev;
+# ~/Library/Application Support/OpenNolan/.env in the packaged app (app_paths owns the decision).
+ENV_PATH = app_paths.env_path()
 
 _KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # Values made only of these chars are safe to write UNQUOTED (matches the existing .env style and

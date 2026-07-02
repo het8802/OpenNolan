@@ -415,6 +415,10 @@ class AgentRunner:
     render_store: Optional[Any] = None
     render_timeout_s: int = 1800            # 30 min cap on a single in-turn render await
     render_poll_interval_s: float = 0.5     # how often the render tool polls job status
+    # WHERE the agent's project artifacts/checkpoints live. Injected from app.create_app so the
+    # agent and the read layer agree; defaults to <repo_root>/projects when omitted (dev + tests).
+    # In the packaged app this is the writable App-Support projects dir, NOT inside the bundle.
+    projects_dir: Optional[Path] = None
 
     _clients: dict[str, Any] = field(default_factory=dict, init=False)
     _emit: dict[str, EmitFn] = field(default_factory=dict, init=False)
@@ -428,6 +432,9 @@ class AgentRunner:
 
     def __post_init__(self) -> None:
         self.repo_root = Path(self.repo_root)
+        # Default projects under the code root (behavior-preserving for dev + tests); app injects
+        # the App-Support dir in prod so agent writes never target the read-only bundle.
+        self.projects_dir = Path(self.projects_dir) if self.projects_dir is not None else self.repo_root / "projects"
         if self.client_factory is None:
             self.client_factory = self._default_client_factory
 
@@ -536,7 +543,7 @@ class AgentRunner:
         'stepper stuck on pending' bug — the agent wrote to a different project)."""
         try:
             from lib.project import get_project_pipeline_type
-            pt = get_project_pipeline_type(self.repo_root / "projects", project_id)
+            pt = get_project_pipeline_type(self.projects_dir, project_id)
         except Exception:
             pt = None
         if pt:
@@ -573,7 +580,7 @@ class AgentRunner:
             from lib.checkpoint import get_completed_stages, get_next_stage
             from lib.project import get_project_pipeline_type
 
-            projects_dir = self.repo_root / "projects"
+            projects_dir = self.projects_dir
             pipeline_type = get_project_pipeline_type(projects_dir, project_id)
             completed = get_completed_stages(projects_dir, project_id, pipeline_type)
             artifacts_dir = projects_dir / project_id / "artifacts"
@@ -688,7 +695,7 @@ class AgentRunner:
         if "edit_decisions" not in inputs:
             try:
                 from server.editor import read_asset_manifest, read_edit_decisions
-                projects_dir = self.repo_root / "projects"
+                projects_dir = self.projects_dir
                 ed = read_edit_decisions(projects_dir, project_id)
                 if ed is not None:
                     inputs["edit_decisions"] = ed
@@ -832,7 +839,7 @@ class AgentRunner:
                             # what files/skills/tools the agent touched, after the
                             # turn and across restarts. Defensive: never raises.
                             record_tool_use(
-                                self.repo_root / "projects", project_id,
+                                self.projects_dir, project_id,
                                 it.get("name", ""), it.get("detail", "") or "",
                             )
                 elif evt["type"] == "result":

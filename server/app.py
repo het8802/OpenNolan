@@ -97,11 +97,15 @@ class EnvUpdateRequest(BaseModel):
     # BYOK: {VARIABLE_NAME: value} edits to persist to the local .env (empty value = leave blank).
     vars: dict[str, str]
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from lib import app_paths
+
+# Read-only code root the agent runs against (repo checkout in dev; app-bundle Resources in prod).
+REPO_ROOT = app_paths.code_root()
 
 
 def _default_projects_dir() -> Path:
-    return Path(os.environ.get("OPENNOLAN_PROJECTS_DIR", REPO_ROOT / "projects"))
+    # Writable projects tree — repo/projects in dev, App-Support/projects in the packaged app.
+    return app_paths.projects_dir()
 
 
 def _default_capabilities() -> dict[str, Any]:
@@ -155,7 +159,9 @@ def create_app(
             # Share ONE RenderJobStore with the editor so the agent's in-process
             # `render` tool runs through it (tracked/superseded), instead of the old
             # background-Bash render that broke turn attribution.
-            app.state.agent_runner = AgentRunner(repo_root=REPO_ROOT, render_store=_render_store())
+            app.state.agent_runner = AgentRunner(
+                repo_root=REPO_ROOT, projects_dir=pdir, render_store=_render_store()
+            )
         return app.state.agent_runner
 
     @app.get("/api/health")

@@ -13,10 +13,19 @@ from dotenv import load_dotenv
 
 
 def load_env(project_root: Optional[Path] = None) -> None:
-    """Load .env file from project root."""
+    """Load the BYOK .env into the environment.
+
+    With no argument, resolves the .env via `lib.app_paths` (repo `.env` in dev; the
+    App-Support `.env` in the packaged app), so tools and the agent subprocess inherit
+    keys the user saved through the BYOK panel. An explicit `project_root` still loads
+    `<project_root>/.env` for callers that want a specific file.
+    """
     if project_root is None:
-        project_root = Path(__file__).resolve().parent.parent
-    env_path = project_root / ".env"
+        from lib import app_paths
+
+        env_path = app_paths.env_path()
+    else:
+        env_path = Path(project_root) / ".env"
     if env_path.exists():
         load_dotenv(env_path)
 
