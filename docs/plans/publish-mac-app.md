@@ -71,6 +71,25 @@ CAPABILITY PACKS (lazy, on first use, with progress UI)
 
 ## 2. Subsystem designs
 
+### 2.0. Locked architecture decisions (eng review 2026-07-01)
+
+**Python runtime (industry standard for install-more-later apps):** bundle a `python-build-standalone` CPython into the app via electron-builder `extraResources`; manage a venv in `~/Library/Application Support/OpenNolan/runtime/venv`; use **`uv`** (single static binary, bundled) as the installer for eager core deps AND lazy capability packs. Matches ComfyUI Desktop / DiffusionBee (bundle core) + InvokeAI (download heavy deps on demand). Freezing (PyInstaller) is rejected: you cannot pip-install torch into a frozen binary, which kills the lazy-pack model.
+
+**repo_root split (the core of P0):** `repo_root` today conflates (a) read-only agent content (skills/, tools/, lib/, AGENT_GUIDE.md, pipeline_defs/, schemas/) with (b) the writable `projects/` tree. In a packaged app these MUST split:
+- Read-only agent tree → ships in the app bundle `Resources/app/` (replaced on update).
+- Writable state (`projects/`, venv, models, `.env`) → `~/Library/Application Support/OpenNolan/` (persists across updates).
+- **`agent_runner.py:539, 576, 691, 835` hardcode `self.repo_root / "projects"`** — these must resolve to the configured projects_dir instead. The agent subprocess still gets `cwd=<bundle Resources>` for reading skills/tools, but every write target is the App-Support projects dir.
+
+**Keys relocation:** `server/env_config.py` `ENV_PATH` → `~/Library/Application Support/OpenNolan/.env` (chmod 600). Keychain deferred to TODO (low stakes, single-user local app).
+
+**Notarization entitlements (prevents the works-in-dev-fails-after-notarize trap):** hardened runtime + these entitlements are REQUIRED so the notarized app can load pip-installed native libs (torch/onnxruntime/numba `.dylib`s):
+```
+com.apple.security.cs.disable-library-validation      # load unsigned 3rd-party dylibs
+com.apple.security.cs.allow-dyld-environment-variables # venv/PYTHONPATH
+com.apple.security.cs.allow-unsigned-executable-memory # torch/numba JIT
+com.apple.security.cs.allow-jit
+```
+
 ### 2A. Packaging (ask #1)
 - **Tool:** `electron-builder` (mature, handles dmg + sign + notarize + auto-update in one config). Reject electron-forge (thinner notarization story).
 - **De-repo the runtime.** `main.js` must stop assuming `REPO_ROOT`. In a packaged app:
@@ -168,6 +187,45 @@ website download → app first-open → deps installed OK → project created
 
 ---
 
+## 5b-2. Bootstrapper / doctor state machine
+
+```
+  app launch
+      │
+      ▼
+  ┌─────────────┐   all core present   ┌──────────────┐
+  │  DIAGNOSE   │─────────────────────▶│   READY      │──▶ open editor window
+  │ /api/doctor │                      └──────────────┘
+  └─────┬───────┘                              ▲
+        │ missing core (python/ffmpeg)          │ verify OK (import smoke test)
+        ▼                                        │
+  ┌─────────────┐  download+install (atomic)   ┌─┴──────────┐
+  │  SETUP UI   │─────────────────────────────▶│  VERIFY    │
+  │ progress log│                              └─────┬──────┘
+  └─────┬───────┘                                    │ verify FAIL
+        │ install FAIL (network/disk/checksum)        ▼
+        ▼                                     ┌──────────────┐
+  ┌──────────────┐  retry (idempotent)        │  DEGRADED    │
+  │  ERROR CARD  │◀───────────────────────────│ (core broke) │
+  │ retry / logs │                            └──────────────┘
+  └──────────────┘
+
+  CAPABILITY PACK (lazy, triggered by a tool call):
+    tool needs whisperx ──▶ backend 409 {pack_required: transcription}
+       │
+       ▼
+    UI: "Install video-understanding (~2.5GB, one time)?"  ──┐
+       │ yes                                                 │ no / install fails
+       ▼                                                     ▼
+    uv pip install pack (atomic: temp venv-overlay,     ┌──────────────────┐
+       verify `import torch` + mps check)               │ CLOUD FALLBACK    │
+       │ verify OK          │ verify FAIL               │ (BYOK key present?)│
+       ▼                    └──────────────────────────▶│  yes: use cloud    │
+    retry original tool                                 │  no: explain+skip  │
+                                                        └──────────────────┘
+```
+Invariants: install to a temp path → `os.replace` (atomic; same footgun as the `write-checkpoint-not-atomic` learning). Every transition emits a PostHog event. VERIFY is not "did pip exit 0" — it is "does `import <pkg>` succeed", because torch installs but fails to load is the #1 real failure.
+
 ## 5c. Error & Rescue map — the bootstrapper (the one genuinely new, high-risk codepath)
 
 | Codepath | What can go wrong | Rescued? | Rescue action | User sees |
@@ -205,19 +263,76 @@ Two must-fix gaps before launch: **(a)** honor the analytics opt-out at the SDK 
 
 ---
 
+## 5f. Test plan (implementation must ship tests alongside code)
+
+Mostly Python + a thin Electron shell; test at the seam that matters (path resolution + doctor state machine), not the OS installer.
+
+**Unit (pytest) — P0 de-repo:**
+- `env_config.ENV_PATH` resolves to App-Support when `OPENNOLAN_HOME` set, repo `.env` otherwise (back-comaptible dev). Happy/missing-dir/unwritable paths.
+- projects_dir resolution: agent_runner writes go to configured dir, NOT `repo_root/projects`. **Regression test (CRITICAL):** assert none of agent_runner.py:539/576/691/835 derive a write path from repo_root. This proves the split didn't regress.
+- doctor: `/api/doctor` returns correct missing-core list for (all present / no python / no ffmpeg / no pack).
+
+**Unit — bootstrapper state machine:**
+- DIAGNOSE→READY when core present; →SETUP when missing.
+- atomic install: simulated mid-install crash leaves NO half-venv (temp dir orphaned, real dir untouched).
+- VERIFY distinguishes "pip ok + import ok" from "pip ok + import fails" → routes to CLOUD FALLBACK.
+- capability pack: 409 `pack_required` shape; retry-after-install succeeds.
+
+**Unit — must-fix gaps:**
+- analytics: PostHog is NOT initialized when opt-out flag set (assert no client constructed, not just "no events"). 
+- port clash: `main.js` bind-fail on chosen port picks a new port and retries once (mock `net` EADDRINUSE).
+
+**Integration (spawn real backend from a temp App-Support dir):**
+- cold boot with empty App-Support → doctor reports missing core (don't actually install torch in CI).
+- feedback: `/api/feedback` → Resend called + `feedback_submitted` event emitted (both mocked).
+
+**Manual / CI-gated (can't unit-test):**
+- notarized `.dmg` opens on a clean Mac that isn't yours (Gatekeeper) — the one test that only a real second machine proves.
+- auto-update: v(n) → v(n+1) upgrade on the beta channel.
+
+## 5g. Worktree parallelization
+
+| Lane | Workstream | Modules | Depends on |
+|---|---|---|---|
+| **A** | P0 de-repo the runtime | server/, lib/, desktop/main.js | — (foundation) |
+| **B** | Analytics events + PostHog | server/ (events), web/src/ (posthog-js) | A (needs App-Support paths for device id) |
+| **C** | Feedback panel | server/ (/api/feedback), web/src/studio/ | A (light) |
+| **D** | Packaging + sign + notarize + auto-update | desktop/, CI (electron-builder) | A (bundle layout) |
+| **E** | Bootstrapper + doctor + packs | desktop/, server/ (/api/doctor) | A, D (needs bundle + venv layout) |
+
+Execution: **A first, alone** (everything hangs off the path split). Then **B + C in parallel** (different files, both light on A). **D then E** are largely sequential (E needs D's bundle layout), but D can start against A while B/C run. So: A → {B, C, D} in parallel → E. Conflict flag: B and C both touch `web/src/studio/` chrome and `server/app.py` route registration — coordinate route additions or expect a small merge in `app.py`.
+
 ## 6. Dream-state delta
 12-month ideal: a stranger downloads a signed dmg, opens it, the setup screen provisions core in ~20s, they make a reel with the agent, export watermark-free, and you can see in PostHog that 40% of installs activated. This plan builds exactly that path. The gap it leaves: capability-pack install reliability across diverse Macs/networks is the long-tail risk, mitigated by cloud fallback (cherry-pick).
 
 ---
 
+## 7. Outside-voice (Codex) refinements — folded into the plan
+
+Resolved strategic tensions:
+- **v1 phasing = HOLD local-first** (Het's call, overriding both AI reviewers' slim-BYOK-first recommendation; he owns the offline-agent + no-per-minute-cost context).
+- **Arch = Apple Silicon (arm64) only for v1.** One signed arm64 `.dmg`. No universal build, no per-arch pack matrix, no Intel wheel-gap tickets, MPS available. Add x64 later only if data demands. (Kills Codex's universal-wheel and Intel-UX concerns outright.)
+
+Accepted refinements (now requirements):
+1. **Sign the bundled Python binary (arm64) with the hardened-runtime entitlements** — they attach to the process that loads the native dylibs, NOT to Electron. Notarizing the `.app` does not cover runtime-installed wheels; the signed+entitled Python is what makes `disable-library-validation` let them load.
+2. **`uv` installs PACKAGES only; never provisions Python.** Bundle a signed CPython; uv/pip populate the venv. (Runtime-downloaded interpreter = unsigned/quarantined trap.)
+3. **`--only-binary=:all:`** — forbid source-build fallback (no Xcode CLT on a user's Mac = dead first-run on llvmlite/tokenizers/opencv).
+4. **Route ALL caches to App Support:** `HF_HOME`, `TRANSFORMERS_CACHE`, `XDG_CACHE_HOME`, `~/.piper`, rembg, plus the existing `~/.cache/opennolan` / `~/.opennolan/clips_cache`. Plan previously only routed `projects/`.
+5. **Capability gate runs BEFORE agent tool execution**, not just on UI retry — a headless agent turn importing whisperx mid-run must be gated up front.
+6. **venv rebuild-on-mismatch:** pin a runtime-manifest version; an auto-update that changes Python minor version or bundle layout triggers a venv rebuild, never trust-in-place.
+7. **PII scrubbing is designed:** scrub file paths / prompts / keys from PostHog autocapture AND the stderr feedback tail before send.
+8. **Atomic install = versioned runtime dirs + pointer swap** (populated-dir `os.replace` isn't clean on macOS); revise transcription-pack disk estimate up (well past 2.5 GB with weights + alignment models + wheel caches); free-space preflight assumes the larger number.
+9. **P0 is bigger than stated** (Codex confirmed): `server/app.py:153` builds `AgentRunner(repo_root=REPO_ROOT)`, and `agent_runner.py:532` embeds `projects/...` into the agent PROMPT/scripts. De-repo changes the agent's prompt contract, not just filesystem paths. → single source of truth for paths (`lib/app_paths.py`).
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
-| CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | ISSUES_OPEN | mode: SELECTIVE_EXPANSION; 4 expansions proposed, 4 accepted, 0 deferred; 2 must-fix gaps (analytics opt-out, port-clash retry); reframed packaging+deps as one problem; local-provisioning strategy held per user, cloud fallback added as hedge |
-| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 0 | — | — |
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | CLEARED | mode: SELECTIVE_EXPANSION; 4 expansions proposed, 4 accepted, 0 deferred; reframed packaging+deps as one problem; local-provisioning held per user + cloud fallback added |
+| Codex Review | `/codex review` | Independent 2nd opinion | 1 | ISSUES_FOUND | notarization applies to Python process not .app; uv must not provision Python; arm64-only beats universal; 9 refinements folded in; both AI models recommended slim-BYOK-v1 (user held local-first) |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR | 3 arch findings (repo_root split, keys relocation, notarize entitlements), 0 critical gaps; Python strategy locked (python-build-standalone + uv); state machine + test plan + parallelization written |
 | Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
 
-- **UNRESOLVED:** 1 (default BYOK provider for the cloud-fallback transcription API — Deepgram vs AssemblyAI vs ElevenLabs Scribe)
-- **VERDICT:** CEO CLEARED (with 2 must-fix gaps noted) — eng review required before implementation. The de-repo-the-runtime step (P0) is the gate: nothing packages until the backend boots from Application Support instead of the git checkout.
+- **CROSS-MODEL:** both reviewers recommended slim-BYOK-v1; user held local-first (owns offline/cost context). Both agreed P0 de-repo is real and under-scoped. arm64-only + entitlements-on-Python resolved cleanly.
+- **UNRESOLVED:** 1 (default cloud transcription provider for the fallback — Deepgram vs AssemblyAI vs ElevenLabs Scribe)
+- **VERDICT:** CEO + ENG CLEARED, Codex refinements folded in. Decisions locked: local-first v1, arm64-only, python-build-standalone + uv (packages only), sign+entitle the bundled Python. Implementing Lane A (de-repo the runtime) first — it's tension-independent (needed in every scenario). Design review recommended for the first-run setup/doctor UX before S-tier polish.
