@@ -55,7 +55,9 @@ from lib.project import (
     sanitize_filename,
 )
 from server import activity as activity_mod
+from server import analytics as analytics_mod
 from server import artifacts as artifacts_mod
+from server import settings as settings_mod
 from server import editor as editor_mod
 from server import threads as thread_store
 from server.agent_runner import AgentRunner, auth_configured
@@ -96,6 +98,11 @@ class AnswerRequest(BaseModel):
 class EnvUpdateRequest(BaseModel):
     # BYOK: {VARIABLE_NAME: value} edits to persist to the local .env (empty value = leave blank).
     vars: dict[str, str]
+
+
+class AnalyticsUpdateRequest(BaseModel):
+    # True = opt OUT of product analytics.
+    disabled: bool
 
 from lib import app_paths
 
@@ -148,6 +155,10 @@ def create_app(
     app.state.capabilities_cache = None  # lazily populated, then reused
     app.state.agent_runner = agent_runner  # injected (tests) or lazily built
     app.state.render_store = None  # editor render-job runner, lazily built
+
+    # One product event per backend boot. No-op when opted out / posthog absent / under pytest.
+    import platform
+    analytics_mod.capture("app_opened", {"os": platform.platform(), "app_version": app.version})
 
     def _render_store() -> RenderJobStore:
         if app.state.render_store is None:
@@ -507,6 +518,23 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc))
         env_config.reload_env()  # so the next agent turn / tool subprocess sees the new keys
         return {"changed": changed, "path": str(env_config.ENV_PATH), "vars": env_config.list_env_vars()}
+
+    @app.get("/api/settings/analytics")
+    def get_analytics_settings() -> dict[str, Any]:
+        """Analytics opt-out state + the anonymous device id (no PII). Drives the settings toggle."""
+        return {
+            "disabled": bool(settings_mod.get("analytics_disabled", False)),
+            "device_id": settings_mod.device_id(),
+        }
+
+    @app.put("/api/settings/analytics")
+    def put_analytics_settings(body: AnalyticsUpdateRequest) -> dict[str, Any]:
+        """Flip the opt-out. Persisted to settings.json; the analytics client is torn down and its
+        init memo cleared so the change takes effect immediately (no client exists while opted out)."""
+        settings_mod.set_value("analytics_disabled", bool(body.disabled))
+        analytics_mod.shutdown()
+        analytics_mod.reset()
+        return {"disabled": bool(body.disabled)}
 
     @app.post("/api/projects/{project_id}/chat")
     async def chat(project_id: str, body: ChatRequest):
