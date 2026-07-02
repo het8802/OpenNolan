@@ -129,13 +129,21 @@ export const PROPERTY_SCHEMA = {
   music: [
     { title: 'Asset', fields: [{ key: 'asset', label: 'File', control: 'select', path: 'asset_id', optionsFrom: 'music' }] },
     {
+      title: 'Timing',
+      fields: [
+        { key: 'mstart', label: 'Start', control: 'number', path: 'start_seconds', min: 0, suffix: 's' },
+        { key: 'mend', label: 'End', control: 'number', path: 'end_seconds', min: 0, suffix: 's' },
+      ],
+      hint: 'drag the region on the timeline to move it, or its edges to trim; blank = spans the whole timeline',
+    },
+    {
       title: 'Levels',
       fields: [
         { key: 'vol', label: 'Volume', control: 'number', path: 'volume', step: 0.05, min: 0, max: 1, default: 1 },
         { key: 'fi', label: 'Fade in', control: 'number', path: 'fade_in_seconds', step: 0.1, min: 0, default: 0, suffix: 's' },
         { key: 'fo', label: 'Fade out', control: 'number', path: 'fade_out_seconds', step: 0.1, min: 0, default: 0, suffix: 's' },
       ],
-      hint: 'plays under the whole timeline (trimmed to the video length on render)',
+      hint: 'trimmed to the video length on render; split a region with the ✂ Split button',
     },
   ],
   sfx: [

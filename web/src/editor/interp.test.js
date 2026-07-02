@@ -8,6 +8,7 @@ import {
   setMusic, updateMusic, removeMusic, addSfx, updateSfx, removeSfx, updateNarration, removeNarration, moveNarration,
   overlayTracks, moveOverlay, trimOverlay, MIN_OVERLAY_SPAN,
   placeOverlayTrack, autoArrangeOverlays, resolveOverlayOverlap,
+  musicRegions, musicWindow, addMusic, trimMusic, moveMusic, splitMusic, splitOverlay, splitNarration,
 } from './interp.js'
 
 describe('interpolateAt (mirrors FFmpeg _piecewise_linear_expr)', () => {
@@ -328,14 +329,26 @@ describe('audioClips (timeline audio lane projection)', () => {
     expect(audioClips({})).toEqual([])
     expect(audioClips(null)).toEqual([])
   })
-  it('draws music as a single bed spanning [0, timelineDuration]', () => {
+  it('draws an un-windowed music bed spanning [0, timelineDuration] (region index 0)', () => {
     const doc = {
       cuts: [{ in_seconds: 0, out_seconds: 4 }, { in_seconds: 0, out_seconds: 2 }], // concat => 6s
       audio: { music: { asset_id: 'song.mp3', volume: 0.6 } },
     }
-    expect(audioClips(doc)).toEqual([
-      { kind: 'music', index: null, asset_id: 'song.mp3', start_seconds: 0, end_seconds: 6, point: false },
+    expect(audioClips(doc)).toMatchObject([
+      { kind: 'music', index: 0, asset_id: 'song.mp3', start_seconds: 0, end_seconds: 6, point: false, volume: 0.6 },
     ])
+  })
+  it('draws MULTIPLE music regions (array form) on their own windows', () => {
+    const doc = {
+      cuts: [{ in_seconds: 0, out_seconds: 10 }],
+      audio: { music: [
+        { asset_id: 'a.mp3', start_seconds: 0, end_seconds: 4 },
+        { asset_id: 'b.mp3', start_seconds: 4, end_seconds: 9, volume: 0.3 },
+      ] },
+    }
+    const music = audioClips(doc).filter(c => c.kind === 'music')
+    expect(music.map(m => [m.index, m.asset_id, m.start_seconds, m.end_seconds]))
+      .toEqual([[0, 'a.mp3', 0, 4], [1, 'b.mp3', 4, 9]])
   })
   it('prefers audio.music over the legacy top-level music', () => {
     const doc = {
@@ -347,8 +360,8 @@ describe('audioClips (timeline audio lane projection)', () => {
   })
   it('falls back to legacy top-level music when audio.music is absent', () => {
     const doc = { cuts: [{ in_seconds: 0, out_seconds: 3 }], music: { asset_id: 'legacy.mp3' } }
-    expect(audioClips(doc)).toEqual([
-      { kind: 'music', index: null, asset_id: 'legacy.mp3', start_seconds: 0, end_seconds: 3, point: false },
+    expect(audioClips(doc)).toMatchObject([
+      { kind: 'music', index: 0, asset_id: 'legacy.mp3', start_seconds: 0, end_seconds: 3, point: false },
     ])
   })
   it('skips music with no asset_id (nothing to draw)', () => {
@@ -403,16 +416,17 @@ describe('audioClips (timeline audio lane projection)', () => {
 })
 
 describe('audio mutators (music bed / narration / sfx)', () => {
-  it('setMusic sets the bed; updateMusic merges + clamps volume; removeMusic clears it', () => {
+  it('setMusic sets the bed; updateMusic(index) merges + clamps volume; removeMusic(index) clears it', () => {
     let d = setMusic({}, 'song.mp3')
-    expect(d.audio.music).toEqual({ asset_id: 'song.mp3' })
-    d = updateMusic(d, { volume: 5, fade_in_seconds: 1 })   // volume clamps to [0,1]
+    expect(d.audio.music).toEqual({ asset_id: 'song.mp3' })   // single bed stored as an OBJECT
+    d = updateMusic(d, 0, { volume: 5, fade_in_seconds: 1 })  // volume clamps to [0,1]
     expect(d.audio.music).toEqual({ asset_id: 'song.mp3', volume: 1, fade_in_seconds: 1 })
-    expect(removeMusic(d).audio.music).toBeUndefined()
-    expect(removeMusic({})).toEqual({})                      // no-op when there is no music
+    expect(removeMusic(d, 0).audio.music).toBeUndefined()
+    const empty = {}
+    expect(removeMusic(empty, 0)).toBe(empty)                 // no-op returns the SAME ref
   })
   it('removeMusic also clears a legacy top-level music', () => {
-    expect(removeMusic({ music: { asset_id: 'legacy.mp3' } }).music).toBeUndefined()
+    expect(removeMusic({ music: { asset_id: 'legacy.mp3' } }, 0).music).toBeUndefined()
   })
   it('addSfx appends a clamped point; updateSfx merges by index; removeSfx drops by index', () => {
     let d = addSfx({}, 'a.mp3', -3)                          // start clamps to >= 0
@@ -612,7 +626,7 @@ describe('resolveOverlayOverlap (auto-float a moved/trimmed overlay off a new sa
 describe('music bed: editing a legacy top-level music doc keeps its asset_id', () => {
   it('updateMusic seeds from legacy doc.music and collapses it into audio.music', () => {
     const legacy = { music: { asset_id: 'bed.mp3', volume: 1 } } // legacy top-level shape
-    const nd = updateMusic(legacy, { volume: 0.4 })
+    const nd = updateMusic(legacy, 0, { volume: 0.4 })
     expect(nd.audio.music).toMatchObject({ asset_id: 'bed.mp3', volume: 0.4 }) // asset_id preserved
     expect(nd.music).toBeUndefined() // legacy field collapsed → one source of truth
     expect(audioClips(nd).find(a => a.kind === 'music')?.asset_id).toBe('bed.mp3')
@@ -701,5 +715,107 @@ describe('sanitizeCut polymorphic scale (number OR per-axis {x,y} box)', () => {
   it('setBackground ignores incomplete/invalid input (clears instead)', () => {
     const d = setBackground({ metadata: {} }, { type: 'color' }) // no color
     expect(getBackground(d)).toBeNull()
+  })
+})
+
+// ── Multi-region music + selection-aware split (requests: split any component; trim music) ──
+describe('musicRegions + music-region mutators', () => {
+  const doc10 = { cuts: [{ in_seconds: 0, out_seconds: 10 }] } // 10s timeline
+
+  it('musicRegions normalizes object / array / legacy / absent', () => {
+    expect(musicRegions({ audio: { music: { asset_id: 'a' } } })).toEqual([{ asset_id: 'a' }])
+    expect(musicRegions({ audio: { music: [{ asset_id: 'a' }, { asset_id: 'b' }] } })).toEqual([{ asset_id: 'a' }, { asset_id: 'b' }])
+    expect(musicRegions({ music: { asset_id: 'legacy' } })).toEqual([{ asset_id: 'legacy' }])
+    expect(musicRegions({})).toEqual([])
+  })
+
+  it('musicWindow defaults to [0, timelineDuration] and honors an explicit window', () => {
+    expect(musicWindow({ asset_id: 'a' }, doc10)).toEqual({ start: 0, end: 10 })
+    expect(musicWindow({ asset_id: 'a', start_seconds: 2, end_seconds: 7 }, doc10)).toEqual({ start: 2, end: 7 })
+  })
+
+  it('addMusic appends a bounded region; a 2nd region flips storage to an ARRAY', () => {
+    let d = setMusic(doc10, 'bed.mp3')
+    expect(Array.isArray(d.audio.music)).toBe(false)            // one bed → object
+    d = addMusic(d, 'sting.mp3', { start: 4, end: 6 })
+    expect(Array.isArray(d.audio.music)).toBe(true)             // two → array
+    expect(d.audio.music[1]).toMatchObject({ asset_id: 'sting.mp3', start_seconds: 4, end_seconds: 6 })
+  })
+
+  it('trimMusic clamps edges (no cross within MIN_OVERLAY_SPAN); moveMusic preserves length', () => {
+    let d = updateMusic(setMusic(doc10, 'bed.mp3'), 0, { start_seconds: 0, end_seconds: 8 })
+    d = trimMusic(d, 0, { start_seconds: 3 })
+    expect(musicRegions(d)[0]).toMatchObject({ start_seconds: 3, end_seconds: 8 })
+    // trimming the in-edge past the out clamps to end - MIN_OVERLAY_SPAN
+    const crossed = trimMusic(d, 0, { start_seconds: 99 })
+    expect(musicRegions(crossed)[0].start_seconds).toBeCloseTo(8 - MIN_OVERLAY_SPAN, 5)
+    // move preserves the 5s length
+    const moved = moveMusic(d, 0, 1)
+    expect(musicRegions(moved)[0]).toMatchObject({ start_seconds: 1, end_seconds: 6 })
+  })
+
+  it('splitMusic splits one region into two at the playhead, dropping seam fades', () => {
+    const d = setMusic(doc10, 'bed.mp3')  // un-windowed bed [0,10]
+    const split = splitMusic(d, 0, 4)
+    const regions = musicRegions(split)
+    expect(regions).toEqual([
+      { asset_id: 'bed.mp3', start_seconds: 0, end_seconds: 4 },
+      { asset_id: 'bed.mp3', start_seconds: 4, end_seconds: 10 },
+    ])
+  })
+
+  it('splitMusic drops the seam fades but keeps outer fades', () => {
+    const d = updateMusic(setMusic(doc10, 'bed.mp3'), 0, { fade_in_seconds: 1, fade_out_seconds: 2, end_seconds: 10 })
+    const [first, second] = musicRegions(splitMusic(d, 0, 5))
+    expect(first.fade_in_seconds).toBe(1)
+    expect(first.fade_out_seconds).toBeUndefined()   // seam
+    expect(second.fade_in_seconds).toBeUndefined()   // seam
+    expect(second.fade_out_seconds).toBe(2)
+  })
+
+  it('splitMusic is a same-ref no-op when the playhead is outside the region', () => {
+    const d = setMusic(doc10, 'bed.mp3')
+    expect(splitMusic(d, 0, 0)).toBe(d)     // left edge
+    expect(splitMusic(d, 0, 10)).toBe(d)    // right edge
+    expect(splitMusic(d, 9, 5)).toBe(d)     // bad index
+  })
+})
+
+describe('splitOverlay + splitNarration', () => {
+  it('splitOverlay splits an overlay window into two, preserving asset/text', () => {
+    const doc = { overlays: [{ type: 'text', text: 'hi', start_seconds: 0, end_seconds: 4, track: 0 }] }
+    const split = splitOverlay(doc, 0, 1.5)
+    expect(split.overlays).toHaveLength(2)
+    expect(split.overlays[0]).toMatchObject({ text: 'hi', start_seconds: 0, end_seconds: 1.5 })
+    expect(split.overlays[1]).toMatchObject({ text: 'hi', start_seconds: 1.5, end_seconds: 4 })
+  })
+
+  it('splitOverlay inserts an interpolated boundary keyframe in both halves', () => {
+    const doc = { overlays: [{
+      type: 'image', asset_id: 'a', position: { x: 0, y: 0 }, start_seconds: 0, end_seconds: 4,
+      keyframes: [{ t: 0, opacity: 0 }, { t: 4, opacity: 1 }],
+    }] }
+    const [first, second] = splitOverlay(doc, 0, 2).overlays
+    // opacity at t=2 is 0.5 → both halves carry a boundary keyframe there
+    expect(first.keyframes[first.keyframes.length - 1]).toMatchObject({ t: 2, opacity: 0.5 })
+    expect(second.keyframes[0]).toMatchObject({ t: 2, opacity: 0.5 })
+  })
+
+  it('splitOverlay is a same-ref no-op outside the window / bad index', () => {
+    const doc = { overlays: [{ type: 'text', text: 'x', start_seconds: 0, end_seconds: 2 }] }
+    expect(splitOverlay(doc, 0, 0)).toBe(doc)
+    expect(splitOverlay(doc, 0, 2)).toBe(doc)
+    expect(splitOverlay(doc, 5, 1)).toBe(doc)
+  })
+
+  it('splitNarration splits a bounded segment; no-op for an open-ended one', () => {
+    const doc = { audio: { narration: { segments: [{ asset_id: 'v.mp3', start_seconds: 0, end_seconds: 6 }] } } }
+    const segs = splitNarration(doc, 0, 2).audio.narration.segments
+    expect(segs).toEqual([
+      { asset_id: 'v.mp3', start_seconds: 0, end_seconds: 2 },
+      { asset_id: 'v.mp3', start_seconds: 2, end_seconds: 6 },
+    ])
+    const open = { audio: { narration: { segments: [{ asset_id: 'v.mp3', start_seconds: 0 }] } } }
+    expect(splitNarration(open, 0, 2)).toBe(open) // no end → nothing to split
   })
 })

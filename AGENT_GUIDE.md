@@ -569,14 +569,20 @@ Record the music decision in the proposal/brief artifact so the asset director k
 `edit_decisions.audio` can carry audio in two shapes. **Default to structured STEMS** so the
 audio stays editable (in the manual editor and by a later agent turn) and so the render owns the mix:
 
-- **Structured stems (preferred):** `audio.music` (bed: `asset_id` + `volume`/`fade_in_seconds`/
-  `fade_out_seconds`/`ducking`), `audio.narration.segments[]` (each `asset_id` + `start_seconds`
-  [+ `end_seconds`]), and `audio.sfx[]` (each `asset_id` + `start_seconds` + `volume`). The FFmpeg
-  render (`video_compose`) now **mixes these stems into the output automatically** — music ducked/
-  faded under narration, SFX placed at their `start_seconds` — reusing `audio_mixer.full_mix`. You do
-  **not** need a manual `audio_mixer.full_mix` step at compose anymore; just emit the stems and keep
-  the individual stem files on disk (referenced by `asset_id` in `asset_manifest`). This is what the
-  manual editor edits and re-mixes on every render.
+- **Structured stems (preferred):** `audio.music`, `audio.narration.segments[]` (each `asset_id` +
+  `start_seconds` [+ `end_seconds`]), and `audio.sfx[]` (each `asset_id` + `start_seconds` + `volume`).
+  The FFmpeg render (`video_compose`) now **mixes these stems into the output automatically** — music
+  ducked/faded under narration, SFX placed at their `start_seconds` — reusing `audio_mixer.full_mix`.
+  You do **not** need a manual `audio_mixer.full_mix` step at compose anymore; just emit the stems and
+  keep the individual stem files on disk (referenced by `asset_id` in `asset_manifest`). This is what
+  the manual editor edits and re-mixes on every render.
+  - **`audio.music` is a MUSIC BED or a LIST of beds.** Emit a single bed as an OBJECT
+    (`asset_id` + `volume`/`fade_in_seconds`/`fade_out_seconds`/`ducking`) — the common case. Each bed
+    also accepts an optional `[start_seconds, end_seconds]` window (defaults to the whole timeline);
+    the render delays the bed to `start_seconds` and truncates it at `end_seconds`. When a user splits
+    or adds a second song in the editor, `audio.music` becomes an ARRAY of these region objects — all
+    beds mix together (each ducks under narration). Readers normalize both shapes, so keep emitting a
+    single object unless you deliberately want multiple beds.
 - **Pre-mixed master (`audio.path`) — reserve for the continuous-VO case:** a single already-mixed
   file muxed verbatim over the assembled video (it OVERRIDES per-cut/stem audio). Use ONLY when the
   audio is inherently one continuous track — e.g. the `anthropic-style-animated-talking-head`

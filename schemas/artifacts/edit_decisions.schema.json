@@ -212,29 +212,11 @@
           }
         },
         "music": {
-          "type": "object",
-          "properties": {
-            "asset_id": { "type": "string" },
-            "volume": { "type": "number", "minimum": 0, "maximum": 1 },
-            "fade_in_seconds": { "type": "number", "minimum": 0 },
-            "fade_out_seconds": { "type": "number", "minimum": 0 },
-            "ducking": {
-              "oneOf": [
-                { "type": "boolean" },
-                {
-                  "type": "object",
-                  "properties": {
-                    "enabled": { "type": "boolean", "default": true },
-                    "threshold_db": { "type": "number" },
-                    "reduction_db": { "type": "number" },
-                    "attack_ms": { "type": "number", "minimum": 0 },
-                    "release_ms": { "type": "number", "minimum": 0 }
-                  },
-                  "additionalProperties": false
-                }
-              ]
-            }
-          }
+          "description": "Music bed(s). A SINGLE region object (one bed — the legacy shape) OR an ARRAY of region objects (multiple beds, e.g. after a split on the timeline). Each region carries an optional [start_seconds, end_seconds] window (defaults to the whole timeline) so it can be trimmed/moved/split like an overlay. Readers normalize both forms to a list.",
+          "oneOf": [
+            { "$ref": "#/$defs/musicRegion" },
+            { "type": "array", "items": { "$ref": "#/$defs/musicRegion" } }
+          ]
         },
         "sfx": {
           "type": "array",
@@ -339,6 +321,37 @@
           "description": "Global default duration (seconds) for cuts[].transition_in/out when a cut omits transition_duration. FFmpeg xfade path clamps all transition durations to [0.1, 2.0]. Default 0.5."
         }
       }
+    }
+  },
+  "$defs": {
+    "musicRegion": {
+      "type": "object",
+      "description": "One music bed spanning an optional [start_seconds, end_seconds] window on the timeline.",
+      "properties": {
+        "asset_id": { "type": "string" },
+        "volume": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fade_in_seconds": { "type": "number", "minimum": 0 },
+        "fade_out_seconds": { "type": "number", "minimum": 0 },
+        "start_seconds": { "type": "number", "minimum": 0, "description": "Project time this bed begins (default 0)." },
+        "end_seconds": { "type": "number", "minimum": 0, "description": "Project time this bed ends (default: end of the timeline). The music is truncated here on render." },
+        "ducking": {
+          "oneOf": [
+            { "type": "boolean" },
+            {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "threshold_db": { "type": "number" },
+                "reduction_db": { "type": "number" },
+                "attack_ms": { "type": "number", "minimum": 0 },
+                "release_ms": { "type": "number", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

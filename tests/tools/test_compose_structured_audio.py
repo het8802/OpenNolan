@@ -224,3 +224,49 @@ def test_render_replaces_base_when_narration_present(tmp_path):
     })
     assert res.success, res.error
     assert _mean_db(out, 0.5, 1.5) > -40.0  # narration audible
+
+
+# --- multi-region music (timeline split/trim) --------------------------------
+
+def test_music_regions_normalizes_object_array_and_absent():
+    assert VideoCompose._music_regions({"music": {"asset_id": "a"}}) == [{"asset_id": "a"}]
+    assert VideoCompose._music_regions({"music": [{"asset_id": "a"}, {"asset_id": "b"}]}) == \
+        [{"asset_id": "a"}, {"asset_id": "b"}]
+    assert VideoCompose._music_regions({}) == []
+    assert VideoCompose._music_regions({"music": None}) == []
+    # array form is recognized as structured audio too
+    assert VideoCompose._has_structured_audio({"music": [{"asset_id": "a"}]}) is True
+
+
+def test_structured_audio_tracks_multi_region_windows():
+    """An ARRAY of music regions -> one music track PER region; a windowed region carries
+    start_seconds (delay) + duration_seconds (truncate). Ducking comes from the first region
+    that specifies it."""
+    resolve = lambda a: a
+    audio = {"music": [
+        {"asset_id": "a", "volume": 0.5, "start_seconds": 0, "end_seconds": 4, "fade_in_seconds": 0.8,
+         "ducking": {"enabled": True, "attack_ms": 5, "release_ms": 320}},
+        {"asset_id": "b", "start_seconds": 4, "end_seconds": 9, "volume": 0.3},
+    ]}
+    spec = VideoCompose._structured_audio_tracks(audio, resolve)
+    music = [t for t in spec["tracks"] if t["role"] == "music"]
+    assert len(music) == 2
+    # region 0: starts at 0 (no delay key), truncated to 4s
+    assert "start_seconds" not in music[0] and music[0]["duration_seconds"] == 4.0
+    assert music[0]["volume"] == 0.5 and music[0]["fade_in_seconds"] == 0.8
+    # region 1: delayed to 4s, truncated to 5s
+    assert music[1]["start_seconds"] == 4.0 and music[1]["duration_seconds"] == 5.0
+    assert spec["ducking"] == {"enabled": True, "attack_ms": 5, "release_ms": 320}
+
+
+def test_per_track_chain_truncates_a_windowed_region():
+    """A music region with duration_seconds is atrim'd to that length before fades/delay,
+    so a trimmed region stops at its end on render."""
+    from tools.audio.audio_mixer import AudioMixer
+    chain = AudioMixer()._per_track_chain(
+        0, {"path": "b.mp3", "role": "music", "volume": 0.3, "start_seconds": 4.0, "duration_seconds": 5.0})
+    assert "atrim=0:5.0" in chain and "asetpts=PTS-STARTPTS" in chain
+    assert "adelay=4000|4000" in chain and "volume=0.3" in chain
+    # un-windowed track: no atrim
+    plain = AudioMixer()._per_track_chain(0, {"path": "a.mp3", "role": "music"})
+    assert "atrim" not in plain

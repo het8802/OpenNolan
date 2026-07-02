@@ -436,6 +436,51 @@ export function trimOverlay(doc, index, patch) {
   return updateOverlay(doc, index, { start_seconds: round3(s), end_seconds: round3(e) })
 }
 
+/**
+ * Partition an overlay's keyframes at project time `ts` into [first, second] so a split preserves
+ * the motion EXACTLY: an interpolated boundary keyframe is inserted at `ts` in both halves for every
+ * animated dimension, so the first half keeps interpolating to the seam value and the second half
+ * resumes from it (rather than each half freezing on its nearest kept keyframe). Returns [null,null]
+ * when there are no keyframes. Keyframe `t` is absolute project time and both halves keep their
+ * absolute positions, so no time-shift is needed.
+ */
+function splitKeyframesAt(keyframes, ts) {
+  const kfs = (Array.isArray(keyframes) ? keyframes : []).filter(k => k && k.t != null)
+  if (!kfs.length) return [null, null]
+  const boundary = { t: round3(ts) }
+  for (const d of KEYFRAME_DIMS) {
+    const v = interpolateAt(kfs, d, ts)
+    if (v != null) boundary[d] = v
+  }
+  const first = kfs.filter(k => Number(k.t) < ts).concat([{ ...boundary }])
+  const second = [{ ...boundary }].concat(kfs.filter(k => Number(k.t) > ts))
+  return [first, second]
+}
+
+/**
+ * Split the overlay at `index` into two overlays at project time `t`. The first keeps
+ * [start,ts], the second [ts,end]; both keep the same asset/text/style. Keyframed motion is split
+ * at the seam (see `splitKeyframesAt`). Returns the original doc unchanged when `t` isn't strictly
+ * inside the overlay window (needs MIN_OVERLAY_SPAN on both halves) — callers use referential
+ * equality to detect the no-op. NOTE: a video overlay's second half replays from its own first
+ * frame (overlays carry no source in-point), matching the editor's existing overlay model.
+ */
+export function splitOverlay(doc, index, t) {
+  const overlays = doc?.overlays || []
+  if (index < 0 || index >= overlays.length) return doc
+  const ov = overlays[index]
+  const s = Number(ov.start_seconds) || 0
+  const e = Number(ov.end_seconds) || s
+  const ts = round3(Number(t))
+  if (ts <= s + MIN_OVERLAY_SPAN || ts >= e - MIN_OVERLAY_SPAN) return doc
+  const [firstKfs, secondKfs] = splitKeyframesAt(ov.keyframes, ts)
+  const first = sanitizeOverlay({ ...ov, end_seconds: ts, ...(firstKfs ? { keyframes: firstKfs } : {}) })
+  const second = sanitizeOverlay({ ...ov, start_seconds: ts, ...(secondKfs ? { keyframes: secondKfs } : {}) })
+  const next = overlays.slice()
+  next.splice(index, 1, first, second)
+  return { ...doc, overlays: next }
+}
+
 /** Two time windows overlap iff they intersect (touching edges — aEnd === bStart — do NOT count). */
 function overlapsInTime(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd - 1e-9 && bStart < aEnd - 1e-9
@@ -576,7 +621,9 @@ export function clearBackground(doc) {
  * Items with no asset_id are skipped — there's nothing to show.
  */
 // Audio field whitelists + value coercion (keep in sync with edit_decisions.schema.json audio.*).
-const MUSIC_FIELDS = ['asset_id', 'volume', 'fade_in_seconds', 'fade_out_seconds', 'ducking']
+// Music regions carry an OPTIONAL [start_seconds, end_seconds] window (schema $defs.musicRegion)
+// so a bed can be trimmed/moved/split like an overlay. Absent window = the whole timeline.
+const MUSIC_FIELDS = ['asset_id', 'volume', 'fade_in_seconds', 'fade_out_seconds', 'start_seconds', 'end_seconds', 'ducking']
 const NARRATION_FIELDS = ['asset_id', 'start_seconds', 'end_seconds']
 const SFX_FIELDS = ['asset_id', 'start_seconds', 'volume']
 
@@ -585,6 +632,8 @@ function cleanMusic(m) {
   if (o.volume != null) o.volume = Math.max(0, Math.min(1, Number(o.volume)))
   if (o.fade_in_seconds != null) o.fade_in_seconds = Math.max(0, Number(o.fade_in_seconds))
   if (o.fade_out_seconds != null) o.fade_out_seconds = Math.max(0, Number(o.fade_out_seconds))
+  if (o.start_seconds != null) o.start_seconds = round3(Math.max(0, Number(o.start_seconds)))
+  if (o.end_seconds != null) o.end_seconds = round3(Math.max(0, Number(o.end_seconds)))
   return o
 }
 function cleanNarration(s) {
@@ -600,37 +649,129 @@ function cleanSfx(s) {
   return o
 }
 
-// Seed the bed from audio.music, FALLING BACK to the legacy top-level doc.music, so editing a
-// legacy-shaped bed doesn't drop its asset_id (audioClips reads either shape). Collapse the legacy
-// field afterward so there's one source of truth.
-function _withMusic(doc, fields) {
+/**
+ * Music beds, normalized to a LIST of region objects regardless of storage shape:
+ *   - audio.music as a single OBJECT (legacy / one bed) → [that object]
+ *   - audio.music as an ARRAY (multiple beds, e.g. after a split) → the array
+ *   - legacy top-level doc.music (object) → [that object] when audio.music is absent
+ * Returns the raw stored regions (NOT window-defaulted) so writers can round-trip. Empty when
+ * there's no music. Each region may carry an optional [start_seconds, end_seconds] window; use
+ * `musicWindow` to resolve the effective window (unset end ⇒ the timeline end).
+ */
+export function musicRegions(doc) {
+  const m = doc?.audio?.music != null ? doc.audio.music : doc?.music
+  if (m == null) return []
+  const list = Array.isArray(m) ? m : [m]
+  return list.filter(r => r && typeof r === 'object')
+}
+
+/** Effective [start,end] window (project seconds) for a music region: start defaults to 0, end
+ * defaults to the timeline end (a bed with no explicit end plays under the whole timeline). */
+export function musicWindow(region, doc) {
+  const s = Math.max(0, Number(region?.start_seconds) || 0)
+  const e = region?.end_seconds != null ? Math.max(s, Number(region.end_seconds)) : timelineDuration(doc)
+  return { start: s, end: e }
+}
+
+// Write a region list back in the shape the schema expects: 0 → remove music, 1 → a single OBJECT
+// (keeps the legacy/agent shape for the common case), 2+ → an ARRAY. Collapses the legacy top-level
+// `music` field so there's one source of truth. Empty (asset-less) regions are dropped.
+function _writeMusicRegions(doc, regions) {
+  const clean = regions.map(cleanMusic).filter(r => r && r.asset_id)
   const audio = { ...(doc?.audio || {}) }
-  const base = audio.music || doc?.music || {}
-  audio.music = cleanMusic({ ...base, ...fields })
+  if (clean.length === 0) delete audio.music
+  else if (clean.length === 1) audio.music = clean[0]
+  else audio.music = clean
   const next = { ...doc, audio }
   if (next.music !== undefined) delete next.music
   return next
 }
 
-/** Set the single music bed (audio.music.asset_id), preserving any other valid music fields. */
+/** Set the PRIMARY music bed's asset (region 0), creating one if there's no music yet. Preserves any
+ * other valid fields (window/levels) on region 0. Used by the Assets "Set music" action. */
 export function setMusic(doc, assetId) {
-  return _withMusic(doc, { asset_id: assetId })
+  const regions = musicRegions(doc)
+  if (regions.length === 0) return _writeMusicRegions(doc, [{ asset_id: assetId }])
+  return _writeMusicRegions(doc, regions.map((r, i) => (i === 0 ? { ...r, asset_id: assetId } : r)))
 }
 
-/** Merge a patch into the music bed. */
-export function updateMusic(doc, patch) {
-  return _withMusic(doc, patch)
+/** Append a NEW music region (used when a music asset is dropped onto the timeline). `start`
+ * defaults to 0; an explicit `end` bounds the region (else it spans to the timeline end). */
+export function addMusic(doc, assetId, { start = 0, end } = {}) {
+  const s = Math.max(0, round3(Number(start) || 0))
+  const region = { asset_id: assetId, start_seconds: s }
+  if (end != null) region.end_seconds = round3(Math.max(s + MIN_OVERLAY_SPAN, Number(end)))
+  return _writeMusicRegions(doc, [...musicRegions(doc), region])
 }
 
-/** Remove the music bed (both audio.music and the legacy top-level music). No-op if absent. */
-export function removeMusic(doc) {
-  const hasA = doc?.audio?.music !== undefined
-  const hasLegacy = doc?.music !== undefined
-  if (!hasA && !hasLegacy) return doc
-  const next = { ...doc }
-  if (hasA) { next.audio = { ...doc.audio }; delete next.audio.music }
-  if (hasLegacy) delete next.music
-  return next
+/** Merge a patch into the music region at `index`. No-op (same doc ref) if out of range or the
+ * cleaned region is value-identical (so a wiggle-and-return drag adds no history/dirty entry). */
+export function updateMusic(doc, index, patch) {
+  const regions = musicRegions(doc)
+  if (index < 0 || index >= regions.length) return doc
+  const cleanedOld = cleanMusic(regions[index])
+  const cleanedNew = cleanMusic({ ...regions[index], ...patch })
+  if (JSON.stringify(cleanedOld) === JSON.stringify(cleanedNew)) return doc
+  return _writeMusicRegions(doc, regions.map((r, i) => (i === index ? cleanedNew : r)))
+}
+
+/** Trim a music region's start/end edge (drag-a-handle), on absolute project time. Clamps like
+ * `trimOverlay`: start ≥ 0 and the edges never cross within MIN_OVERLAY_SPAN. Writes an explicit
+ * window. No-op if out of range. */
+export function trimMusic(doc, index, patch) {
+  const regions = musicRegions(doc)
+  if (index < 0 || index >= regions.length) return doc
+  const { start: curStart, end: curEnd } = musicWindow(regions[index], doc)
+  let s = patch.start_seconds != null ? Number(patch.start_seconds) : curStart
+  let e = patch.end_seconds != null ? Number(patch.end_seconds) : curEnd
+  s = Math.max(0, s)
+  if (patch.start_seconds != null) s = Math.min(s, e - MIN_OVERLAY_SPAN)
+  if (patch.end_seconds != null) e = Math.max(e, s + MIN_OVERLAY_SPAN)
+  s = Math.max(0, s)
+  return updateMusic(doc, index, { start_seconds: round3(s), end_seconds: round3(e) })
+}
+
+/** Move a music region to a new start, PRESERVING its window length. Forces an explicit end.
+ * No-op (same doc) if out of range or unchanged. */
+export function moveMusic(doc, index, start) {
+  const regions = musicRegions(doc)
+  if (index < 0 || index >= regions.length) return doc
+  const { start: curStart, end: curEnd } = musicWindow(regions[index], doc)
+  const len = Math.max(0, curEnd - curStart)
+  const ns = Math.max(0, round3(Number(start) || 0))
+  if (ns === round3(curStart)) return doc
+  return updateMusic(doc, index, { start_seconds: ns, end_seconds: round3(ns + len) })
+}
+
+/**
+ * Split the music region at `index` into two regions at project time `t`. Both keep the same asset
+ * (each plays from the song's start — music regions carry no source in-point, matching the
+ * narration/overlay model). Seam fades are dropped so they don't double up. Returns the original doc
+ * unchanged when `t` isn't strictly inside the region window (needs MIN_OVERLAY_SPAN on both halves).
+ */
+export function splitMusic(doc, index, t) {
+  const regions = musicRegions(doc)
+  if (index < 0 || index >= regions.length) return doc
+  const { start: s, end: e } = musicWindow(regions[index], doc)
+  const ts = round3(Number(t))
+  if (ts <= s + MIN_OVERLAY_SPAN || ts >= e - MIN_OVERLAY_SPAN) return doc
+  const first = cleanMusic({ ...regions[index], start_seconds: s, end_seconds: ts })
+  const second = cleanMusic({ ...regions[index], start_seconds: ts, end_seconds: e })
+  delete first.fade_out_seconds
+  delete second.fade_in_seconds
+  const next = regions.slice()
+  next.splice(index, 1, first, second)
+  return _writeMusicRegions(doc, next)
+}
+
+/** Remove the music region at `index` (or ALL music when `index` is null/undefined). No-op if absent
+ * or out of range. */
+export function removeMusic(doc, index) {
+  const regions = musicRegions(doc)
+  if (regions.length === 0) return doc
+  const next = index == null ? [] : regions.filter((_, i) => i !== index)
+  if (next.length === regions.length) return doc
+  return _writeMusicRegions(doc, next)
 }
 
 /** Append a point SFX (audio.sfx[]) at project time `start`. */
@@ -665,6 +806,28 @@ export function moveNarration(doc, index, start) {
   return updateNarration(doc, index, patch)
 }
 
+/**
+ * Split a narration segment at `index` into two at project time `t`. Needs a BOUNDED segment (an
+ * explicit end_seconds) — an open-ended segment has no seam to split, so it's a no-op. Both halves
+ * keep the same asset (each plays from the asset's start; narration segments carry no source
+ * in-point). No-op when `t` isn't strictly inside the segment (MIN_OVERLAY_SPAN on both halves).
+ */
+export function splitNarration(doc, index, t) {
+  const segs = doc?.audio?.narration?.segments || []
+  if (index < 0 || index >= segs.length) return doc
+  const seg = segs[index]
+  const s = Math.max(0, Number(seg.start_seconds) || 0)
+  if (seg.end_seconds == null) return doc
+  const e = Math.max(s, Number(seg.end_seconds))
+  const ts = round3(Number(t))
+  if (ts <= s + MIN_OVERLAY_SPAN || ts >= e - MIN_OVERLAY_SPAN) return doc
+  const first = cleanNarration({ ...seg, start_seconds: s, end_seconds: ts })
+  const second = cleanNarration({ ...seg, start_seconds: ts, end_seconds: e })
+  const segments = segs.slice()
+  segments.splice(index, 1, first, second)
+  return { ...doc, audio: { ...(doc.audio || {}), narration: { ...(doc.audio?.narration || {}), segments } } }
+}
+
 /** Remove a narration segment by index. No-op (same doc) if out of range. */
 export function removeNarration(doc, index) {
   const segs = doc?.audio?.narration?.segments || []
@@ -692,10 +855,17 @@ export function removeSfx(doc, index) {
 export function audioClips(doc) {
   const out = []
   const a = doc?.audio || {}
-  const music = a.music || doc?.music // prefer audio.music; fall back to the legacy top-level
-  if (music && music.asset_id) {
-    out.push({ kind: 'music', index: null, asset_id: music.asset_id, start_seconds: 0, end_seconds: timelineDuration(doc), point: false })
-  }
+  // Music: one block PER REGION, on its resolved [start,end] window. Carries the region levels
+  // (volume/fades) so the timeline can draw the gain line + fade handles without re-reading the doc.
+  musicRegions(doc).forEach((r, i) => {
+    if (!r.asset_id) return
+    const { start, end } = musicWindow(r, doc)
+    out.push({
+      kind: 'music', index: i, asset_id: r.asset_id,
+      start_seconds: round3(start), end_seconds: round3(end), point: false,
+      volume: r.volume, fade_in_seconds: r.fade_in_seconds, fade_out_seconds: r.fade_out_seconds,
+    })
+  })
   ;(a.narration?.segments || []).forEach((seg, i) => {
     if (!seg || !seg.asset_id) return
     const s = Math.max(0, Number(seg.start_seconds) || 0)

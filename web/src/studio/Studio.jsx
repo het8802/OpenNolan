@@ -50,6 +50,19 @@ export default function Studio({ projectId, state, onClose, chat }) {
   const [sourceMetas, setSourceMetas] = useState({}) // ref -> {duration,width,height}
   const [zoom, setZoom] = useState(80) // px per second
 
+  // ── per-track PREVIEW hide (view state, NOT the doc) — a Set of track keys the preview canvas
+  // skips: `main`, `ov:<track>`, `aud:music|narration|sfx`. It's an editing aid only (the eye
+  // toggle in each timeline lane label); the saved doc and the exported/rendered MP4 are untouched,
+  // so preview==export holds for the render. Persisted to localStorage like the panel layout. ──
+  const HIDDEN_KEY = 'st.hidden.v1'
+  const [hiddenTracks, setHiddenTracks] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]')) } catch { return new Set() }
+  })
+  useEffect(() => { try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...hiddenTracks])) } catch { /* ignore */ } }, [hiddenTracks])
+  const onToggleHidden = useCallback((key) => {
+    setHiddenTracks(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next })
+  }, [])
+
   // ── resizable panels (feat 1): inspector width + timeline height, collapse past a threshold,
   // persisted to localStorage. Layout is view state — NEVER written to the doc. ──
   const [panels, setPanels] = useState(() => {
@@ -295,7 +308,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
   const selOverlayIndex = selection?.kind === 'overlay' ? selection.index : -1
   const selAudio = selection?.kind === 'audio' ? selection : null // {audioKind:'music'|'narration'|'sfx', index}
   const selAudioObj = !selAudio ? null
-    : selAudio.audioKind === 'music' ? (doc?.audio?.music || doc?.music || null)
+    : selAudio.audioKind === 'music' ? (interp.musicRegions(doc)[selAudio.index] || null)
       : selAudio.audioKind === 'narration' ? (doc?.audio?.narration?.segments?.[selAudio.index] || null)
         : (doc?.audio?.sfx?.[selAudio.index] || null)
 
@@ -308,11 +321,33 @@ export default function Studio({ projectId, state, onClose, chat }) {
   }, [sourceMetas, live])
   const onTrimBegin = useCallback(() => snapshot(), [snapshot])
 
+  // Split acts on WHATEVER is selected at the playhead — the selected overlay / music region /
+  // narration segment, else the main cut under the playhead. Each pure mutator returns the same
+  // doc ref when the playhead isn't strictly inside that item, which we surface as a hint.
   const onSplit = useCallback(() => {
-    const nd = interp.splitCutAtPlayhead(docRef.current, playhead)
-    if (nd === docRef.current) { flash('warn', 'Move the playhead inside a clip to split'); return }
+    const before = docRef.current
+    const sel = selection
+    let nd = before
+    let hint = 'Move the playhead inside a clip to split it'
+    if (sel?.kind === 'overlay') {
+      nd = interp.splitOverlay(before, sel.index, playhead)
+      hint = 'Move the playhead inside the selected overlay to split it'
+    } else if (sel?.kind === 'audio') {
+      if (sel.audioKind === 'music') {
+        nd = interp.splitMusic(before, sel.index, playhead)
+        hint = 'Move the playhead inside the music region to split it'
+      } else if (sel.audioKind === 'narration') {
+        nd = interp.splitNarration(before, sel.index, playhead)
+        hint = 'Move the playhead inside the narration segment to split it'
+      } else {
+        flash('warn', 'A sound effect is a single cue — there’s nothing to split'); return
+      }
+    } else {
+      nd = interp.splitCutAtPlayhead(before, playhead)
+    }
+    if (nd === before) { flash('warn', hint); return }
     commit(nd)
-  }, [playhead, commit, flash])
+  }, [selection, playhead, commit, flash])
 
   const onDelete = useCallback(() => {
     if (selCut) {
@@ -323,7 +358,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
       commit(d => interp.removeOverlay(d, selOverlayIndex))
       setSelection(null)
     } else if (selAudio) {
-      if (selAudio.audioKind === 'music') commit(d => interp.removeMusic(d))
+      if (selAudio.audioKind === 'music') commit(d => interp.removeMusic(d, selAudio.index))
       else if (selAudio.audioKind === 'narration') commit(d => interp.removeNarration(d, selAudio.index))
       else commit(d => interp.removeSfx(d, selAudio.index))
       setSelection(null)
@@ -352,19 +387,28 @@ export default function Studio({ projectId, state, onClose, chat }) {
     commit(d => interp.addCut(d, { source: path, in_seconds: 0, out_seconds: out }, atIndex))
   }, [commit, sourceMetas])
   const onSetMusic = useCallback((path) => { commit(d => interp.setMusic(d, path)); flash('ok', 'Music set') }, [commit, flash])
+  // Drop a music asset onto the timeline: the FIRST bed spans the whole timeline (background music);
+  // a subsequent drop adds a bounded region at the drop time (its length from the asset duration).
+  const onAddMusic = useCallback((path, atTime) => {
+    if (interp.musicRegions(docRef.current).length === 0) { commit(d => interp.setMusic(d, path)); flash('ok', 'Music set'); return }
+    const start = atTime != null ? Math.max(0, atTime) : playhead
+    const meta = sourceMetas[path]
+    const end = start + (meta?.duration ? Math.min(meta.duration, 30) : 12)
+    commit(d => interp.addMusic(d, path, { start, end })); flash('ok', 'Music region added')
+  }, [commit, flash, playhead, sourceMetas])
   const onAddSfx = useCallback((path, atTime) => { commit(d => interp.addSfx(d, path, atTime != null ? atTime : playhead)) }, [commit, playhead])
 
   // Edit the selected audio item (music bed / narration segment / sfx) from the properties panel.
   const onUpdateAudio = useCallback((patch) => {
     if (!selAudio) return
-    if (selAudio.audioKind === 'music') commit(d => interp.updateMusic(d, patch))
+    if (selAudio.audioKind === 'music') commit(d => interp.updateMusic(d, selAudio.index, patch))
     else if (selAudio.audioKind === 'narration') commit(d => interp.updateNarration(d, selAudio.index, patch))
     else commit(d => interp.updateSfx(d, selAudio.index, patch))
   }, [selAudio, commit])
   // Per-frame variant used while DRAGGING a scrub field (no history; onScrubBegin snapshotted once).
   const onLiveUpdateAudio = useCallback((patch) => {
     if (!selAudio) return
-    if (selAudio.audioKind === 'music') live(d => interp.updateMusic(d, patch))
+    if (selAudio.audioKind === 'music') live(d => interp.updateMusic(d, selAudio.index, patch))
     else if (selAudio.audioKind === 'narration') live(d => interp.updateNarration(d, selAudio.index, patch))
     else live(d => interp.updateSfx(d, selAudio.index, patch))
   }, [selAudio, live])
@@ -450,12 +494,12 @@ export default function Studio({ projectId, state, onClose, chat }) {
   // crashes the whole editor on mount, which the build can't catch).
   const onAssetDrop = useCallback((kind, path, t, target = {}) => {
     const { lane, track = 0 } = target
-    if (kind === 'music') { onSetMusic(path); return }
+    if (kind === 'music') { onAddMusic(path, t); return } // first drop = full bed, else a region at t
     if (kind === 'audio') { onAddSfx(path, t); return }
     if (lane === 'cuts') { onAddClip(path, t); return } // image or video → main-timeline clip
     if (kind === 'video') onAddVideoOverlay(path, t, track)
     else onAddImage(path, t, track) // images → image overlay at the dropped track
-  }, [onAddImage, onAddVideoOverlay, onAddClip, onSetMusic, onAddSfx])
+  }, [onAddImage, onAddVideoOverlay, onAddClip, onAddMusic, onAddSfx])
 
   // Overlay timeline drag (feat 3): move on absolute time + change track, or edge-trim. Uses the
   // live/snapshot pattern — onOverlayDragBegin snapshots once at pointerdown so a whole drag is one
@@ -475,8 +519,11 @@ export default function Studio({ projectId, state, onClose, chat }) {
   const onMoveSfx = useCallback((index, start) => live(d => interp.updateSfx(d, index, { start_seconds: start })), [live])
   const onMoveNarration = useCallback((index, start) => live(d => interp.moveNarration(d, index, start)), [live])
   const onTrimNarration = useCallback((index, patch) => live(d => interp.updateNarration(d, index, patch)), [live])
-  // Music bed level/fades dragged directly on the lane (single bed → no index).
-  const onSetMusicLive = useCallback((patch) => live(d => interp.updateMusic(d, patch)), [live])
+  // Music regions dragged directly on the lane: gain line (volume), edge-trim, body-move — each
+  // targets the region by index (there can be several after a split).
+  const onSetMusicLive = useCallback((index, patch) => live(d => interp.updateMusic(d, index, patch)), [live])
+  const onTrimMusic = useCallback((index, patch) => live(d => interp.trimMusic(d, index, patch)), [live])
+  const onMoveMusic = useCallback((index, start) => live(d => interp.moveMusic(d, index, start)), [live])
 
   // Canvas drag-to-position (feat 4): merge {x,y} (canvas px) into the overlay's position object,
   // converting a text anchor string to an object on the first drag. Live (no per-frame history) —
@@ -538,7 +585,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
       setSelection(null)
     } else if (selection?.kind === 'audio') {
       const a = doc?.audio || {}
-      const exists = selection.audioKind === 'music' ? !!(a.music?.asset_id || doc?.music?.asset_id)
+      const exists = selection.audioKind === 'music' ? !!interp.musicRegions(doc)[selection.index]
         : selection.audioKind === 'narration' ? !!(a.narration?.segments?.[selection.index])
           : !!(a.sfx?.[selection.index])
       if (!exists) setSelection(null)
@@ -621,7 +668,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
           <StudioPreview
             projectId={projectId} doc={doc} canvas={canvas} playhead={playhead}
             previewMode={previewMode} renderPath={renderPath} renderVersion={renderVersion}
-            playing={playing} selection={selection} sourceMetas={sourceMetas}
+            playing={playing} selection={selection} sourceMetas={sourceMetas} hidden={hiddenTracks}
             onScrub={setPlayhead} onPlayingChange={setPlaying}
             onSelectOverlay={onSelectOverlay} onOverlayPosition={onOverlayPosition} onOverlayDragBegin={onOverlayDragBegin}
             onClipPosition={onClipPosition} onClipDragBegin={snapshot}
@@ -664,6 +711,8 @@ export default function Studio({ projectId, state, onClose, chat }) {
                 onOverlayResolve={onOverlayResolve}
                 onAudioDragBegin={onAudioDragBegin} onMoveSfx={onMoveSfx} onMoveNarration={onMoveNarration}
                 onTrimNarration={onTrimNarration} onSetMusicLevels={onSetMusicLive}
+                onTrimMusic={onTrimMusic} onMoveMusic={onMoveMusic}
+                hidden={hiddenTracks} onToggleHidden={onToggleHidden}
                 onTogglePlay={togglePlay} onSplit={onSplit} onDuplicate={onDuplicate} onDelete={onDelete}
                 onAutoArrange={onAutoArrange}
               />

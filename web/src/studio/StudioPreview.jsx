@@ -36,7 +36,9 @@ function syncAudioEls(els, tracks, t, active) {
     if (!el) continue
     const local = t - tr.start
     const assetDur = Number.isFinite(el.duration) ? el.duration : Infinity
-    const windowEnd = tr.kind === 'narration' ? Math.min(tr.end - tr.start, assetDur) : assetDur
+    // A finite window END bounds narration AND trimmed/split music regions (unset end ⇒ asset end).
+    const hasWindow = Number.isFinite(tr.end)
+    const windowEnd = (tr.kind === 'narration' || hasWindow) ? Math.min(tr.end - tr.start, assetDur) : assetDur
     const audible = active && local >= -0.05 && local < windowEnd
     if (audible) {
       el.volume = Math.max(0, Math.min(1, tr.volume))
@@ -80,9 +82,13 @@ function syncOverlayVideos(els, overlays, t, { play }) {
 
 export default function StudioPreview({
   projectId, doc, canvas, playhead, previewMode, renderPath, renderVersion, playing, selection, sourceMetas = {},
-  onScrub, onPlayingChange, onSelectOverlay, onOverlayPosition, onOverlayDragBegin,
+  hidden, onScrub, onPlayingChange, onSelectOverlay, onOverlayPosition, onOverlayDragBegin,
   onClipPosition, onClipDragBegin,
 }) {
+  // Per-track PREVIEW hide (view state from Studio): a Set of keys (`main`, `ov:<t>`, `aud:<kind>`)
+  // this canvas skips. Editing aid only — the doc/export are untouched.
+  const isHidden = (key) => !!(hidden && hidden.has && hidden.has(key))
+  const mainHidden = isHidden('main')
   const srcRef = useRef(null)
   const renRef = useRef(null)
   const frameRef = useRef(null)
@@ -131,15 +137,19 @@ export default function StudioPreview({
     setNatDims(d => (d[assetId]?.w === w && d[assetId]?.h === h) ? d : { ...d, [assetId]: { w, h } })
   }
 
-  // Audio to play alongside the source clip (unchanged).
+  // Audio to play alongside the source clip. A HIDDEN audio lane (music/narration/sfx) is dropped
+  // from the preview set — its <audio> unmounts + stops (view-only mute; the export still has it).
   const audioTracks = useMemo(() => previewAudioTracks(doc), [doc])
+  const visibleAudioTracks = useMemo(
+    () => audioTracks.filter(tr => !(hidden && hidden.has && hidden.has(`aud:${tr.kind}`))),
+    [audioTracks, hidden])
   const audioEls = useRef(new Map())
   const ovVideoEls = useRef(new Map()) // overlay index → <video> (video overlays that play live)
 
   const playheadRef = useRef(playhead)
   playheadRef.current = playhead
   const liveRef = useRef(null)
-  liveRef.current = { doc, previewMode, dur, onScrub, onPlayingChange, audioTracks }
+  liveRef.current = { doc, previewMode, dur, onScrub, onPlayingChange, audioTracks: visibleAudioTracks }
 
   // Paused-scrub seek: the DESIRED source time for the persistent <video>, plus a guard-ref so the
   // chaser can tell whether it's allowed to run without re-subscribing.
@@ -380,6 +390,7 @@ export default function StudioPreview({
   const visibleOverlays = overlays
     .map((o, i) => ({ o, i }))
     .filter(({ o }) => {
+      if (isHidden(`ov:${Math.round(Number(o.track) || 0)}`)) return false // track hidden in preview
       const s = Number(o.start_seconds) || 0
       const e = Number(o.end_seconds) || s
       return playhead >= s - 1e-6 && playhead <= e + 1e-6
@@ -448,8 +459,9 @@ export default function StudioPreview({
 
   return (
     <div className="st-stage" ref={stageRef}>
-      {/* hidden audio tracks (music / narration / sfx) — synced to the playhead by the rAF clock */}
-      {audioTracks.map(tr => (
+      {/* hidden audio tracks (music / narration / sfx) — synced to the playhead by the rAF clock.
+          A lane hidden via its eye toggle is filtered out (visibleAudioTracks) → it stops playing. */}
+      {visibleAudioTracks.map(tr => (
         <audio
           key={tr.key}
           src={api.sourceUrl(projectId, tr.src)}
@@ -463,7 +475,7 @@ export default function StudioPreview({
           style={{ width: frameSize.w || undefined, height: frameSize.h || undefined, background: bgColor || undefined }}>
           {/* project background (color via the frame bg above; image as a cover layer behind clips) */}
           {bgImage && <img className="st-bg-media" src={bgImage} alt="" draggable={false} />}
-          {sourceRef != null ? (
+          {sourceRef != null && !mainHidden ? (
             // The clip BOX (move + resize) sits on the background; drag it to move, Scale to resize.
             // The persistent <video> stays mounted inside so playback wiring is uninterrupted.
             <div className={`st-clip-box${clipSelected ? ' sel' : ''}`} style={clipBoxStyle} onPointerDown={beginClipDrag}>
@@ -481,7 +493,7 @@ export default function StudioPreview({
               )}
             </div>
           ) : (
-            <div className="st-stage-empty">No clip under the playhead.</div>
+            <div className="st-stage-empty">{mainHidden ? 'Video track hidden — click the eye in the timeline to show it' : 'No clip under the playhead.'}</div>
           )}
           {/* WYSIWYG overlay layer (canvas coordinates → frame px) */}
           {scale > 0 && <div className="st-ov-layer">{visibleOverlays.map(renderOverlay)}</div>}
