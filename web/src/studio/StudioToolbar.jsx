@@ -9,6 +9,7 @@ import { IconUndo, IconRedo } from '../components/icons.jsx'
 export default function StudioToolbar({
   doc, canvas, ffmpeg, canUndo, canRedo, dirty, rendering, hasRender, previewMode,
   onUndo, onRedo, onSave, onRender, onPreviewMode, onAddText, onCanvas,
+  recording, onToggleRecord,
 }) {
   const curCanvas = `${canvas.width}×${canvas.height}`
 
@@ -42,6 +43,19 @@ export default function StudioToolbar({
       </div>
 
       <div className="st-grp st-grp-right">
+        {onToggleRecord && (
+          <button
+            className={`st-ico st-rec${recording ? ' on' : ''}`}
+            onClick={onToggleRecord}
+            title={recording
+              ? 'Stop debug recording (writes the session log to disk)'
+              : 'Record a debug session — console, clicks & scrubs → .agents/tools/logs/ui-sessions'}
+            aria-label={recording ? 'Stop debug recording' : 'Record debug session'}
+            aria-pressed={!!recording}
+          >
+            <span className="st-rec-dot" />
+          </button>
+        )}
         <span className="st-toggle">
           <button className={`st-seg ${previewMode === 'source' ? 'on' : ''}`} onClick={() => onPreviewMode('source')} title="Live source scrub">Source</button>
           <button className={`st-seg ${previewMode === 'render' ? 'on' : ''}`} onClick={() => onPreviewMode('render')} disabled={!hasRender} title="Composed render">Render</button>

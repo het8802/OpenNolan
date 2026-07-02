@@ -17,6 +17,7 @@ import StudioTimeline from './StudioTimeline.jsx'
 import StudioInspector from './StudioInspector.jsx'
 import StudioPreview from './StudioPreview.jsx'
 import ChatPanel from '../chat/ChatPanel.jsx'
+import dbg from '../debug/recorder.js'
 
 const POLL_MS = 500
 const POLL_MAX = 600 // ~5 min ceiling
@@ -88,10 +89,21 @@ export default function Studio({ projectId, state, onClose, chat }) {
   const togglePlay = useCallback(() => {
     const atEnd = playhead >= interp.timelineDuration(doc) - 1e-3
     if (!playing && atEnd) setPlayhead(0) // hitting play at the end restarts from the top
+    dbg.event('ui.togglePlay', { toPlaying: !playing, playhead })
     setPlaying(!playing)
   }, [playing, playhead, doc])
-  const seekFromUser = useCallback((t) => { setPlaying(false); setPlayhead(t) }, [])
-  const changePreviewMode = useCallback((m) => { setPlaying(false); setPreviewMode(m) }, [])
+  const seekFromUser = useCallback((t) => { dbg.event('ui.seek', { t: Math.round(t * 1000) / 1000 }); setPlaying(false); setPlayhead(t) }, [])
+  const changePreviewMode = useCallback((m) => { dbg.event('ui.previewMode', { mode: m }); setPlaying(false); setPreviewMode(m) }, [])
+
+  // Dev observability: re-arm the session recorder if a session was left running before a reload
+  // (survives an accidental ⌘R). The toggle lives in the toolbar; see web/src/debug/recorder.js.
+  const recording = dbg.useRecording()
+  useEffect(() => { dbg.resumeIfActive({ projectId }) }, [projectId])
+  const onToggleRecord = useCallback(() => {
+    const session = dbg.toggle({ projectId, canvas: `${canvas.width}×${canvas.height}` })
+    if (dbg.isRecording()) flash('ok', `Debug recording on → .agents/tools/logs/ui-sessions/${session}.ndjson`)
+    else flash('ok', 'Debug recording stopped — session saved')
+  }, [projectId, canvas, flash])
 
   // ── load ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -580,6 +592,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
           dirty={dirty} rendering={rendering} hasRender={!!renderPath} previewMode={previewMode}
           onUndo={undo} onRedo={redo} onSave={save} onRender={render}
           onPreviewMode={changePreviewMode} onAddText={onAddText} onCanvas={onCanvas}
+          recording={recording} onToggleRecord={onToggleRecord}
         />
       </div>
 

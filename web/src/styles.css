@@ -771,6 +771,19 @@ select { cursor: pointer; }
 .st-primary:hover { filter: brightness(1.06); color: #fff; border-color: var(--accent); }
 .st-primary:disabled { background: var(--accent); color: #fff; }
 .st-danger { color: var(--red); }
+
+/* Debug session recorder toggle (dev observability). Neutral dot when idle; a pulsing red dot
+   while a session is recording to .agents/tools/logs/ui-sessions. */
+.st-rec .st-rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; transition: background 0.15s; }
+.st-rec:hover .st-rec-dot { background: var(--accent); }
+.st-rec.on { border-color: #e5484d; }
+.st-rec.on:hover { border-color: #e5484d; color: inherit; }
+.st-rec.on .st-rec-dot { background: #e5484d; animation: st-rec-pulse 1.4s ease-out infinite; }
+@keyframes st-rec-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(229, 72, 77, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0); }
+}
 .st-danger:hover { border-color: var(--red); color: var(--red); }
 
 .st-select-btn { position: relative; display: inline-flex; align-items: center; }

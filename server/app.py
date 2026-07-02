@@ -58,6 +58,7 @@ from server import activity as activity_mod
 from server import analytics as analytics_mod
 from server import artifacts as artifacts_mod
 from server import settings as settings_mod
+from server import debug_log as debug_log_mod
 from server import editor as editor_mod
 from server import threads as thread_store
 from server.agent_runner import AgentRunner, auth_configured
@@ -110,6 +111,12 @@ class FeedbackRequest(BaseModel):
     message: str
     email: Optional[str] = None       # optional, so we can reply
     diagnostics: Optional[str] = None  # optional client-attached logs/context
+
+
+class DebugLogBody(BaseModel):
+    # A batch from the editor's UI session recorder (web/src/debug/recorder.js).
+    session: str
+    events: list[dict[str, Any]] = []
 
 from lib import app_paths
 
@@ -663,6 +670,39 @@ def create_app(
             pdir, project_id, thread_id,
             messages=body.messages, session_id=body.session_id, title=body.title,
         )
+
+    # ── Dev observability: UI session recorder sink ────────────────────────────
+    # The editor's recorder batch-POSTs timestamped events (console, errors, clicks,
+    # scrub/seek) here; we append them as NDJSON under .agents/tools/logs/ui-sessions/
+    # so the coding agent can read a full, ordered trace of a session to diagnose (and
+    # reproduce) intermittent UI bugs. Dev-only sink; never touches project data.
+    @app.post("/api/debug/log")
+    def debug_log(body: DebugLogBody) -> dict[str, Any]:
+        try:
+            written = debug_log_mod.append_events(body.session, body.events)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"ok": True, "written": written}
+
+    @app.get("/api/debug/sessions")
+    def debug_sessions() -> dict[str, Any]:
+        return {"sessions": debug_log_mod.list_sessions()}
+
+    # "Query, don't read": a compact report (histogram + seek anomalies + verbatim errors) so a
+    # tool/agent never loads the multi-thousand-line raw NDJSON into context. Pass 'latest'.
+    @app.get("/api/debug/sessions/{session}/analyze")
+    def debug_analyze(session: str) -> dict[str, Any]:
+        if session == "latest":
+            latest = debug_log_mod.latest_session()
+            if not latest:
+                raise HTTPException(status_code=404, detail="no sessions recorded")
+            session = latest
+        try:
+            return debug_log_mod.analyze_session(session)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail=f"session {session!r} not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     # Serve the built Mission Control UI (web/dist) for the packaged desktop app.
     # Mounted LAST so every /api/* route above takes precedence; the SPA and its
