@@ -105,6 +105,11 @@ def _iter_events(session: str) -> Iterator[dict[str, Any]]:
 # Event types that are always worth surfacing verbatim (rare + high signal).
 _ERROR_TYPES = {"error", "unhandledrejection", "preview.video.error", "preview.video.stalled"}
 
+# Discrete editing actions (from Studio.jsx commit/live/undo/redo). Their `data` is a
+# summarizeDocChange() diff — collected into an ordered "edit history" in the report.
+_EDIT_TYPES = {"edit.commit", "edit.undo", "edit.redo"}
+_MAX_EDITS = 60
+
 
 def analyze_session(session: str, *, sample: int = 15) -> dict[str, Any]:
     """Compact, token-cheap report for a session — the thing agents read INSTEAD of the raw log.
@@ -126,6 +131,8 @@ def analyze_session(session: str, *, sample: int = 15) -> dict[str, Any]:
     req = fired = seek_started = seek_finished = 0
     stuck_sample: list[dict[str, Any]] = []
     pending: Optional[dict[str, Any]] = None  # a 'seeking' awaiting its 'seeked'
+    edits: list[dict[str, Any]] = []
+    edits_total = 0
 
     total = 0
     for e in _iter_events(session):
@@ -143,6 +150,12 @@ def analyze_session(session: str, *, sample: int = 15) -> dict[str, Any]:
         if etype in _ERROR_TYPES or (etype == "console" and e.get("level") in ("error", "warn")):
             if len(errors) < 40:
                 errors.append(e)
+
+        # Ordered edit history — what the user (or agent) changed, in sequence.
+        if etype in _EDIT_TYPES:
+            edits_total += 1
+            if len(edits) < _MAX_EDITS:
+                edits.append({"seq": e.get("seq"), "t": e.get("t"), "type": etype, **(e.get("data") or {})})
 
         # Source-video seek lifecycle: a 'seeking' with no 'seeked' before the NEXT 'seeking'
         # was superseded (the browser coalesced/dropped it) — that's the stuck-canvas signature.
@@ -170,6 +183,9 @@ def analyze_session(session: str, *, sample: int = 15) -> dict[str, Any]:
         "histogram": dict(hist.most_common()),
         "errors": errors,
     }
+
+    if edits_total:
+        report["edits"] = {"total": edits_total, "log": edits}
 
     if req or seek_started:
         rate = (seek_finished / seek_started) if seek_started else None

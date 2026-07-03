@@ -110,3 +110,23 @@ def test_analyze_latest_and_404(tmp_path, monkeypatch):
     client.post("/api/debug/log", json={"session": "only-one", "events": _seek_session_events()})
     assert client.get("/api/debug/sessions/latest/analyze").json()["session"] == "only-one"
     assert client.get("/api/debug/sessions/nope/analyze").status_code == 404
+
+
+def test_analyze_collects_edit_history(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    session = "edits-sess"
+    events = [
+        {"seq": 0, "type": "edit.commit", "data": {"cuts": {"added": ["c2"]}}},        # split/add
+        {"seq": 1, "type": "edit.commit", "data": {"cuts": {"changed": [{"id": "c2", "fields": ["out_seconds"]}]}}},  # trim
+        {"seq": 2, "type": "edit.commit", "data": {"overlays": {"changed": [{"index": 0, "fields": ["text"]}]}}},     # text edit
+        {"seq": 3, "type": "edit.undo", "data": {"overlays": {"changed": [{"index": 0, "fields": ["text"]}]}}},
+        {"seq": 4, "type": "ui.save", "data": {"result": "ok"}},
+    ]
+    client.post("/api/debug/log", json={"session": session, "events": events})
+
+    rep = client.get(f"/api/debug/sessions/{session}/analyze").json()
+    assert rep["edits"]["total"] == 4  # 3 commits + 1 undo (ui.save is not an edit)
+    types = [e["type"] for e in rep["edits"]["log"]]
+    assert types == ["edit.commit", "edit.commit", "edit.commit", "edit.undo"]
+    assert rep["edits"]["log"][0]["cuts"] == {"added": ["c2"]}
+    assert rep["histogram"]["ui.save"] == 1

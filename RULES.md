@@ -185,3 +185,30 @@ NOT assert geometry that needs `getBoundingClientRect`.
 smoothness, drag-trim/reorder, render==preview — belong in a Playwright suite against the
 running app (`./run-desktop --dev`), not jsdom.
 
+## Debugging the editor — the session recorder
+
+The editor can't be inspected live (the Electron renderer launches with **no** remote-debugging
+port). Instead there's an in-app **session recorder** for reproducing UI bugs (`web/src/debug/recorder.js`).
+
+- **Capture:** click the record dot in the studio toolbar (top-right) → reproduce the bug → click it
+off. It records — timestamped, in order — every `console.*`, uncaught error, user interaction
+(click/key/scrub-drag), and semantic editor event (`edit.commit`/`edit.live`/`edit.undo`,
+`preview.seekReq`, `preview.video.*`, `ui.save`/`ui.render`/`ui.select`, `agent.adopt`). It writes
+NDJSON to `.agents/tools/logs/ui-sessions/<session>.ndjson` (gitignored dev tooling).
+- **⚠️ NEVER `Read`/`cat` the raw `.ndjson`.** A 2-minute session is ~2000 lines / ~85k tokens and
+will blow your context. It is built to be **queried, not read.**
+- **Read the analyzer report instead** — a compact histogram + edit history + seek-completion
+analysis + errors, bounded regardless of session length:
+
+  ```
+  python scripts/debug_session.py latest       # newest session
+  python scripts/debug_session.py --list        # list sessions
+  python scripts/debug_session.py <id> --json    # machine-readable
+  ```
+
+  Only after the report points you at a moment should you pull that slice:
+  `sed -n '600,640p' .agents/tools/logs/ui-sessions/<id>.ndjson`. (Same data via the API:
+  `GET /api/debug/sessions/{id}/analyze`; backend/analyzer in `server/debug_log.py`.)
+- Using the recorder requires a **full app restart** to pick up recorder/backend changes (a stale
+  backend lacks `/api/debug/log`); ⌘R alone is not enough.
+
