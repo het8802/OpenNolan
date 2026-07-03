@@ -90,6 +90,8 @@ HTML5 DnD — `dataTransfer` type `application/x-opennolan-asset`, dropped via `
 - We want an aesthetic UI, so don't add unnecessary emojis to the UI. Use aesthetic icons instead.
 - The programmer creating this software (the one prompting you) is new to this world of video editing. He doesn't have much experience on how ffmpeg works, how is HDR different from SDR, what are the different codecs. However, they are willing to spend time with someone to explain them about all these things in the world of videos.
 - We need to improve the observability in the app for the developer, whether it be tracing the ai agent working on the video or whether it be the editing tools used by the user in edit window. the overall app needs more observability for the developer.
+- This is a public repo so make sure not to leave any PII data of the user tracked by git. The code will be pushed to a public repo and hence only what's required should be commited.
+- Remember that since this is an editing tool, the user can drop in any kind of media, so our code should be prepared for that.
 
 ### Editor feature conventions
 
@@ -191,24 +193,22 @@ The editor can't be inspected live (the Electron renderer launches with **no** r
 port). Instead there's an in-app **session recorder** for reproducing UI bugs (`web/src/debug/recorder.js`).
 
 - **Capture:** click the record dot in the studio toolbar (top-right) → reproduce the bug → click it
-off. It records — timestamped, in order — every `console.*`, uncaught error, user interaction
+off. It records — timestamped, in order — every `console.`*, uncaught error, user interaction
 (click/key/scrub-drag), and semantic editor event (`edit.commit`/`edit.live`/`edit.undo`,
-`preview.seekReq`, `preview.video.*`, `ui.save`/`ui.render`/`ui.select`, `agent.adopt`). It writes
+`preview.seekReq`, `preview.video.`*, `ui.save`/`ui.render`/`ui.select`, `agent.adopt`). It writes
 NDJSON to `.agents/tools/logs/ui-sessions/<session>.ndjson` (gitignored dev tooling).
 - **⚠️ NEVER `Read`/`cat` the raw `.ndjson`.** A 2-minute session is ~2000 lines / ~85k tokens and
 will blow your context. It is built to be **queried, not read.**
 - **Read the analyzer report instead** — a compact histogram + edit history + seek-completion
 analysis + errors, bounded regardless of session length:
-
   ```
   python scripts/debug_session.py latest       # newest session
   python scripts/debug_session.py --list        # list sessions
   python scripts/debug_session.py <id> --json    # machine-readable
   ```
-
   Only after the report points you at a moment should you pull that slice:
   `sed -n '600,640p' .agents/tools/logs/ui-sessions/<id>.ndjson`. (Same data via the API:
   `GET /api/debug/sessions/{id}/analyze`; backend/analyzer in `server/debug_log.py`.)
 - Using the recorder requires a **full app restart** to pick up recorder/backend changes (a stale
-  backend lacks `/api/debug/log`); ⌘R alone is not enough.
+backend lacks `/api/debug/log`); ⌘R alone is not enough.
 
