@@ -392,3 +392,78 @@ export function fmtScrub(v) {
   if (!Number.isFinite(n)) return ''
   return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(3)))
 }
+
+// ── debug-recorder: doc-change summary ────────────────────────────────────────
+// Compact, bounded description of what a mutation changed between two edit_decisions docs. Every
+// editor edit funnels through commit/live, so summarizing prev→next there captures EVERY action
+// (trim, split, delete, reorder, overlay move/edit, text, settings, keyframes, audio, canvas, …)
+// as one readable semantic event — no need to instrument 40 handlers. Pure; tested in model.test.js.
+
+const _MAX_CHANGED = 12 // cap per list so a bulk edit can't bloat the trace
+
+// Field names whose value differs between two objects (deep-compared via JSON). Bounded.
+function _fieldsChanged(a = {}, b = {}) {
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})])
+  const changed = []
+  for (const k of keys) {
+    if (JSON.stringify(a?.[k]) !== JSON.stringify(b?.[k])) changed.push(k)
+  }
+  return changed
+}
+
+// Diff two lists of objects that carry a stable `id` (cuts): added/removed ids, per-item changed
+// fields, and a reorder flag when the same set changed order.
+function _diffById(prev = [], next = []) {
+  const pById = new Map(prev.map((c) => [c.id, c]))
+  const nById = new Map(next.map((c) => [c.id, c]))
+  const added = next.filter((c) => !pById.has(c.id)).map((c) => c.id)
+  const removed = prev.filter((c) => !nById.has(c.id)).map((c) => c.id)
+  const changed = []
+  for (const c of next) {
+    const p = pById.get(c.id)
+    if (p && p !== c) { const f = _fieldsChanged(p, c); if (f.length) changed.push({ id: c.id, fields: f }) }
+  }
+  const res = {}
+  if (added.length) res.added = added.slice(0, _MAX_CHANGED)
+  if (removed.length) res.removed = removed.slice(0, _MAX_CHANGED)
+  if (changed.length) res.changed = changed.slice(0, _MAX_CHANGED)
+  if (!added.length && !removed.length && prev.map((c) => c.id).join() !== next.map((c) => c.id).join()) res.reordered = true
+  return Object.keys(res).length ? res : null
+}
+
+// Diff two index-keyed lists (overlays have no stable id): count change + per-index changed fields.
+function _diffByIndex(prev = [], next = []) {
+  const res = {}
+  if (prev.length !== next.length) res.count = { from: prev.length, to: next.length }
+  const changed = []
+  const n = Math.min(prev.length, next.length)
+  for (let i = 0; i < n; i++) {
+    if (prev[i] !== next[i]) { const f = _fieldsChanged(prev[i], next[i]); if (f.length) changed.push({ index: i, fields: f }) }
+  }
+  if (changed.length) res.changed = changed.slice(0, _MAX_CHANGED)
+  return Object.keys(res).length ? res : null
+}
+
+/**
+ * Compact diff of two edit_decisions docs for the debug recorder. Returns only what changed:
+ *   { cuts?: {added|removed|changed|reordered}, overlays?: {count|changed}, fields?: [top-level keys] }
+ * `fields` catches audio / metadata / canvas / background / render_runtime (anything not cuts/overlays).
+ * A no-op (same ref or deep-equal) returns {}.
+ */
+export function summarizeDocChange(prev, next) {
+  if (!prev || !next || prev === next) return {}
+  const out = {}
+  const cuts = _diffById(prev.cuts || [], next.cuts || [])
+  if (cuts) out.cuts = cuts
+  const overlays = _diffByIndex(prev.overlays || [], next.overlays || [])
+  if (overlays) out.overlays = overlays
+  const handled = new Set(['cuts', 'overlays'])
+  const fields = []
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)])
+  for (const k of keys) {
+    if (handled.has(k)) continue
+    if (JSON.stringify(prev[k]) !== JSON.stringify(next[k])) fields.push(k)
+  }
+  if (fields.length) out.fields = fields
+  return out
+}
