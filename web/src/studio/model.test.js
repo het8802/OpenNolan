@@ -10,7 +10,7 @@ import {
   isFfmpeg, anchorToXY, fmtTime, round3, clamp, previewAudioTracks, groupAudioLanes, isImageSource, clipType,
   scrubValue, roundTo, fmtScrub, decimalsOf,
   clipFitSize, clipBox, clipDefaultPosition, clipAnchorXY, clipPositionXY,
-  isScaleObject, scaleAxes,
+  isScaleObject, scaleAxes, summarizeDocChange,
 } from './model.js'
 import { sanitizeOverlay } from '../editor/interp.js'
 
@@ -377,5 +377,49 @@ describe('main-clip placement helpers (move + resize on the canvas)', () => {
     const cut = { transform: { scale: { x: 1, y: 0.5 }, position: 'bottom-right' } }
     // box = 1080×960 → flush bottom-right = (1080-1080, 1920-960) = (0, 960)
     expect(clipPositionXY(cut, src, canvas)).toEqual({ x: 0, y: 960 })
+  })
+})
+
+describe('summarizeDocChange (debug-recorder edit diff)', () => {
+  const base = () => ({
+    cuts: [{ id: 'a', out_seconds: 5 }, { id: 'b', out_seconds: 3 }],
+    overlays: [{ text: 'hi', font_size: 48 }],
+    audio: { music: { asset_id: 'm.mp3' } },
+    metadata: { canvas: { width: 1080, height: 1920 } },
+  })
+
+  it('returns {} for a no-op (same ref or deep-equal)', () => {
+    const d = base()
+    expect(summarizeDocChange(d, d)).toEqual({})
+    expect(summarizeDocChange(base(), base())).toEqual({})
+  })
+
+  it('reports a trimmed cut as a per-id field change (e.g. out_seconds)', () => {
+    const prev = base()
+    const next = { ...prev, cuts: [prev.cuts[0], { ...prev.cuts[1], out_seconds: 2 }] }
+    expect(summarizeDocChange(prev, next)).toEqual({ cuts: { changed: [{ id: 'b', fields: ['out_seconds'] }] } })
+  })
+
+  it('reports add (split), remove (delete), and reorder of cuts', () => {
+    const prev = base()
+    expect(summarizeDocChange(prev, { ...prev, cuts: [...prev.cuts, { id: 'c' }] })).toEqual({ cuts: { added: ['c'] } })
+    expect(summarizeDocChange(prev, { ...prev, cuts: [prev.cuts[0]] })).toEqual({ cuts: { removed: ['b'] } })
+    expect(summarizeDocChange(prev, { ...prev, cuts: [prev.cuts[1], prev.cuts[0]] })).toEqual({ cuts: { reordered: true } })
+  })
+
+  it('reports overlay edits by index and count changes', () => {
+    const prev = base()
+    const edited = { ...prev, overlays: [{ ...prev.overlays[0], text: 'bye' }] }
+    expect(summarizeDocChange(prev, edited)).toEqual({ overlays: { changed: [{ index: 0, fields: ['text'] }] } })
+    const added = { ...prev, overlays: [...prev.overlays, { text: 'two' }] }
+    expect(summarizeDocChange(prev, added)).toEqual({ overlays: { count: { from: 1, to: 2 } } })
+  })
+
+  it('reports non-cut/overlay changes (audio, metadata) as top-level fields', () => {
+    const prev = base()
+    const next = { ...prev, audio: { music: { asset_id: 'other.mp3' } } }
+    expect(summarizeDocChange(prev, next)).toEqual({ fields: ['audio'] })
+    const canvasChange = { ...prev, metadata: { canvas: { width: 1920, height: 1080 } } }
+    expect(summarizeDocChange(prev, canvasChange)).toEqual({ fields: ['metadata'] })
   })
 })

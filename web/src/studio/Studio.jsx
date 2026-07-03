@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api.js'
 import * as interp from '../editor/interp.js'
-import { isFfmpeg, newTextOverlay, newImageOverlay, newVideoOverlay } from './model.js'
+import { isFfmpeg, newTextOverlay, newImageOverlay, newVideoOverlay, summarizeDocChange } from './model.js'
 import StudioToolbar from './StudioToolbar.jsx'
 import StudioTimeline from './StudioTimeline.jsx'
 import StudioInspector from './StudioInspector.jsx'
@@ -164,19 +164,24 @@ export default function Studio({ projectId, state, onClose, chat }) {
     setFuture([])
   }, [])
 
-  // Live update, NO history push (per-frame during a coalesced drag).
+  // Live update, NO history push (per-frame during a coalesced drag). Emits a throttled
+  // `edit.live` to the debug recorder with a diff summary (which cut/overlay/field the drag touched).
   const live = useCallback((next) => {
     const prev = docRef.current
     const nd = typeof next === 'function' ? next(prev) : next
     if (nd === prev) return
+    dbg.event('edit.live', summarizeDocChange(prev, nd))
     setDocBoth(nd); setDirty(true)
   }, [setDocBoth])
 
-  // Discrete edit = snapshot + apply (one undo step). Referential no-op = no history.
+  // Discrete edit = snapshot + apply (one undo step). Referential no-op = no history. Emits
+  // `edit.commit` with a diff summary — the semantic record of EVERY discrete edit (trim/split/
+  // delete/reorder/add/overlay/text/settings/keyframes/canvas/audio) for the debug session trace.
   const commit = useCallback((next) => {
     const prev = docRef.current
     const nd = typeof next === 'function' ? next(prev) : next
     if (nd === prev) return
+    dbg.event('edit.commit', summarizeDocChange(prev, nd))
     setPast(p => [...p, prev].slice(-100))
     setFuture([])
     setDocBoth(nd); setDirty(true)
@@ -185,6 +190,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
   const undo = useCallback(() => {
     if (!past.length) return
     const prev = past[past.length - 1]
+    dbg.event('edit.undo', summarizeDocChange(docRef.current, prev))
     setPast(past.slice(0, -1))
     setFuture([docRef.current, ...future])
     setDocBoth(prev); setDirty(true)
@@ -193,6 +199,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
   const redo = useCallback(() => {
     if (!future.length) return
     const nxt = future[0]
+    dbg.event('edit.redo', summarizeDocChange(docRef.current, nxt))
     setFuture(future.slice(1))
     setPast([...past, docRef.current])
     setDocBoth(nxt); setDirty(true)
@@ -206,6 +213,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
     const d = docRef.current
     if (!d) return null
     if (agentBusyRef.current || reconcilingRef.current) {
+      dbg.event('ui.save', { silent: !!silent, result: 'blocked-agent' })
       if (!silent) flash('warn', 'Agent is editing — your changes will save the moment its turn ends')
       return null
     }
@@ -213,9 +221,11 @@ export default function Studio({ projectId, state, onClose, chat }) {
       await api.saveEditDecisions(projectId, d)
       savedRef.current = JSON.stringify(d)
       setDirty(false)
+      dbg.event('ui.save', { silent: !!silent, result: 'ok' })
       if (!silent) flash('ok', 'Saved')
       return d
     } catch (e) {
+      dbg.event('ui.save', { silent: !!silent, result: 'rejected', error: String(e.message || e).slice(0, 200) })
       if (!silent) flash('err', `Save rejected: ${String(e.message || e)}`)
       return null
     }
@@ -242,8 +252,9 @@ export default function Studio({ projectId, state, onClose, chat }) {
 
   const render = useCallback(async () => {
     if (rendering) return
+    dbg.event('ui.render', { phase: 'start' })
     const saved = await save()
-    if (!saved) return
+    if (!saved) { dbg.event('ui.render', { phase: 'abort', reason: 'save-failed' }); return }
     setRendering(true)
     flash('warn', 'Rendering… (only changed scenes re-render)')
     const myJob = ++jobRef.current
@@ -258,13 +269,16 @@ export default function Studio({ projectId, state, onClose, chat }) {
           setRenderVersion(v => v + 1)
           setPreviewMode('render')
           const w = (st.warnings || []).join(' · ')
+          dbg.event('ui.render', { phase: 'done', warnings: st.warnings || [] })
           flash('ok', w ? `Rendered — ${w}` : 'Rendered')
           return
         }
-        if (st.status === 'failed') { flash('err', `Render failed: ${st.error || 'unknown'}`); return }
+        if (st.status === 'failed') { dbg.event('ui.render', { phase: 'failed', error: st.error || 'unknown' }); flash('err', `Render failed: ${st.error || 'unknown'}`); return }
       }
+      dbg.event('ui.render', { phase: 'timeout' })
       flash('err', 'Render timed out')
     } catch (e) {
+      dbg.event('ui.render', { phase: 'error', error: String(e.message || e).slice(0, 200) })
       flash('err', `Render error: ${String(e.message || e)}`)
     } finally {
       if (jobRef.current === myJob) setRendering(false)
@@ -294,6 +308,7 @@ export default function Studio({ projectId, state, onClose, chat }) {
         const incoming = JSON.stringify(content)
         if (incoming === savedRef.current) return // disk matches our last save — nothing changed
         const hadLocal = dirtyRef.current
+        dbg.event('agent.adopt', { hadLocalEdits: hadLocal, ...summarizeDocChange(docRef.current, content) })
         if (hadLocal) { setPast(p => [...p, docRef.current].slice(-100)); setFuture([]) } // keep ⌘Z to user's version
         docRef.current = content; setDoc(content); savedRef.current = incoming; setDirty(false)
         flash('ok', hadLocal ? 'Timeline updated by the agent — ⌘Z to restore your version' : 'Timeline updated by the agent')
@@ -554,8 +569,8 @@ export default function Studio({ projectId, state, onClose, chat }) {
   }, [projectId])
   const onUploadAsset = useCallback(async (kind, file) => {
     if (!file) return
-    try { await api.uploadAsset(projectId, kind, file); refreshAssets(); flash('ok', `Uploaded ${file.name}`) }
-    catch (e) { flash('err', `Upload failed: ${String(e.message || e)}`) }
+    try { await api.uploadAsset(projectId, kind, file); refreshAssets(); dbg.event('ui.uploadAsset', { kind, name: file.name, bytes: file.size }); flash('ok', `Uploaded ${file.name}`) }
+    catch (e) { dbg.event('ui.uploadAsset', { kind, name: file?.name, result: 'failed', error: String(e.message || e).slice(0, 200) }); flash('err', `Upload failed: ${String(e.message || e)}`) }
   }, [projectId, refreshAssets, flash])
 
   // Quietly self-heal an agent-authored image/video overlay whose position is a string anchor
@@ -591,6 +606,14 @@ export default function Studio({ projectId, state, onClose, chat }) {
       if (!exists) setSelection(null)
     }
   }, [doc, selection])
+
+  // Debug recorder: log every selection change (from any source — timeline, canvas, keyboard, add)
+  // so the trace shows what the user had selected when an edit happened.
+  useEffect(() => {
+    dbg.event('ui.select', selection
+      ? { kind: selection.kind, id: selection.id, index: selection.index, audioKind: selection.audioKind }
+      : { kind: null })
+  }, [selection])
 
   // ── keyboard shortcuts ──────────────────────────────────────────────────────
   useEffect(() => {

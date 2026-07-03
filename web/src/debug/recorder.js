@@ -33,7 +33,7 @@ const ENDPOINT = '/api/debug/log'
 // them to ~15 Hz so a session stays small; the diagnostic signal (video seek COMPLETION RATE)
 // is a ratio derived from the low-volume `preview.video.*` lifecycle events, which are NOT
 // throttled — so thinning the requests loses nothing that matters. See analyze_session.
-const THROTTLE_MS = { 'ui.seek': 66, 'preview.seekReq': 66 }
+const THROTTLE_MS = { 'ui.seek': 66, 'preview.seekReq': 66, 'edit.live': 66 }
 const MAX_SESSION_EVENTS = 200000 // safety net (~tens of MB) so a forgotten session can't grow unbounded
 
 const state = {
