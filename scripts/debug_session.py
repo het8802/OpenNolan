@@ -43,6 +43,13 @@ def _print_report(rep: dict) -> None:
     for etype, n in rep["histogram"].items():
         print(f"  {etype:26} {n:6d}")
 
+    edits = rep.get("edits")
+    if edits:
+        print(f"\nedit history ({edits['total']} edits, showing {len(edits['log'])}):")
+        for e in edits["log"]:
+            summ = {k: v for k, v in e.items() if k not in ("seq", "t", "type")}
+            print(f"  seq={e.get('seq')} {e.get('type'):12} {json.dumps(summ)[:150]}")
+
     seeks = rep.get("seeks")
     if seeks:
         print("\nsource-video seek lifecycle (scrub → canvas):")
