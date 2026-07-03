@@ -24,8 +24,10 @@ the filesystem alone can't answer:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -34,6 +36,24 @@ from lib.atomic_io import atomic_write_json
 
 MANIFEST_NAME = "project.json"
 ASSET_SUBDIRS = ("images", "video", "audio", "music")
+
+# The canonical home for every kind of asset the agent produces, keyed by the
+# kind it declares. This is the single source of truth for "where does X go" —
+# the agent declares a kind, never a folder (see `place_asset`). Note that the
+# UI reads three distinct buckets (server/app.py `list_assets`): source assets
+# under assets/, the agent's building-block clips under hf/renders/ (the
+# Assets -> Renders tab), and ONLY the final deliverable under renders/. Keeping
+# intermediate `render`s out of renders/ is what stops them masquerading as the
+# "Final render" surface.
+KIND_DIRS: dict[str, str] = {
+    "image": "assets/images",
+    "video": "assets/video",
+    "audio": "assets/audio",
+    "music": "assets/music",
+    "render": "hf/renders",      # intermediate per-scene clips (building blocks)
+    "final_render": "renders",   # the one assembled deliverable
+}
+
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -232,3 +252,90 @@ def get_project_pipeline_type(
     except Exception:
         pass
     return None
+
+
+# --- asset placement ------------------------------------------------------
+#
+# The agent must never hand-pick a destination folder — that's what let
+# intermediate clips land in renders/ and show up as "Final render". Instead it
+# declares a KIND and hands the file to `place_asset`, the single writer into a
+# project's asset tree. Exposed to the agent as the `store_asset` SDK tool
+# (server/agent_runner.py).
+
+
+def asset_dir(projects_dir: Path | str, project_id: str, kind: str) -> Path:
+    """The canonical directory for a given asset `kind`. Raises ValueError on
+    an unknown kind (so a typo fails loudly instead of writing somewhere odd)."""
+    try:
+        sub = KIND_DIRS[kind]
+    except KeyError:
+        raise ValueError(
+            f"unknown asset kind {kind!r}; expected one of {sorted(KIND_DIRS)}"
+        )
+    return project_dir(projects_dir, project_id) / sub
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def place_asset(
+    projects_dir: Path | str,
+    project_id: str,
+    kind: str,
+    src: Path | str,
+    name: Optional[str] = None,
+    *,
+    move: bool = False,
+) -> dict[str, Any]:
+    """Move/copy a produced file into its canonical location for ``kind`` and
+    report where it landed.
+
+    This is the single writer into a project's asset tree: the caller declares a
+    ``kind`` and the destination folder is derived (via ``KIND_DIRS``), never
+    passed in. ``src`` is the file the caller just produced (a scratch/temp path
+    or wherever a generator defaulted). Set ``move=True`` to relocate it rather
+    than copy.
+
+    Idempotent by content: re-placing identical bytes under a taken name reuses
+    the existing file (``deduped=True``); a name collision with DIFFERENT bytes
+    gets a short content-hash suffix so nothing is ever clobbered.
+
+    Returns ``{"path", "abs_path", "kind", "deduped"}`` where ``path`` is
+    relative to the project dir (e.g. ``assets/images/foo.png``); join it to
+    ``projects/<id>/`` for a repo-relative path usable in edit_decisions.
+    """
+    src = Path(src)
+    if not src.is_file():
+        raise FileNotFoundError(f"source file not found: {src}")
+
+    dest_dir = asset_dir(projects_dir, project_id, kind)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    src_hash = _sha256(src)
+    safe = sanitize_filename(name or src.name)
+    target = dest_dir / safe
+    deduped = False
+
+    if target.is_file() and _sha256(target) == src_hash:
+        deduped = True  # same name, same bytes — reuse, don't recopy
+    elif target.exists():
+        # Name taken by different content — disambiguate by content hash so we
+        # neither clobber the existing file nor duplicate identical bytes.
+        stem, suffix = Path(safe).stem, Path(safe).suffix
+        target = dest_dir / f"{stem}.{src_hash[:8]}{suffix}"
+        deduped = target.is_file() and _sha256(target) == src_hash
+
+    if not deduped and target.resolve() != src.resolve():
+        if move:
+            shutil.move(str(src), str(target))
+        else:
+            shutil.copy2(str(src), str(target))
+
+    rel = target.relative_to(project_dir(projects_dir, project_id))
+    return {"path": str(rel), "abs_path": str(target), "kind": kind,
+            "deduped": deduped}

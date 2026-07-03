@@ -209,6 +209,8 @@ projects/<project-name>/
 
 Create the project directory at pipeline initialization, before any stage runs. All tools and agents should write outputs to these paths — never to the repo root or ad-hoc locations.
 
+**Do not hand-pick these folders — call `store_asset`.** For any file you produce (image / video / audio / music / an intermediate scene `render` / the `final_render`), call the `store_asset` tool with its `kind` and `src`; it files the asset in the correct folder above and returns the path to reference in `edit_decisions` / `asset_manifest`. Have generators write to a scratch path, then hand the result to `store_asset`. Declaring the wrong folder yourself is how intermediate clips end up under `renders/` and get shown as the editor's **Final render**. `store_asset` is the single writer into a project's asset tree (impl: `lib/project.py::place_asset`, `kind`→folder map in `KIND_DIRS`).
+
 **Agent renders live in `hf/renders/`, the final video in `renders/`.** Any HyperFrames-rendering
 pipeline should run `hf render` from the `hf/` workspace so per-scene clips land in `hf/renders/`
 (this is the HyperFrames CLI default, `renders/<name>_<timestamp>`, resolved relative to that
