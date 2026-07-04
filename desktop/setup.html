@@ -15,30 +15,44 @@
     }
     h1 { font-size: 19px; font-weight: 650; letter-spacing: -.01em; }
     p.sub { margin-top: 6px; color: #7a7266; font-size: 13px; line-height: 1.5; }
-    .bar { margin: 20px 0 14px; height: 4px; border-radius: 4px; background: #ece3d6; overflow: hidden; }
-    .bar > i { display: block; height: 100%; width: 40%; border-radius: 4px; background: #d97757;
-               animation: slide 1.3s ease-in-out infinite; }
+    .bar { margin: 20px 0 14px; height: 5px; border-radius: 5px; background: #ece3d6; overflow: hidden; }
+    .bar > i { display: block; height: 100%; border-radius: 5px; background: #d97757;
+               width: 0%; transition: width .35s ease; position: relative; overflow: hidden; }
+    /* A moving sheen says "still working" even when the width itself is barely moving
+       (uv / npm ci are silent for minutes; real progress boundaries are sparse). */
+    .bar > i::after { content: ''; position: absolute; inset: 0;
+                      background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent);
+                      animation: sheen 1.6s ease-in-out infinite; }
+    @keyframes sheen { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+    /* Until the first real step frame arrives, show the indeterminate slide. */
+    .bar > i.indet { width: 40%; transition: none; animation: slide 1.3s ease-in-out infinite; }
+    .bar > i.indet::after { content: none; }
     @keyframes slide { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+    .bar > i.err { background: #c0392b; }
+    .bar > i.err::after { content: none; }
     #log {
       flex: 1; overflow-y: auto; background: #fff; border: 1px solid #ece3d6; border-radius: 8px;
       padding: 12px 14px; font-family: 'SF Mono', 'JetBrains Mono', monospace; font-size: 11px;
       line-height: 1.65; color: #6b6357; white-space: pre-wrap; word-break: break-word;
     }
     #log .err { color: #c0392b; }
-    .foot { margin-top: 12px; font-size: 11.5px; color: #9a9184; }
+    .foot { margin-top: 12px; font-size: 11.5px; color: #9a9184;
+            display: flex; justify-content: space-between; gap: 12px; }
+    #pct { font-variant-numeric: tabular-nums; color: #7a7266; font-weight: 600; }
   </style>
 </head>
 <body>
   <h1>Setting up OpenNolan</h1>
   <p class="sub">First launch only. Installing the local video engine and its dependencies into
     your Application Support folder. This can take a few minutes.</p>
-  <div class="bar" id="bar"><i></i></div>
+  <div class="bar" id="bar"><i id="fill" class="indet"></i></div>
   <div id="log"></div>
-  <div class="foot" id="foot">Working…</div>
+  <div class="foot"><span id="foot">Working…</span><span id="pct"></span></div>
   <script>
     const log = document.getElementById('log');
     const foot = document.getElementById('foot');
-    const bar = document.getElementById('bar');
+    const fill = document.getElementById('fill');
+    const pctEl = document.getElementById('pct');
     function line(t, cls) {
       const d = document.createElement('div');
       if (cls) d.className = cls;
@@ -46,12 +60,54 @@
       log.appendChild(d);
       log.scrollTop = log.scrollHeight;
     }
+
+    // Determinate progress. `display` is what the bar shows; each step frame gives the step's
+    // start (pct) and where it will land (end). Between frames we creep toward `ceil` so a long
+    // silent install (uv / npm ci) still reads as alive. Never move backwards, never pass ceil.
+    let display = 0, ceil = 0, haveStep = false, failed = false;
+    function render() {
+      fill.style.width = display.toFixed(1) + '%';
+      pctEl.textContent = Math.floor(display) + '%';
+    }
     const api = window.openNolanSetup;
     if (api) {
       api.onProgress((l) => line(l));
-      api.onDone(() => { foot.textContent = 'Done — starting OpenNolan…'; bar.style.display = 'none'; });
-      api.onError((m) => { foot.textContent = 'Setup failed.'; bar.style.display = 'none'; line(m, 'err'); });
+      api.onStep(({ pct, end, label }) => {
+        if (failed) return;
+        display = Math.max(display, Math.min(100, pct || 0));
+        ceil = Math.max(display, Math.min(100, end == null ? display : end));
+        if (!haveStep) {
+          // Leaving the indeterminate slide: snap the width with NO transition, else the 40%-wide
+          // slider visibly drains backwards to the (small) real pct over the .35s transition.
+          haveStep = true;
+          fill.classList.remove('indet');
+          fill.style.transition = 'none';
+          render();
+          void fill.offsetWidth; // flush so the snap isn't batched into the next transition
+          fill.style.transition = '';
+        }
+        if (label) foot.textContent = label;
+        render();
+      });
+      api.onDone(() => { if (!failed) foot.textContent = 'Done — starting OpenNolan…'; });
+      api.onError((m) => {
+        failed = true;
+        foot.textContent = 'Setup failed.';
+        pctEl.textContent = '';
+        fill.classList.remove('indet');
+        fill.classList.add('err');
+        fill.style.width = '100%';
+        line(m, 'err');
+      });
     }
+    // Purely exponential creep (no linear floor): asymptotically approaches — never reaches — the
+    // step's ceiling, so a multi-minute uv / npm ci keeps showing motion instead of pinning early.
+    // ~0.5%/s of the remaining gap: after 60s ≈ 26% of the gap consumed, after 3min ≈ 59%.
+    setInterval(() => {
+      if (!haveStep || failed || ceil - display < 0.05) return;
+      display += (ceil - display) * 0.001;
+      render();
+    }, 200);
   </script>
 </body>
 </html>

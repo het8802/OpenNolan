@@ -145,12 +145,34 @@ def test_provision_composition_records_manifest(monkeypatch, tmp_path):
     (code / "composition" / "hyperframes" / "package.json").write_text("{}")
     monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(code))
     installed: list[str] = []
-    monkeypatch.setattr(provision, "_install_engine", lambda name, src, prog: installed.append(name))
+    monkeypatch.setattr(provision, "_install_engine",
+                        lambda name, src, prog, **kw: installed.append(name))
     monkeypatch.setattr(provision, "_ensure_browsers", lambda prog: None)
     provision.provision_composition()
     assert installed == ["remotion", "hyperframes"]  # both engines, Remotion first
     m = provision._read_manifest()
     assert m["composition_installed"] is True and m["node_version"] == "v22.7.0"
+
+
+def test_provision_composition_step_frames_monotonic(monkeypatch, tmp_path):
+    # The setup-window progress contract: step(pct, end, label) frames never move backwards,
+    # end >= pct, and the run finishes at exactly (100, 100). desktop/setup.html relies on this.
+    _fake_node(monkeypatch, "v22.7.0")
+    code = tmp_path / "code"
+    (code / "remotion-composer").mkdir(parents=True)
+    (code / "remotion-composer" / "package.json").write_text("{}")
+    (code / "composition" / "hyperframes").mkdir(parents=True)
+    (code / "composition" / "hyperframes" / "package.json").write_text("{}")
+    monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(code))
+    monkeypatch.setattr(provision, "_npm_ci", lambda project, prog: None)
+    monkeypatch.setattr(provision, "_ensure_browsers", lambda prog: None)
+    frames: list[tuple[float, float, str]] = []
+    provision.provision_composition(None, step=lambda pct, end, label: frames.append((pct, end, label)))
+    assert frames and frames[-1] == (100, 100, "Video engines ready.")
+    prev = -1.0
+    for pct, end, label in frames:
+        assert pct >= prev and end >= pct and label
+        prev = pct
 
 
 def test_install_engine_atomic_on_failure(monkeypatch, tmp_path):
@@ -190,7 +212,8 @@ def test_core_rebuild_preserves_composition_keys(monkeypatch, tmp_path):
 def test_ffmpeg_sha_mismatch_never_trusts_binary(monkeypatch):
     monkeypatch.setattr(provision.shutil, "which", lambda _x: None)  # force the download path
     monkeypatch.setitem(provision.FFMPEG_SHA256, "ffmpeg", "de" * 32)  # a pin that won't match
-    monkeypatch.setattr(provision, "_download_binary", lambda url, dest: dest.write_bytes(b"not-ffmpeg"))
+    monkeypatch.setattr(provision, "_download_binary",
+                        lambda url, dest, on_bytes=None: dest.write_bytes(b"not-ffmpeg"))
     with pytest.raises(RuntimeError, match="sha256 mismatch"):
         provision.provision_ffmpeg()
     assert not (provision.bin_dir() / "ffmpeg").exists()  # mismatched binary removed, not trusted
@@ -198,7 +221,7 @@ def test_ffmpeg_sha_mismatch_never_trusts_binary(monkeypatch):
 
 def test_print_ffmpeg_shas(monkeypatch):
     import hashlib
-    monkeypatch.setattr(provision, "_download_binary", lambda url, dest: dest.write_bytes(b"abc"))
+    monkeypatch.setattr(provision, "_download_binary", lambda url, dest, on_bytes=None: dest.write_bytes(b"abc"))
     out = provision.print_ffmpeg_shas()
     assert set(out) == {"ffmpeg", "ffprobe"}
     assert out["ffmpeg"] == hashlib.sha256(b"abc").hexdigest()

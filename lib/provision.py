@@ -46,6 +46,18 @@ CORE_REQUIREMENTS = ("requirements-ui.txt", "requirements.txt")
 
 ProgressCb = Callable[[str], None]
 
+# Determinate setup progress: (pct, end_pct, label). `pct` is where this step STARTS on the
+# 0-100 scale of the CURRENT provision run; `end_pct` is where it will land when the step
+# finishes, so the UI may creep the bar toward it while a long subprocess (uv/npm) is silent.
+# Long downloads (ffmpeg) emit many frames with a REAL byte-derived pct. Consumers that only
+# want text (the /api/provision endpoints) simply don't pass a StepCb.
+StepCb = Callable[[float, float, str], None]
+
+
+def _step(step: Optional[StepCb], pct: float, end: float, label: str) -> None:
+    if step:
+        step(pct, end, label)
+
 # ── composition tier (OPN-3: Node + Remotion + HyperFrames) ───────────────────
 # The two JS composition engines the agent renders with, plus their prerequisite Node runtime.
 # Node ships as a bundled, signed binary (like the interpreter — main.js sets OPENNOLAN_NODE); the
@@ -355,7 +367,7 @@ def _pip_install(target_python: Path, args: list[str], progress: Optional[Progre
 
 # ── core provisioning ──────────────────────────────────────────────────────────
 
-def provision_core(progress: Optional[ProgressCb] = None) -> None:
+def provision_core(progress: Optional[ProgressCb] = None, step: Optional[StepCb] = None) -> None:
     """Build the managed venv and install core deps + ffmpeg. Atomic + idempotent."""
     rt = app_paths.runtime_dir()
     rt.mkdir(parents=True, exist_ok=True)
@@ -366,6 +378,7 @@ def provision_core(progress: Optional[ProgressCb] = None) -> None:
         progress(f"Setting up OpenNolan runtime in {rt} …")
 
     # 1) fresh venv in a temp location (so a crash never leaves a half-venv at the real path)
+    _step(step, 0, 3, "Creating Python environment…")
     shutil.rmtree(building, ignore_errors=True)
     uv = _uv()
     if uv:
@@ -382,21 +395,25 @@ def provision_core(progress: Optional[ProgressCb] = None) -> None:
             req_args += ["-r", str(rp)]
     if not req_args:
         raise RuntimeError("no core requirement files found under code_root()")
+    _step(step, 3, 55, "Installing Python packages…")
     _pip_install(building_python, req_args, progress)
 
     # 3) verify the backend's hard deps actually import before we trust this venv
+    _step(step, 55, 58, "Verifying installation…")
     _run([str(building_python), "-c", "import fastapi, uvicorn, pydantic"], progress)
 
     # 4) atomically swap the built venv into place
+    _step(step, 58, 60, "Activating environment…")
     shutil.rmtree(final, ignore_errors=True)
     os.replace(building, final)
 
     # 5) ffmpeg (best-effort; the editor degrades to 503 on scrub/export if it's absent)
     try:
-        provision_ffmpeg(progress)
+        provision_ffmpeg(progress, step=step, span=(60.0, 97.0))
     except Exception as exc:  # don't fail core provisioning on an ffmpeg hiccup
         if progress:
             progress(f"[warn] ffmpeg provisioning failed: {exc} (you can retry from Settings)")
+        _step(step, 97, 97, "ffmpeg skipped — you can retry from Settings.")
 
     # 6) record success (preserve composition state across a core rebuild; composition_ok() re-checks
     #    Node drift on its own, so carrying the keys is safe and avoids a needless re-install)
@@ -410,7 +427,9 @@ def provision_core(progress: Optional[ProgressCb] = None) -> None:
     for k in ("node_version", "composition_installed"):
         if k in m:
             new_manifest[k] = m[k]
+    _step(step, 97, 100, "Finishing up…")
     _write_manifest(new_manifest)
+    _step(step, 100, 100, "Core setup complete.")
     if progress:
         progress("Core setup complete.")
 
@@ -468,26 +487,50 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def provision_ffmpeg(progress: Optional[ProgressCb] = None) -> None:
+def provision_ffmpeg(progress: Optional[ProgressCb] = None, step: Optional[StepCb] = None,
+                     span: tuple[float, float] = (0.0, 100.0)) -> None:
     """Ensure ffmpeg + ffprobe are available. Dev: a PATH ffmpeg is used as-is. Packaged clean Mac:
     download a static arm64 build into runtime/bin, then dequarantine + ad-hoc sign so a notarized,
-    hardened app can spawn it. main.js prepends runtime/bin to the child PATH so shutil.which finds it."""
+    hardened app can spawn it. main.js prepends runtime/bin to the child PATH so shutil.which finds it.
+
+    `span` is this function's slice of the caller's 0-100 progress scale; each binary gets an equal
+    sub-slice and reports REAL byte progress within it (Content-Length is known for these downloads)."""
+    s0, s1 = span
     if shutil.which("ffmpeg") and shutil.which("ffprobe"):
         if progress:
             progress("ffmpeg found on PATH — using it.")
+        _step(step, s1, s1, "ffmpeg ready.")
         return
     bd = bin_dir()
     bd.mkdir(parents=True, exist_ok=True)
-    for name, url in FFMPEG_URLS.items():
+    names = list(FFMPEG_URLS.items())
+    per = (s1 - s0) / max(len(names), 1)
+    for i, (name, url) in enumerate(names):
+        f0, f1 = s0 + i * per, s0 + (i + 1) * per
         dest = bd / name
         if dest.exists():
+            _step(step, f1, f1, f"{name} already present.")
             continue
         expected = (FFMPEG_SHA256.get(name) or "").strip().lower()
         attempts = 2 if expected else 1  # a pin lets us retry a corrupt/partial download once
         for attempt in range(1, attempts + 1):
             if progress:
                 progress(f"Downloading {name}…" + (f" (attempt {attempt})" if attempt > 1 else ""))
-            _download_binary(url, dest)
+            _step(step, f0, f1, f"Downloading {name}…")
+            # Real byte progress, throttled to ~0.5% increments so we don't flood the NDJSON pipe.
+            last_emit = [f0]
+
+            def on_bytes(read: int, total: Optional[int],
+                         _f0=f0, _f1=f1, _name=name, _last=last_emit) -> None:
+                if not step or not total:
+                    return
+                pct = _f0 + (read / total) * (_f1 - _f0)
+                if pct - _last[0] >= 0.5 or read >= total:
+                    _last[0] = pct
+                    mb, mb_total = read // (1 << 20), max(1, total // (1 << 20))
+                    _step(step, pct, _f1, f"Downloading {_name}… {mb} / {mb_total} MB")
+
+            _download_binary(url, dest, on_bytes)
             if not expected:
                 if progress:
                     progress(f"[warn] {name} is UNPINNED (no sha256) — OK in dev, MUST pin before release.")
@@ -509,6 +552,7 @@ def provision_ffmpeg(progress: Optional[ProgressCb] = None) -> None:
         subprocess.run(["xattr", "-dr", "com.apple.quarantine", str(dest)], capture_output=True)
         subprocess.run(["codesign", "--force", "--sign", "-", str(dest)], capture_output=True)
     # verify
+    _step(step, s1, s1, "Verifying ffmpeg…")
     _run([str(bd / "ffmpeg"), "-version"], progress)
 
 
@@ -543,16 +587,23 @@ def _npm_ci(project: Path, progress: Optional[ProgressCb]) -> None:
          env={"npm_config_update_notifier": "false", "CI": "1"})
 
 
-def _install_engine(name: str, src: Path, progress: Optional[ProgressCb]) -> Path:
+def _install_engine(name: str, src: Path, progress: Optional[ProgressCb],
+                    step: Optional[StepCb] = None, span: tuple[float, float] = (0.0, 100.0),
+                    label: Optional[str] = None) -> Path:
     """Copy a READ-ONLY engine source out of the bundle into the WRITABLE runtime, then npm ci. Atomic:
     build in <name>.building and os.replace() into place, so a crash never leaves a half-install."""
+    s0, s1 = span
+    what = label or name
     comp = composition_dir()
     comp.mkdir(parents=True, exist_ok=True)
     final = comp / name
     building = comp / f"{name}.building"
     shutil.rmtree(building, ignore_errors=True)
     # copy source only (any bundled/dev node_modules is stale for this machine — reinstall fresh)
+    copy_end = s0 + (s1 - s0) * 0.15
+    _step(step, s0, copy_end, f"Preparing {what}…")
     shutil.copytree(src, building, ignore=shutil.ignore_patterns("node_modules", ".git", "out", "dist"))
+    _step(step, copy_end, s1, f"Installing {what} packages…")
     _npm_ci(building, progress)
     shutil.rmtree(final, ignore_errors=True)
     os.replace(building, final)
@@ -585,7 +636,7 @@ def _ensure_browsers(progress: Optional[ProgressCb]) -> None:
                 progress(f"[warn] HyperFrames pre-warm skipped ({exc}); fetched on first render.")
 
 
-def provision_composition(progress: Optional[ProgressCb] = None) -> None:
+def provision_composition(progress: Optional[ProgressCb] = None, step: Optional[StepCb] = None) -> None:
     """Install the composition tier (Remotion + HyperFrames) into the writable runtime. Requires the
     bundled Node. Atomic + idempotent + manifest-tracked (staleness keyed to the Node version).
 
@@ -600,35 +651,58 @@ def provision_composition(progress: Optional[ProgressCb] = None) -> None:
     remo_src = app_paths.code_root() / "remotion-composer"
     if not (remo_src / "package.json").exists():
         raise RuntimeError(f"remotion-composer source not found at {remo_src}")
-    _install_engine("remotion", remo_src, progress)
+    _install_engine("remotion", remo_src, progress, step=step, span=(0.0, 38.0), label="Remotion")
 
     hf_src = app_paths.code_root() / "composition" / "hyperframes"
     if not (hf_src / "package.json").exists():
         raise RuntimeError(f"hyperframes pin not found at {hf_src} (ship a pinned package.json + lockfile)")
-    _install_engine("hyperframes", hf_src, progress)
+    _install_engine("hyperframes", hf_src, progress, step=step, span=(38.0, 66.0), label="HyperFrames")
 
+    _step(step, 66, 97, "Downloading render browser…")
     _ensure_browsers(progress)
 
+    _step(step, 97, 100, "Finishing up…")
     m = _read_manifest()
     m["node_version"] = _node_id()
     m["composition_installed"] = True
     _write_manifest(m)
+    _step(step, 100, 100, "Video engines ready.")
     if progress:
         progress("Video engines ready.")
 
 
-def _download_binary(url: str, dest: Path) -> None:
-    """Download url to dest. Handles a .zip (extract the single binary) or a raw binary."""
+def _download_binary(url: str, dest: Path,
+                     on_bytes: Optional[Callable[[int, Optional[int]], None]] = None) -> None:
+    """Download url to dest. Handles a .zip (extract the single binary) or a raw binary.
+    `on_bytes(read, total_or_None)` fires per chunk so callers can surface real download progress."""
     tmp = dest.with_suffix(".download")
     with urllib.request.urlopen(url) as resp, open(tmp, "wb") as out:  # noqa: S310 (pinned/config'd URL)
-        shutil.copyfileobj(resp, out)
-    # zip? extract the member matching the target name; else it's the raw binary
+        total: Optional[int] = None
+        try:
+            cl = resp.headers.get("Content-Length")
+            total = int(cl) if cl else None
+        except (TypeError, ValueError):
+            total = None
+        read = 0
+        while True:
+            chunk = resp.read(1 << 20)
+            if not chunk:
+                break
+            out.write(chunk)
+            read += len(chunk)
+            if on_bytes:
+                on_bytes(read, total)
+    # zip? extract the member matching the target name; else it's the raw binary. Extraction goes
+    # through a temp file + os.replace so a kill mid-extract (setup-window cancel) can never leave
+    # a truncated binary at dest — dest.exists() is trusted as "complete" on the next run.
     import zipfile
     if zipfile.is_zipfile(tmp):
+        extracted = dest.with_suffix(".extract")
         with zipfile.ZipFile(tmp) as zf:
             member = next((n for n in zf.namelist() if n.rstrip("/").endswith(dest.name)), zf.namelist()[0])
-            with zf.open(member) as src, open(dest, "wb") as out:
+            with zf.open(member) as src, open(extracted, "wb") as out:
                 shutil.copyfileobj(src, out)
+        os.replace(extracted, dest)
         tmp.unlink(missing_ok=True)
     else:
         os.replace(tmp, dest)

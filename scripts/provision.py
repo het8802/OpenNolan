@@ -8,6 +8,9 @@ Usage:
 
 Streams NDJSON to stdout so desktop/main.js can drive a setup window:
     {"type":"log","line":"..."}   progress line
+    {"type":"step","pct":n,"end":n,"label":"…"}  determinate progress: this step starts at pct
+                                  (0-100 for THIS run) and lands at end when it completes, so
+                                  the UI can creep the bar toward end while a long install runs
     {"type":"doctor","doctor":{}} (--doctor only)
     {"type":"done"}               success
     {"type":"error","error":"…"}  failure (exit 1)
@@ -35,6 +38,10 @@ def progress(line: str) -> None:
     emit({"type": "log", "line": line})
 
 
+def step(pct: float, end: float, label: str) -> None:
+    emit({"type": "step", "pct": round(pct, 1), "end": round(end, 1), "label": label})
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="OpenNolan first-run provisioning")
     group = ap.add_mutually_exclusive_group(required=True)
@@ -55,9 +62,9 @@ def main() -> int:
             emit({"type": "ffmpeg_sha", "sha256": provision.print_ffmpeg_shas(progress)})
             return 0
         if args.core:
-            provision.provision_core(progress)
+            provision.provision_core(progress, step)
         elif args.composition:
-            provision.provision_composition(progress)
+            provision.provision_composition(progress, step)
         else:
             provision.provision_pack(args.pack, progress)
         emit({"type": "done"})

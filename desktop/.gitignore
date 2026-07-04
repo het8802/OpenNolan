@@ -4,7 +4,7 @@ out/
 resources/
 
 # The root .gitignore ignores `build/`, but desktop/build/ is electron-builder's
-# buildResources dir and holds COMMITTED config (entitlements). Re-include it here;
-# only the generated/binary icon stays ignored.
+# buildResources dir and holds COMMITTED build inputs: entitlements + the app icon
+# (icon.icns/icon.png compiled from the committed vector master icon.svg). These are
+# required to package the app, so re-include the whole dir.
 !build/
-build/icon.icns

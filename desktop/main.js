@@ -45,7 +45,11 @@ function fatal(title, message) {
   if (fatalShown) return;
   fatalShown = true;
   shuttingDown = true;
+  stopProvision();
   stopBackend();
+  // If the setup window is still up (e.g. the backend died after a first-run install), flip it
+  // into its error state — a green bar creeping behind a fatal dialog reads as a lie.
+  setupSend('setup:error', message);
   dialog.showErrorBox(title, message);
   app.quit();
 }
@@ -144,12 +148,17 @@ function provisionEnv() {
 }
 
 // Run scripts/provision.py with the bundled interpreter, parsing its NDJSON stdout. `onFrame` gets
-// each {type:'log'|'doctor'|'done'|'error', ...}. Resolves with the last frame; rejects on failure.
+// each {type:'log'|'step'|'doctor'|'done'|'error', ...}. Resolves with the last frame; rejects on failure.
+let provisionChild = null; // in-flight provision.py process (killed if the user cancels setup)
 function runProvision(args, onFrame) {
   return new Promise((resolve, reject) => {
     const script = path.join(codeRoot(), 'scripts', 'provision.py');
+    // detached:true makes the child a process-GROUP leader, so stopProvision can signal the whole
+    // group — a bare kill of python would orphan a live uv/npm grandchild that keeps writing into
+    // runtime/*.building after the app quit (and races the next launch's re-provision).
     const child = spawn(bundledPython(), [script, ...args],
-      { cwd: codeRoot(), env: provisionEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+      { cwd: codeRoot(), env: provisionEnv(), stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    provisionChild = child;
     let buf = '';
     let last = null;
     child.stdout.on('data', (d) => {
@@ -166,11 +175,31 @@ function runProvision(args, onFrame) {
       }
     });
     child.stderr.on('data', (d) => { if (onFrame) onFrame({ type: 'log', line: String(d).trimEnd() }); });
-    child.on('error', reject);
-    child.on('exit', (code) => (code === 0
-      ? resolve(last)
-      : reject(new Error((last && last.error) || ('provisioning exited ' + code)))));
+    child.on('error', (err) => { if (provisionChild === child) provisionChild = null; reject(err); });
+    child.on('exit', (code) => {
+      if (provisionChild === child) provisionChild = null;
+      return code === 0
+        ? resolve(last)
+        : reject(new Error((last && last.error) || ('provisioning exited ' + code)));
+    });
   });
+}
+
+// Kill an in-flight provision run (user closed the setup window = cancel). Signals the process
+// GROUP (python + uv/npm/node grandchildren — see the detached spawn above) with a SIGKILL
+// escalation, mirroring stopBackend. Provisioning is atomic on the Python side (venv.building /
+// <engine>.building + os.replace), so a kill never leaves a half-install the next launch would
+// trust — it just re-runs.
+function stopProvision() {
+  const child = provisionChild;
+  provisionChild = null;
+  if (!child) return;
+  const killGroup = (sig) => {
+    try { process.kill(-child.pid, sig); } // negative pid = the whole process group
+    catch (_) { try { child.kill(sig); } catch (_) { /* already gone */ } }
+  };
+  killGroup('SIGTERM');
+  setTimeout(() => killGroup('SIGKILL'), 3000);
 }
 
 let setupWin = null;
@@ -189,6 +218,17 @@ function createSetupWindow() {
   });
 }
 
+// Send to the setup window, tolerating a mid-flight close (user cancel destroys the webContents).
+function setupSend(channel, payload) {
+  try {
+    if (setupWin && !setupWin.isDestroyed()) setupWin.webContents.send(channel, payload);
+  } catch (_) { /* window went away between the check and the send */ }
+}
+
+// Rough share of first-run wall-clock per phase, used to map each provision run's OWN 0-100 step
+// frames onto ONE global setup bar. 'backend' = starting uvicorn after install (cold venv import).
+const SETUP_WEIGHTS = { core: 58, composition: 36, backend: 6 };
+
 // Ensure the managed venv + core deps + composition engines exist before the backend starts. Packaged
 // only (dev has the repo .venv + `make setup`). Shows a setup window streaming install progress on first
 // run; no-op once provisioned.
@@ -197,40 +237,88 @@ function createSetupWindow() {
 // COMPOSITION (Node engines) is BEST-EFFORT (OPN-3): install it eagerly in the same window, but a failure
 // only WARNS and lets the editor open on the ffmpeg-only path. Never brick the app because Remotion or a
 // headless-browser download failed on a flaky network.
+//
+// On success the setup window is left OPEN — boot() keeps it up through backend start and closes it
+// only after the main window exists (handoffFromSetup). Closing it here would leave a zero-window
+// moment, which fires 'window-all-closed' and quits the app right after first-run setup.
 async function ensureProvisioned() {
   if (!app.isPackaged) return;
   let doc = null;
   try { const f = await runProvision(['--doctor']); doc = f && f.doctor; } catch (_) { /* provision below */ }
+  if (shuttingDown) return; // Cmd+Q during the doctor probe — don't start a pointless install mid-quit
   const coreReady = !!(doc && doc.core_ok);
   const compositionReady = !!(doc && doc.composition_ok);
   if (coreReady && compositionReady) return; // everything present + current
 
+  // Plan the phases we'll actually run and give each a weighted slice [g0,g1] of the global bar.
+  const phases = [];
+  if (!coreReady) phases.push('core');
+  if (!compositionReady) phases.push('composition');
+  phases.push('backend');
+  const totalW = phases.reduce((s, p) => s + SETUP_WEIGHTS[p], 0);
+  const seg = {};
+  let acc = 0;
+  for (const p of phases) {
+    const w = (SETUP_WEIGHTS[p] / totalW) * 100;
+    seg[p] = [acc, acc + w];
+    acc += w;
+  }
+
   await createSetupWindow();
-  const relayProgress = (frame) => {
-    if (setupWin && frame.type === 'log') setupWin.webContents.send('setup:progress', frame.line);
+  const sendStep = (pct, end, label) => setupSend('setup:step', { pct, end, label });
+  // Per-phase frame relay: logs pass through; step frames are remapped from the run's own
+  // 0-100 scale into the phase's global slice.
+  const relay = (phase) => (frame) => {
+    if (frame.type === 'log') {
+      setupSend('setup:progress', frame.line);
+    } else if (frame.type === 'step') {
+      const [g0, g1] = seg[phase];
+      const map = (v) => g0 + (Math.max(0, Math.min(100, Number(v) || 0)) / 100) * (g1 - g0);
+      sendStep(map(frame.pct), map(frame.end == null ? frame.pct : frame.end), frame.label || '');
+    }
   };
   try {
     if (!coreReady) {
-      await runProvision(['--core'], relayProgress); // fatal on failure (caught below)
+      await runProvision(['--core'], relay('core')); // fatal on failure (caught below)
     }
     if (!compositionReady) {
       // Best-effort: swallow failures so a broken Remotion/HyperFrames install never blocks the editor.
       try {
-        await runProvision(['--composition'], relayProgress);
+        await runProvision(['--composition'], relay('composition'));
       } catch (compErr) {
+        if (shuttingDown) throw compErr; // user cancelled — don't misread the kill as an engine failure
         console.error('[provision] composition tier failed (non-fatal): ' + (compErr && compErr.message));
-        relayProgress({ type: 'log', line: 'Video engines unavailable — you can retry later from Settings.' });
+        setupSend('setup:progress', 'Video engines unavailable — you can retry later from Settings.');
+        sendStep(seg.composition[1], seg.composition[1], 'Video engines skipped.');
       }
     }
-    if (setupWin) setupWin.webContents.send('setup:done');
-    await new Promise((r) => setTimeout(r, 600)); // let the user read "done" before we swap windows
+    setupSend('setup:done', undefined);
+    sendStep(seg.backend[0], 99, 'Starting OpenNolan…'); // backend start = the last slice of the bar
   } catch (err) {
-    if (setupWin) setupWin.webContents.send('setup:error', String((err && err.message) || err));
+    setupSend('setup:error', String((err && err.message) || err));
     throw err; // boot()'s catch surfaces the fatal dialog (core-only)
-  } finally {
-    if (setupWin) { setupWin.close(); setupWin = null; }
   }
 }
+
+// Close the setup window only AFTER the main window's content has loaded (or a short fallback),
+// so there is never a zero-window gap for 'window-all-closed' to turn into a quit.
+function handoffFromSetup() {
+  if (!setupWin) return;
+  sendStep100();
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    if (setupWin) { setupWin.close(); setupWin = null; }
+  };
+  if (mainWindow) {
+    mainWindow.webContents.once('did-finish-load', finish);
+    setTimeout(finish, 4000); // fallback: never leave the setup window hanging around
+  } else {
+    finish();
+  }
+}
+function sendStep100() { setupSend('setup:step', { pct: 100, end: 100, label: 'Ready.' }); }
 
 // Grab an OS-assigned free port (prod). Small TOCTOU window before uvicorn binds —
 // acceptable on a single-user Mac; a bind failure surfaces the real stderr below.
@@ -429,13 +517,17 @@ async function boot() {
         return fatal('UI not built', 'The web UI has not been built.\n\nRun:\n  npm --prefix web run build\n\nthen start the app again. (`npm start` does this automatically.)');
       }
       await ensureProvisioned(); // first run (packaged): build the venv + core deps + ffmpeg before the backend
+      if (shuttingDown) return;  // cancelled during setup — never spawn a backend mid-quit
       backendPort = await freePort();
       backend = startBackend(backendPort);
-      await waitForHealth(backendPort);
+      // First run boots a COLD venv (every .pyc compiles on import) — give it longer than a warm start.
+      await waitForHealth(backendPort, setupWin ? 90000 : 30000);
       createWindow(rendererUrl());
+      handoffFromSetup(); // swap setup -> main with no zero-window gap (else the app quits itself)
       initAutoUpdate();
     }
   } catch (err) {
+    if (shuttingDown) return; // user closed the setup window mid-install — a cancel, not a failure
     const tail = stderrTail.slice(-20).join('\n');
     fatal('OpenNolan failed to start', String((err && err.stack) || err) + (tail ? '\n\nBackend output:\n' + tail : ''));
   }
@@ -457,7 +549,8 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0 && backendPort) createWindow(rendererUrl());
 });
 
-// Single-purpose tool: quit (and stop the backend) when the window closes, macOS included.
-app.on('window-all-closed', () => { shuttingDown = true; stopBackend(); app.quit(); });
-app.on('before-quit', () => { shuttingDown = true; stopBackend(); });
-process.on('exit', stopBackend);
+// Single-purpose tool: quit (and stop the backend + any in-flight provisioning) when the window
+// closes, macOS included. Closing the SETUP window mid-install lands here too — that's a cancel.
+app.on('window-all-closed', () => { shuttingDown = true; stopProvision(); stopBackend(); app.quit(); });
+app.on('before-quit', () => { shuttingDown = true; stopProvision(); stopBackend(); });
+process.on('exit', () => { stopProvision(); stopBackend(); });
