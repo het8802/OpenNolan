@@ -207,6 +207,15 @@ def test_list_assets_agent_renders_from_hf_renders(tmp_path):
     # The editor's final output lives in renders/ — must NOT leak into agent_renders.
     # (create_project already made renders/, so don't re-create it.)
     (proj / "renders" / "final.mp4").write_bytes(b"final")
+    # Render-engine internals under renders/ MUST NOT surface as "Final render":
+    # the content-keyed proxy cache and the review-frame scratch dir are not
+    # deliverables. (Regression guard: the renders bucket used to rglob these in.)
+    proxies = proj / "renders" / "proxies"
+    proxies.mkdir(parents=True)
+    (proxies / "b1.deadbeef.mp4").write_bytes(b"proxy")
+    (proxies / "b2.cafef00d.mp4").write_bytes(b"proxy")
+    (proj / "renders" / ".final_review_frames").mkdir(parents=True)
+    (proj / "renders" / ".final_review_frames" / "f0.png").write_bytes(b"png")
 
     body = _client(tmp_path).get("/api/projects/hf-proj/assets").json()
 
@@ -217,6 +226,7 @@ def test_list_assets_agent_renders_from_hf_renders(tmp_path):
     assert all("mtime" in f and "size_bytes" in f for f in body["agent_renders"])
 
     # The final output stays in the separate `renders` bucket, not agent_renders.
+    # Only the top-level deliverable — NOT the proxy cache — appears here.
     assert [f["name"] for f in body["renders"]] == ["final.mp4"]
     assert "final.mp4" not in ar_names
 
