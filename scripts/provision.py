@@ -40,15 +40,24 @@ def main() -> int:
     group = ap.add_mutually_exclusive_group(required=True)
     group.add_argument("--doctor", action="store_true", help="print status JSON and exit")
     group.add_argument("--core", action="store_true", help="provision the core venv + ffmpeg")
+    group.add_argument("--composition", action="store_true",
+                       help="provision the composition tier (Node engines: Remotion + HyperFrames)")
     group.add_argument("--pack", metavar="NAME", help="install a capability pack")
+    group.add_argument("--print-ffmpeg-sha", action="store_true",
+                       help="download the configured ffmpeg/ffprobe and print their sha256 (to fill the pins)")
     args = ap.parse_args()
 
     try:
         if args.doctor:
             emit({"type": "doctor", "doctor": provision.doctor()})
             return 0
+        if args.print_ffmpeg_sha:
+            emit({"type": "ffmpeg_sha", "sha256": provision.print_ffmpeg_shas(progress)})
+            return 0
         if args.core:
             provision.provision_core(progress)
+        elif args.composition:
+            provision.provision_composition(progress)
         else:
             provision.provision_pack(args.pack, progress)
         emit({"type": "done"})
