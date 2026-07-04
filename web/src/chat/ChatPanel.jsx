@@ -48,19 +48,6 @@ export default function ChatPanel({ chat, disabled = false, className = '' }) {
       <div className="chat-header">
         <h2>Agent</h2>
         <div className="chat-header-actions">
-          <select
-            className="model-select"
-            value={model}
-            onChange={e => setModel?.(e.target.value)}
-            disabled={busy}
-            title="Agent model"
-          >
-            {AGENT_MODELS.map(m => (
-              <option key={m.id} value={m.id}>
-                {m.label}{m.recommended ? ' · Recommended' : ''}
-              </option>
-            ))}
-          </select>
           {threads && threads.length > 0 && (
             <select
               className="thread-select"
@@ -118,6 +105,21 @@ export default function ChatPanel({ chat, disabled = false, className = '' }) {
           ? <button type="button" className="stop-btn" onClick={stop} title="Stop the agent">■ Stop</button>
           : <button type="submit" disabled={disabled || !input.trim()}>Send</button>}
       </form>
+      <div className="composer-bar">
+        <select
+          className="model-select"
+          value={model}
+          onChange={e => setModel?.(e.target.value)}
+          disabled={busy}
+          title="Agent model"
+        >
+          {AGENT_MODELS.map(m => (
+            <option key={m.id} value={m.id}>
+              {m.label}{m.recommended ? ' · Recommended' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
     </section>
   )
 }
