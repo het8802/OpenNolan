@@ -263,6 +263,22 @@ class HyperFramesCompose(BaseTool):
         if cls._npm_resolve_cache is not None:
             return cls._npm_resolve_cache
 
+        # Prefer the locally-provisioned package (OPN-3): when HyperFrames is installed in the managed
+        # runtime, it resolves OFFLINE with no live `npm view` — faster (~saves a 5s network round-trip
+        # per fresh process) and deterministic. The live `npm view` below is the dev/unprovisioned path.
+        try:
+            from lib import provision
+            if provision.hyperframes_ok():
+                pkg_json = provision.hyperframes_root() / "node_modules" / cls._NPM_PACKAGE / "package.json"
+                version = None
+                if pkg_json.exists():
+                    import json as _json
+                    version = _json.loads(pkg_json.read_text()).get("version")
+                cls._npm_resolve_cache = {"version": version or "local"}
+                return cls._npm_resolve_cache
+        except Exception:
+            pass
+
         npm = shutil.which("npm")
         if not npm:
             cls._npm_resolve_cache = {"error": "npm not on PATH"}
@@ -1122,13 +1138,23 @@ class HyperFramesCompose(BaseTool):
         timeout: int,
         check: bool,
     ) -> subprocess.CompletedProcess:
-        """Invoke `npx hyperframes <args>` with the right Windows quirks.
+        """Invoke `hyperframes <args>` with the right Windows quirks.
 
         We intentionally bypass `self.run_command` here because we do NOT
         want to raise CalledProcessError on non-zero exits — the caller
         parses lint/validate/render exit codes itself.
         """
+        # Prefer the locally-provisioned CLI (OPN-3): rendering from the managed runtime's node_modules
+        # needs NO live `npx --yes` fetch — deterministic + offline-capable. Fall back to `npx --yes` in
+        # dev / when the composition tier isn't provisioned.
         cmd = ["npx", "--yes", "hyperframes", *args]
+        try:
+            from lib import provision
+            local_cli = provision.hyperframes_root() / "node_modules" / ".bin" / "hyperframes"
+            if local_cli.exists():
+                cmd = [str(local_cli), *args]
+        except Exception:
+            pass
         # On Windows, resolve the .cmd wrapper so subprocess can find it
         # without shell=True.
         if os.name == "nt":

@@ -1,0 +1,9 @@
+{
+  "name": "opennolan-hyperframes-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pinned HyperFrames install for OpenNolan's composition tier (OPN-3). Provisioned into the writable runtime via `npm ci` so `hyperframes` renders from a local, deterministic, offline copy instead of a live `npx --yes hyperframes` fetch. Bump the version deliberately + regenerate the lockfile: `npm install --package-lock-only --prefix composition/hyperframes`.",
+  "dependencies": {
+    "hyperframes": "0.7.29"
+  }
+}
