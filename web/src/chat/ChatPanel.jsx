@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
-import { TOOL_ICON, formatToolInput } from './chatUtils.js'
+import { TOOL_ICON, formatToolInput, AGENT_MODELS, DEFAULT_MODEL } from './chatUtils.js'
 
 // Configure marked for safe, compact output
 marked.setOptions({ breaks: true, gfm: true })
@@ -14,7 +14,7 @@ export default function ChatPanel({ chat, disabled = false, className = '' }) {
   const {
     messages, input, setInput, busy,
     pendingConfirm, pendingQuestion, renderingStage, toolResults,
-    threads, activeThread,
+    threads, activeThread, model = DEFAULT_MODEL, setModel,
     send, stop, newChat, loadThread, resolveConfirm, answerQuestion,
   } = chat
 
@@ -48,6 +48,19 @@ export default function ChatPanel({ chat, disabled = false, className = '' }) {
       <div className="chat-header">
         <h2>Agent</h2>
         <div className="chat-header-actions">
+          <select
+            className="model-select"
+            value={model}
+            onChange={e => setModel?.(e.target.value)}
+            disabled={busy}
+            title="Agent model"
+          >
+            {AGENT_MODELS.map(m => (
+              <option key={m.id} value={m.id}>
+                {m.label}{m.recommended ? ' · Recommended' : ''}
+              </option>
+            ))}
+          </select>
           {threads && threads.length > 0 && (
             <select
               className="thread-select"

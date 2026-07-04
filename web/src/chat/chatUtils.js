@@ -1,6 +1,15 @@
 // Shared chat helpers used by both the agent hook (useAgentChat) and the chat view
 // (ChatPanel). Kept tiny and pure so both the pipeline window and the editor can import them.
 
+// Agent models offered in the chat-header dropdown. First entry = default/recommended.
+// Ids MUST match server/agent_runner.py AGENT_MODELS (the backend validates against it).
+export const AGENT_MODELS = [
+  { id: 'claude-opus-4-8', label: 'Opus 4.8', recommended: true },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+]
+export const DEFAULT_MODEL = AGENT_MODELS[0].id
+
 export const TOOL_ICON = {
   Read: '📄',
   Write: '✏️',

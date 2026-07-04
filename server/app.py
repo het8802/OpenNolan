@@ -74,6 +74,7 @@ class CreateProjectRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     thread_id: Optional[str] = None
+    model: Optional[str] = None   # UI-selected agent model (validated against AGENT_MODELS)
 
 
 class ThreadCreate(BaseModel):
@@ -634,6 +635,11 @@ def create_app(
         if body.thread_id:
             thread = thread_store.get_thread(pdir, project_id, body.thread_id)
             await runner.switch_session(project_id, thread.get("session_id") if thread else None)
+
+        # Apply the UI-selected model when the client picked one (no-op when
+        # unchanged / unknown). Keeps context across a mid-chat model switch.
+        if body.model:
+            await runner.set_model(project_id, body.model)
 
         queue: asyncio.Queue = asyncio.Queue()
 

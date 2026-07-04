@@ -7,7 +7,18 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '../api.js'
-import { isRenderCommand } from './chatUtils.js'
+import { isRenderCommand, AGENT_MODELS, DEFAULT_MODEL } from './chatUtils.js'
+
+const MODEL_KEY = 'st.agentModel.v1'   // remembered agent-model choice (a global preference)
+const VALID_MODEL_IDS = new Set(AGENT_MODELS.map(m => m.id))
+
+function loadModel() {
+  try {
+    const saved = localStorage.getItem(MODEL_KEY)
+    if (saved && VALID_MODEL_IDS.has(saved)) return saved
+  } catch { /* localStorage unavailable */ }
+  return DEFAULT_MODEL
+}
 
 export function useAgentChat(projectId, { onError } = {}) {
   const [messages, setMessages] = useState([])
@@ -19,6 +30,13 @@ export function useAgentChat(projectId, { onError } = {}) {
   const [toolResults, setToolResults] = useState({})          // tool_use_id -> result, for expansion
   const [threads, setThreads] = useState([])                  // chat threads for the project
   const [activeThread, setActiveThread] = useState(null)      // current thread id
+  const [model, setModelState] = useState(loadModel)          // UI-selected agent model
+
+  // Remember the model choice globally (survives reloads + project switches).
+  const setModel = useCallback((id) => {
+    setModelState(id)
+    try { localStorage.setItem(MODEL_KEY, id) } catch { /* best effort */ }
+  }, [])
 
   const messagesRef = useRef([])      // latest messages, for thread persistence
   const sessionIdRef = useRef(null)   // latest agent session_id
@@ -102,7 +120,7 @@ export function useAgentChat(projectId, { onError } = {}) {
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      for await (const evt of api.chatStream(projectId, message, tid, controller.signal)) {
+      for await (const evt of api.chatStream(projectId, message, tid, controller.signal, model)) {
         if (evt.type === 'assistant') {
           setMessages(m => {
             const last = m[m.length - 1]
@@ -153,7 +171,7 @@ export function useAgentChat(projectId, { onError } = {}) {
       // Persist the conversation (messages + session_id) so the thread is revivable.
       if (tid) setTimeout(() => persistThread(tid), 0)
     }
-  }, [input, projectId, busy, renderingStage, activeThread, deriveTitle, persistThread])
+  }, [input, projectId, busy, renderingStage, activeThread, model, deriveTitle, persistThread])
 
   const stop = useCallback(async () => {
     if (!projectId) return
@@ -200,7 +218,7 @@ export function useAgentChat(projectId, { onError } = {}) {
   return {
     messages, input, setInput, busy,
     pendingConfirm, pendingQuestion, renderingStage, toolResults,
-    threads, activeThread,
+    threads, activeThread, model, setModel,
     send, stop, newChat, loadThread, resolveConfirm, answerQuestion,
   }
 }

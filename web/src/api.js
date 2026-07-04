@@ -113,11 +113,11 @@ export const saveThread = (id, tid, body) =>
 
 // Stream an agent turn. /chat is POST, so we read the SSE body off fetch
 // (EventSource can't POST). Yields one parsed event object per `data:` line.
-export async function* chatStream(id, message, thread_id, signal) {
+export async function* chatStream(id, message, thread_id, signal, model) {
   const resp = await fetch(`/api/projects/${id}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, thread_id }),
+    body: JSON.stringify({ message, thread_id, model }),
     signal,
   })
   if (!resp.ok) {

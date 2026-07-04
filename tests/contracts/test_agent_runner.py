@@ -27,6 +27,8 @@ from claude_agent_sdk import (
 from server.agent_runner import (
     ACTION_ALLOW,
     ACTION_CONFIRM,
+    AGENT_MODELS,
+    DEFAULT_MODEL,
     AgentRunner,
     auth_configured,
     bash_destructive_reason,
@@ -356,3 +358,74 @@ def test_first_turn_preamble_includes_context_even_for_fresh_project(tmp_path):
     pre = runner._first_turn_preamble("fresh")
     assert "PROJECT CONTEXT" in pre
     assert "RESUMING WORK" not in pre
+
+
+# --- model selection -------------------------------------------------------
+
+def test_default_model_is_a_selectable_model():
+    # The UI dropdown validates against AGENT_MODELS; the default must be one of them.
+    assert DEFAULT_MODEL in AGENT_MODELS
+
+
+def test_model_for_defaults_then_reflects_selection():
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+    assert runner._model_for("proj") == DEFAULT_MODEL
+    other = next(m for m in AGENT_MODELS if m != DEFAULT_MODEL)
+    asyncio.run(runner.set_model("proj", other))
+    assert runner._model_for("proj") == other
+
+
+def test_set_model_ignores_unknown_and_empty():
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+    asyncio.run(runner.set_model("proj", "not-a-real-model"))
+    asyncio.run(runner.set_model("proj", None))
+    asyncio.run(runner.set_model("proj", ""))
+    assert runner._model_for("proj") == DEFAULT_MODEL  # unchanged
+
+
+def test_set_model_change_tears_down_client_and_resumes_session():
+    fake = FakeClient(_scripted_turn())
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: fake)
+    runner._clients["proj"] = fake
+    runner._session_ids["proj"] = "sess-1"   # there IS a live session to preserve
+    other = next(m for m in AGENT_MODELS if m != DEFAULT_MODEL)
+    asyncio.run(runner.set_model("proj", other))
+    # client dropped so the next turn rebuilds with the new model, resuming context
+    assert "proj" not in runner._clients
+    assert runner._resume_next.get("proj") is True
+    assert runner._model_for("proj") == other
+
+
+def test_set_model_noop_when_unchanged_keeps_client():
+    fake = FakeClient(_scripted_turn())
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: fake)
+    runner._clients["proj"] = fake
+    asyncio.run(runner.set_model("proj", DEFAULT_MODEL))  # same as default -> no-op
+    assert runner._clients.get("proj") is fake
+    assert runner._resume_next.get("proj") is None
+
+
+def test_set_model_fresh_project_no_resume_flag():
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+    other = next(m for m in AGENT_MODELS if m != DEFAULT_MODEL)
+    asyncio.run(runner.set_model("proj", other))  # no session yet
+    assert runner._resume_next.get("proj") is None
+    assert runner._model_for("proj") == other
+
+
+def test_default_factory_builds_client_with_selected_model(monkeypatch):
+    runner = AgentRunner(repo_root=".")  # real default factory
+    other = next(m for m in AGENT_MODELS if m != DEFAULT_MODEL)
+    runner._models["p"] = other
+
+    captured: dict = {}
+    import server.agent_runner as ar
+    real_build = ar.build_agent_options
+
+    def fake_build(repo_root, **kwargs):
+        captured.update(kwargs)
+        return real_build(repo_root, **kwargs)  # real options so ClaudeSDKClient constructs fine
+
+    monkeypatch.setattr(ar, "build_agent_options", fake_build)
+    runner._default_client_factory("p")  # construct only (no connect, no network)
+    assert captured.get("model") == other
