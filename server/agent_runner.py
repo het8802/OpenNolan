@@ -164,7 +164,7 @@ AGENT_SYSTEM_PROMPT = """You are the OpenNolan production agent, running HEADLES
 The user steers via a Mission Control UI between turns.
 
 Obey the repo contract exactly:
-- Read CLAUDE.md then AGENT_GUIDE.md before acting. Follow Rule Zero.
+- Read AGENT_GUIDE.md before acting. Follow Rule Zero.
 - Read the per-stage director skill before each stage. Read Layer 3 skills before any generation tool.
 - Checkpoints live under projects/<project_id>/ (NOT pipelines/).
 
