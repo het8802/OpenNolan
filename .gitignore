@@ -101,3 +101,7 @@ demos/
 graphify-out/
 settings.json
 .understand-anything/
+
+# Marketing/waitlist website — extracted to its own private repo (het8802/opennolan-website).
+# The folder still lives here locally as an independent git repo; do not track it from OpenMontage.
+website/
