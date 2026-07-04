@@ -306,13 +306,26 @@ class VideoCompose(BaseTool):
         "Play the composed output and verify cuts, subtitles, and overlays",
     ]
 
+    def _composer_dir(self) -> Path:
+        """The Remotion project to render from. Prefer the PROVISIONED writable copy (packaged app, OPN-3:
+        runtime/composition/remotion, npm ci'd at first run); fall back to the in-repo composer (dev / the
+        `make setup` path). This is what makes 'engines always available' true in a packaged .app."""
+        try:
+            from lib import provision
+            prov = provision.remotion_root()
+            if (prov / "package.json").exists() and (prov / "node_modules").exists():
+                return prov
+        except Exception:
+            pass
+        return Path(__file__).resolve().parent.parent.parent / "remotion-composer"
+
     def _remotion_available(self) -> bool:
         """Check if Remotion rendering is available (requires npx + composer project + node_modules)."""
         import shutil as _shutil
 
         if not _shutil.which("npx"):
             return False
-        composer_dir = Path(__file__).resolve().parent.parent.parent / "remotion-composer"
+        composer_dir = self._composer_dir()
         if not composer_dir.exists() or not (composer_dir / "package.json").exists():
             return False
         # Check that node_modules are actually installed — without this,
@@ -361,7 +374,7 @@ class VideoCompose(BaseTool):
                 "and motion-graphics pipelines that already use the scene-component stack."
             )
         else:
-            composer_dir = Path(__file__).resolve().parent.parent.parent / "remotion-composer"
+            composer_dir = self._composer_dir()
             if composer_dir.exists() and (composer_dir / "package.json").exists() and not (composer_dir / "node_modules").exists():
                 info["remotion_note"] = (
                     "Remotion project exists but node_modules are NOT installed. "
@@ -3586,8 +3599,8 @@ class VideoCompose(BaseTool):
         with open(props_path, "w", encoding="utf-8") as f:
             json.dump(props, f)
 
-        # remotion-composer lives at project root
-        composer_dir = Path(__file__).resolve().parent.parent.parent / "remotion-composer"
+        # Prefer the provisioned writable composer (packaged app, OPN-3), else the in-repo one (dev).
+        composer_dir = self._composer_dir()
         if not composer_dir.exists():
             return ToolResult(
                 success=False,
