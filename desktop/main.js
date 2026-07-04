@@ -72,6 +72,17 @@ function uvBin() {
   return process.env.OPENNOLAN_UV || 'uv';
 }
 
+// The bundled Node runtime dir (OPN-3) — the composition engines (Remotion + HyperFrames) run on it.
+// Packaged: Resources/node (from fetch-node.mjs). Dev: unset -> provision.py falls back to PATH node.
+function nodeDir() {
+  return app.isPackaged ? path.join(process.resourcesPath, 'node') : null;
+}
+// The bundled node binary, or null in dev (PATH node is used instead).
+function nodeBin() {
+  const dir = nodeDir();
+  return dir ? path.join(dir, 'bin', 'node') : null;
+}
+
 // Which Python runs the BACKEND. Explicit override wins. Packaged: the provisioned venv python if it
 // exists (ensureProvisioned() guarantees this before startBackend), else the bundled base as a
 // bootstrap fallback. Dev: repo .venv, then PATH — unchanged.
@@ -115,13 +126,21 @@ function initAutoUpdate() {
 
 function provisionEnv() {
   const home = process.env.OPENNOLAN_HOME || app.getPath('userData');
-  return {
+  const env = {
     ...process.env,
     OPENNOLAN_HOME: home,
     OPENNOLAN_CODE_ROOT: codeRoot(),
     OPENNOLAN_PYTHON: bundledPython(), // the base interpreter the venv is built from
     OPENNOLAN_UV: uvBin(),
   };
+  // Composition tier (OPN-3): point provision.py at the bundled node + put its bin on PATH so the
+  // sibling npm/npx resolve. Dev leaves these unset (provision.py falls back to a PATH node).
+  const nb = nodeBin();
+  if (nb) {
+    env.OPENNOLAN_NODE = nb;
+    env.PATH = path.join(nodeDir(), 'bin') + path.delimiter + (process.env.PATH || '');
+  }
+  return env;
 }
 
 // Run scripts/provision.py with the bundled interpreter, parsing its NDJSON stdout. `onFrame` gets
@@ -170,24 +189,44 @@ function createSetupWindow() {
   });
 }
 
-// Ensure the managed venv + core deps exist before the backend starts. Packaged only (dev has the
-// repo .venv). Shows a setup window streaming pip progress on first run; no-op once provisioned.
+// Ensure the managed venv + core deps + composition engines exist before the backend starts. Packaged
+// only (dev has the repo .venv + `make setup`). Shows a setup window streaming install progress on first
+// run; no-op once provisioned.
+//
+// CORE (venv + ffmpeg) is REQUIRED — a failure is fatal (the backend can't `import fastapi` without it).
+// COMPOSITION (Node engines) is BEST-EFFORT (OPN-3): install it eagerly in the same window, but a failure
+// only WARNS and lets the editor open on the ffmpeg-only path. Never brick the app because Remotion or a
+// headless-browser download failed on a flaky network.
 async function ensureProvisioned() {
   if (!app.isPackaged) return;
   let doc = null;
   try { const f = await runProvision(['--doctor']); doc = f && f.doctor; } catch (_) { /* provision below */ }
-  if (doc && doc.core_ok) return; // venv present + current
+  const coreReady = !!(doc && doc.core_ok);
+  const compositionReady = !!(doc && doc.composition_ok);
+  if (coreReady && compositionReady) return; // everything present + current
 
   await createSetupWindow();
+  const relayProgress = (frame) => {
+    if (setupWin && frame.type === 'log') setupWin.webContents.send('setup:progress', frame.line);
+  };
   try {
-    await runProvision(['--core'], (frame) => {
-      if (setupWin && frame.type === 'log') setupWin.webContents.send('setup:progress', frame.line);
-    });
+    if (!coreReady) {
+      await runProvision(['--core'], relayProgress); // fatal on failure (caught below)
+    }
+    if (!compositionReady) {
+      // Best-effort: swallow failures so a broken Remotion/HyperFrames install never blocks the editor.
+      try {
+        await runProvision(['--composition'], relayProgress);
+      } catch (compErr) {
+        console.error('[provision] composition tier failed (non-fatal): ' + (compErr && compErr.message));
+        relayProgress({ type: 'log', line: 'Video engines unavailable — you can retry later from Settings.' });
+      }
+    }
     if (setupWin) setupWin.webContents.send('setup:done');
     await new Promise((r) => setTimeout(r, 600)); // let the user read "done" before we swap windows
   } catch (err) {
     if (setupWin) setupWin.webContents.send('setup:error', String((err && err.message) || err));
-    throw err; // boot()'s catch surfaces the fatal dialog
+    throw err; // boot()'s catch surfaces the fatal dialog (core-only)
   } finally {
     if (setupWin) { setupWin.close(); setupWin = null; }
   }
@@ -260,8 +299,18 @@ function startBackend(port) {
     runtimeEnv.OPENNOLAN_CODE_ROOT = CODE_ROOT;
     runtimeEnv.OPENNOLAN_PROJECTS_DIR = process.env.OPENNOLAN_PROJECTS_DIR || path.join(home, 'projects');
     runtimeEnv.OPENNOLAN_UV = uvBin();       // so the backend can install capability packs on demand
-    // Downloaded ffmpeg/ffprobe live in runtime/bin — put them on PATH so shutil.which() finds them.
-    runtimeEnv.PATH = path.join(home, 'runtime', 'bin') + path.delimiter + (process.env.PATH || '');
+    // Composition tier (OPN-3): the bundled node runs Remotion/HyperFrames; expose it + its bin dir so
+    // shutil.which('node'/'npx') and provision.node_bin() resolve, and route the engines' browser cache
+    // into the writable runtime. Order the PATH: ffmpeg (runtime/bin) > node > system.
+    runtimeEnv.OPENNOLAN_NODE = nodeBin();
+    const browsersCache = path.join(home, 'runtime', 'composition', 'browsers');
+    runtimeEnv.REMOTION_BROWSER_CACHE = browsersCache;
+    runtimeEnv.PUPPETEER_CACHE_DIR = browsersCache;
+    runtimeEnv.PLAYWRIGHT_BROWSERS_PATH = browsersCache;
+    // Downloaded ffmpeg/ffprobe live in runtime/bin; the bundled node lives in Resources/node/bin — put
+    // both on PATH so shutil.which() finds them.
+    runtimeEnv.PATH = path.join(home, 'runtime', 'bin') + path.delimiter
+      + path.join(nodeDir(), 'bin') + path.delimiter + (process.env.PATH || '');
   } else {
     runtimeEnv.OPENNOLAN_PROJECTS_DIR =
       process.env.OPENNOLAN_PROJECTS_DIR || path.join(REPO_ROOT, 'projects');
