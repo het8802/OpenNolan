@@ -568,25 +568,19 @@ def create_app(
         from lib import provision
         return provision.doctor()
 
-    @app.post("/api/provision/{pack}")
-    def post_provision(pack: str):
-        """Lazily install a capability pack (whisperx/torch, mediapipe, rembg, librosa, piper) into the
-        managed venv, streaming pip progress as NDJSON so the UI can show it. Runs in a worker thread so
-        the multi-minute torch install doesn't hold the event loop; the client reads the stream to done."""
+    def _stream_provision(work, done_extra: Optional[dict] = None) -> StreamingResponse:
+        """Run a provisioning `work(progress)` in a worker thread, streaming NDJSON log/done/error frames
+        so the UI can show progress without the (multi-minute) install holding the event loop. Shared by
+        the capability-pack and composition-tier install endpoints."""
         import queue
         import threading
-
-        from lib import provision
-
-        if pack not in provision.PACKS:
-            raise HTTPException(status_code=404, detail=f"unknown pack {pack!r}")
 
         q: "queue.Queue[Optional[str]]" = queue.Queue()
 
         def worker() -> None:
             try:
-                provision.provision_pack(pack, lambda line: q.put(json.dumps({"type": "log", "line": line})))
-                q.put(json.dumps({"type": "done", "pack": pack}))
+                work(lambda line: q.put(json.dumps({"type": "log", "line": line})))
+                q.put(json.dumps({"type": "done", **(done_extra or {})}))
             except Exception as exc:  # surface a clean error frame to the stream
                 q.put(json.dumps({"type": "error", "error": str(exc)}))
             finally:
@@ -602,6 +596,25 @@ def create_app(
                 yield frame + "\n"
 
         return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+    @app.post("/api/provision/composition")
+    def post_provision_composition() -> StreamingResponse:
+        """Install the composition tier (Node engines: Remotion + HyperFrames) into the managed runtime,
+        streaming progress as NDJSON. Provisioned eagerly at first run; this is the RETRY path (Settings)
+        after a failed/skipped install. Registered BEFORE /api/provision/{pack} so this static path wins
+        over the {pack} param route (else 'composition' would be read as an unknown pack -> 404)."""
+        from lib import provision
+        return _stream_provision(provision.provision_composition, {"tier": "composition"})
+
+    @app.post("/api/provision/{pack}")
+    def post_provision(pack: str) -> StreamingResponse:
+        """Lazily install a capability pack (whisperx/torch, mediapipe, rembg, librosa, piper) into the
+        managed venv, streaming pip progress as NDJSON so the UI can show it."""
+        from lib import provision
+
+        if pack not in provision.PACKS:
+            raise HTTPException(status_code=404, detail=f"unknown pack {pack!r}")
+        return _stream_provision(lambda progress: provision.provision_pack(pack, progress), {"pack": pack})
 
     @app.post("/api/projects/{project_id}/chat")
     async def chat(project_id: str, body: ChatRequest):
