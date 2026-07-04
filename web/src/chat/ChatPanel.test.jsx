@@ -19,6 +19,8 @@ function mockChat(overrides = {}) {
     toolResults: {},
     threads: [],
     activeThread: null,
+    model: 'claude-opus-4-8',
+    setModel: vi.fn(),
     send: vi.fn(),
     stop: vi.fn(),
     newChat: vi.fn(),
@@ -85,5 +87,20 @@ describe('ChatPanel render contract', () => {
     const chat = mockChat({ threads: [{ thread_id: 't1', title: 'First chat' }], activeThread: 't1' })
     const { getByText } = render(<ChatPanel chat={chat} disabled={false} />)
     expect(getByText('First chat')).toBeInTheDocument()
+  })
+
+  it('renders the model selector with Opus marked recommended and selects the chat model', () => {
+    const chat = mockChat({ model: 'claude-sonnet-5' })
+    const { getByTitle, getByText } = render(<ChatPanel chat={chat} disabled={false} />)
+    const select = getByTitle('Agent model')
+    expect(select.value).toBe('claude-sonnet-5')
+    expect(getByText('Opus 4.8 · Recommended')).toBeInTheDocument()
+  })
+
+  it('changing the model selector calls chat.setModel', () => {
+    const chat = mockChat()
+    const { getByTitle } = render(<ChatPanel chat={chat} disabled={false} />)
+    fireEvent.change(getByTitle('Agent model'), { target: { value: 'claude-haiku-4-5-20251001' } })
+    expect(chat.setModel).toHaveBeenCalledWith('claude-haiku-4-5-20251001')
   })
 })

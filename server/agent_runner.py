@@ -34,6 +34,16 @@ from typing import Any, Awaitable, Callable, Optional
 from server.activity import record_tool_use
 
 DEFAULT_MODEL = "claude-opus-4-8"            # most capable model; strongest at long-horizon agentic runs
+
+# Models the user can pick in the agent UI (id -> display label). The UI dropdown
+# and the /chat payload validate against this set — an unknown id is ignored and the
+# session keeps its current model. Keep in sync with web/src/chat/chatUtils.js.
+AGENT_MODELS: dict[str, str] = {
+    "claude-opus-4-8": "Opus 4.8",              # default / recommended
+    "claude-sonnet-5": "Sonnet 5",
+    "claude-haiku-4-5-20251001": "Haiku 4.5",
+}
+
 DEFAULT_MAX_BUDGET_USD = 15.0                # SDK-native hard ceiling per session
 DEFAULT_CONFIRM_TIMEOUT_S = 300
 DEFAULT_ANSWER_TIMEOUT_S = 900               # users may take a while to answer a question
@@ -429,6 +439,7 @@ class AgentRunner:
     _session_ids: dict[str, str] = field(default_factory=dict, init=False)   # last session_id per project
     _resume_next: dict[str, bool] = field(default_factory=dict, init=False)  # rebuild-with-resume after error
     _fresh_client: dict[str, bool] = field(default_factory=dict, init=False) # client just (re)created this turn
+    _models: dict[str, str] = field(default_factory=dict, init=False)        # UI-selected model per project
 
     def __post_init__(self) -> None:
         self.repo_root = Path(self.repo_root)
@@ -516,7 +527,7 @@ class AgentRunner:
 
         options = build_agent_options(
             self.repo_root,
-            model=self.model,
+            model=self._model_for(project_id),
             max_budget_usd=self.max_budget_usd,
             confirm_handler=confirm,
             resume=resume,
@@ -526,6 +537,11 @@ class AgentRunner:
             disallowed_tools=["AskUserQuestion"],
         )
         return ClaudeSDKClient(options=options)
+
+    def _model_for(self, project_id: str) -> str:
+        """The model a new client for this project should be built with: the
+        UI-selected override if one has been set, else the runner default."""
+        return self._models.get(project_id, self.model)
 
     async def _get_client(self, project_id: str) -> Any:
         client = self._clients.get(project_id)
@@ -911,6 +927,31 @@ class AgentRunner:
         else:
             self._session_ids.pop(project_id, None)
             self._resume_next.pop(project_id, None)  # brand-new thread -> fresh session
+
+    async def set_model(self, project_id: str, model: Optional[str]) -> None:
+        """Point the project's session at a UI-selected model.
+
+        The model is baked into the SDK client at build time, so a change means
+        tearing down the live client; the next turn rebuilds with the new model.
+        Conversation context survives — if the project already has a session, the
+        rebuild RESUMES it (so switching model mid-chat keeps history). Unknown or
+        empty ids are ignored (the session keeps its current model). No-op when the
+        model is unchanged, so it's safe to call on every turn.
+        """
+        if not model or model not in AGENT_MODELS:
+            return
+        if self._model_for(project_id) == model:
+            return
+        self._models[project_id] = model
+        dead = self._clients.pop(project_id, None)
+        if dead is not None:
+            try:
+                await dead.disconnect()
+            except Exception:
+                pass
+        # Preserve context across the model swap: resume the existing session if any.
+        if self._session_ids.get(project_id):
+            self._resume_next[project_id] = True
 
     async def aclose(self) -> None:
         for client in self._clients.values():
