@@ -17,8 +17,8 @@ OpenNolan.app/Contents/
   Resources/
     app.asar                          main.js, preload.js, node_modules (electron-updater)
     backend/                          OPENNOLAN_CODE_ROOT (read-only)
-      server/ lib/ tools/ schemas/ pipeline_defs/ skills/ scripts/ assets/ templates/ styles/
-      AGENT_GUIDE.md RULES.md config.yaml requirements-*.txt
+      server/ lib/ tools/ schemas/ pipeline_defs/ skills/ .agents/skills/ scripts/ assets/ templates/ styles/
+      AGENT_GUIDE.md PROJECT_CONTEXT.md config.yaml requirements-*.txt
       web/dist/                       served by the backend at code_root()/web/dist
     python/bin/python3                bundled, SIGNED python-build-standalone (arm64)
 ```
