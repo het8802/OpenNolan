@@ -27,6 +27,7 @@ import asyncio
 import json
 import os
 import shutil
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -166,7 +167,8 @@ The user steers via a Mission Control UI between turns.
 Obey the repo contract exactly:
 - Read AGENT_GUIDE.md before acting. Follow Rule Zero.
 - Read the per-stage director skill before each stage. Read Layer 3 skills before any generation tool.
-- Checkpoints live under projects/<project_id>/ (NOT pipelines/).
+- Checkpoints and artifacts live under the ABSOLUTE project directory given in your PROJECT CONTEXT \
+message — NOT relative to your working directory (which is the read-only app code), and NOT pipelines/.
 
 PIPELINE STATUS (critical — the UI stepper shows this in real time):
   Mark a stage IN PROGRESS at start:
@@ -243,9 +245,52 @@ def auth_configured() -> bool:
     return claude_cli_available()
 
 
+def agent_subprocess_path() -> str:
+    """The PATH the agent's Bash subprocess should use.
+
+    The agent runs `python …` (preflight, scripts/update_stage.py, tool one-liners).
+    Its cwd is the read-only code root, and in the packaged app the interpreter that
+    actually has our dependencies is the managed venv under OPENNOLAN_HOME/runtime —
+    which is NOT on the inherited PATH (desktop/main.js puts ffmpeg + node there, not
+    the venv). Without this, the agent's bare `python` resolves to whatever Python is
+    on the user's machine, which has none of OpenNolan's deps — that is OPN-4: the
+    bundled agent "gets lost" hunting for Python/tools across the whole device.
+
+    We prepend the venv's bin so `python` is the app's Python. The SDK merges this
+    over os.environ (our PATH wins), so the inherited ffmpeg (runtime/bin), node
+    (Resources/node/bin), and system entries are preserved after it. Dev-safe: the
+    venv bin does not exist in a plain checkout, so resolution simply falls through
+    to the active dev venv already on PATH.
+    """
+    from lib import app_paths
+
+    venv_bin = app_paths.runtime_dir() / "venv" / "bin"
+    inherited = os.environ.get("PATH", "")
+    return f"{venv_bin}{os.pathsep}{inherited}" if inherited else str(venv_bin)
+
+
+def agent_add_dirs(projects_dir: Path | str | None) -> list[str]:
+    """Extra workspace directories the agent's file tools may operate in.
+
+    The agent's cwd is the (read-only) code root, but project data — artifacts and
+    checkpoints — lives under projects_dir (the writable App-Support dir in the
+    packaged app, which is OUTSIDE the code root). Expose it as an explicit workspace
+    dir so Read/Write/Glob of those files are first-class rather than out-of-workspace.
+
+    Guarded on existence: a `--add-dir` that points at a nonexistent path aborts the
+    CLI launch, so we only add it when it is really there (the app creates the
+    projects dir before any agent turn; dev/tests may not).
+    """
+    if projects_dir is None:
+        return []
+    p = Path(projects_dir)
+    return [str(p)] if p.exists() else []
+
+
 def build_agent_options(
     repo_root: Path | str,
     *,
+    projects_dir: Path | str | None = None,
     model: str = DEFAULT_MODEL,
     max_budget_usd: float = DEFAULT_MAX_BUDGET_USD,
     confirm_handler: Optional[ConfirmHandler] = None,
@@ -254,6 +299,10 @@ def build_agent_options(
     disallowed_tools: Optional[list[str]] = None,
 ):
     """Construct ClaudeAgentOptions for an OpenNolan agent session.
+
+    ``projects_dir`` is the writable location of project artifacts/checkpoints. It is
+    added to the agent's workspace (``add_dirs``) so file tools can reach it even
+    though it lives outside the read-only ``repo_root`` cwd (packaged app).
 
     ``resume`` is a prior session_id. When set, the SDK restores that
     conversation's full history into the new client, so a session that died
@@ -265,6 +314,19 @@ def build_agent_options(
     (whose headless I/O we don't control) toward our ask_user tool.
     """
     from claude_agent_sdk import ClaudeAgentOptions
+    from lib import app_paths
+
+    # Loud, non-fatal signal if the managed venv is missing in a packaged run
+    # (OPENNOLAN_CODE_ROOT is set only by desktop/main.js in the .app). Better a
+    # visible warning in the backend log than a silent fall-back to system Python.
+    if os.environ.get("OPENNOLAN_CODE_ROOT"):
+        venv_python = app_paths.runtime_dir() / "venv" / "bin" / "python"
+        if not venv_python.exists():
+            print(
+                f"[agent_runner] WARNING: managed venv Python not found at {venv_python}; "
+                "the agent's `python` may fall back to system Python.",
+                file=sys.stderr,
+            )
 
     return ClaudeAgentOptions(
         cwd=str(repo_root),
@@ -277,6 +339,10 @@ def build_agent_options(
         resume=resume,
         mcp_servers=mcp_servers or {},
         disallowed_tools=disallowed_tools or [],
+        # Make the agent's `python` the app's Python, and let it write to the
+        # writable projects dir that sits outside its read-only cwd (OPN-4).
+        env={"PATH": agent_subprocess_path()},
+        add_dirs=agent_add_dirs(projects_dir),
     )
 
 
@@ -576,6 +642,7 @@ class AgentRunner:
 
         options = build_agent_options(
             self.repo_root,
+            projects_dir=self.projects_dir,
             model=self._model_for(project_id),
             max_budget_usd=self.max_budget_usd,
             confirm_handler=confirm,
@@ -626,7 +693,9 @@ class AgentRunner:
         return (
             f"[PROJECT CONTEXT: You are working on the existing project '{project_id}'{pipeline_clause}.{choose_clause} "
             f"Use EXACTLY this project_id for everything — do NOT create a new project directory. "
-            f"Write artifacts to projects/{project_id}/artifacts/. For every produced asset "
+            f"Write artifacts to the ABSOLUTE path {self.projects_dir / project_id}/artifacts/ — your working "
+            f"directory is the read-only app code, so a relative 'projects/{project_id}/...' path would write to "
+            f"the wrong place. For every produced asset "
             f"(image/video/audio/music/render/final_render) call the `store_asset` tool instead of "
             f"choosing a folder — it files each asset in the right place and returns its path. As you "
             f"work each stage, update its status so the UI stepper reflects progress: run `{stage_cmd}` "
@@ -658,7 +727,7 @@ class AgentRunner:
                 f"[RESUMING WORK on project '{project_id}' (pipeline: {pipeline_type}). "
                 f"Completed stages: {', '.join(completed) or 'none'}. "
                 f"Next stage: {nxt or 'all done'}. "
-                f"Existing artifacts in projects/{project_id}/artifacts/: {', '.join(artifacts) or 'none'}. "
+                f"Existing artifacts in {artifacts_dir}/: {', '.join(artifacts) or 'none'}. "
                 f"Read the relevant checkpoints and artifacts to recover context, then continue from "
                 f"the next stage. Do NOT redo completed stages.]"
             )
