@@ -25,6 +25,15 @@ Detection already exists and is correct (`video_compose._remotion_available()`, 
 
 **Refinement (not re-litigating #2):** eager is about *timing/availability*, not a hard gate. Composition provisioning is **best-effort-eager** — attempt in the setup window, but a failure WARNS and lets the editor open in the ffmpeg-only degraded state (same treatment `provision_core` already gives ffmpeg). It must never brick an offline/flaky-network first-run. Retry from Settings + app-driven re-prompt on first render.
 
+## Implementation status (live)
+
+- **Lane B — provision engine + doctor + ffmpeg pin + tests: DONE + committed** (`ebcd2de`). `lib/provision.py` composition status/staleness/installer + ffmpeg sha verification; `scripts/provision.py` flags; `server/app.py` `/api/provision/composition` (DRY'd streaming). 20 contract tests pass.
+- **Lane A — Node bundling: DONE (verified end-to-end).** `scripts/fetch-node.mjs` (pinned Node v22.17.1 arm64, sha256 `a983f4f2…`) — real download+verify+extract confirmed. `desktop/package.json`: `fetch-runtime` runs it; extraResources bundle `resources/node`, `remotion-composer` (minus node_modules), and `composition/`.
+- **Lane D — HyperFrames pin + runtime opt: DONE (verified end-to-end).** `composition/hyperframes/{package.json,package-lock.json}` pin `hyperframes@0.7.29`; a REAL `npm ci` via the bundled node installed it and `hyperframes_ok()` went True + local CLI resolved. `_resolve_npm_package`/`_run_hf` prefer the local install (no live `npm view`/`npx --yes`).
+- **Lane C — wiring: DONE (needs Mac-build verification).** `desktop/main.js`: `nodeBin()`/`nodeDir()`, `OPENNOLAN_NODE` in provisionEnv, best-effort `--composition` in `ensureProvisioned` (non-fatal), backend PATH + browser-cache env. `video_compose._composer_dir()` renders from the provisioned copy when present.
+
+**Not yet verified (requires a real electron-builder run on a Mac):** electron-builder signing of the bundled node with hardened-runtime entitlements; the full first-run `ensureProvisioned` flow in a packaged `.app`; Remotion's real `npm ci` + `browser ensure` (identical code path to the verified HyperFrames install, just larger); HyperFrames `doctor` browser pre-fetch. **Fill-in before release:** the ffmpeg pin values (mechanism is in; run `scripts/provision.py --print-ffmpeg-sha` against a versioned build).
+
 ## Architecture
 
 ```
