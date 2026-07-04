@@ -52,7 +52,7 @@ ProgressCb = Callable[[str], None]
 # npm packages install at FIRST RUN into the WRITABLE runtime dir (the bundle is read-only), mirroring
 # how the Python venv is populated. Installed EAGERLY in the setup window (AGENT_GUIDE requires the
 # agent to offer BOTH runtimes), but BEST-EFFORT: a failure degrades to the ffmpeg-only path and NEVER
-# blocks the editor from opening. See docs/plans/opn-3-provision-composition-engines.md.
+# blocks the editor from opening (Linear OPN-3).
 NODE_FLOOR_MAJOR = 22  # HyperFrames' floor; Remotion 4.x is also happy here.
 
 
