@@ -275,6 +275,8 @@ To extend the library, append entries to `scripts/generate_educational_sfx.py` a
 
 Do this before any creative work. **Use `provider_menu_summary()` first — it's the human-ready rollup.** The raw `support_envelope()` dump is a firehose (megabytes of JSON on a well-configured machine); pasting it into chat will bury the user.
 
+> **`python` means the project's Python.** Run the `python …` commands below as-is: your PATH is set so a bare `python` resolves to the interpreter that has OpenNolan's dependencies (the repo venv in dev; the app's managed runtime venv in the packaged desktop app). Do NOT substitute a system Python or a hardcoded interpreter path — a system Python lacks the deps and is the classic "bundled agent can't find its tools" failure.
+
 ```bash
 python -c "
 from tools.tool_registry import registry
