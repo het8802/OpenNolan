@@ -192,6 +192,14 @@ To ask the user a clarifying question, call the `ask_user` tool with your questi
 of options (the user picks one in the UI and it comes back as the tool result). Use it whenever \
 your skills tell you to ask the user something.
 
+To SAVE any file you produce (image/video/audio/music, an intermediate scene clip, or the final \
+deliverable), call the `store_asset` tool with its `kind` and `src` — it places the file in the \
+correct folder and returns the path to reference in edit_decisions/asset_manifest. NEVER write \
+into assets/, hf/renders/, or renders/ by hand and never pass a hand-picked project path to a \
+generator; write generated files to a scratch path, then hand them to `store_asset`. This is the \
+ONLY correct way to place assets — declaring the wrong folder yourself makes intermediate clips \
+show up as the final render in the editor.
+
 Announce cost before any paid generation. Never exceed the budget.
 """
 
@@ -404,6 +412,13 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
+def _text_result(payload: dict[str, Any]) -> dict[str, Any]:
+    """An MCP tool result carrying a JSON payload. Marks is_error when the
+    payload reports an error, so the agent treats a failure as a failure."""
+    return {"content": [{"type": "text", "text": json.dumps(payload)}],
+            "is_error": "error" in payload}
+
+
 @dataclass
 class AgentRunner:
     """Manages one persistent agent session per project.
@@ -517,7 +532,41 @@ class AgentRunner:
         async def render(args: dict[str, Any]) -> dict[str, Any]:
             return await self._run_render(project_id, args)
 
-        mc_server = create_sdk_mcp_server("mc", "1.0.0", [ask_user, render])
+        # store_asset: the agent's file-placement tool. The agent declares a
+        # KIND and hands over the file it just produced; the tool moves/copies it
+        # into the canonical folder for that kind and returns the path to use in
+        # edit_decisions/asset_manifest. The agent never names a destination —
+        # this is what stops intermediate clips landing in renders/ and showing
+        # up as "Final render". Generators should write to a scratch path, then
+        # store_asset places the result.
+        @tool(
+            "store_asset",
+            "Save a file you produced into the project. Declare its KIND — the "
+            "tool puts it in the correct folder and returns the path to reference "
+            "in edit_decisions/asset_manifest. NEVER write into assets/, hf/renders/, "
+            "or renders/ yourself; always route produced files through this tool. "
+            "kinds: image | video | audio | music | render (intermediate per-scene "
+            "clip) | final_render (the ONE assembled deliverable). Idempotent by "
+            "content (re-storing identical bytes reuses the existing file).",
+            {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string",
+                        "enum": ["image", "video", "audio", "music", "render", "final_render"],
+                        "description": "What the file is. Determines the destination folder."},
+                    "src": {"type": "string",
+                        "description": "Path to the file you produced (absolute, or relative to "
+                                       "the repo root). Typically a scratch/temp path a generator wrote."},
+                    "name": {"type": "string",
+                        "description": "Optional final filename. Defaults to the source basename."},
+                },
+                "required": ["kind", "src"],
+            },
+        )
+        async def store_asset(args: dict[str, Any]) -> dict[str, Any]:
+            return await self._store_asset(project_id, args)
+
+        mc_server = create_sdk_mcp_server("mc", "1.0.0", [ask_user, render, store_asset])
 
         # If a prior session for this project died, resume it so the agent
         # comes back with its full conversation context (on a fresh budget).
@@ -577,9 +626,10 @@ class AgentRunner:
         return (
             f"[PROJECT CONTEXT: You are working on the existing project '{project_id}'{pipeline_clause}.{choose_clause} "
             f"Use EXACTLY this project_id for everything — do NOT create a new project directory. "
-            f"Write artifacts to projects/{project_id}/artifacts/, assets to projects/{project_id}/assets/, "
-            f"and the final render to projects/{project_id}/renders/. As you work each stage, update its "
-            f"status so the UI stepper reflects progress: run `{stage_cmd}` "
+            f"Write artifacts to projects/{project_id}/artifacts/. For every produced asset "
+            f"(image/video/audio/music/render/final_render) call the `store_asset` tool instead of "
+            f"choosing a folder — it files each asset in the right place and returns its path. As you "
+            f"work each stage, update its status so the UI stepper reflects progress: run `{stage_cmd}` "
             f"(status = in_progress at the start of a stage, completed when done, awaiting_human at approval gates).]"
         )
 
@@ -781,6 +831,40 @@ class AgentRunner:
             # User hit Stop -> the turn is being cancelled. Leave the job running (it's
             # a thread, not a CLI bg task); the next turn's resume note surfaces it.
             raise
+
+    async def _store_asset(self, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        """Place a produced file into its canonical folder for the declared kind
+        and return the path the agent should reference. Thin wrapper over
+        lib.project.place_asset (the single writer into the asset tree). Errors
+        (bad kind, missing src) come back as a JSON {"error": ...} the agent can
+        recover from, not an exception that kills the turn."""
+        from lib.project import place_asset
+
+        kind = (args.get("kind") or "").strip()
+        src_arg = (args.get("src") or "").strip()
+        name = (args.get("name") or "").strip() or None
+        if not src_arg:
+            return _text_result({"error": "src is required (path to the file you produced)"})
+
+        # Resolve src relative to the repo root when not absolute (the agent works
+        # from repo-root-relative paths everywhere else).
+        src = Path(src_arg)
+        if not src.is_absolute():
+            src = self.repo_root / src_arg
+
+        try:
+            res = place_asset(self.projects_dir, project_id, kind, src, name)
+        except (ValueError, FileNotFoundError) as exc:
+            return _text_result({"error": str(exc)})
+
+        # Hand back a repo-relative path — directly usable in edit_decisions /
+        # asset_manifest — plus the project-relative form.
+        return _text_result({
+            "path": f"projects/{project_id}/{res['path']}",
+            "project_relative": res["path"],
+            "kind": res["kind"],
+            "deduped": res["deduped"],
+        })
 
     def _render_resume_note(self, project_id: str) -> Optional[str]:
         """If there's an UNCONSUMED agent render job for this project, return a note

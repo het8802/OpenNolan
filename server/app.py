@@ -309,7 +309,12 @@ def create_app(
         renders: list[dict[str, Any]] = []
         renders_dir = proj / "renders"
         if renders_dir.is_dir():
-            for f in sorted(renders_dir.rglob("*")):
+            # NON-recursive on purpose: only top-level renders/ files are deliverables.
+            # Subdirs hold render-engine internals — renders/proxies/ (content-keyed
+            # per-scene proxy cache) and renders/.final_review_frames/ — which are NOT
+            # final renders. rglob swept those in and the dashboard showed every proxy
+            # clip as a "Final render". Deliverables live directly in renders/ (final.mp4).
+            for f in sorted(renders_dir.glob("*")):
                 if f.is_file() and f.suffix.lower() in VIDEO_EXTS and not f.name.startswith("."):
                     stat = f.stat()
                     # mtime is the cache-bust/remount key the UI uses so a freshly

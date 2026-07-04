@@ -37,6 +37,7 @@ CANONICAL_STAGE_ARTIFACTS = {
     "assets": "asset_manifest",
     "edit": "edit_decisions",
     "compose": "render_report",
+    "qa": "final_review",
     "publish": "publish_log",
 }
 
