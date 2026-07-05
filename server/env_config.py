@@ -83,6 +83,10 @@ KNOWN_ENV_VARS: list[dict] = [
 
 _KNOWN_BY_KEY = {v["key"]: v for v in KNOWN_ENV_VARS}
 
+# App-managed secrets that must NOT appear in the BYOK panel (the user edits them through the
+# "Sign in with Claude" flow, not by hand). Hidden from both the curated menu and the "Other" bucket.
+_INTERNAL_KEYS = {"CLAUDE_CODE_REFRESH_TOKEN"}
+
 
 def _looks_secret(key: str) -> bool:
     k = key.upper()
@@ -134,7 +138,7 @@ def list_env_vars(path: Path = ENV_PATH) -> list[dict]:
     current = read_env_file(path)
     out: list[dict] = [{**spec, "value": current.get(spec["key"], "")} for spec in KNOWN_ENV_VARS]
     for key, val in current.items():
-        if key in _KNOWN_BY_KEY:
+        if key in _KNOWN_BY_KEY or key in _INTERNAL_KEYS:
             continue
         out.append({"key": key, "label": key, "group": "Other", "secret": _looks_secret(key),
                     "description": "", "value": val})

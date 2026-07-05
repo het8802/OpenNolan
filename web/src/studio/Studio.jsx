@@ -31,7 +31,7 @@ const TIMELINE_MAX_FRAC = 0.6 // timeline may take at most 60% of the body (keep
 const AGENT_MIN = 260       // collapse threshold for the agent panel: drag narrower than this → hide
 const AGENT_MAX = 520
 
-export default function Studio({ projectId, state, onClose, chat }) {
+export default function Studio({ projectId, state, onClose, chat, auth, onReconnect }) {
   const [doc, setDoc] = useState(null)
   const docRef = useRef(null) // mirror of `doc` so handlers read the latest synchronously
   const [past, setPast] = useState([])
@@ -679,7 +679,8 @@ export default function Studio({ projectId, state, onClose, chat }) {
           {chat && (panels.agentOpen ? (
             <>
               <div className="st-agent-wrap" style={{ width: panels.agentW }}>
-                <ChatPanel chat={chatForPanel} disabled={!projectId} className="st-agent" />
+                <ChatPanel chat={chatForPanel} disabled={!projectId} className="st-agent"
+                  auth={auth} onReconnect={onReconnect} />
               </div>
               <div className="st-vsplit" onPointerDown={(e) => beginPanelDrag(e, 'agent')}
                 title="Drag to resize · drag fully left to hide" />

@@ -18,3 +18,23 @@ export const IconUndo = (p) => <Svg {...p}><path d="M9 14 4 9l5-5" /><path d="M4
 export const IconRedo = (p) => <Svg {...p}><path d="m15 14 5-5-5-5" /><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H11" /></Svg>
 export const IconPlay = (p) => <Svg {...p}><path d="M6 4v16l13-8z" fill="currentColor" stroke="none" /></Svg>
 export const IconMusic = (p) => <Svg {...p}><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></Svg>
+export const IconRefresh = (p) => <Svg {...p}><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v5h-5" /></Svg>
+export const IconAlert = (p) => <Svg {...p}><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></Svg>
+
+// Claude sunburst mark — a radiating burst that evokes Claude's identity, in its terracotta.
+// Rendered as filled rays so it reads at button size; `color` defaults to the Claude accent.
+export function ClaudeLogo({ size = 18, color = 'currentColor', ...p }) {
+  const rays = []
+  for (let i = 0; i < 8; i++) {
+    rays.push(
+      <line key={i} x1="12" y1="12" x2="12" y2="3.2"
+        transform={`rotate(${i * 45} 12 12)`} />
+    )
+  }
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke={color} strokeWidth="2.4" strokeLinecap="round" aria-hidden="true" {...p}>
+      {rays}
+    </svg>
+  )
+}

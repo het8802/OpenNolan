@@ -20,7 +20,7 @@ function loadModel() {
   return DEFAULT_MODEL
 }
 
-export function useAgentChat(projectId, { onError } = {}) {
+export function useAgentChat(projectId, { onError, onAuthError } = {}) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -42,7 +42,9 @@ export function useAgentChat(projectId, { onError } = {}) {
   const sessionIdRef = useRef(null)   // latest agent session_id
   const abortRef = useRef(null)       // aborts the in-flight chat stream (Stop)
   const onErrorRef = useRef(onError)  // decouple from a non-memoized onError so handlers stay stable
+  const onAuthErrorRef = useRef(onAuthError)
   useEffect(() => { onErrorRef.current = onError })
+  useEffect(() => { onAuthErrorRef.current = onAuthError })
   useEffect(() => { messagesRef.current = messages }, [messages])
 
   const showError = useCallback((e) => { onErrorRef.current?.(e) }, [])
@@ -154,6 +156,11 @@ export function useAgentChat(projectId, { onError } = {}) {
           setPendingConfirm(evt)
         } else if (evt.type === 'question') {
           setPendingQuestion(evt)
+        } else if (evt.type === 'auth_error') {
+          // Credential problem (expired/revoked token, rejected key). Surface it AND nudge the
+          // app to re-check auth so the reconnect box appears above the composer.
+          setMessages(m => [...m, { role: 'error', text: evt.detail || 'Claude authentication failed — reconnect your account.' }])
+          onAuthErrorRef.current?.()
         } else if (evt.type === 'error') {
           setMessages(m => [...m, { role: 'error', text: evt.detail }])
         }
@@ -163,7 +170,12 @@ export function useAgentChat(projectId, { onError } = {}) {
         setRenderingStage(null)
         setMessages(m => [...m, { role: 'note', text: '■ Stopped. Your next message resumes this session with its context.' }])
       } else {
-        setMessages(m => [...m, { role: 'error', text: String(e.message || e) }])
+        const text = String(e.message || e)
+        setMessages(m => [...m, { role: 'error', text }])
+        // A 503 "auth not configured" (or any auth-shaped failure) at request start never reaches
+        // the SSE stream — re-check auth so the reconnect box surfaces promptly instead of lagging
+        // the 20s poll.
+        if (/auth|token|api key|unauthor|401|403|credit|billing/i.test(text)) onAuthErrorRef.current?.()
       }
     } finally {
       abortRef.current = null

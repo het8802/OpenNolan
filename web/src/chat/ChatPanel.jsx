@@ -6,11 +6,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import { TOOL_ICON, formatToolInput, AGENT_MODELS, DEFAULT_MODEL } from './chatUtils.js'
+import { ClaudeLogo, IconAlert } from '../components/icons.jsx'
 
 // Configure marked for safe, compact output
 marked.setOptions({ breaks: true, gfm: true })
 
-export default function ChatPanel({ chat, disabled = false, className = '' }) {
+export default function ChatPanel({ chat, disabled = false, className = '', auth, onReconnect }) {
   const {
     messages, input, setInput, busy,
     pendingConfirm, pendingQuestion, renderingStage, toolResults,
@@ -85,6 +86,19 @@ export default function ChatPanel({ chat, disabled = false, className = '' }) {
         <div ref={endRef} />
       </div>
       {pendingQuestion && <QuestionCard q={pendingQuestion} onAnswer={answerQuestion} />}
+      {auth && (!auth.authenticated || auth.needs_reauth) && onReconnect && (
+        <div className="auth-reconnect">
+          <span className="auth-reconnect-msg">
+            <IconAlert size={14} />
+            {auth.authenticated
+              ? 'Claude sign-in needs attention — the agent can’t run until you reconnect.'
+              : 'Connect your Anthropic account to use the agent.'}
+          </span>
+          <button type="button" className="claude-btn claude-btn-sm" onClick={onReconnect}>
+            <ClaudeLogo size={14} /> {auth.authenticated ? 'Reconnect' : 'Sign in with Claude'}
+          </button>
+        </div>
+      )}
       <form className="composer" onSubmit={e => { e.preventDefault(); send() }}>
         <textarea
           ref={taRef}

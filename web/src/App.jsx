@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import * as api from './api.js'
 import { LineChart } from './components/LineChart.jsx'
-import { IconKey, IconEye, IconEyeOff, IconCheck, IconX } from './components/icons.jsx'
+import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, ClaudeLogo } from './components/icons.jsx'
 import Studio from './studio/Studio.jsx'
 import ChatPanel from './chat/ChatPanel.jsx'
 import { useAgentChat } from './chat/useAgentChat.js'
+import { useAuth } from './auth/useAuth.js'
+import ConnectClaudeModal from './auth/ConnectClaudeModal.jsx'
 
 const STATUS_LABEL = {
   pending: 'pending',
@@ -27,10 +29,16 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [uploadTick, setUploadTick] = useState(0)             // bump to refresh asset listing
   const [editing, setEditing] = useState(false)               // manual editor open (full-screen)
+  const [showConnect, setShowConnect] = useState(false)        // "Sign in with Claude" modal open
+
+  // Anthropic account auth — one instance for the whole app (sign-in CTA, top-right re-auth,
+  // in-chat reconnect box). The backend is the source of truth; refresh() re-checks on demand.
+  const auth = useAuth()
 
   // All agent-chat state + handlers live in one hook so the pipeline window and the editor
-  // share a single conversation (revived from disk whenever `selected` changes).
-  const chat = useAgentChat(selected, { onError: showError })
+  // share a single conversation (revived from disk whenever `selected` changes). A turn-level auth
+  // failure calls onAuthError → re-check auth so the reconnect surfaces immediately.
+  const chat = useAgentChat(selected, { onError: showError, onAuthError: () => auth.refresh() })
 
   useEffect(() => {
     api.getPipelines().then(d => setPipelines(d.pipelines || [])).catch(showError)
@@ -68,6 +76,15 @@ export default function App() {
     setSelected(id)
   }
 
+  // One connect/reconnect modal, shared across every view (dashboard, editor, project).
+  const connectModal = showConnect && (
+    <ConnectClaudeModal
+      initialStatus={auth.status}
+      onClose={() => setShowConnect(false)}
+      onConnected={() => { setShowConnect(false); auth.refresh(); showOk('Connected to Claude') }}
+    />
+  )
+
   if (!selected) {
     return (
       <div className="app">
@@ -75,6 +92,8 @@ export default function App() {
           pipelines={pipelines}
           projects={projects}
           onOpen={openProject}
+          auth={auth.status}
+          onConnect={() => setShowConnect(true)}
           onCreate={async (name, pipeline) => {
             const m = await api.createProject(name, pipeline)
             await refreshProjects()
@@ -82,6 +101,7 @@ export default function App() {
             showOk(`Created "${m.name}"`)
           }}
         />
+        {connectModal}
         {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
       </div>
     )
@@ -90,7 +110,9 @@ export default function App() {
   if (editing) {
     return (
       <div className="app">
-        <Studio projectId={selected} state={state} onClose={() => setEditing(false)} chat={chat} />
+        <Studio projectId={selected} state={state} onClose={() => setEditing(false)} chat={chat}
+          auth={auth.status} onReconnect={() => setShowConnect(true)} />
+        {connectModal}
         {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
       </div>
     )
@@ -104,7 +126,8 @@ export default function App() {
         onBack={() => { setSelected(null); setEditing(false) }}
       />
       <main className="grid">
-        <ChatPanel chat={chat} disabled={!selected} />
+        <ChatPanel chat={chat} disabled={!selected}
+          auth={auth.status} onReconnect={() => setShowConnect(true)} />
         <WorkPanel state={state} selected={selected} />
         <AssetPanel
           selected={selected}
@@ -118,6 +141,7 @@ export default function App() {
           }}
         />
       </main>
+      {connectModal}
       {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
     </div>
   )
@@ -138,19 +162,50 @@ function fmtDate(s) {
   } catch { return '' }
 }
 
-function Dashboard({ pipelines, projects, onOpen, onCreate }) {
+function Dashboard({ pipelines, projects, onOpen, onCreate, auth, onConnect }) {
   const [creating, setCreating] = useState(false)
   const [showEnv, setShowEnv] = useState(false)
   const sorted = [...projects].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+  // auth === null while the first status check is in flight — don't flash the CTA before we know.
+  const connected = auth?.authenticated
+  const needsReauth = !!auth?.needs_reauth
   return (
     <div className="dashboard">
       <header className="dash-header">
         <div className="brand"><span className="dot" /> OpenNolan <span className="muted">· Mission Control</span></div>
         <div className="dash-sub">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
+        {auth && connected && (
+          <button
+            className={`claude-btn claude-btn-sm reauth-btn${needsReauth ? ' warn' : ''}`}
+            onClick={onConnect}
+            title={needsReauth ? 'Your Claude connection needs attention' : 'Re-authenticate with Claude'}>
+            <ClaudeLogo size={15} /> Re-authenticate with Claude
+          </button>
+        )}
         <button className="byok-btn" onClick={() => setShowEnv(true)} title="Manage your API keys (.env)">
           <IconKey /> BYOK
         </button>
       </header>
+      {auth && !connected && (
+        <div className="auth-hero">
+          <div className="auth-hero-text">
+            <div className="auth-hero-title">Sign in with Claude to get started</div>
+            <div className="auth-hero-sub">
+              OpenNolan's AI agent uses your own Anthropic account to build and edit your videos.
+              Connect it once — your credentials stay on this Mac.
+            </div>
+          </div>
+          <button className="claude-btn claude-btn-lg" onClick={onConnect}>
+            <ClaudeLogo size={20} /> Authenticate with Claude
+          </button>
+        </div>
+      )}
+      {auth && connected && needsReauth && (
+        <div className="auth-warn-bar">
+          <span><IconAlert size={15} /> Your Claude connection needs attention — the agent may not be able to run.</span>
+          <button className="linkish" onClick={onConnect}>Re-authenticate</button>
+        </div>
+      )}
       <div className="dash-grid">
         <button className="tile tile-new" onClick={() => setCreating(true)}>
           <span className="tile-plus">＋</span>

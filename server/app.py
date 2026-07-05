@@ -58,6 +58,7 @@ from server import activity as activity_mod
 from server import analytics as analytics_mod
 from server import artifacts as artifacts_mod
 from server import settings as settings_mod
+from server import auth as auth_mod
 from server import debug_log as debug_log_mod
 from server import editor as editor_mod
 from server import threads as thread_store
@@ -118,6 +119,16 @@ class DebugLogBody(BaseModel):
     # A batch from the editor's UI session recorder (web/src/debug/recorder.js).
     session: str
     events: list[dict[str, Any]] = []
+
+
+class OAuthFinishRequest(BaseModel):
+    # The `code#state` string the user copies from the Claude sign-in page.
+    code: str
+
+
+class ApiKeyRequest(BaseModel):
+    # An Anthropic API key (fallback to "Sign in with Claude"). Verified live before it is saved.
+    api_key: str
 
 from lib import app_paths
 
@@ -539,6 +550,44 @@ def create_app(
         env_config.reload_env()  # so the next agent turn / tool subprocess sees the new keys
         return {"changed": changed, "path": str(env_config.ENV_PATH), "vars": env_config.list_env_vars()}
 
+    # ── Anthropic account auth ("Sign in with Claude" / API-key fallback) ──────────
+    @app.get("/api/auth/status")
+    def auth_status() -> dict[str, Any]:
+        """Whether the agent can reach the user's Anthropic account, and whether a reconnect is
+        needed (expired/revoked token, rejected key). Polled by the UI to drive the sign-in CTA,
+        the top-right re-auth button, and the in-chat reconnect box."""
+        return auth_mod.status()
+
+    @app.post("/api/auth/oauth/start")
+    def auth_oauth_start() -> dict[str, Any]:
+        """Begin the PKCE flow; returns the claude.ai authorize URL to open in the browser."""
+        return auth_mod.start_oauth()
+
+    @app.post("/api/auth/oauth/finish")
+    def auth_oauth_finish(body: OAuthFinishRequest) -> dict[str, Any]:
+        """Exchange the pasted `code#state` for an OAuth token and persist it."""
+        try:
+            result = auth_mod.finish_oauth(body.code, app_state=app.state)
+        except auth_mod.AuthError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        analytics_mod.capture("auth_connected", {"method": "oauth"})
+        return result
+
+    @app.post("/api/auth/api-key")
+    def auth_api_key(body: ApiKeyRequest) -> dict[str, Any]:
+        """Verify an Anthropic API key with a live call, then persist it (fallback path)."""
+        try:
+            result = auth_mod.set_api_key(body.api_key, app_state=app.state)
+        except auth_mod.AuthError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        analytics_mod.capture("auth_connected", {"method": "api_key"})
+        return result
+
+    @app.post("/api/auth/disconnect")
+    def auth_disconnect() -> dict[str, Any]:
+        """Forget the stored Anthropic credential."""
+        return auth_mod.disconnect(app_state=app.state)
+
     @app.get("/api/settings/analytics")
     def get_analytics_settings() -> dict[str, Any]:
         """Analytics opt-out state + the anonymous device id (no PII). Drives the settings toggle."""
@@ -660,15 +709,37 @@ def create_app(
             await runner.set_model(project_id, body.model)
 
         queue: asyncio.Queue = asyncio.Queue()
+        # A live turn is the truth about the credential: the model answering clears any prior
+        # "reconnect" flag; a turn-level auth failure sets it (and is re-tagged `auth_error` so the
+        # UI shows the reconnect box instead of a nondescript red line). See server/auth.py.
+        cleared = {"done": False}
+
+        def _evt_text(evt: dict[str, Any]) -> str:
+            # `result` is where a ResultMessage carries its (error) text; the rest cover error events.
+            return " ".join(str(evt.get(k, "")) for k in ("detail", "text", "error", "message", "result"))
 
         async def emit(evt: dict[str, Any]) -> None:
+            etype = evt.get("type")
+            if etype == "assistant" and not cleared["done"]:
+                cleared["done"] = True
+                auth_mod.clear_auth_error()
+            elif etype == "result" and evt.get("is_error"):
+                text = _evt_text(evt)
+                if auth_mod.classify_auth_error(text):
+                    auth_mod.mark_auth_error(text)
+                    await queue.put({"type": "auth_error", "detail": text[:400]})
             await queue.put(evt)
 
         async def drive() -> None:
             try:
                 await runner.run_turn(project_id, body.message, on_event=emit)
             except Exception as exc:  # surface runner failure as an SSE event
-                await queue.put({"type": "error", "detail": str(exc)[:500]})
+                detail = str(exc)[:500]
+                if auth_mod.classify_auth_error(detail):
+                    auth_mod.mark_auth_error(detail)
+                    await queue.put({"type": "auth_error", "detail": detail})
+                else:
+                    await queue.put({"type": "error", "detail": detail})
             finally:
                 await queue.put(None)  # sentinel: stream complete
 

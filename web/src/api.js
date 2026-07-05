@@ -19,6 +19,23 @@ export const saveEnv = (vars) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ vars }),
   }).then(json)
+// Anthropic account auth ("Sign in with Claude" OAuth + API-key fallback).
+export const getAuthStatus = () => fetch('/api/auth/status').then(json)
+export const startOAuth = () => fetch('/api/auth/oauth/start', { method: 'POST' }).then(json)
+export const finishOAuth = (code) =>
+  fetch('/api/auth/oauth/finish', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  }).then(json)
+export const connectApiKey = (api_key) =>
+  fetch('/api/auth/api-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key }),
+  }).then(json)
+export const disconnectAuth = () => fetch('/api/auth/disconnect', { method: 'POST' }).then(json)
+
 export const getState = (id) => fetch(`/api/projects/${id}/state`).then(json)
 export const getCapabilities = () => fetch('/api/capabilities').then(json)
 export const listAssets = (id) => fetch(`/api/projects/${id}/assets`).then(json)

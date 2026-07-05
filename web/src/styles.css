@@ -1096,3 +1096,67 @@ body.st-scrubbing, body.st-scrubbing * { cursor: ew-resize !important; user-sele
   /* stacked vertically — let the agent panel span the full width instead of its drag width */
   .st-agent-wrap { width: auto !important; max-height: 40vh; }
 }
+
+/* ── Anthropic account auth: "Sign in with Claude" + reconnect surfaces ───────── */
+
+/* The Claude sign-in button. Base is the global accent-filled button; the logo (currentColor)
+   renders white on the fill for contrast. Sizes: lg = hero CTA, sm = compact (chat/header). */
+.claude-btn { display: inline-flex; align-items: center; gap: 0.45rem; white-space: nowrap; }
+.claude-btn-lg { padding: 0.6rem 1rem; font-size: 0.95rem; border-radius: var(--radius); }
+.claude-btn-sm { padding: 0.32rem 0.6rem; font-size: 0.8rem; }
+
+/* Top-right re-auth: a quiet ghost button so it doesn't compete with the primary flow. `warn`
+   flips it to attention colors when the connection needs reauthentication. `margin-left:auto`
+   pushes the reauth+BYOK pair to the right; the adjacent BYOK drops its own auto margin so they
+   sit together. */
+.reauth-btn { margin-left: auto; align-self: center; background: transparent; color: var(--accent);
+  border: 1px solid var(--line); font-weight: 550; }
+.reauth-btn:hover { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent); filter: none; }
+.reauth-btn.warn { color: var(--amber); border-color: var(--amber-soft); background: var(--amber-soft); }
+.reauth-btn.warn:hover { background: var(--amber-soft); filter: brightness(0.97); }
+.reauth-btn + .byok-btn { margin-left: 0.6rem; }
+
+/* First-page CTA when no account is connected. */
+.auth-hero { display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap;
+  background: var(--accent-soft); border: 1px solid var(--accent-soft); border-left: 3px solid var(--accent);
+  border-radius: 14px; padding: 1.1rem 1.25rem; margin-bottom: 1.4rem; }
+.auth-hero-text { flex: 1; min-width: 260px; }
+.auth-hero-title { font-weight: 650; font-size: 1.02rem; letter-spacing: -0.01em; }
+.auth-hero-sub { color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; max-width: 60ch; }
+
+/* Slim attention bar shown on the dashboard when a connected account stops working. */
+.auth-warn-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem;
+  background: var(--amber-soft); color: var(--amber); border: 1px solid var(--amber-soft);
+  border-radius: 10px; padding: 0.55rem 0.85rem; margin-bottom: 1.2rem; font-size: 0.85rem; }
+.auth-warn-bar span { display: inline-flex; align-items: center; gap: 0.4rem; }
+
+/* The small reconnect box above the chat composer. */
+.auth-reconnect { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  background: var(--amber-soft); border: 1px solid var(--amber-soft); border-radius: 10px;
+  padding: 0.5rem 0.65rem; margin-top: 0.6rem; flex-shrink: 0; }
+.auth-reconnect-msg { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--amber);
+  font-size: 0.78rem; line-height: 1.35; }
+
+/* Connect modal. */
+.auth-modal { width: 460px; max-width: 92vw; }
+.auth-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.8rem;
+  padding: 1.1rem 1.25rem 0.6rem; }
+.auth-head h3 { margin: 0; font-size: 1.05rem; }
+.auth-sub { color: var(--muted); font-size: 0.82rem; margin-top: 0.35rem; line-height: 1.5; }
+.auth-body { padding: 0.4rem 1.25rem 1.25rem; display: flex; flex-direction: column; gap: 0.9rem; }
+.auth-step { display: flex; flex-direction: column; gap: 0.7rem; }
+.auth-steps { margin: 0; padding-left: 1.15rem; color: var(--ink); font-size: 0.85rem; line-height: 1.6; }
+.auth-steps li { margin: 0.1rem 0; }
+.auth-input { font: inherit; padding: 0.5rem 0.65rem; border: 1px solid var(--line); border-radius: var(--radius);
+  background: #fff; color: var(--ink); width: 100%; }
+.auth-input:focus { outline: none; border-color: var(--accent); }
+.auth-label { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  font-size: 0.82rem; font-weight: 550; color: var(--muted); }
+.auth-alt { align-self: flex-start; margin-top: 0.2rem; }
+.auth-err { color: var(--red); font-size: 0.82rem; background: var(--red-soft); border-radius: 8px;
+  padding: 0.5rem 0.65rem; }
+
+/* A text-only "link" button (no button chrome). */
+.linkish { background: transparent; border: none; color: var(--accent); padding: 0; font: inherit;
+  font-weight: 550; cursor: pointer; text-decoration: none; }
+.linkish:hover { text-decoration: underline; filter: none; background: transparent; }
