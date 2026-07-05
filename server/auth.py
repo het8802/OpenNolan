@@ -46,6 +46,11 @@ SCOPES = os.environ.get("OPENNOLAN_OAUTH_SCOPES", "org:create_api_key user:profi
 MODELS_URL = "https://api.anthropic.com/v1/models"
 ANTHROPIC_VERSION = "2023-06-01"
 
+# console.anthropic.com (the OAuth token endpoint) sits behind Cloudflare, which 403s the default
+# Python-urllib User-Agent — "Error 1010: browser_signature_banned". A plain app identifier passes,
+# so we send one on EVERY outbound request (a missing/urllib UA silently breaks the token exchange).
+_USER_AGENT = "OpenNolan/0.1.0"
+
 OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"      # read by the Agent SDK
 REFRESH_TOKEN_ENV = "CLAUDE_CODE_REFRESH_TOKEN"  # internal; hidden from the BYOK panel
 API_KEY_ENV = "ANTHROPIC_API_KEY"
@@ -91,7 +96,7 @@ def _http_json(url: str, method: str = "GET", *, headers: Optional[dict] = None,
                body: Optional[dict] = None) -> tuple[int, dict]:
     """Minimal stdlib JSON HTTP (no extra deps). Returns (status, parsed_body); never raises on a
     non-2xx — only on a transport/network failure (as AuthError)."""
-    hdrs = {"Accept": "application/json", **(headers or {})}
+    hdrs = {"Accept": "application/json", "User-Agent": _USER_AGENT, **(headers or {})}
     data = None
     if body is not None:
         data = json.dumps(body).encode("utf-8")
@@ -119,7 +124,9 @@ def _err_message(payload: dict) -> str:
     err = payload.get("error")
     if isinstance(err, dict):
         return str(err.get("message") or err.get("error_description") or "")
-    return str(payload.get("error_description") or err or payload.get("message") or "")
+    # error_description/error = OAuth-style; detail/title = Cloudflare-style (so a block isn't opaque).
+    return str(payload.get("error_description") or err or payload.get("message")
+               or payload.get("detail") or payload.get("title") or "")
 
 
 def _prune_pending() -> None:

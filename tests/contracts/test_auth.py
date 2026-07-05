@@ -54,6 +54,36 @@ def test_classify_auth_error_negative():
 
 # ── PKCE / start_oauth ────────────────────────────────────────────────────────
 
+def test_http_json_sends_non_default_user_agent(monkeypatch):
+    """console.anthropic.com's Cloudflare 403s the default Python-urllib User-Agent ('Error 1010:
+    browser_signature_banned'), which silently breaks the OAuth token exchange. Every request must
+    carry an explicit app User-Agent — regression guard for that fix."""
+    captured: dict = {}
+
+    class _Resp:
+        status = 200
+        def read(self):
+            return b"{}"
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        captured["ua"] = req.get_header("User-agent")
+        return _Resp()
+
+    monkeypatch.setattr(auth.urllib.request, "urlopen", fake_urlopen)
+    auth._http_json("https://example.com/x", "POST", body={"a": 1})
+    assert captured["ua"] and "urllib" not in captured["ua"].lower()
+
+
+def test_err_message_reads_cloudflare_and_oauth_bodies():
+    assert auth._err_message({"error": "invalid_grant", "error_description": "Invalid 'code'."}) == "Invalid 'code'."
+    assert "blocked" in auth._err_message({"detail": "The site owner has blocked access."})
+    assert auth._err_message({"error": {"message": "boom"}}) == "boom"
+
+
 def test_start_oauth_builds_authorize_url_with_valid_pkce():
     out = auth.start_oauth()
     assert out["authorize_url"].startswith(auth.AUTHORIZE_URL + "?")
