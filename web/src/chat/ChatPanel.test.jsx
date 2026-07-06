@@ -15,6 +15,7 @@ function mockChat(overrides = {}) {
     busy: false,
     pendingConfirm: null,
     pendingQuestion: null,
+    pendingKeyRequest: null,
     renderingStage: null,
     toolResults: {},
     threads: [],
@@ -27,6 +28,8 @@ function mockChat(overrides = {}) {
     loadThread: vi.fn(),
     resolveConfirm: vi.fn(),
     answerQuestion: vi.fn(),
+    provideKey: vi.fn(),
+    skipKeyRequest: vi.fn(),
     ...overrides,
   }
 }
@@ -102,5 +105,44 @@ describe('ChatPanel render contract', () => {
     const { getByTitle } = render(<ChatPanel chat={chat} disabled={false} />)
     fireEvent.change(getByTitle('Agent model'), { target: { value: 'claude-haiku-4-5-20251001' } })
     expect(chat.setModel).toHaveBeenCalledWith('claude-haiku-4-5-20251001')
+  })
+
+  it('renders the API-key card and wires Save & continue to provideKey', () => {
+    const chat = mockChat({
+      pendingKeyRequest: {
+        key_request_id: 'p:k1', env_var: 'GOOGLE_API_KEY',
+        provider: 'Google (Gemini / Veo)', label: 'Google (Gemini / Veo)',
+        reason: 'to generate the video',
+      },
+    })
+    const { getByText, container } = render(<ChatPanel chat={chat} disabled={false} />)
+    // header + reason surface the friendly provider name and the env-var scoping note
+    expect(getByText(/Google \(Gemini \/ Veo\) key needed/)).toBeInTheDocument()
+    expect(getByText(/never sent anywhere but Google/)).toBeInTheDocument()
+    const input = container.querySelector('.ak-input')
+    expect(input.getAttribute('type')).toBe('password')   // masked by default
+    fireEvent.change(input, { target: { value: 'sk-goog-123' } })
+    fireEvent.click(getByText('Save & continue'))
+    expect(chat.provideKey).toHaveBeenCalledWith('sk-goog-123')
+  })
+
+  it('the API-key card Continue-without calls skipKeyRequest', () => {
+    const chat = mockChat({
+      pendingKeyRequest: { key_request_id: 'p:k1', env_var: 'FAL_KEY', provider: 'fal.ai' },
+    })
+    const { getByText } = render(<ChatPanel chat={chat} disabled={false} />)
+    fireEvent.click(getByText('Continue without'))
+    expect(chat.skipKeyRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it('Save & continue is disabled until a key is typed', () => {
+    const chat = mockChat({
+      pendingKeyRequest: { key_request_id: 'p:k1', env_var: 'FAL_KEY', provider: 'fal.ai' },
+    })
+    const { getByText, container } = render(<ChatPanel chat={chat} disabled={false} />)
+    const save = getByText('Save & continue')
+    expect(save).toBeDisabled()
+    fireEvent.change(container.querySelector('.ak-input'), { target: { value: 'sk-fal' } })
+    expect(save).not.toBeDisabled()
   })
 })

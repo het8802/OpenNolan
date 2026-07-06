@@ -26,6 +26,7 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
   const [busy, setBusy] = useState(false)
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [pendingQuestion, setPendingQuestion] = useState(null)
+  const [pendingKeyRequest, setPendingKeyRequest] = useState(null) // agent asked for a missing API key
   const [renderingStage, setRenderingStage] = useState(null) // tool_use id of in-flight render
   const [toolResults, setToolResults] = useState({})          // tool_use_id -> result, for expansion
   const [threads, setThreads] = useState([])                  // chat threads for the project
@@ -53,6 +54,7 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
     setMessages([])
     setPendingConfirm(null)
     setPendingQuestion(null)
+    setPendingKeyRequest(null)
     setRenderingStage(null)
     setToolResults({})
     setInput('')
@@ -156,6 +158,8 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
           setPendingConfirm(evt)
         } else if (evt.type === 'question') {
           setPendingQuestion(evt)
+        } else if (evt.type === 'api_key_request') {
+          setPendingKeyRequest(evt)
         } else if (evt.type === 'auth_error') {
           // Credential problem (expired/revoked token, rejected key). Surface it AND nudge the
           // app to re-check auth so the reconnect box appears above the composer.
@@ -207,6 +211,29 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
     finally { setPendingQuestion(null) }
   }, [pendingQuestion, projectId, showError])
 
+  // Provide the API key the agent asked for: save it to BYOK, then unblock the agent's tool.
+  // The card stays open (and rethrows) if the save fails, so the user can correct the value.
+  const provideKey = useCallback(async (value) => {
+    if (!pendingKeyRequest || !projectId) return
+    const kr = pendingKeyRequest
+    await api.provideKey(projectId, {
+      key_request_id: kr.key_request_id, env_var: kr.env_var, value,
+    })
+    setMessages(m => [...m, { role: 'note', text: `Saved ${kr.label || kr.env_var} — retrying.` }])
+    setPendingKeyRequest(null)
+  }, [pendingKeyRequest, projectId])
+
+  const skipKeyRequest = useCallback(async () => {
+    if (!pendingKeyRequest || !projectId) return
+    const kr = pendingKeyRequest
+    try { await api.provideKey(projectId, { key_request_id: kr.key_request_id, env_var: kr.env_var, skipped: true }) }
+    catch (e) { showError(e) }
+    finally {
+      setMessages(m => [...m, { role: 'note', text: `Continuing without ${kr.label || kr.env_var}.` }])
+      setPendingKeyRequest(null)
+    }
+  }, [pendingKeyRequest, projectId, showError])
+
   // Revive the project's most recent conversation when the project changes; reset when none.
   // This consolidates what App's openProject used to do, so both views land in the same chat.
   useEffect(() => {
@@ -229,8 +256,8 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
 
   return {
     messages, input, setInput, busy,
-    pendingConfirm, pendingQuestion, renderingStage, toolResults,
+    pendingConfirm, pendingQuestion, pendingKeyRequest, renderingStage, toolResults,
     threads, activeThread, model, setModel,
-    send, stop, newChat, loadThread, resolveConfirm, answerQuestion,
+    send, stop, newChat, loadThread, resolveConfirm, answerQuestion, provideKey, skipKeyRequest,
   }
 }

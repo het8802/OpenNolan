@@ -98,6 +98,15 @@ class AnswerRequest(BaseModel):
     answer: str
 
 
+class ProvideKeyRequest(BaseModel):
+    # Answer to an agent `request_api_key` prompt. `skipped=True` declines (no write); otherwise
+    # `value` is saved to the BYOK .env under `env_var` before the agent's tool is unblocked.
+    key_request_id: str
+    env_var: str
+    value: Optional[str] = None
+    skipped: bool = False
+
+
 class EnvUpdateRequest(BaseModel):
     # BYOK: {VARIABLE_NAME: value} edits to persist to the local .env (empty value = leave blank).
     vars: dict[str, str]
@@ -770,6 +779,32 @@ def create_app(
         if runner is None:
             raise HTTPException(status_code=409, detail="no active agent runner")
         return {"resolved": runner.resolve_answer(body.question_id, body.answer)}
+
+    @app.post("/api/projects/{project_id}/agent/provide-key")
+    def agent_provide_key(project_id: str, body: ProvideKeyRequest) -> dict[str, Any]:
+        """Answer an agent `request_api_key` prompt. On save, persist the key to the BYOK
+        .env (so it also appears in the BYOK panel) and reload it so this session's next tool
+        subprocess picks it up — THEN unblock the agent's tool. On skip, unblock as declined
+        without writing. The raw key is never returned to the agent."""
+        runner = app.state.agent_runner
+        if runner is None:
+            raise HTTPException(status_code=409, detail="no active agent runner")
+        from server import env_config
+
+        if body.skipped:
+            return {"resolved": runner.resolve_key_request(body.key_request_id, False), "saved": False}
+
+        value = (body.value or "").strip()
+        if not value:
+            raise HTTPException(status_code=400, detail="a non-empty key value is required (or set skipped=true)")
+        try:
+            changed = env_config.write_env_vars({body.env_var: value})
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        env_config.reload_env()  # so this session's next tool subprocess inherits the new key
+        # Persist happened; NOW unblock the waiting tool so it retries with the key present.
+        resolved = runner.resolve_key_request(body.key_request_id, True)
+        return {"resolved": resolved, "saved": True, "changed": changed}
 
     @app.post("/api/projects/{project_id}/agent/stop")
     async def agent_stop(project_id: str) -> dict[str, Any]:

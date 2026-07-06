@@ -109,6 +109,14 @@ export const answerQuestion = (id, question_id, answer) =>
     body: JSON.stringify({ question_id, answer }),
   }).then(json)
 
+// Answer an agent `request_api_key` prompt: save the key to BYOK (skipped=false) or decline it.
+export const provideKey = (id, body) =>
+  fetch(`/api/projects/${id}/agent/provide-key`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(json)
+
 export const stopAgent = (id) =>
   fetch(`/api/projects/${id}/agent/stop`, { method: 'POST' }).then(json)
 

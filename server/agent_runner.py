@@ -194,6 +194,15 @@ To ask the user a clarifying question, call the `ask_user` tool with your questi
 of options (the user picks one in the UI and it comes back as the tool result). Use it whenever \
 your skills tell you to ask the user something.
 
+MISSING API KEY: if a generation/media tool fails because a required API key or environment \
+variable is NOT set (e.g. it returns "GOOGLE_API_KEY not set", "REPLICATE_API_TOKEN not set", \
+"No ElevenLabs API key", "FAL_KEY / FAL_AI_API_KEY not set"), do NOT just tell the user to open \
+the BYOK panel. Call the `request_api_key` tool with the EXACT env-var name (plus a short \
+provider name and reason) — a secure input appears in the chat. If the user provides the key it \
+is saved to their keychain and the tool returns {provided: true}; then RETRY the tool that \
+needed it. If it returns {provided: false} the user declined — do NOT retry; use an alternative \
+or continue without that capability and tell the user exactly what you skipped.
+
 To SAVE any file you produce (image/video/audio/music, an intermediate scene clip, or the final \
 deliverable), call the `store_asset` tool with its `kind` and `src` — it places the file in the \
 correct folder and returns the path to reference in edit_decisions/asset_manifest. NEVER write \
@@ -517,6 +526,8 @@ class AgentRunner:
     _confirm_seq: int = field(default=0, init=False)
     _answers: dict[str, asyncio.Future] = field(default_factory=dict, init=False)  # question_id -> answer future
     _question_seq: int = field(default=0, init=False)
+    _key_requests: dict[str, asyncio.Future] = field(default_factory=dict, init=False)  # key_request_id -> provided(bool) future
+    _key_seq: int = field(default=0, init=False)
     _session_ids: dict[str, str] = field(default_factory=dict, init=False)   # last session_id per project
     _resume_next: dict[str, bool] = field(default_factory=dict, init=False)  # rebuild-with-resume after error
     _fresh_client: dict[str, bool] = field(default_factory=dict, init=False) # client just (re)created this turn
@@ -632,7 +643,47 @@ class AgentRunner:
         async def store_asset(args: dict[str, Any]) -> dict[str, Any]:
             return await self._store_asset(project_id, args)
 
-        mc_server = create_sdk_mcp_server("mc", "1.0.0", [ask_user, render, store_asset])
+        # request_api_key: the agent's key-provisioning tool. When a generation/media
+        # tool fails because an API key isn't set (e.g. "GOOGLE_API_KEY not set"), the
+        # agent calls this instead of telling the user to open BYOK by hand. A secure
+        # input appears IN the chat; if the user enters the key it is saved to their BYOK
+        # .env (and shows up in the BYOK panel) and this returns success so the agent
+        # RETRIES the tool. The user can also decline — then the agent skips that tool.
+        # The raw key is written server-side and NEVER returned to the model.
+        @tool(
+            "request_api_key",
+            "Ask the user for a missing API key. Call this when a tool failed because a "
+            "required API key / environment variable is NOT set (e.g. the tool returned "
+            "'GOOGLE_API_KEY not set' or 'REPLICATE_API_TOKEN not set'). A secure input "
+            "appears in the chat; when the user enters the key it is saved to their BYOK "
+            "keychain and this returns {provided: true} so you can RETRY the tool that "
+            "needed it. If the user declines it returns {provided: false} — then do NOT "
+            "retry; use an alternative or continue without that capability and tell the "
+            "user what you skipped. Pass the EXACT environment-variable name.",
+            {
+                "type": "object",
+                "properties": {
+                    "env_var": {"type": "string",
+                        "description": "The exact env-var name the tool needs, e.g. GOOGLE_API_KEY, "
+                                       "REPLICATE_API_TOKEN, ELEVENLABS_API_KEY, FAL_KEY."},
+                    "provider": {"type": "string",
+                        "description": "Human name of the service the key is for, e.g. 'Google (Gemini / Veo)'. Optional."},
+                    "reason": {"type": "string",
+                        "description": "Short reason you need it, e.g. 'to generate the video with Veo'. Optional."},
+                },
+                "required": ["env_var"],
+            },
+        )
+        async def request_api_key(args: dict[str, Any]) -> dict[str, Any]:
+            return await self._request_api_key(
+                project_id,
+                str(args.get("env_var") or "").strip(),
+                str(args.get("provider") or "").strip(),
+                str(args.get("reason") or "").strip(),
+            )
+
+        mc_server = create_sdk_mcp_server(
+            "mc", "1.0.0", [ask_user, render, store_asset, request_api_key])
 
         # If a prior session for this project died, resume it so the agent
         # comes back with its full conversation context (on a fresh budget).
@@ -808,6 +859,57 @@ class AgentRunner:
         if fut is None or fut.done():
             return False
         fut.set_result(str(answer))
+        return True
+
+    async def _request_api_key(self, project_id, env_var, provider, reason) -> dict[str, Any]:
+        """Surface a secure API-key prompt to the UI and block until the user provides the key
+        (saved to the BYOK .env by the /provide-key endpoint) or declines. Returns an MCP text
+        result carrying {provided: bool}; the raw key is NEVER passed back to the model."""
+        if not env_var:
+            return _text_result({"error": "request_api_key needs a non-empty env_var name."})
+        emit = self._emit.get(project_id)
+        if emit is None:
+            return _text_result({"provided": False,
+                                 "detail": "No user is available to provide a key right now; skip this tool."})
+        try:
+            from server import env_config
+            meta = env_config.describe_var(env_var)
+        except Exception:
+            meta = {"key": env_var, "label": env_var, "description": ""}
+        self._key_seq += 1
+        key_request_id = f"{project_id}:k{self._key_seq}"
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        self._key_requests[key_request_id] = fut
+        await _maybe_await(emit({
+            "type": "api_key_request",
+            "key_request_id": key_request_id,
+            "env_var": env_var,
+            "provider": provider or meta.get("label") or env_var,
+            "label": meta.get("label") or env_var,
+            "description": meta.get("description") or "",
+            "reason": reason,
+        }))
+        try:
+            provided = bool(await asyncio.wait_for(fut, timeout=self.answer_timeout_s))
+        except asyncio.TimeoutError:
+            return _text_result({"provided": False,
+                                 "detail": f"No response (timed out) for {env_var}; proceed without it."})
+        finally:
+            self._key_requests.pop(key_request_id, None)
+        if provided:
+            return _text_result({"provided": True, "env_var": env_var,
+                                 "detail": f"The user saved {env_var}. It is now available — RETRY the tool that needed it."})
+        return _text_result({"provided": False, "env_var": env_var,
+                             "detail": f"The user declined to provide {env_var}. Do NOT retry that tool; "
+                                       f"use an alternative or continue without it and tell the user what you skipped."})
+
+    def resolve_key_request(self, key_request_id: str, provided: bool) -> bool:
+        """Resolve a pending request_api_key prompt (called by the /provide-key endpoint,
+        AFTER the key is persisted). Returns True if a pending request matched."""
+        fut = self._key_requests.get(key_request_id)
+        if fut is None or fut.done():
+            return False
+        fut.set_result(bool(provided))
         return True
 
     # -- render tool ---------------------------------------------------------

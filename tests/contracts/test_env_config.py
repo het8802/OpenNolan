@@ -103,6 +103,23 @@ def test_write_creates_file_when_missing(tmp_path: Path):
     assert env_config.read_env_file(env)["OPENAI_API_KEY"] == "sk-1"
 
 
+def test_describe_var_known_key_carries_curated_metadata():
+    d = env_config.describe_var("GOOGLE_API_KEY")
+    assert d["key"] == "GOOGLE_API_KEY"
+    assert d["label"] == "Google (Gemini / Veo)"
+    assert d["group"] == "AI generation"
+    assert d["secret"] is True
+    assert d["description"]  # curated hint present
+
+
+def test_describe_var_unknown_key_falls_back():
+    d = env_config.describe_var("SOME_MYSTERY_TOKEN")
+    assert d["key"] == "SOME_MYSTERY_TOKEN"
+    assert d["label"] == "SOME_MYSTERY_TOKEN"
+    assert d["group"] == "Other"
+    assert d["secret"] is True   # name-based secret detection (contains TOKEN)
+
+
 def test_write_keeps_simple_values_unquoted_but_quotes_special(tmp_path: Path):
     env = tmp_path / ".env"
     env.touch()

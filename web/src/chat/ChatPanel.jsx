@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import { TOOL_ICON, formatToolInput, AGENT_MODELS, DEFAULT_MODEL } from './chatUtils.js'
-import { ClaudeLogo, IconAlert } from '../components/icons.jsx'
+import { ClaudeLogo, IconAlert, IconKey, IconEye, IconEyeOff } from '../components/icons.jsx'
 
 // Configure marked for safe, compact output
 marked.setOptions({ breaks: true, gfm: true })
@@ -14,9 +14,9 @@ marked.setOptions({ breaks: true, gfm: true })
 export default function ChatPanel({ chat, disabled = false, className = '', auth, onReconnect }) {
   const {
     messages, input, setInput, busy,
-    pendingConfirm, pendingQuestion, renderingStage, toolResults,
+    pendingConfirm, pendingQuestion, pendingKeyRequest, renderingStage, toolResults,
     threads, activeThread, model = DEFAULT_MODEL, setModel,
-    send, stop, newChat, loadThread, resolveConfirm, answerQuestion,
+    send, stop, newChat, loadThread, resolveConfirm, answerQuestion, provideKey, skipKeyRequest,
   } = chat
 
   const endRef = useRef(null)
@@ -28,7 +28,7 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
   // to read history. Scrolling up parks them there until they return to bottom.
   useEffect(() => {
     if (stickRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, pendingConfirm, pendingQuestion, renderingStage])
+  }, [messages, pendingConfirm, pendingQuestion, pendingKeyRequest, renderingStage])
 
   function onMessagesScroll() {
     const el = msgsRef.current
@@ -86,6 +86,7 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
         <div ref={endRef} />
       </div>
       {pendingQuestion && <QuestionCard q={pendingQuestion} onAnswer={answerQuestion} />}
+      {pendingKeyRequest && <ApiKeyCard req={pendingKeyRequest} onProvide={provideKey} onSkip={skipKeyRequest} />}
       {auth && (!auth.authenticated || auth.needs_reauth) && onReconnect && (
         <div className="auth-reconnect">
           <span className="auth-reconnect-msg">
@@ -170,6 +171,70 @@ function QuestionCard({ q, onAnswer }) {
           />
         ))}
       </div>
+    </div>
+  )
+}
+
+// ─── API-key Card (agent needs a missing BYOK key) ──────────────────────────────
+// A secure, in-chat prompt: the user pastes the key, it's saved to their BYOK .env, and the
+// agent's blocked tool is unblocked to retry. "Continue without" declines. The key is masked
+// by default (reveal toggle) and posted straight to the local backend — never to the model.
+
+function ApiKeyCard({ req, onProvide, onSkip }) {
+  const [value, setValue] = useState('')
+  const [reveal, setReveal] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const provider = req.provider || req.label || req.env_var
+
+  async function save() {
+    const v = value.trim()
+    if (!v || busy) return
+    setBusy(true); setErr(null)
+    try { await onProvide(v) }
+    catch (e) { setErr(String(e.message || e)); setBusy(false) }  // keep the card open to retry
+  }
+  async function skip() {
+    if (busy) return
+    setBusy(true)
+    try { await onSkip() } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="apikey-card">
+      <div className="ak-header"><IconKey size={14} /> {provider} key needed</div>
+      <div className="ak-reason">
+        {req.reason
+          ? `The agent needs your ${provider} API key ${req.reason}.`
+          : `The agent needs your ${provider} API key to continue.`}
+        {req.description && <span className="ak-desc"> {req.description}</span>}
+      </div>
+      <div className="ak-input-row">
+        <input
+          className="ak-input"
+          type={reveal ? 'text' : 'password'}
+          placeholder={req.env_var}
+          value={value}
+          autoFocus
+          spellCheck={false}
+          autoComplete="off"
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); save() } }}
+          disabled={busy}
+        />
+        <button type="button" className="ak-reveal" onClick={() => setReveal(r => !r)}
+          title={reveal ? 'Hide' : 'Show'} disabled={busy}>
+          {reveal ? <IconEyeOff size={15} /> : <IconEye size={15} />}
+        </button>
+      </div>
+      {err && <div className="ak-err"><IconAlert size={12} /> {err}</div>}
+      <div className="ak-actions">
+        <button className="ak-save" onClick={save} disabled={busy || !value.trim()}>
+          {busy ? 'Saving…' : 'Save & continue'}
+        </button>
+        <button className="ak-skip" onClick={skip} disabled={busy}>Continue without</button>
+      </div>
+      <div className="ak-note">Stored locally in your BYOK keys ({req.env_var}) — never sent anywhere but {provider}.</div>
     </div>
   )
 }

@@ -85,10 +85,19 @@ class ToolRegistry:
 
     @staticmethod
     def _load_dotenv() -> None:
-        """Load .env file into os.environ if present, so tools can find API keys."""
+        """Load .env file into os.environ if present, so tools can find API keys.
+
+        Resolves the BYOK .env via app_paths (App-Support file in the packaged app, repo
+        .env in dev) so a mid-session key save is seen by the next tool subprocess; falls
+        back to the repo-root .env if app_paths is unavailable. Only sets vars not already set.
+        """
         from pathlib import Path
         import os
-        env_path = Path(__file__).resolve().parent.parent / ".env"
+        try:
+            from lib import app_paths
+            env_path = app_paths.env_path()
+        except Exception:
+            env_path = Path(__file__).resolve().parent.parent / ".env"
         if not env_path.is_file():
             return
         with open(env_path, encoding="utf-8", errors="ignore") as f:

@@ -133,6 +133,18 @@ def read_env_file(path: Path = ENV_PATH) -> dict[str, str]:
     return out
 
 
+def describe_var(key: str) -> dict:
+    """Display metadata for a single variable — the curated spec if we know the key, else a
+    sensible default. Powers the agent's in-chat `request_api_key` prompt so the user sees a
+    friendly label ("Google (Gemini / Veo)") and hint instead of a bare env-var name."""
+    spec = _KNOWN_BY_KEY.get(key)
+    if spec:
+        return {"key": key, "label": spec["label"], "group": spec["group"],
+                "description": spec.get("description", ""), "secret": spec.get("secret", True)}
+    return {"key": key, "label": key, "group": "Other", "description": "",
+            "secret": _looks_secret(key)}
+
+
 def list_env_vars(path: Path = ENV_PATH) -> list[dict]:
     """The curated menu with each var's current value, plus any extra keys present in the file."""
     current = read_env_file(path)
