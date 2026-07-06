@@ -24,6 +24,12 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
   const stickRef = useRef(true)        // auto-scroll only while parked at the bottom
   const taRef = useRef(null)
 
+  // Per-turn cost is the SDK's token spend, computed at API rates. It's only real money the user
+  // pays when they're billed per-token — i.e. BYOK (`method: 'api_key'`). Under a Claude
+  // subscription ('oauth') or a logged-in CLI ('cli') the agent runs on the user's plan and isn't
+  // charged per-token, so the number would be a misleading notional figure — hide it there.
+  const showCost = auth?.method === 'api_key'
+
   // Auto-scroll to the newest message, but ONLY if the user hasn't scrolled up
   // to read history. Scrolling up parks them there until they return to bottom.
   useEffect(() => {
@@ -70,7 +76,7 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
         {messages.length === 0 && (
           <p className="empty">{disabled ? 'Select or create a project to start.' : 'Tell the agent what to make.'}</p>
         )}
-        {messages.map((m, i) => <Message key={i} m={m} toolResults={toolResults} />)}
+        {messages.map((m, i) => <Message key={i} m={m} toolResults={toolResults} showCost={showCost} />)}
         {renderingStage && <RenderProgress />}
         {pendingConfirm && (
           <div className="confirm-card">
@@ -241,7 +247,7 @@ function ApiKeyCard({ req, onProvide, onSkip }) {
 
 // ─── Message ─────────────────────────────────────────────────────────────────
 
-function Message({ m, toolResults }) {
+function Message({ m, toolResults, showCost }) {
   if (m.role === 'user') return <div className="msg user">{m.text}</div>
   if (m.role === 'error') return <div className="msg error">⚠ {m.text}</div>
   if (m.role === 'note') return <div className="msg note">{m.text}</div>
@@ -249,7 +255,7 @@ function Message({ m, toolResults }) {
     return (
       <div className="msg result">
         {m.is_error ? '⚠ Turn ended — your next message resumes this session with its context.' : 'Turn complete.'}
-        {m.total_cost_usd != null && <span className="cost"> ${m.total_cost_usd.toFixed(3)}</span>}
+        {showCost && m.total_cost_usd != null && <span className="cost"> ${m.total_cost_usd.toFixed(3)}</span>}
         {m.num_turns != null && <span className="muted"> · {m.num_turns} steps</span>}
       </div>
     )

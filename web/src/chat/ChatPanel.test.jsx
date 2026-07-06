@@ -135,6 +135,31 @@ describe('ChatPanel render contract', () => {
     expect(chat.skipKeyRequest).toHaveBeenCalledTimes(1)
   })
 
+  it('shows the per-turn cost only when the user is billed per-token (BYOK api_key)', () => {
+    const chat = mockChat({ messages: [{ role: 'result', total_cost_usd: 0.123, num_turns: 3 }] })
+    const { container } = render(
+      <ChatPanel chat={chat} disabled={false} auth={{ authenticated: true, method: 'api_key' }} />
+    )
+    const cost = container.querySelector('.cost')
+    expect(cost).toBeInTheDocument()
+    expect(cost.textContent).toContain('$0.123')
+  })
+
+  it('hides the per-turn cost on a Claude subscription (oauth) — no per-token billing', () => {
+    const chat = mockChat({ messages: [{ role: 'result', total_cost_usd: 0.123, num_turns: 3 }] })
+    const { container, getByText } = render(
+      <ChatPanel chat={chat} disabled={false} auth={{ authenticated: true, method: 'oauth' }} />
+    )
+    expect(container.querySelector('.cost')).not.toBeInTheDocument()
+    expect(getByText('Turn complete.')).toBeInTheDocument()   // the rest of the result line still renders
+  })
+
+  it('hides the per-turn cost when the auth method is unknown (status not yet loaded)', () => {
+    const chat = mockChat({ messages: [{ role: 'result', total_cost_usd: 0.123, num_turns: 3 }] })
+    const { container } = render(<ChatPanel chat={chat} disabled={false} />)
+    expect(container.querySelector('.cost')).not.toBeInTheDocument()
+  })
+
   it('Save & continue is disabled until a key is typed', () => {
     const chat = mockChat({
       pendingKeyRequest: { key_request_id: 'p:k1', env_var: 'FAL_KEY', provider: 'fal.ai' },
