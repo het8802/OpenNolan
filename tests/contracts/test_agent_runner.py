@@ -8,6 +8,7 @@ CLAUDE_CODE_OAUTH_TOKEN required.
 
 import asyncio
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -27,12 +28,16 @@ from claude_agent_sdk import (
 from server.agent_runner import (
     ACTION_ALLOW,
     ACTION_CONFIRM,
+    ACTION_DENY,
     AGENT_MODELS,
     DEFAULT_MODEL,
     AgentRunner,
+    Sandbox,
     auth_configured,
     bash_destructive_reason,
+    bash_path_escape_reason,
     build_agent_options,
+    build_sandbox,
     decide_tool,
     make_can_use_tool,
 )
@@ -87,6 +92,96 @@ def test_question_tools_always_allowed():
     # The built-in question tool and our in-process ask_user tool never confirm.
     assert decide_tool("AskUserQuestion", {}).action == ACTION_ALLOW
     assert decide_tool("mcp__mc__ask_user", {"question": "?"}).action == ACTION_ALLOW
+
+
+def test_no_sandbox_skips_path_checks():
+    # sandbox=None (the dev default) → any path is allowed, unchanged behavior.
+    assert decide_tool("Read", {"file_path": "/etc/passwd"}).action == ACTION_ALLOW
+    assert decide_tool("Bash", {"command": "cat /etc/passwd"}).action == ACTION_ALLOW
+
+
+# --- filesystem sandbox ---------------------------------------------------
+
+def test_sandbox_allows_in_bounds(tmp_path):
+    proj = tmp_path / "projects"
+    proj.mkdir()
+    sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(), proj.resolve()))
+    # relative path resolves under base (the agent cwd)
+    assert decide_tool("Read", {"file_path": "AGENT_GUIDE.md"}, sb).action == ACTION_ALLOW
+    # absolute path under a root
+    assert decide_tool("Write", {"file_path": str(proj / "x/a.json")}, sb).action == ACTION_ALLOW
+    # search rooted inside the workspace
+    assert decide_tool("Grep", {"pattern": "foo", "path": str(tmp_path / "lib")}, sb).action == ACTION_ALLOW
+
+
+@pytest.mark.parametrize("tool,inp", [
+    ("Read", {"file_path": "/etc/passwd"}),
+    ("Read", {"file_path": "~/secret.txt"}),
+    ("Write", {"file_path": "/Users/someone-else/other/file"}),
+    ("Edit", {"file_path": "../../../../etc/hosts"}),
+    ("LS", {"path": "/"}),
+    ("Glob", {"pattern": "/Users/**"}),
+    ("NotebookRead", {"notebook_path": "/private/other/x.ipynb"}),
+])
+def test_sandbox_denies_out_of_bounds(tmp_path, tool, inp):
+    sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(),))
+    assert decide_tool(tool, inp, sb).action == ACTION_DENY
+
+
+def test_sandbox_bash_escape_confirms(tmp_path):
+    sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(),))
+    assert decide_tool("Bash", {"command": "cat /etc/passwd"}, sb).action == ACTION_CONFIRM
+    assert decide_tool("Bash", {"command": "ls ~"}, sb).action == ACTION_CONFIRM
+    assert decide_tool("Bash", {"command": "cat $HOME/.ssh/id_rsa"}, sb).action == ACTION_CONFIRM
+    assert bash_path_escape_reason("cat /etc/passwd", sb) is not None
+
+
+def test_sandbox_bash_in_bounds_allowed(tmp_path):
+    sb = Sandbox(base=tmp_path, roots=(
+        tmp_path.resolve(),
+        Path("/tmp").resolve(),
+        Path(tempfile.gettempdir()).resolve(),
+    ))
+    for cmd in [
+        "python scripts/update_stage.py p research in_progress ig",
+        "ffmpeg -i in.mp4 out.mp4",
+        "cat projects/x/artifacts/script.json",
+        "echo hi 2>/dev/null",
+        "ls -la .",
+        "curl https://example.com/api",  # a URL is not a filesystem escape
+    ]:
+        assert bash_path_escape_reason(cmd, sb) is None, cmd
+        assert decide_tool("Bash", {"command": cmd}, sb).action == ACTION_ALLOW, cmd
+
+
+def test_build_sandbox_none_in_dev(monkeypatch):
+    monkeypatch.delenv("OPENNOLAN_CODE_ROOT", raising=False)
+    monkeypatch.delenv("OPENNOLAN_AGENT_SANDBOX", raising=False)
+    assert build_sandbox("/repo", "/repo/projects") is None
+
+
+def test_build_sandbox_on_when_forced(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENNOLAN_CODE_ROOT", raising=False)
+    monkeypatch.setenv("OPENNOLAN_AGENT_SANDBOX", "1")
+    sb = build_sandbox(tmp_path, tmp_path / "projects")
+    assert sb is not None
+    assert tmp_path.resolve() in sb.roots
+
+
+def test_build_sandbox_on_when_packaged(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(tmp_path))
+    sb = build_sandbox(tmp_path, tmp_path / "projects")
+    assert sb is not None
+    assert tmp_path.resolve() in sb.roots
+
+
+def test_can_use_tool_sandbox_denies_out_of_bounds(tmp_path):
+    sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(),))
+    cb = make_can_use_tool(confirm_handler=None, sandbox=sb)
+    denied = asyncio.run(cb("Read", {"file_path": "/etc/passwd"}, None))
+    assert isinstance(denied, PermissionResultDeny)
+    ok = asyncio.run(cb("Read", {"file_path": "notes.txt"}, None))
+    assert isinstance(ok, PermissionResultAllow)
 
 
 # --- can_use_tool callback ------------------------------------------------

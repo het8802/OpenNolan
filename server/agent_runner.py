@@ -28,6 +28,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -107,9 +108,181 @@ def bash_uses_videocompose_render(command: str) -> bool:
     )
 
 
-def decide_tool(tool_name: str, tool_input: dict[str, Any] | None) -> ToolDecision:
+# --------------------------------------------------------------------------
+# Filesystem sandbox — keep the agent inside the app's OWN folders.
+#
+# The agent's cwd (repo/bundle code root) and the SDK ``add_dirs`` are only
+# workspace HINTS; they do not stop the agent from reading ~/Documents or
+# /etc/passwd. In the packaged Mac app that let the bundled agent "wander" the
+# user's disk. So the permission policy enforces a hard boundary: file tools may
+# only touch paths under one of the app's own roots (code root, the writable
+# data home, project data, caches, and ephemeral system temp). Enabled in the
+# packaged app (and via OPENNOLAN_AGENT_SANDBOX=1 for dev testing); a plain dev
+# checkout runs unsandboxed exactly as before.
+# --------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Sandbox:
+    """A filesystem boundary. ``base`` is the agent cwd (used to resolve relative
+    paths); ``roots`` are the only directory trees the agent may read/write."""
+    base: Path
+    roots: tuple[Path, ...]
+
+
+# File tools whose input names a path we must keep in-bounds.
+_PATH_TOOLS = frozenset({
+    "Read", "Write", "Edit", "MultiEdit", "NotebookRead", "NotebookEdit",
+    "LS", "Glob", "Grep",
+})
+# Harmless device paths a shell command may legitimately reference.
+_BASH_OK_PATHS = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
+# Path-like tokens in a shell command: ~…, $HOME…, /abs…, ./rel…, ../rel…
+_BASH_PATH_TOKEN = re.compile(
+    r"(?:^|[\s=:'\"(<>|&;`])"
+    r"(~[^\s'\"|&;:)<>`]*"
+    r"|\$\{?HOME\}?[^\s'\"|&;:)<>`]*"
+    r"|/[^\s'\"|&;:)<>`]*"
+    r"|\.\.?/[^\s'\"|&;:)<>`]*)"
+)
+
+
+def _truthy(value: Optional[str]) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_under(path_str: str, base: Path, *, expand_vars: bool = False) -> Path:
+    """Resolve a possibly-relative, ~-bearing path against ``base`` (the agent
+    cwd), following symlinks and collapsing ``..``. Never raises.
+
+    ``expand_vars`` also expands shell variables ($HOME, $TMPDIR, …) — used only
+    when scanning a Bash command, so ``cat $HOME/.ssh/id_rsa`` resolves to the
+    real home (out of bounds) instead of a literal ``$HOME`` dir under ``base``.
+    """
+    s = os.path.expandvars(path_str) if expand_vars else path_str
+    p = Path(os.path.expanduser(s))
+    if not p.is_absolute():
+        p = base / p
+    try:
+        return p.resolve()
+    except Exception:
+        return Path(os.path.normpath(str(p)))
+
+
+def _within(path_str: str, sandbox: Sandbox, *, expand_vars: bool = False) -> bool:
+    p = _resolve_under(path_str, sandbox.base, expand_vars=expand_vars)
+    for r in sandbox.roots:
+        if p == r or r in p.parents:
+            return True
+    return False
+
+
+def _tool_paths(tool_name: str, ti: dict[str, Any]) -> list[str]:
+    """The filesystem paths a given tool call would touch."""
+    out: list[str] = []
+
+    def add(v: Any) -> None:
+        if isinstance(v, str) and v.strip():
+            out.append(v)
+
+    if tool_name in ("Read", "Write", "Edit", "MultiEdit", "NotebookRead", "NotebookEdit"):
+        add(ti.get("file_path"))
+        add(ti.get("notebook_path"))
+    elif tool_name == "LS":
+        add(ti.get("path"))
+    elif tool_name in ("Glob", "Grep"):
+        add(ti.get("path"))
+        pat = ti.get("pattern")
+        # An absolute glob/regex root can escape too (e.g. "/Users/**").
+        if isinstance(pat, str) and (pat.startswith("/") or pat.startswith("~")):
+            add(pat)
+    return out
+
+
+def bash_path_escape_reason(command: str, sandbox: Sandbox) -> Optional[str]:
+    """Return the first path-like token in a shell command that resolves OUTSIDE
+    the sandbox, else None.
+
+    Best-effort STATIC analysis: it catches the obvious escapes (absolute paths
+    to other folders, ~, $HOME) but a shell can hide paths behind variables or
+    substitution, so this is defense-in-depth — the file-tool boundary is the
+    hard guarantee."""
+    for m in _BASH_PATH_TOKEN.finditer(command):
+        tok = m.group(1).rstrip(".,:;")
+        if not tok or tok.startswith("//"):  # "//" → URL authority, not a path
+            continue
+        if tok in _BASH_OK_PATHS:
+            continue
+        if not _within(tok, sandbox, expand_vars=True):
+            return tok
+    return None
+
+
+def build_sandbox(
+    repo_root: Path | str,
+    projects_dir: Path | str | None,
+) -> Optional[Sandbox]:
+    """The filesystem boundary for a run, or None to run unsandboxed.
+
+    Active in the packaged Mac app (``app_paths.is_packaged()``) or when
+    OPENNOLAN_AGENT_SANDBOX is set (dev testing). Roots: the app code root, its
+    writable data home (projects/.env/runtime/cache), the project data dir, and
+    ephemeral system temp (media tools stage scratch files there). A plain dev
+    checkout returns None so developer workflows are unchanged."""
+    from lib import app_paths
+
+    if not (app_paths.is_packaged() or _truthy(os.environ.get("OPENNOLAN_AGENT_SANDBOX"))):
+        return None
+
+    base = Path(repo_root).resolve()
+    candidates: list[Path | str] = [
+        base,
+        app_paths.code_root(),
+        app_paths.home(),
+        app_paths.projects_dir(),
+        app_paths.runtime_dir(),
+        app_paths.cache_dir(),
+    ]
+    if projects_dir is not None:
+        candidates.append(Path(projects_dir))
+    # ephemeral scratch the media/generation tools legitimately use
+    candidates += [tempfile.gettempdir(), "/tmp", "/private/tmp", "/var/folders"]
+
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            r = Path(c).resolve()
+        except Exception:
+            continue
+        if str(r) not in seen:
+            seen.add(str(r))
+            roots.append(r)
+    return Sandbox(base=base, roots=tuple(roots))
+
+
+def decide_tool(
+    tool_name: str,
+    tool_input: dict[str, Any] | None,
+    sandbox: Optional[Sandbox] = None,
+) -> ToolDecision:
     """Allow safe tools and clean Bash; route destructive Bash + unknown tools to confirm.
-    Hard-deny (with a steer to the `render` tool) Bash that renders via VideoCompose."""
+    Hard-deny (with a steer to the `render` tool) Bash that renders via VideoCompose.
+
+    When ``sandbox`` is set, file tools that target a path OUTSIDE the app's own
+    folders are hard-denied (with a steering message), and Bash commands that
+    reference an out-of-bounds path are routed to confirm. ``sandbox=None`` (the
+    dev default) disables path enforcement entirely."""
+    ti = tool_input or {}
+    # Sandbox: keep the agent inside the app's own folders. File tools name their
+    # target directly, so an out-of-bounds path is an unambiguous, hard deny.
+    if sandbox is not None and tool_name in _PATH_TOOLS:
+        for pth in _tool_paths(tool_name, ti):
+            if not _within(pth, sandbox):
+                return ToolDecision(
+                    ACTION_DENY,
+                    f"Path {pth!r} is outside the app workspace. Only read or write "
+                    "within the project directory and the app's own folders.",
+                )
     if tool_name in SAFE_TOOLS or tool_name in WRITE_TOOLS:
         return ToolDecision(ACTION_ALLOW, f"{tool_name} is a safe/standard tool")
     # Question/render tools are always allowed — our in-process mc tools are safe.
@@ -117,7 +290,7 @@ def decide_tool(tool_name: str, tool_input: dict[str, Any] | None) -> ToolDecisi
     if tool_name == "AskUserQuestion" or tool_name.startswith("mcp__mc__"):
         return ToolDecision(ACTION_ALLOW, "in-process mc tool (ask_user / render)")
     if tool_name == "Bash":
-        command = (tool_input or {}).get("command", "") or ""
+        command = ti.get("command", "") or ""
         if bash_uses_videocompose_render(command):
             return ToolDecision(
                 ACTION_DENY,
@@ -125,6 +298,14 @@ def decide_tool(tool_name: str, tool_input: dict[str, Any] | None) -> ToolDecisi
                 "background renders break turn attribution. Call the `render` tool "
                 "with edit_decisions/asset_manifest/proposal_packet.",
             )
+        # Bash is free-form; flag commands that reach outside the app workspace.
+        if sandbox is not None:
+            escape = bash_path_escape_reason(command, sandbox)
+            if escape:
+                return ToolDecision(
+                    ACTION_CONFIRM,
+                    f"Bash flagged: reaches outside the app workspace ({escape})",
+                )
         label = bash_destructive_reason(command)
         if label:
             return ToolDecision(ACTION_CONFIRM, f"Bash flagged: {label}")
@@ -137,16 +318,20 @@ def decide_tool(tool_name: str, tool_input: dict[str, Any] | None) -> ToolDecisi
 ConfirmHandler = Callable[[str, dict[str, Any], str], Awaitable[bool]]
 
 
-def make_can_use_tool(confirm_handler: Optional[ConfirmHandler] = None):
+def make_can_use_tool(
+    confirm_handler: Optional[ConfirmHandler] = None,
+    sandbox: Optional[Sandbox] = None,
+):
     """Build the SDK `can_use_tool` callback from the policy.
 
     Flagged calls go to `confirm_handler`. With no handler (a fully
-    unattended run), flagged calls are DENIED — the safe default.
+    unattended run), flagged calls are DENIED — the safe default. ``sandbox``
+    (when set) confines file tools/Bash to the app's own folders.
     """
     from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 
     async def can_use_tool(tool_name: str, tool_input: dict[str, Any], context: Any):
-        decision = decide_tool(tool_name, tool_input)
+        decision = decide_tool(tool_name, tool_input, sandbox)
         if decision.action == ACTION_ALLOW:
             return PermissionResultAllow()
         if decision.action == ACTION_DENY:
@@ -337,6 +522,16 @@ def build_agent_options(
                 file=sys.stderr,
             )
 
+    # Confine the agent's file tools + Bash to the app's own folders (packaged
+    # app, or OPENNOLAN_AGENT_SANDBOX=1). None in a plain dev checkout.
+    sandbox = build_sandbox(repo_root, projects_dir)
+    if sandbox is not None:
+        print(
+            "[agent_runner] filesystem sandbox ON; agent confined to: "
+            + ", ".join(str(r) for r in sandbox.roots),
+            file=sys.stderr,
+        )
+
     return ClaudeAgentOptions(
         cwd=str(repo_root),
         system_prompt=AGENT_SYSTEM_PROMPT,
@@ -344,7 +539,7 @@ def build_agent_options(
         max_budget_usd=max_budget_usd,
         permission_mode="default",      # so can_use_tool is consulted
         setting_sources=["project"],    # load CLAUDE.md -> the contract applies
-        can_use_tool=make_can_use_tool(confirm_handler),
+        can_use_tool=make_can_use_tool(confirm_handler, sandbox),
         resume=resume,
         mcp_servers=mcp_servers or {},
         disallowed_tools=disallowed_tools or [],
@@ -729,6 +924,13 @@ class AgentRunner:
             pt = get_project_pipeline_type(self.projects_dir, project_id)
         except Exception:
             pt = None
+        # In the packaged app there is exactly one pipeline — pin it instead of
+        # telling the agent to browse pipeline_defs/ (which would let it "choose").
+        if not pt:
+            from lib import app_paths
+            from lib.pipeline_loader import PACKAGED_PIPELINES
+            if app_paths.is_packaged() and PACKAGED_PIPELINES:
+                pt = PACKAGED_PIPELINES[0]
         if pt:
             pipeline_clause = f" using the '{pt}' pipeline"
             choose_clause = ""

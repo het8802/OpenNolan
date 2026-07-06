@@ -12,7 +12,14 @@ from typing import Any, Optional
 import yaml
 import jsonschema
 
+from lib import app_paths
+
 PIPELINE_DEFS_DIR = Path(__file__).resolve().parent.parent / "pipeline_defs"
+
+# The packaged Mac app ships a SINGLE pipeline. A dev checkout keeps them all.
+# The bundle still contains every manifest (they are inert data); this list is
+# what the app actually offers/validates/uses when running as the packaged app.
+PACKAGED_PIPELINES: tuple[str, ...] = ("instagram-fast-reel",)
 SCHEMA_PATH = (
     Path(__file__).resolve().parent.parent
     / "schemas"
@@ -50,10 +57,25 @@ def load_pipeline(name: str, defs_dir: Optional[Path] = None) -> dict[str, Any]:
     return manifest
 
 
-def list_pipelines(defs_dir: Optional[Path] = None) -> list[str]:
-    """List all available pipeline manifest names."""
+def list_pipelines(
+    defs_dir: Optional[Path] = None,
+    *,
+    packaged: Optional[bool] = None,
+) -> list[str]:
+    """List available pipeline manifest names.
+
+    In the packaged Mac app the list is restricted to ``PACKAGED_PIPELINES``; a
+    dev checkout returns every manifest. ``packaged`` overrides the auto-detect
+    (``app_paths.is_packaged()``) — pass it explicitly in tests.
+    """
     defs_dir = defs_dir or PIPELINE_DEFS_DIR
-    return [p.stem for p in defs_dir.glob("*.yaml")]
+    names = [p.stem for p in defs_dir.glob("*.yaml")]
+    if packaged is None:
+        packaged = app_paths.is_packaged()
+    if packaged:
+        allow = set(PACKAGED_PIPELINES)
+        names = [n for n in names if n in allow]
+    return names
 
 
 def _condition_is_active(condition: Optional[str], context: Optional[dict[str, Any]]) -> bool:

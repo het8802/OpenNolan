@@ -70,3 +70,14 @@ def cache_dir() -> Path:
     routed under here by the bootstrapper so nothing scatters into the user's ~ or the bundle."""
     override = os.environ.get("OPENNOLAN_CACHE_DIR")
     return Path(override) if override else home() / "cache"
+
+
+def is_packaged() -> bool:
+    """True when running inside the packaged Mac app, False in a dev checkout.
+
+    The Electron shell (desktop/main.js) sets OPENNOLAN_CODE_ROOT before it spawns
+    the backend, and ONLY in a packaged build (app.isPackaged). A dev checkout leaves
+    it unset. This is the single signal used to gate packaged-only behavior:
+    the restricted pipeline/style catalogue and the agent's filesystem sandbox.
+    Read live from the environment (not cached) to match the rest of this module."""
+    return bool(os.environ.get("OPENNOLAN_CODE_ROOT"))

@@ -16,7 +16,17 @@ from typing import Any, Optional
 import yaml
 import jsonschema
 
+from lib import app_paths
+
 STYLES_DIR = Path(__file__).resolve().parent
+
+# The packaged Mac app offers exactly TWO styles; a dev checkout keeps them all.
+# These are the two playbooks the instagram-fast-reel pipeline is built around
+# (Anthropic editorial surface + Greg Isenberg motion grammar).
+PACKAGED_PLAYBOOKS: tuple[str, ...] = (
+    "anthropic-editorial-animated",
+    "greg-isenberg-product-explainer",
+)
 SCHEMA_PATH = (
     Path(__file__).resolve().parent.parent
     / "schemas"
@@ -58,14 +68,29 @@ def validate_playbook(playbook: dict) -> None:
     jsonschema.validate(instance=playbook, schema=schema)
 
 
-def list_playbooks(styles_dir: Optional[Path] = None) -> list[str]:
-    """List all available playbook names."""
+def list_playbooks(
+    styles_dir: Optional[Path] = None,
+    *,
+    packaged: Optional[bool] = None,
+) -> list[str]:
+    """List available playbook names.
+
+    In the packaged Mac app the list is restricted to ``PACKAGED_PLAYBOOKS``; a
+    dev checkout returns every playbook. ``packaged`` overrides the auto-detect
+    (``app_paths.is_packaged()``) — pass it explicitly in tests.
+    """
     styles_dir = styles_dir or STYLES_DIR
-    return [
+    names = [
         p.stem
         for p in styles_dir.glob("*.yaml")
         if p.stem != "__pycache__"
     ]
+    if packaged is None:
+        packaged = app_paths.is_packaged()
+    if packaged:
+        allow = set(PACKAGED_PLAYBOOKS)
+        names = [n for n in names if n in allow]
+    return names
 
 
 # ---------------------------------------------------------------------------

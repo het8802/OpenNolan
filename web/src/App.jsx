@@ -346,8 +346,10 @@ function EnvModal({ onClose }) {
 }
 
 function CreateModal({ pipelines, onClose, onCreate }) {
+  // Packaged app ships a single pipeline → preselect it (no "agent decides").
+  const single = pipelines.length === 1
   const [name, setName] = useState('')
-  const [pipeline, setPipeline] = useState('')   // '' = let the agent decide
+  const [pipeline, setPipeline] = useState(single ? pipelines[0].name : '')   // '' = let the agent decide
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
@@ -370,8 +372,8 @@ function CreateModal({ pipelines, onClose, onCreate }) {
         </label>
         <label className="modal-field">
           <span>Pipeline type</span>
-          <select value={pipeline} onChange={e => setPipeline(e.target.value)}>
-            <option value="">✨ Let the agent decide</option>
+          <select value={pipeline} onChange={e => setPipeline(e.target.value)} disabled={single}>
+            {!single && <option value="">✨ Let the agent decide</option>}
             {pipelines.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
           </select>
         </label>
