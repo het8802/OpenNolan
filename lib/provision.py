@@ -243,9 +243,14 @@ def core_ok() -> bool:
 
 
 def ffmpeg_ok() -> bool:
+    # BOTH binaries are required: probe_output/HDR-detection shell out to ffprobe, so an ffmpeg-only
+    # environment still 503s on every probe. Report ready only when both resolve.
     if forced():
         return False
-    return shutil.which("ffmpeg") is not None or (bin_dir() / "ffmpeg").exists()
+
+    def _have(name: str) -> bool:
+        return shutil.which(name) is not None or (bin_dir() / name).exists()
+    return _have("ffmpeg") and _have("ffprobe")
 
 
 # ── composition status (OPN-3) ──────────────────────────────────────────────────
@@ -377,12 +382,14 @@ def provision_core(progress: Optional[ProgressCb] = None, step: Optional[StepCb]
     if progress:
         progress(f"Setting up OpenNolan runtime in {rt} …")
 
-    # 1) fresh venv in a temp location (so a crash never leaves a half-venv at the real path)
+    # 1) fresh venv in a temp location (so a crash never leaves a half-venv at the real path).
+    #    `--seed` installs pip/setuptools into the venv — `uv venv` OMITS pip by default, which left
+    #    the runtime with no `python -m pip` for lazy capability-pack installs that shell out to pip.
     _step(step, 0, 3, "Creating Python environment…")
     shutil.rmtree(building, ignore_errors=True)
     uv = _uv()
     if uv:
-        _run([uv, "venv", "--python", base_python(), str(building)], progress)
+        _run([uv, "venv", "--seed", "--python", base_python(), str(building)], progress)
     else:
         _run([base_python(), "-m", "venv", str(building)], progress)
     building_python = building / "bin" / "python"
@@ -496,9 +503,15 @@ def provision_ffmpeg(progress: Optional[ProgressCb] = None, step: Optional[StepC
     `span` is this function's slice of the caller's 0-100 progress scale; each binary gets an equal
     sub-slice and reports REAL byte progress within it (Content-Length is known for these downloads)."""
     s0, s1 = span
-    if shutil.which("ffmpeg") and shutil.which("ffprobe"):
+    # PACKAGED: ALWAYS provision our own ffmpeg into runtime/bin — do NOT trust a `shutil.which` hit.
+    # Provisioning may run with a richer PATH (e.g. a dev shell, or a system/Homebrew ffmpeg) than the
+    # packaged BACKEND, which is Finder-launched with a minimal PATH (/usr/bin:/bin) + runtime/bin. A
+    # system ffmpeg found here would NOT be on the backend's PATH at runtime → the old early-return
+    # left runtime/bin empty and every probe/cut failed with "ffprobe not found". Our own copy in
+    # runtime/bin (which main.js prepends) is the only reliable guarantee. DEV: a PATH ffmpeg is fine.
+    if not app_paths.is_packaged() and shutil.which("ffmpeg") and shutil.which("ffprobe"):
         if progress:
-            progress("ffmpeg found on PATH — using it.")
+            progress("ffmpeg found on PATH — using it (dev).")
         _step(step, s1, s1, "ffmpeg ready.")
         return
     bd = bin_dir()
@@ -551,9 +564,12 @@ def provision_ffmpeg(progress: Optional[ProgressCb] = None, step: Optional[StepC
         # then ad-hoc sign so Gatekeeper never blocks the spawn under a hardened parent.
         subprocess.run(["xattr", "-dr", "com.apple.quarantine", str(dest)], capture_output=True)
         subprocess.run(["codesign", "--force", "--sign", "-", str(dest)], capture_output=True)
-    # verify
+    # verify BOTH binaries actually execute — ffprobe is downloaded from an independent URL and is
+    # what probe_output/HDR-detection call, so a corrupt/incompatible ffprobe that slipped past an
+    # ffmpeg-only check would still 503 every probe while provisioning reported success.
     _step(step, s1, s1, "Verifying ffmpeg…")
     _run([str(bd / "ffmpeg"), "-version"], progress)
+    _run([str(bd / "ffprobe"), "-version"], progress)
 
 
 def print_ffmpeg_shas(progress: Optional[ProgressCb] = None) -> dict:

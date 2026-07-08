@@ -38,6 +38,47 @@ export const disconnectAuth = () => fetch('/api/auth/disconnect', { method: 'POS
 
 export const getState = (id) => fetch(`/api/projects/${id}/state`).then(json)
 export const getCapabilities = () => fetch('/api/capabilities').then(json)
+
+// First-run / capability provisioning status: core/ffmpeg/composition + per-pack installed flags
+// and metadata (label, size_mb). Drives the Capabilities settings panel.
+export const getDoctor = () => fetch('/api/doctor').then(json)
+
+// Install a lazy capability pack (transcription/vision/bg-removal/beat-sync/tts). Streams NDJSON
+// frames {type:'log'|'done'|'error', ...} while pip runs — plain newline-delimited JSON (NOT the
+// SSE `data:` framing that chatStream uses), so parse line-by-line.
+export async function* provisionStream(pack, signal) {
+  const resp = await fetch(`/api/provision/${encodeURIComponent(pack)}`, { method: 'POST', signal })
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}))
+    throw new Error(body.detail || `install failed (${resp.status})`)
+  }
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let nl
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const raw = buffer.slice(0, nl).trim()
+      buffer = buffer.slice(nl + 1)
+      if (!raw) continue
+      try { yield JSON.parse(raw) } catch { /* ignore malformed line */ }
+    }
+  }
+  const tail = buffer.trim()
+  if (tail) { try { yield JSON.parse(tail) } catch { /* ignore */ } }
+}
+
+// Answer an agent `request_capability` prompt: unblock the waiting tool after the UI installed
+// (installed=true → agent retries) or the user declined (installed=false).
+export const provideCapability = (id, cap_request_id, installed) =>
+  fetch(`/api/projects/${id}/agent/provide-capability`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cap_request_id, installed }),
+  }).then(json)
 export const listAssets = (id) => fetch(`/api/projects/${id}/assets`).then(json)
 // `v` is an optional cache-bust token (e.g. a file's mtime). Including it makes the
 // URL change when the file's contents change, so a <video>/<img> re-fetches the new

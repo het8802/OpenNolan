@@ -8,6 +8,7 @@ CLAUDE_CODE_OAUTH_TOKEN required.
 
 import asyncio
 import sys
+import shlex
 import tempfile
 from pathlib import Path
 
@@ -149,9 +150,30 @@ def test_sandbox_bash_in_bounds_allowed(tmp_path):
         "echo hi 2>/dev/null",
         "ls -la .",
         "curl https://example.com/api",  # a URL is not a filesystem escape
+        "curl https://example.com/api?a=/etc/x",  # =/path inside a URL is not an assignment
     ]:
         assert bash_path_escape_reason(cmd, sb) is None, cmd
         assert decide_tool("Bash", {"command": cmd}, sb).action == ACTION_ALLOW, cmd
+
+
+def test_sandbox_bash_allows_quoted_in_bounds_path_with_spaces(tmp_path):
+    """Regression: a quoted in-bounds path CONTAINING A SPACE must not be flagged. The app's own
+    data dir is under macOS '~/Library/Application Support/…' — the old space-splitting regex
+    truncated the quoted path at the space and flagged the (out-of-bounds) prefix."""
+    root = tmp_path / "Application Support" / "opennolan-desktop" / "projects"
+    root.mkdir(parents=True)
+    sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(), root.resolve()))
+    vid = root / "test-proj-1" / "assets" / "video" / "clip.MP4"
+    # bare, quoted, VAR=, and an unterminated `python -c "` trailing (the exact shape we hit)
+    for cmd in [
+        f'ffprobe "{vid}"',
+        f'V="{vid}"\npython -c "',
+        f'cat {shlex.quote(str(vid))}',
+    ]:
+        assert bash_path_escape_reason(cmd, sb) is None, cmd
+        assert decide_tool("Bash", {"command": cmd}, sb).action == ACTION_ALLOW, cmd
+    # a QUOTED path with spaces that truly escapes is still caught
+    assert bash_path_escape_reason('cat "/Users/someone/secret file.txt"', sb) is not None
 
 
 def test_build_sandbox_none_in_dev(monkeypatch):

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 import pkgutil
 from types import ModuleType
 from typing import Any, Optional
@@ -123,7 +124,18 @@ class ToolRegistry:
         for module_info in pkgutil.walk_packages(package_paths, f"{package.__name__}."):
             if module_info.name.endswith(".base_tool") or module_info.name.endswith(".tool_registry"):
                 continue
-            module = importlib.import_module(module_info.name)
+            # Fault-isolate each module import. A single tool with a heavy top-level import (e.g.
+            # `import numpy` in a tool whose capability pack isn't installed) must NOT abort discovery
+            # for the ENTIRE registry — otherwise one missing optional dep makes the agent blind to
+            # every tool. Skip + warn; the tool simply won't be registered (its get_status would have
+            # reported unavailable anyway).
+            try:
+                module = importlib.import_module(module_info.name)
+            except Exception as exc:  # ImportError, or anything a module raises at import time
+                logging.getLogger(__name__).warning(
+                    "tool discovery: skipping %s (import failed: %s)", module_info.name, exc
+                )
+                continue
             discovered.extend(self.register_module(module))
 
         self._discovered_packages.add(package_name)

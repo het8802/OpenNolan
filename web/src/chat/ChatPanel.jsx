@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import { TOOL_ICON, formatToolInput, AGENT_MODELS, DEFAULT_MODEL } from './chatUtils.js'
 import { ClaudeLogo, IconAlert, IconKey, IconEye, IconEyeOff } from '../components/icons.jsx'
+import CapabilityInstall from '../CapabilityInstall.jsx'
 
 // Configure marked for safe, compact output
 marked.setOptions({ breaks: true, gfm: true })
@@ -14,9 +15,10 @@ marked.setOptions({ breaks: true, gfm: true })
 export default function ChatPanel({ chat, disabled = false, className = '', auth, onReconnect }) {
   const {
     messages, input, setInput, busy,
-    pendingConfirm, pendingQuestion, pendingKeyRequest, renderingStage, toolResults,
+    pendingConfirm, pendingQuestion, pendingKeyRequest, pendingCapability, renderingStage, toolResults,
     threads, activeThread, model = DEFAULT_MODEL, setModel,
     send, stop, newChat, loadThread, resolveConfirm, answerQuestion, provideKey, skipKeyRequest,
+    resolveCapability,
   } = chat
 
   const endRef = useRef(null)
@@ -34,7 +36,7 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
   // to read history. Scrolling up parks them there until they return to bottom.
   useEffect(() => {
     if (stickRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, pendingConfirm, pendingQuestion, pendingKeyRequest, renderingStage])
+  }, [messages, pendingConfirm, pendingQuestion, pendingKeyRequest, pendingCapability, renderingStage])
 
   function onMessagesScroll() {
     const el = msgsRef.current
@@ -93,6 +95,7 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
       </div>
       {pendingQuestion && <QuestionCard q={pendingQuestion} onAnswer={answerQuestion} />}
       {pendingKeyRequest && <ApiKeyCard req={pendingKeyRequest} onProvide={provideKey} onSkip={skipKeyRequest} />}
+      {pendingCapability && <CapabilityCard req={pendingCapability} onResolve={resolveCapability} />}
       {auth && (!auth.authenticated || auth.needs_reauth) && onReconnect && (
         <div className="auth-reconnect">
           <span className="auth-reconnect-msg">
@@ -241,6 +244,33 @@ function ApiKeyCard({ req, onProvide, onSkip }) {
         <button className="ak-skip" onClick={skip} disabled={busy}>Continue without</button>
       </div>
       <div className="ak-note">Stored locally in your BYOK keys ({req.env_var}) — never sent anywhere but {provider}.</div>
+    </div>
+  )
+}
+
+// ─── Capability Card (agent needs a missing LOCAL pack) ─────────────────────────
+// The agent hit a tool whose on-device deps aren't installed. Offer a one-time local install
+// (streamed via the shared CapabilityInstall) or "Continue without". On a completed install the
+// agent's blocked tool is unblocked to retry; declining tells it to skip that capability.
+
+function CapabilityCard({ req, onResolve }) {
+  return (
+    <div className="apikey-card">
+      <div className="ak-header">Install {req.label || req.pack}?</div>
+      <div className="ak-reason">
+        The agent needs this on-device capability{req.reason ? ` ${req.reason}` : ' to continue'}.
+        {' '}It downloads and installs locally, one time.
+      </div>
+      <CapabilityInstall
+        pack={req.pack}
+        label={req.label || req.pack}
+        sizeMb={req.size_mb}
+        onInstalled={() => onResolve(true)}
+      />
+      <div className="ak-actions">
+        <button className="ak-skip" onClick={() => onResolve(false)}>Continue without</button>
+      </div>
+      <div className="ak-note">Installed into your local runtime — nothing leaves your Mac.</div>
     </div>
   )
 }

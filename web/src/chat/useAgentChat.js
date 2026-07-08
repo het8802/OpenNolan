@@ -27,6 +27,7 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [pendingQuestion, setPendingQuestion] = useState(null)
   const [pendingKeyRequest, setPendingKeyRequest] = useState(null) // agent asked for a missing API key
+  const [pendingCapability, setPendingCapability] = useState(null) // agent asked to install a local pack
   const [renderingStage, setRenderingStage] = useState(null) // tool_use id of in-flight render
   const [toolResults, setToolResults] = useState({})          // tool_use_id -> result, for expansion
   const [threads, setThreads] = useState([])                  // chat threads for the project
@@ -41,6 +42,7 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
 
   const messagesRef = useRef([])      // latest messages, for thread persistence
   const sessionIdRef = useRef(null)   // latest agent session_id
+  const resolvingCapRef = useRef(false) // guards resolveCapability against a double-fire (install-done + decline click)
   const abortRef = useRef(null)       // aborts the in-flight chat stream (Stop)
   const onErrorRef = useRef(onError)  // decouple from a non-memoized onError so handlers stay stable
   const onAuthErrorRef = useRef(onAuthError)
@@ -55,6 +57,8 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
     setPendingConfirm(null)
     setPendingQuestion(null)
     setPendingKeyRequest(null)
+    setPendingCapability(null)
+    resolvingCapRef.current = false
     setRenderingStage(null)
     setToolResults({})
     setInput('')
@@ -160,6 +164,8 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
           setPendingQuestion(evt)
         } else if (evt.type === 'api_key_request') {
           setPendingKeyRequest(evt)
+        } else if (evt.type === 'capability_request') {
+          setPendingCapability(evt)
         } else if (evt.type === 'auth_error') {
           // Credential problem (expired/revoked token, rejected key). Surface it AND nudge the
           // app to re-check auth so the reconnect box appears above the composer.
@@ -234,6 +240,25 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
     }
   }, [pendingKeyRequest, projectId, showError])
 
+  // Resolve the agent's request_capability prompt. The card already streamed the install (or the
+  // user declined); this just unblocks the waiting tool — installed=true → agent retries.
+  const resolveCapability = useCallback(async (installed) => {
+    if (!pendingCapability || !projectId || resolvingCapRef.current) return
+    resolvingCapRef.current = true  // set synchronously so a racing decline-click + install-done resolve only once
+    const cr = pendingCapability
+    try { await api.provideCapability(projectId, cr.cap_request_id, installed) }
+    catch (e) { showError(e) }
+    finally {
+      setMessages(m => [...m, {
+        role: 'note',
+        text: installed ? `Installed ${cr.label || cr.pack} — retrying.`
+                        : `Continuing without ${cr.label || cr.pack}.`,
+      }])
+      setPendingCapability(null)
+      resolvingCapRef.current = false
+    }
+  }, [pendingCapability, projectId, showError])
+
   // Revive the project's most recent conversation when the project changes; reset when none.
   // This consolidates what App's openProject used to do, so both views land in the same chat.
   useEffect(() => {
@@ -256,8 +281,9 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
 
   return {
     messages, input, setInput, busy,
-    pendingConfirm, pendingQuestion, pendingKeyRequest, renderingStage, toolResults,
+    pendingConfirm, pendingQuestion, pendingKeyRequest, pendingCapability, renderingStage, toolResults,
     threads, activeThread, model, setModel,
     send, stop, newChat, loadThread, resolveConfirm, answerQuestion, provideKey, skipKeyRequest,
+    resolveCapability,
   }
 }

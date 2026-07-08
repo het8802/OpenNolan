@@ -601,6 +601,7 @@ def generate_ltx_modal_video(inputs: dict[str, Any]) -> ToolResult:
 
 
 def probe_output(path: Path) -> dict[str, Any]:
+    path = Path(path)  # tolerate a str path (callers pass both) — str has no .stat()/ffprobe args below
     info: dict[str, Any] = {"file_size_bytes": path.stat().st_size}
     if not shutil.which("ffprobe"):
         return info

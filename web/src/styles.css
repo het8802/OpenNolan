@@ -1200,3 +1200,45 @@ body.st-scrubbing, body.st-scrubbing * { cursor: ew-resize !important; user-sele
 .linkish { background: transparent; border: none; color: var(--accent); padding: 0; font: inherit;
   font-weight: 550; cursor: pointer; text-decoration: none; }
 .linkish:hover { text-decoration: underline; filter: none; background: transparent; }
+
+/* ─── Capabilities (optional on-device packs) ──────────────────────────────── */
+/* Two header buttons (Capabilities · BYOK) sit together at the right. */
+.byok-btn + .byok-btn { margin-left: 0.6rem; }
+
+/* Base-runtime status rows (read-only) in the Capabilities panel. */
+.rt-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; flex-wrap: wrap; }
+.rt-dot { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
+.rt-dot.ok { background: var(--green); }
+.rt-dot.bad { background: var(--red); }
+.rt-label { font-size: 0.86rem; color: var(--ink); }
+.rt-status { display: inline-flex; align-items: center; gap: 0.25rem; margin-left: auto;
+  font-size: 0.76rem; font-weight: 550; }
+.rt-status.ok { color: var(--green); }
+.rt-status.bad { color: var(--red); }
+.rt-hint { flex-basis: 100%; font-size: 0.75rem; color: var(--muted); }
+
+/* One capability pack row + its inline install progress. Reused in the settings panel and the
+   agent's in-chat install card. */
+.cap-wrap { padding: 0.15rem 0; }
+.cap-item { border: 1px solid var(--line); border-radius: var(--radius); padding: 0.6rem 0.75rem;
+  background: var(--panel); margin: 0.35rem 0; }
+.cap-item.cap-done { border-color: var(--green-soft); background: color-mix(in srgb, var(--green-soft) 35%, var(--panel)); }
+.cap-item.cap-error { border-color: var(--red-soft); }
+.cap-row { display: flex; align-items: center; gap: 0.6rem; }
+.cap-info { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.cap-label { font-size: 0.87rem; font-weight: 600; color: var(--ink); }
+.cap-size { font-size: 0.72rem; color: var(--muted); }
+.cap-reason { font-size: 0.78rem; color: var(--muted); }
+.cap-action { margin-left: auto; flex-shrink: 0; }
+.cap-btn { background: var(--accent); color: #fff; border: none; border-radius: 999px;
+  padding: 0.32rem 0.95rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+.cap-btn:hover { filter: brightness(1.05); }
+.cap-badge { font-size: 0.76rem; font-weight: 600; white-space: nowrap; }
+.cap-badge.done { color: var(--green); }
+.cap-badge.working { color: var(--accent); }
+.cap-bar { height: 6px; background: var(--line); border-radius: 999px; overflow: hidden; margin-top: 0.55rem; }
+.cap-bar > i { display: block; height: 100%; background: var(--accent); border-radius: 999px;
+  transition: width 0.3s ease; }
+.cap-latest { margin-top: 0.35rem; font-family: ui-monospace, "SF Mono", monospace; font-size: 0.72rem;
+  color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cap-err { margin-top: 0.4rem; font-size: 0.78rem; color: var(--red); }

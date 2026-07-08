@@ -436,9 +436,19 @@ function rendererUrl() {
 // Prod-only CSP (defense-in-depth for a local same-origin app). Skipped in dev
 // because Vite HMR needs inline/eval/ws. If the prod UI ever looks unstyled or
 // can't load an asset, this policy is the first thing to relax.
+//
+// SCOPED TO THE http:// APP ORIGIN ONLY. The onHeadersReceived handler is session-wide, so an
+// unscoped rewrite also lands on the setup window's file:// load — and this policy has no
+// `script-src 'unsafe-inline'`, which silently BLOCKS setup.html's script (that was the "blank
+// setup window" bug: the page JS never ran, so no progress ever rendered). file:// setup assets
+// carry their own <meta> CSP and load an external setup.js, so we pass them through untouched.
 function applyCsp() {
   if (DEV) return;
   session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
+    if (!/^https?:/i.test(details.url || '')) {
+      cb({}); // file:// (setup window, packaged assets) — leave its own CSP alone
+      return;
+    }
     cb({
       responseHeaders: {
         ...details.responseHeaders,

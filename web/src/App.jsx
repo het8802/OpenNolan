@@ -4,6 +4,7 @@ import { LineChart } from './components/LineChart.jsx'
 import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, ClaudeLogo } from './components/icons.jsx'
 import Studio from './studio/Studio.jsx'
 import ChatPanel from './chat/ChatPanel.jsx'
+import CapabilitiesModal from './CapabilitiesModal.jsx'
 import { useAgentChat } from './chat/useAgentChat.js'
 import { useAuth } from './auth/useAuth.js'
 import ConnectClaudeModal from './auth/ConnectClaudeModal.jsx'
@@ -165,6 +166,7 @@ function fmtDate(s) {
 function Dashboard({ pipelines, projects, onOpen, onCreate, auth, onConnect }) {
   const [creating, setCreating] = useState(false)
   const [showEnv, setShowEnv] = useState(false)
+  const [showCaps, setShowCaps] = useState(false)
   const sorted = [...projects].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
   // auth === null while the first status check is in flight — don't flash the CTA before we know.
   const connected = auth?.authenticated
@@ -182,6 +184,9 @@ function Dashboard({ pipelines, projects, onOpen, onCreate, auth, onConnect }) {
             <ClaudeLogo size={15} /> Re-authenticate with Claude
           </button>
         )}
+        <button className="byok-btn" onClick={() => setShowCaps(true)} title="Manage optional on-device capabilities">
+          Capabilities
+        </button>
         <button className="byok-btn" onClick={() => setShowEnv(true)} title="Manage your API keys (.env)">
           <IconKey /> BYOK
         </button>
@@ -238,6 +243,7 @@ function Dashboard({ pipelines, projects, onOpen, onCreate, auth, onConnect }) {
         <CreateModal pipelines={pipelines} onClose={() => setCreating(false)} onCreate={onCreate} />
       )}
       {showEnv && <EnvModal onClose={() => setShowEnv(false)} />}
+      {showCaps && <CapabilitiesModal onClose={() => setShowCaps(false)} />}
     </div>
   )
 }

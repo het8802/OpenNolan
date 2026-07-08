@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import shutil
 import sys
 import tempfile
@@ -137,15 +138,6 @@ _PATH_TOOLS = frozenset({
 # Harmless device paths a shell command may legitimately reference.
 _BASH_OK_PATHS = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
 # Path-like tokens in a shell command: ~…, $HOME…, /abs…, ./rel…, ../rel…
-_BASH_PATH_TOKEN = re.compile(
-    r"(?:^|[\s=:'\"(<>|&;`])"
-    r"(~[^\s'\"|&;:)<>`]*"
-    r"|\$\{?HOME\}?[^\s'\"|&;:)<>`]*"
-    r"|/[^\s'\"|&;:)<>`]*"
-    r"|\.\.?/[^\s'\"|&;:)<>`]*)"
-)
-
-
 def _truthy(value: Optional[str]) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -198,6 +190,43 @@ def _tool_paths(tool_name: str, ti: dict[str, Any]) -> list[str]:
     return out
 
 
+def _bash_tokens(command: str) -> list[str]:
+    """Tokenize a shell command RESPECTING quotes, so a quoted path containing spaces stays ONE
+    token (e.g. "~/Library/Application Support/…" — the app's own data dir has a space in it).
+    Tolerant of unbalanced quotes / odd syntax (an unterminated `python -c "…` is common): we keep
+    whatever fully-formed tokens were lexed before the error. Best-effort by design — the file-tool
+    boundary in decide_tool is the hard guarantee."""
+    try:
+        lex = shlex.shlex(command, posix=True, punctuation_chars=True)  # split off ; | & < > ( )
+        lex.whitespace_split = True
+        out: list[str] = []
+        try:
+            for tok in lex:
+                out.append(tok)
+        except ValueError:
+            pass  # unterminated quote / bad syntax — return the prefix we managed to lex
+        return out
+    except Exception:
+        return command.split()
+
+
+def _looks_like_path(s: str) -> bool:
+    """A token worth boundary-checking: an absolute path, ~, ./ or ../, or a $HOME-rooted path.
+    A bare relative token (e.g. `projects/x`) resolves under the in-bounds cwd, so it's not flagged
+    here (mirrors the old regex, which only matched these same prefixes)."""
+    return s.startswith(("/", "~", "./", "../", "$HOME", "${HOME}"))
+
+
+def _path_candidates(token: str):
+    """The path-like strings hiding in a token: the token itself, plus the value of an
+    assignment/flag (`VAR=/path`, `--out=/path`). The `=` split is gated to a real var/flag head so
+    a URL like `https://x/api?a=/y` isn't mis-split into a bogus `/y` path."""
+    yield token
+    head, sep, tail = token.partition("=")
+    if sep and tail and re.fullmatch(r"[-A-Za-z_][\w.-]*", head):
+        yield tail
+
+
 def bash_path_escape_reason(command: str, sandbox: Sandbox) -> Optional[str]:
     """Return the first path-like token in a shell command that resolves OUTSIDE
     the sandbox, else None.
@@ -206,14 +235,17 @@ def bash_path_escape_reason(command: str, sandbox: Sandbox) -> Optional[str]:
     to other folders, ~, $HOME) but a shell can hide paths behind variables or
     substitution, so this is defense-in-depth — the file-tool boundary is the
     hard guarantee."""
-    for m in _BASH_PATH_TOKEN.finditer(command):
-        tok = m.group(1).rstrip(".,:;")
-        if not tok or tok.startswith("//"):  # "//" → URL authority, not a path
-            continue
-        if tok in _BASH_OK_PATHS:
-            continue
-        if not _within(tok, sandbox, expand_vars=True):
-            return tok
+    for token in _bash_tokens(command):
+        for cand in _path_candidates(token):
+            cand = cand.rstrip(".,:;")
+            if not cand or cand.startswith("//"):  # "//" → URL authority, not a path
+                continue
+            if not _looks_like_path(cand):
+                continue
+            if cand in _BASH_OK_PATHS:
+                continue
+            if not _within(cand, sandbox, expand_vars=True):
+                return cand
     return None
 
 
@@ -387,6 +419,17 @@ provider name and reason) — a secure input appears in the chat. If the user pr
 is saved to their keychain and the tool returns {provided: true}; then RETRY the tool that \
 needed it. If it returns {provided: false} the user declined — do NOT retry; use an alternative \
 or continue without that capability and tell the user exactly what you skipped.
+
+MISSING LOCAL DEPENDENCY: if a LOCAL (on-device) tool fails because its Python packages are not \
+installed (e.g. "faster_whisper not installed", "No module named cv2 / mediapipe / librosa / \
+rembg"), do NOT hand-run pip or tell the user to install anything. Call the `request_capability` \
+tool with the matching pack — 'transcription' (speech-to-text / captions), 'vision' \
+(auto-reframe / face tracking), 'bg-removal', 'beat-sync' (music beats), or 'tts' (local \
+text-to-speech). An install card appears in the chat; if the user approves, the pack downloads \
+into the managed runtime and the tool returns {installed: true} — then RETRY the tool. If \
+{installed: false}, the user declined — do NOT retry; use an alternative or continue without it \
+and tell the user what you skipped. (Use request_api_key for missing CLOUD keys; use \
+request_capability for missing LOCAL packs — never raw pip.)
 
 To SAVE any file you produce (image/video/audio/music, an intermediate scene clip, or the final \
 deliverable), call the `store_asset` tool with its `kind` and `src` — it places the file in the \
@@ -723,6 +766,8 @@ class AgentRunner:
     _question_seq: int = field(default=0, init=False)
     _key_requests: dict[str, asyncio.Future] = field(default_factory=dict, init=False)  # key_request_id -> provided(bool) future
     _key_seq: int = field(default=0, init=False)
+    _cap_requests: dict[str, asyncio.Future] = field(default_factory=dict, init=False)  # cap_request_id -> installed(bool) future
+    _cap_seq: int = field(default=0, init=False)
     _session_ids: dict[str, str] = field(default_factory=dict, init=False)   # last session_id per project
     _resume_next: dict[str, bool] = field(default_factory=dict, init=False)  # rebuild-with-resume after error
     _fresh_client: dict[str, bool] = field(default_factory=dict, init=False) # client just (re)created this turn
@@ -877,8 +922,45 @@ class AgentRunner:
                 str(args.get("reason") or "").strip(),
             )
 
+        # request_capability: the agent's LOCAL-dependency provisioner (sibling of request_api_key,
+        # but for on-device capability packs, not cloud keys). When a LOCAL tool reports its Python
+        # deps are missing (e.g. transcriber → "faster_whisper not installed"), the agent calls this
+        # instead of hand-running pip. An install card appears in the chat; the UI downloads the pack
+        # (streaming progress) into the managed runtime, then this returns {installed: true} so the
+        # agent RETRIES the tool. The five packs map to the lib.provision.PACKS registry.
+        @tool(
+            "request_capability",
+            "Install a missing LOCAL capability pack (on-device Python deps). Call this when a LOCAL "
+            "tool failed because its packages aren't installed (e.g. 'faster_whisper not installed', "
+            "'No module named cv2/mediapipe/librosa/rembg'). An install card appears in the chat; when "
+            "the user approves, the pack downloads into the managed runtime and this returns "
+            "{installed: true} — then RETRY the tool. If the user declines it returns {installed: "
+            "false} — do NOT retry; use an alternative or continue without it and say what you skipped. "
+            "This is for LOCAL packs only; for missing cloud API keys use request_api_key instead. "
+            "Packs: 'transcription' (speech-to-text / captions / video understanding), 'vision' "
+            "(auto-reframe / face tracking), 'bg-removal' (background removal), 'beat-sync' (music "
+            "beat detection), 'tts' (local text-to-speech).",
+            {
+                "type": "object",
+                "properties": {
+                    "pack": {"type": "string",
+                        "enum": ["transcription", "vision", "bg-removal", "beat-sync", "tts"],
+                        "description": "Which capability pack the failing tool needs."},
+                    "reason": {"type": "string",
+                        "description": "Short reason you need it, e.g. 'to transcribe the clip for captions'. Optional."},
+                },
+                "required": ["pack"],
+            },
+        )
+        async def request_capability(args: dict[str, Any]) -> dict[str, Any]:
+            return await self._request_capability(
+                project_id,
+                str(args.get("pack") or "").strip(),
+                str(args.get("reason") or "").strip(),
+            )
+
         mc_server = create_sdk_mcp_server(
-            "mc", "1.0.0", [ask_user, render, store_asset, request_api_key])
+            "mc", "1.0.0", [ask_user, render, store_asset, request_api_key, request_capability])
 
         # If a prior session for this project died, resume it so the agent
         # comes back with its full conversation context (on a fresh budget).
@@ -1112,6 +1194,66 @@ class AgentRunner:
         if fut is None or fut.done():
             return False
         fut.set_result(bool(provided))
+        return True
+
+    async def _request_capability(self, project_id, pack, reason) -> dict[str, Any]:
+        """Surface a capability-install prompt to the UI and block until the pack is installed (the
+        UI streams /api/provision/{pack} and then calls /provide-capability) or the user declines.
+        Returns an MCP text result carrying {installed: bool}."""
+        try:
+            from lib import provision
+            packs = provision.PACKS
+        except Exception:
+            packs = {}
+        if pack not in packs:
+            return _text_result({"error": f"unknown capability pack {pack!r}; "
+                                          f"known: {sorted(packs)}"})
+        # Already installed? Then there's nothing to ask — tell the agent to just retry.
+        try:
+            if provision.pack_installed(pack):
+                return _text_result({"installed": True, "pack": pack,
+                                     "detail": f"'{pack}' is already installed — RETRY the tool."})
+        except Exception:
+            pass
+        emit = self._emit.get(project_id)
+        if emit is None:
+            return _text_result({"installed": False,
+                                 "detail": "No user is available to approve an install right now; skip this tool."})
+        meta = packs.get(pack, {})
+        self._cap_seq += 1
+        cap_request_id = f"{project_id}:c{self._cap_seq}"
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        self._cap_requests[cap_request_id] = fut
+        await _maybe_await(emit({
+            "type": "capability_request",
+            "cap_request_id": cap_request_id,
+            "pack": pack,
+            "label": meta.get("label") or pack,
+            "size_mb": meta.get("size_mb"),
+            "reason": reason,
+        }))
+        try:
+            # Installs are large (up to ~2.6 GB) — allow far longer than the question/key timeout.
+            installed = bool(await asyncio.wait_for(fut, timeout=max(self.answer_timeout_s, 3600)))
+        except asyncio.TimeoutError:
+            return _text_result({"installed": False,
+                                 "detail": f"No response (timed out) for '{pack}'; proceed without it."})
+        finally:
+            self._cap_requests.pop(cap_request_id, None)
+        if installed:
+            return _text_result({"installed": True, "pack": pack,
+                                 "detail": f"'{pack}' is now installed — RETRY the tool that needed it."})
+        return _text_result({"installed": False, "pack": pack,
+                             "detail": f"The user declined to install '{pack}'. Do NOT retry that tool; "
+                                       f"use an alternative or continue without it and tell the user what you skipped."})
+
+    def resolve_capability_request(self, cap_request_id: str, installed: bool) -> bool:
+        """Resolve a pending request_capability prompt (called by the /provide-capability endpoint
+        AFTER the pack install stream finished). Returns True if a pending request matched."""
+        fut = self._cap_requests.get(cap_request_id)
+        if fut is None or fut.done():
+            return False
+        fut.set_result(bool(installed))
         return True
 
     # -- render tool ---------------------------------------------------------

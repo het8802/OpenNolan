@@ -107,6 +107,13 @@ class ProvideKeyRequest(BaseModel):
     skipped: bool = False
 
 
+class ProvideCapabilityRequest(BaseModel):
+    # Answer to an agent `request_capability` prompt. The UI streams the install itself; this only
+    # unblocks the waiting tool. installed=true → agent retries; false → declined/failed, agent skips.
+    cap_request_id: str
+    installed: bool = False
+
+
 class EnvUpdateRequest(BaseModel):
     # BYOK: {VARIABLE_NAME: value} edits to persist to the local .env (empty value = leave blank).
     vars: dict[str, str]
@@ -810,6 +817,18 @@ def create_app(
         # Persist happened; NOW unblock the waiting tool so it retries with the key present.
         resolved = runner.resolve_key_request(body.key_request_id, True)
         return {"resolved": resolved, "saved": True, "changed": changed}
+
+    @app.post("/api/projects/{project_id}/agent/provide-capability")
+    def agent_provide_capability(project_id: str, body: ProvideCapabilityRequest) -> dict[str, Any]:
+        """Answer an agent `request_capability` prompt. The UI installs the pack itself (by streaming
+        /api/provision/{pack}) and then calls this to unblock the waiting tool: installed=true means
+        the agent retries; installed=false (declined) means it moves on. This endpoint does NOT run
+        the install — it only resolves the agent's await after the UI's install stream finished."""
+        runner = app.state.agent_runner
+        if runner is None:
+            raise HTTPException(status_code=409, detail="no active agent runner")
+        resolved = runner.resolve_capability_request(body.cap_request_id, bool(body.installed))
+        return {"resolved": resolved}
 
     @app.post("/api/projects/{project_id}/agent/stop")
     async def agent_stop(project_id: str) -> dict[str, Any]:
