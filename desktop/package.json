@@ -62,7 +62,6 @@
       "category": "public.app-category.video",
       "icon": "build/icon.icns",
       "target": [
-        { "target": "dmg", "arch": ["arm64"] },
         { "target": "zip", "arch": ["arm64"] }
       ],
       "hardenedRuntime": true,
@@ -74,9 +73,6 @@
         "NSMicrophoneUsageDescription": "OpenNolan records audio for your videos.",
         "NSCameraUsageDescription": "OpenNolan captures video for your projects."
       }
-    },
-    "dmg": {
-      "title": "OpenNolan ${version}"
     },
     "publish": [
       {
