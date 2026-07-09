@@ -59,6 +59,32 @@ def is_enabled() -> bool:
     return True
 
 
+def _redact_paths(obj: Any) -> Any:
+    """Recursively path-redact every string in a nested structure. Used by _before_send to scrub the
+    SDK-built exception frames (abs_path/filename/value), which embed the OS username and which _scrub
+    never sees (the SDK adds `$exception_list` AFTER our properties are scrubbed)."""
+    if isinstance(obj, str):
+        return _PATH_RE.sub("[path]", obj)
+    if isinstance(obj, list):
+        return [_redact_paths(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _redact_paths(v) for k, v in obj.items()}
+    return obj
+
+
+def _before_send(event: Any) -> Any:
+    """Last gate before an event leaves the machine: strip absolute paths from event properties,
+    closing the PII leak in SDK-serialized `$exception_list` stack frames (each frame's abs_path is
+    /Users/<username>/… — the module's 'NO PII / paths stripped' contract). MUST NOT raise: the SDK
+    falls back to the UN-redacted event if this throws, so any failure re-opens the leak."""
+    try:
+        if isinstance(event, dict) and isinstance(event.get("properties"), dict):
+            event["properties"] = _redact_paths(event["properties"])
+    except Exception:
+        pass
+    return event
+
+
 def _get_client() -> Optional[Any]:
     """Lazily construct the PostHog client the FIRST time it's needed — and ONLY if enabled.
     Returns None (and stays None) whenever analytics is disabled/unavailable."""
@@ -76,6 +102,7 @@ def _get_client() -> Optional[Any]:
             project_api_key=os.environ.get("POSTHOG_KEY", _DEFAULT_KEY),
             host=os.environ.get("POSTHOG_HOST", _DEFAULT_HOST),
             enable_exception_autocapture=True,
+            before_send=_before_send,
         )
     except Exception:
         _client = None  # any init failure -> silent no-op
@@ -123,6 +150,39 @@ def capture_exception(exc: BaseException, properties: Optional[dict[str, Any]] =
         client.capture_exception(exc, distinct_id=settings.device_id(), properties=_scrub(properties))
     except Exception:
         pass
+
+
+class _ClientError(Exception):
+    """A JS (React) or Electron error re-homed into PostHog Error Tracking next to backend
+    exceptions, so there's ONE crash inbox. ponytail: the Python traceback is this one-frame shim;
+    the REAL client stack rides along in the `client_stack` property."""
+
+
+def capture_client_error(
+    source: str,
+    message: str,
+    stack: Optional[str] = None,
+    context: Optional[dict[str, Any]] = None,
+) -> None:
+    """Report a frontend/Electron error to PostHog (no-op when disabled). Paths are redacted from
+    the message + stack; free-text context values are scrubbed like any event props."""
+    client = _get_client()
+    if client is None:
+        return
+    props = _scrub(dict(context or {}))
+    props["source"] = str(source)[:80]
+    props["platform"] = "client"
+    if stack:
+        props["client_stack"] = _PATH_RE.sub("[path]", str(stack))[:8000]
+    safe = _PATH_RE.sub("[path]", str(message))[:300]
+    try:
+        # Raise + catch so the exception carries a valid (if shim-only) traceback for the SDK.
+        raise _ClientError(f"[{source}] {safe}")
+    except _ClientError as exc:
+        try:
+            client.capture_exception(exc, distinct_id=settings.device_id(), properties=props)
+        except Exception:
+            pass
 
 
 def shutdown() -> None:

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as api from './api.js'
 import { LineChart } from './components/LineChart.jsx'
-import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, ClaudeLogo } from './components/icons.jsx'
+import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, IconMessage, ClaudeLogo } from './components/icons.jsx'
 import Studio from './studio/Studio.jsx'
 import ChatPanel from './chat/ChatPanel.jsx'
 import CapabilitiesModal from './CapabilitiesModal.jsx'
@@ -167,6 +167,7 @@ function Dashboard({ pipelines, projects, onOpen, onCreate, auth, onConnect }) {
   const [creating, setCreating] = useState(false)
   const [showEnv, setShowEnv] = useState(false)
   const [showCaps, setShowCaps] = useState(false)
+  const [showFeedback, setShowFeedback] = useState(false)
   const sorted = [...projects].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
   // auth === null while the first status check is in flight — don't flash the CTA before we know.
   const connected = auth?.authenticated
@@ -186,6 +187,9 @@ function Dashboard({ pipelines, projects, onOpen, onCreate, auth, onConnect }) {
         )}
         <button className="byok-btn" onClick={() => setShowCaps(true)} title="Manage optional on-device capabilities">
           Capabilities
+        </button>
+        <button className="byok-btn" onClick={() => setShowFeedback(true)} title="Send feedback or report a problem">
+          <IconMessage /> Feedback
         </button>
         <button className="byok-btn" onClick={() => setShowEnv(true)} title="Manage your API keys (.env)">
           <IconKey /> BYOK
@@ -244,6 +248,107 @@ function Dashboard({ pipelines, projects, onOpen, onCreate, auth, onConnect }) {
       )}
       {showEnv && <EnvModal onClose={() => setShowEnv(false)} />}
       {showCaps && <CapabilitiesModal onClose={() => setShowCaps(false)} />}
+      {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
+    </div>
+  )
+}
+
+// ─── Feedback + privacy ─────────────────────────────────────────────────────────
+// One place for "tell us something" (bug/feature/other → /api/feedback) and the anonymous-usage
+// opt-out. Co-located on purpose: where we ask for feedback we also disclose telemetry + let the
+// user turn it off. Feedback is always stored locally + emitted to PostHog; email is best-effort.
+function FeedbackModal({ onClose }) {
+  const [kind, setKind] = useState('bug')
+  const [message, setMessage] = useState('')
+  const [email, setEmail] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [sent, setSent] = useState(false)
+
+  const [analyticsDisabled, setAnalyticsDisabled] = useState(null)  // null = still loading
+  useEffect(() => {
+    api.getAnalytics().then(a => setAnalyticsDisabled(!!a.disabled)).catch(() => {})
+  }, [])
+
+  async function toggleAnalytics() {
+    const next = !analyticsDisabled
+    setAnalyticsDisabled(next)  // optimistic
+    try { await api.setAnalytics(next) }
+    catch { setAnalyticsDisabled(!next) }  // revert on failure
+  }
+
+  async function submit(e) {
+    e.preventDefault()
+    if (!message.trim() || busy) return
+    setBusy(true); setErr(null)
+    try {
+      await api.sendFeedback({ kind, message: message.trim(), email: email.trim() || null })
+      setSent(true)
+    } catch (e) {
+      setErr(String(e.message || e)); setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal feedback-modal" onClick={e => e.stopPropagation()}>
+        <div className="env-head">
+          <div className="env-head-text">
+            <h3>Feedback</h3>
+            <div className="env-sub">Found a bug or have an idea? Tell us — it goes straight to the developer.</div>
+          </div>
+          <button className="am-close" onClick={onClose} title="Close" aria-label="Close"><IconX /></button>
+        </div>
+
+        {sent ? (
+          <div className="feedback-sent">
+            <IconCheck /> Thanks — your {kind === 'bug' ? 'report' : 'note'} was sent.
+            <div className="modal-actions"><button onClick={onClose}>Close</button></div>
+          </div>
+        ) : (
+          <form className="feedback-body" onSubmit={submit}>
+            {err && <div className="modal-err">⚠ {err}</div>}
+            <label className="modal-field">
+              Type
+              <select value={kind} onChange={e => setKind(e.target.value)}>
+                <option value="bug">Bug / something broke</option>
+                <option value="feature">Feature idea</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label className="modal-field">
+              Message
+              <textarea rows={5} value={message} maxLength={5000} autoFocus
+                placeholder={kind === 'bug' ? 'What happened? What did you expect?' : 'Tell us more…'}
+                onChange={e => setMessage(e.target.value)} />
+            </label>
+            <label className="modal-field">
+              Email <span className="modal-hint" style={{ marginTop: 0 }}>(optional — so we can reply)</span>
+              <input type="email" value={email} placeholder="you@example.com"
+                onChange={e => setEmail(e.target.value)} />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="modal-cancel" onClick={onClose}>Cancel</button>
+              <button type="submit" disabled={busy || !message.trim()}>{busy ? 'Sending…' : 'Send'}</button>
+            </div>
+          </form>
+        )}
+
+        <div className="feedback-privacy">
+          <label className="privacy-row">
+            <input type="checkbox"
+              checked={analyticsDisabled === false}
+              disabled={analyticsDisabled === null}
+              onChange={toggleAnalytics} />
+            <span>
+              Share anonymous usage &amp; crash data
+              <span className="modal-hint" style={{ marginTop: 0 }}>
+                No account, no file contents — an anonymous device id only. Helps us fix crashes.
+              </span>
+            </span>
+          </label>
+        </div>
+      </div>
     </div>
   )
 }

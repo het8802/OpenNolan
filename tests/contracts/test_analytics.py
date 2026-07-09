@@ -135,3 +135,109 @@ def test_scrub_redacts_paths_secrets_and_drops_freetext():
 def test_scrub_empty_is_empty():
     assert analytics._scrub(None) == {}
     assert analytics._scrub({}) == {}
+
+
+# ── analytics: client-error reporting (frontend / Electron → Error Tracking) ──────
+
+def test_capture_client_error_reports_scrubbed(monkeypatch):
+    _inject_fake_posthog(monkeypatch)
+    monkeypatch.setattr(analytics, "_under_pytest", lambda: False)
+    settings.set_value("analytics_disabled", False)
+    analytics.reset()
+
+    analytics.capture_client_error(
+        "renderer",
+        "boom at /Users/het/app.js",
+        stack="Error: boom\n at /Users/het/app.js:10",
+        context={"api_key": "sk-leak", "line": 10},
+    )
+    cap = analytics._get_client().captures[0]
+    assert isinstance(cap["exc"], analytics._ClientError)
+    assert "[path]" in str(cap["exc"]) and "/Users/het" not in str(cap["exc"])  # message path-redacted
+    props = cap["properties"]
+    assert props["source"] == "renderer" and props["platform"] == "client"
+    assert "/Users/het" not in props["client_stack"]        # stack path-redacted
+    assert props["api_key"] == "[redacted]" and props["line"] == 10  # context scrubbed like any props
+
+
+def test_before_send_redacts_username_in_exception_frames():
+    # The SDK builds $exception_list (with abs_path = /Users/<username>/…) AFTER _scrub runs, so the
+    # OS username would leak unless _before_send catches it. Use the SDK's REAL serializer + the REAL
+    # current username so this fails if the hook ever regresses.
+    import getpass
+    import json
+    import sys
+
+    from posthog.exception_utils import exceptions_from_error_tuple
+
+    try:
+        raise RuntimeError("open failed: /Users/nobody/secret.txt")
+    except Exception:
+        exc_list = exceptions_from_error_tuple(sys.exc_info())
+
+    event = {"event": "$exception", "properties": {"$exception_list": exc_list, "path": "/api/x"}}
+    out = analytics._before_send(event)
+    blob = json.dumps(out["properties"])
+    user = getpass.getuser()
+    assert user and user not in blob        # THE invariant: current OS username must not leak
+    assert "/Users/" not in blob            # no absolute user path survives (frames or message)
+    assert "nobody" not in blob             # path inside the exception message is redacted too
+    # Non-path structure is preserved (lineno present, still parseable) and URL routes are NOT
+    # over-redacted — only real filesystem prefixes match _PATH_RE.
+    assert out["properties"]["$exception_list"][0]["stacktrace"]["frames"][-1]["lineno"] > 0
+    assert out["properties"]["path"] == "/api/x"
+
+
+def test_before_send_never_raises_on_bad_input():
+    # Contract: the SDK falls back to the UN-redacted event if this raises, so it must never raise.
+    for bad in (None, {}, {"properties": None}, {"properties": {"$exception_list": "oops"}}, 42):
+        analytics._before_send(bad)  # must not raise
+
+
+def test_capture_client_error_noop_when_disabled(monkeypatch):
+    constructed = _inject_fake_posthog(monkeypatch)
+    monkeypatch.setattr(analytics, "_under_pytest", lambda: False)
+    settings.set_value("analytics_disabled", True)
+    analytics.reset()
+    analytics.capture_client_error("renderer", "x")
+    assert constructed == []  # opted out → no client, nothing sent
+
+
+# ── app wiring: telemetry endpoint + global exception handler ────────────────────
+
+def _client(monkeypatch):
+    import tempfile
+
+    from fastapi.testclient import TestClient
+
+    from server.app import create_app
+
+    return TestClient(create_app(projects_dir=tempfile.mkdtemp()), raise_server_exceptions=False)
+
+
+def test_telemetry_error_endpoint_forwards(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(analytics, "capture_client_error",
+                        lambda *a, **k: seen.setdefault("call", (a, k)))
+    resp = _client(monkeypatch).post("/api/telemetry/error",
+                                     json={"source": "renderer", "message": "kaboom", "stack": "s"})
+    assert resp.status_code == 200 and resp.json()["received"] is True
+    assert seen["call"][0][0] == "renderer" and seen["call"][0][1] == "kaboom"
+
+
+def test_unhandled_route_exception_is_reported_and_500(monkeypatch):
+    import server.app as app_mod
+
+    reported = {}
+    monkeypatch.setattr(app_mod.analytics_mod, "capture_exception",
+                        lambda exc, props=None: reported.setdefault("exc", (exc, props)))
+
+    def boom(_pdir):
+        raise RuntimeError("db exploded")
+
+    monkeypatch.setattr(app_mod, "list_projects", boom)  # make a real route throw
+
+    resp = _client(monkeypatch).get("/api/projects")
+    assert resp.status_code == 500                                  # clean 500, not a raw crash
+    assert isinstance(reported["exc"][0], RuntimeError)             # crash reached PostHog
+    assert reported["exc"][1]["path"] == "/api/projects"

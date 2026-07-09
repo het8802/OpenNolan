@@ -24,8 +24,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -131,6 +131,15 @@ class FeedbackRequest(BaseModel):
     diagnostics: Optional[str] = None  # optional client-attached logs/context
 
 
+class ClientErrorReport(BaseModel):
+    # A JS/renderer error posted by web/src/main.jsx (window.onerror / ErrorBoundary) or by the
+    # Electron shell. Forwarded to PostHog Error Tracking; body is redacted server-side.
+    source: str                        # e.g. "renderer", "unhandledrejection", "react-boundary"
+    message: str
+    stack: Optional[str] = None
+    context: Optional[dict[str, Any]] = None
+
+
 class DebugLogBody(BaseModel):
     # A batch from the editor's UI session recorder (web/src/debug/recorder.js).
     session: str
@@ -187,6 +196,15 @@ def create_app(
     load_env()
 
     app = FastAPI(title="OpenNolan Mission Control", version="0.1.0")
+
+    @app.exception_handler(Exception)
+    async def _report_unhandled(request: Request, exc: Exception) -> JSONResponse:
+        """Catch-all for unhandled route errors: report to PostHog (no-op when opted out / under
+        pytest) so backend crashes are visible, then return a clean 500. HTTPException has its own
+        handler and never reaches here. Streaming routes that already started a response handle
+        their own errors (see the chat SSE `drive()` below)."""
+        analytics_mod.capture_exception(exc, {"path": request.url.path, "method": request.method})
+        return JSONResponse(status_code=500, content={"detail": "internal server error"})
 
     pdir = Path(projects_dir) if projects_dir is not None else _default_projects_dir()
     source = state_source or FileStateSource(pdir)
@@ -550,7 +568,9 @@ def create_app(
             try:
                 app.state.capabilities_cache = cap_provider()
             except Exception as exc:
-                # Surface discovery failure explicitly rather than 500-ing.
+                # Surface discovery failure explicitly rather than 500-ing — and report it, since a
+                # swallowed discovery failure means the whole tool/provider menu is silently empty.
+                analytics_mod.capture_exception(exc, {"where": "capability_discovery"})
                 app.state.capabilities_cache = {"error": f"capability discovery failed: {exc}"}
         return app.state.capabilities_cache
 
@@ -635,6 +655,13 @@ def create_app(
             return feedback_mod.submit(body.kind, body.message, body.email, body.diagnostics)
         except feedback_mod.FeedbackError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+    @app.post("/api/telemetry/error")
+    def post_client_error(body: ClientErrorReport) -> dict[str, Any]:
+        """Report a frontend (React) / Electron error to PostHog Error Tracking. Always 200 — a
+        no-op when analytics is opted out; reporting must never itself error into the client."""
+        analytics_mod.capture_client_error(body.source, body.message, body.stack, body.context)
+        return {"received": True}
 
     @app.get("/api/doctor")
     def get_doctor() -> dict[str, Any]:
@@ -760,6 +787,10 @@ def create_app(
                     auth_mod.mark_auth_error(detail)
                     await queue.put({"type": "auth_error", "detail": detail})
                 else:
+                    # A real agent-turn failure (not an auth reconnect) — report it; this is where
+                    # most runtime crashes surface, and the SSE stream already started so the global
+                    # exception handler above can't see it.
+                    analytics_mod.capture_exception(exc, {"where": "agent_turn"})
                     await queue.put({"type": "error", "detail": detail})
             finally:
                 await queue.put(None)  # sentinel: stream complete

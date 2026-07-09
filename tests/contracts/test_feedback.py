@@ -18,7 +18,7 @@ def _home(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENNOLAN_HOME", str(tmp_path))
     # Neutralize analytics + email by default; individual tests opt back in.
     monkeypatch.setattr(feedback.analytics, "capture", lambda *a, **k: captured.append((a, k)))
-    for var in ("RESEND_API_KEY", "FEEDBACK_TO", "FEEDBACK_FROM"):
+    for var in ("RESEND_API_KEY", "FEEDBACK_TO", "FEEDBACK_FROM", "FEEDBACK_RELAY_URL", "FEEDBACK_RELAY_TOKEN"):
         monkeypatch.delenv(var, raising=False)
     captured.clear()
     yield
@@ -100,6 +100,45 @@ def test_email_failure_is_graceful(monkeypatch, tmp_path):
     monkeypatch.setattr(feedback.requests, "post", boom)
     out = feedback.submit("bug", "still works")
     assert out["stored"] is True and out["emailed"] is False  # stored despite email failure
+    assert (tmp_path / "feedback.jsonl").exists()
+
+
+# ── relay (public path — no secret shipped in the app) ──────────────────────────
+
+def test_relay_used_when_configured(monkeypatch, tmp_path):
+    monkeypatch.setenv("FEEDBACK_RELAY_URL", "https://opennolan.app/api/feedback")
+    monkeypatch.setenv("FEEDBACK_RELAY_TOKEN", "tok123")
+    sent = {}
+
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            return {"ok": True, "emailed": True}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        sent["url"] = url
+        sent["token"] = headers.get("X-Feedback-Token")
+        sent["json"] = json
+        return FakeResp()
+
+    monkeypatch.setattr(feedback.requests, "post", fake_post)
+    out = feedback.submit("bug", "relay this", email="u@x.com")
+    assert out["stored"] is True and out["emailed"] is True
+    assert sent["url"] == "https://opennolan.app/api/feedback"
+    assert sent["token"] == "tok123"
+    assert sent["json"]["kind"] == "bug" and sent["json"]["message"] == "relay this"
+    assert (tmp_path / "feedback.jsonl").exists()          # still stored locally regardless
+
+
+def test_relay_failure_falls_back_and_is_graceful(monkeypatch, tmp_path):
+    monkeypatch.setenv("FEEDBACK_RELAY_URL", "https://opennolan.app/api/feedback")
+
+    def boom(*a, **k):
+        raise feedback.requests.RequestException("relay down")
+
+    monkeypatch.setattr(feedback.requests, "post", boom)
+    out = feedback.submit("bug", "still stored")           # no direct Resend key either
+    assert out["stored"] is True and out["emailed"] is False
     assert (tmp_path / "feedback.jsonl").exists()
 
 

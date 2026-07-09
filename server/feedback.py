@@ -29,6 +29,11 @@ VALID_KINDS = {"bug", "feature", "other"}
 MAX_MESSAGE_CHARS = 5000
 _RESEND_ENDPOINT = "https://api.resend.com/emails"
 
+# Public feedback relay (website /api/feedback) — holds the Resend secret SERVER-side, so the packaged
+# app ships no key. This is the delivery path for the distributed app. Empty until the endpoint is
+# deployed; then set FEEDBACK_RELAY_URL in the packaged env (or fill this default with the public URL).
+_DEFAULT_RELAY_URL = ""
+
 
 class FeedbackError(ValueError):
     """Invalid submission (bad kind / empty / too-long message) — surfaced as HTTP 400."""
@@ -89,6 +94,33 @@ def _maybe_email(kind: str, message: str, email: Optional[str], diagnostics: Opt
         return False
 
 
+def _maybe_relay(kind: str, message: str, email: Optional[str], diagnostics: Optional[str]) -> bool:
+    """POST feedback to the developer's public relay (website /api/feedback), which sends the email
+    server-side with ITS OWN Resend key — so the distributed app ships no secret. Returns True iff the
+    relay accepted and emailed. Best-effort: never raises into the caller (feedback is already stored)."""
+    url = os.environ.get("FEEDBACK_RELAY_URL", _DEFAULT_RELAY_URL)
+    if not url:
+        return False
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("FEEDBACK_RELAY_TOKEN")
+    if token:
+        headers["X-Feedback-Token"] = token
+    try:
+        resp = requests.post(
+            url, headers=headers,
+            json={"kind": kind, "message": message, "email": email, "diagnostics": diagnostics},
+            timeout=10,
+        )
+        if resp.status_code >= 300:
+            return False
+        try:
+            return bool(resp.json().get("emailed"))
+        except ValueError:
+            return True  # 2xx with a non-JSON body — treat as delivered
+    except requests.RequestException:
+        return False
+
+
 def submit(
     kind: str,
     message: str,
@@ -110,5 +142,7 @@ def submit(
         "feedback_submitted",
         {"kind": kind, "message": message, "has_email": bool(email), "has_diagnostics": bool(diagnostics)},
     )
-    emailed = _maybe_email(kind, message, email, diagnostics)
+    # Public relay first (the distributed-app path, no shipped secret); direct Resend is the
+    # dev / self-host fallback when a local RESEND_API_KEY is configured instead.
+    emailed = _maybe_relay(kind, message, email, diagnostics) or _maybe_email(kind, message, email, diagnostics)
     return {"stored": True, "emailed": emailed}

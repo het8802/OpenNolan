@@ -36,6 +36,40 @@ export const connectApiKey = (api_key) =>
   }).then(json)
 export const disconnectAuth = () => fetch('/api/auth/disconnect', { method: 'POST' }).then(json)
 
+// In-app feedback (bug/feature/other). Stored locally + PostHog event + best-effort email.
+export const sendFeedback = (body) =>
+  fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(json)
+
+// Product-analytics opt-out state (+ anonymous device id) and the toggle to flip it.
+export const getAnalytics = () => fetch('/api/settings/analytics').then(json)
+export const setAnalytics = (disabled) =>
+  fetch('/api/settings/analytics', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ disabled }),
+  }).then(json)
+
+// Fire-and-forget crash reporter. Called from window.onerror / the React ErrorBoundary, so it must
+// NEVER throw (that would loop) and never use `json()` (which throws on !ok). Deduped + capped so a
+// tight render-error loop can't flood the backend.
+const _reported = new Set()
+export function reportClientError(source, message, stack, context) {
+  try {
+    const sig = `${source}:${String(message).slice(0, 200)}`
+    if (_reported.has(sig) || _reported.size > 25) return
+    _reported.add(sig)
+    fetch('/api/telemetry/error', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source, message: String(message).slice(0, 1000), stack: stack ? String(stack).slice(0, 8000) : null, context }),
+    }).catch(() => {})
+  } catch { /* reporting must never throw */ }
+}
+
 export const getState = (id) => fetch(`/api/projects/${id}/state`).then(json)
 export const getCapabilities = () => fetch('/api/capabilities').then(json)
 

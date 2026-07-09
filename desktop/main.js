@@ -15,8 +15,10 @@ const { app, BrowserWindow, dialog, shell, session } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const http = require('node:http');
+const https = require('node:https');
 const net = require('node:net');
 const fs = require('node:fs');
+const os = require('node:os');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const DEV = process.env.ELECTRON_DEV === '1';
@@ -41,9 +43,68 @@ let backendDead = false;   // set when our child exits, so health-wait can bail 
 let fatalShown = false;    // show at most one fatal dialog
 const stderrTail = [];     // ring buffer of recent backend stderr lines (for diagnostics)
 
+// ── Crash reporting (Electron layer) ──────────────────────────────────────────
+// The backend's PostHog reporter can't see main-process crashes, renderer "aw snap"s, or the case
+// that matters most for a packaged app: the backend NEVER BECOMING HEALTHY (bad venv/ffmpeg — see
+// docs/plans/publish-mac-app.md). Those must report even though /api is unreachable, so we POST
+// straight to PostHog. Public write-only key (same as server/analytics.py); opt-out is honored by
+// reading the SAME settings.json the Python side writes; the home dir is scrubbed from message+stack.
+const POSTHOG_KEY = process.env.POSTHOG_KEY || 'phc_s9P9JiTbBgmzqYGwug8ciiLnWsCSJF62Vz5UGRJsPGBE';
+const POSTHOG_HOST = process.env.POSTHOG_HOST || 'https://us.i.posthog.com';
+let errorsSent = 0;
+
+function scrubText(s) {
+  let t = String(s == null ? '' : s);
+  try { const home = os.homedir(); if (home) t = t.split(home).join('~'); } catch (_) { /* best effort */ }
+  // Same prefixes as server/analytics.py _PATH_RE, so both reporters redact absolute paths alike
+  // (home dir is already collapsed to ~ above; this catches other users' + /var //private //tmp paths).
+  return t.replace(/(\/Users\/|\/home\/|\/var\/|\/private\/|\/tmp\/)[^\s]*/g, '[path]');
+}
+
+function reportDesktopError(source, err) {
+  try {
+    if (!app.isPackaged) return;   // dev crashes surface in the terminal — keep the inbox = real users
+    if (errorsSent >= 20) return;  // never let a crash loop flood ingestion
+    // Same settings.json app_paths.home() reads (packaged: OPENNOLAN_HOME === userData). Missing file
+    // => opted in (the default). ponytail: in dev these paths can differ, but dev is gated out above.
+    let settings = {};
+    try {
+      const home = process.env.OPENNOLAN_HOME || app.getPath('userData');
+      settings = JSON.parse(fs.readFileSync(path.join(home, 'settings.json'), 'utf8')) || {};
+    } catch (_) { /* no/corrupt settings → default opted-in */ }
+    if (settings.analytics_disabled) return;
+    errorsSent++;
+    const message = scrubText((err && err.message) || err).slice(0, 500);
+    const stack = scrubText((err && err.stack) || '').slice(0, 8000);
+    const body = JSON.stringify({
+      api_key: POSTHOG_KEY,
+      event: 'desktop_error',
+      distinct_id: settings.device_id || 'desktop-unknown',
+      properties: {
+        source, message, stack, app_version: app.getVersion(),
+        os: process.platform, arch: process.arch, packaged: true,
+      },
+    });
+    const u = new URL('/capture/', POSTHOG_HOST);
+    const req = https.request(
+      { method: 'POST', hostname: u.hostname, path: u.pathname,
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        timeout: 4000 },
+      (res) => { res.on('data', () => {}); res.on('end', () => {}); },
+    );
+    req.on('error', () => {});
+    req.on('timeout', () => { try { req.destroy(); } catch (_) { /* gone */ } });
+    req.write(body);
+    req.end();
+  } catch (_) { /* reporting must NEVER throw into a crash path */ }
+}
+
 function fatal(title, message) {
   if (fatalShown) return;
   fatalShown = true;
+  // Report before the dialog — this fires for "backend won't start / exited", the crash most likely
+  // to lose a new user. Title = the grouping message; message (incl. backend stderr tail) = detail.
+  reportDesktopError('fatal', { message: title, stack: message });
   shuttingDown = true;
   stopProvision();
   stopBackend();
@@ -552,6 +613,13 @@ function stopBackend() {
   }
   backend = null;
 }
+
+// Report crashes the backend reporter can't see. Report-only (no forced exit) so behavior matches
+// today's no-handler default; the process keeps running where Electron would have.
+process.on('uncaughtException', (e) => { reportDesktopError('main-uncaught', e); console.error('[main] uncaught: ' + (e && e.stack || e)); });
+process.on('unhandledRejection', (reason) => { reportDesktopError('main-rejection', reason); console.error('[main] unhandledRejection: ' + (reason && reason.stack || reason)); });
+app.on('render-process-gone', (_e, _wc, d) => reportDesktopError('renderer-gone', { message: 'renderer gone: ' + (d && d.reason), stack: 'exitCode=' + (d && d.exitCode) }));
+app.on('child-process-gone', (_e, d) => reportDesktopError('child-gone', { message: (d && d.type || 'child') + ' gone: ' + (d && d.reason), stack: 'exitCode=' + (d && d.exitCode) }));
 
 app.whenReady().then(boot);
 
