@@ -76,6 +76,13 @@ function reportDesktopError(source, err) {
     errorsSent++;
     const message = scrubText((err && err.message) || err).slice(0, 500);
     const stack = scrubText((err && err.stack) || '').slice(0, 8000);
+    // Same internal-machine marker as server/analytics.py so the developer's own crashes filter out.
+    let internal = false;
+    try {
+      const flag = (process.env.OPENNOLAN_INTERNAL || '').trim().toLowerCase();
+      internal = (!!flag && !['0', 'false', 'no'].includes(flag))
+        || fs.existsSync(path.join(os.homedir(), '.opennolan-internal'));
+    } catch (_) { /* default: not internal */ }
     const body = JSON.stringify({
       api_key: POSTHOG_KEY,
       event: 'desktop_error',
@@ -83,6 +90,7 @@ function reportDesktopError(source, err) {
       properties: {
         source, message, stack, app_version: app.getVersion(),
         os: process.platform, arch: process.arch, packaged: true,
+        env: 'packaged', internal,
       },
     });
     const u = new URL('/capture/', POSTHOG_HOST);

@@ -137,6 +137,41 @@ def test_scrub_empty_is_empty():
     assert analytics._scrub({}) == {}
 
 
+# ── analytics: internal-machine marker + env props (filter dev/own use out) ──────
+
+def test_is_internal_via_env_var(monkeypatch, tmp_path):
+    monkeypatch.setattr(analytics.Path, "home", lambda: tmp_path)  # no sentinel in this dir
+    monkeypatch.delenv("OPENNOLAN_INTERNAL", raising=False)
+    assert analytics._is_internal() is False
+    monkeypatch.setenv("OPENNOLAN_INTERNAL", "1")
+    assert analytics._is_internal() is True
+    monkeypatch.setenv("OPENNOLAN_INTERNAL", "false")  # explicit off-values don't count
+    assert analytics._is_internal() is False
+
+
+def test_is_internal_via_sentinel_file(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENNOLAN_INTERNAL", raising=False)
+    monkeypatch.setattr(analytics.Path, "home", lambda: tmp_path)
+    assert analytics._is_internal() is False
+    (tmp_path / analytics._INTERNAL_SENTINEL).touch()
+    assert analytics._is_internal() is True
+
+
+def test_env_props_attached_to_every_event(monkeypatch, tmp_path):
+    _inject_fake_posthog(monkeypatch)
+    monkeypatch.setattr(analytics, "_under_pytest", lambda: False)
+    monkeypatch.setattr(analytics.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("OPENNOLAN_INTERNAL", "1")
+    settings.set_value("analytics_disabled", False)
+    analytics.reset()
+
+    analytics.capture("project_created", {"pipeline_type": "instagram-fast-reel"})
+    props = analytics._get_client().captures[0]["properties"]
+    assert props["internal"] is True                       # developer machine → filterable
+    assert props["env"] in ("packaged", "dev")             # build that fired it
+    assert props["pipeline_type"] == "instagram-fast-reel"  # original props preserved
+
+
 # ── analytics: client-error reporting (frontend / Electron → Error Tracking) ──────
 
 def test_capture_client_error_reports_scrubbed(monkeypatch):

@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from pathlib import Path
 from typing import Any, Optional
 
 from server import settings
@@ -42,6 +43,38 @@ _initialized = False
 
 def _under_pytest() -> bool:
     return "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
+
+
+_INTERNAL_SENTINEL = ".opennolan-internal"
+
+
+def _is_internal() -> bool:
+    """True on the developer's OWN machines, so their events can be filtered out of product analytics.
+    `env` (packaged vs dev) can't do this: the developer running the downloaded .app looks identical to
+    a real user. Marked two ways, either wins:
+      * OPENNOLAN_INTERNAL set truthy — easy in a dev shell.
+      * a sentinel file ~/.opennolan-internal — works for the Finder-launched packaged app (no env to
+        set); set once with `touch ~/.opennolan-internal`, survives reinstalls (lives in the home dir,
+        not app data)."""
+    val = os.environ.get("OPENNOLAN_INTERNAL", "").strip().lower()
+    if val and val not in ("0", "false", "no"):
+        return True
+    try:
+        return (Path.home() / _INTERNAL_SENTINEL).exists()
+    except Exception:
+        return False
+
+
+def _env_props() -> dict[str, Any]:
+    """Base properties attached to EVERY event: which build fired it (`env`) and whether it came from
+    an internal/developer machine (`internal`). This is what lets the dashboards separate real users
+    from our own use — filter `internal != true`."""
+    from lib import app_paths
+
+    return {
+        "env": "packaged" if app_paths.is_packaged() else "dev",
+        "internal": _is_internal(),
+    }
 
 
 def is_enabled() -> bool:
@@ -136,7 +169,9 @@ def capture(event: str, properties: Optional[dict[str, Any]] = None) -> None:
     if client is None:
         return
     try:
-        client.capture(distinct_id=settings.device_id(), event=event, properties=_scrub(properties))
+        props = _scrub(properties)
+        props.update(_env_props())
+        client.capture(distinct_id=settings.device_id(), event=event, properties=props)
     except Exception:
         pass  # analytics never raises into the caller
 
@@ -147,7 +182,9 @@ def capture_exception(exc: BaseException, properties: Optional[dict[str, Any]] =
     if client is None:
         return
     try:
-        client.capture_exception(exc, distinct_id=settings.device_id(), properties=_scrub(properties))
+        props = _scrub(properties)
+        props.update(_env_props())
+        client.capture_exception(exc, distinct_id=settings.device_id(), properties=props)
     except Exception:
         pass
 
@@ -170,6 +207,7 @@ def capture_client_error(
     if client is None:
         return
     props = _scrub(dict(context or {}))
+    props.update(_env_props())
     props["source"] = str(source)[:80]
     props["platform"] = "client"
     if stack:

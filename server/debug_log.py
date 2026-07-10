@@ -85,6 +85,49 @@ def latest_session() -> Optional[str]:
     return sessions[0]["session"] if sessions else None
 
 
+def delete_session(session: str) -> bool:
+    """Discard a recorded session's NDJSON file (the user chose not to send it). Returns True if a
+    file was removed, False if there was nothing to delete (idempotent). Raises ValueError on an
+    invalid session id — the same guard as the writer, so this can never unlink outside the logs dir."""
+    path = _session_path(session)  # validates the id → cannot escape logs_dir()
+    try:
+        path.unlink()
+        return True
+    except FileNotFoundError:
+        return False
+
+
+# Cap the emailed log at ~2.5 MB raw. base64 inflates ~33% (→ ~3.4 MB), which must stay under the
+# Vercel serverless request-body limit (4.5 MB) the relay runs behind. A repro is seconds of clicks,
+# so this is generous; the rare runaway session is tail-truncated (below).
+# ponytail: single global cap; if huge sessions ever need full fidelity, switch to gzip + a bigger cap.
+MAX_ATTACHMENT_BYTES = 2_500_000
+
+
+def read_session_bytes(session: str, max_bytes: int = MAX_ATTACHMENT_BYTES) -> bytes:
+    """Raw NDJSON bytes for a session, to email as a file attachment. If the file is larger than
+    max_bytes, returns the LAST max_bytes (the most recent events — where a repro's failure lands),
+    dropping a partial leading line and prefixing a truncation marker so the result is still valid
+    NDJSON. Raises FileNotFoundError / ValueError like the other readers."""
+    path = _session_path(session)
+    if not path.exists():
+        raise FileNotFoundError(session)
+    size = path.stat().st_size
+    with path.open("rb") as fh:
+        if size <= max_bytes:
+            return fh.read()
+        fh.seek(size - max_bytes)
+        tail = fh.read()
+    nl = tail.find(b"\n")  # drop the partial first line so no torn JSON object survives
+    if nl != -1:
+        tail = tail[nl + 1:]
+    marker = (
+        '{"type":"session.truncated","note":"showing last '
+        f'{len(tail)} of {size} bytes"}}\n'
+    ).encode("utf-8")
+    return marker + tail
+
+
 def _iter_events(session: str) -> Iterator[dict[str, Any]]:
     path = _session_path(session)
     if not path.exists():

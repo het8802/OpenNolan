@@ -46,6 +46,9 @@ music_library/
 *.env
 .youtube-token.json
 
+# In-app feedback / bug reports written at runtime (contains user messages + emails — never commit)
+/feedback.jsonl
+
 # Stray media downloads (test/scratch clips left in repo root)
 pexels_video_*.mp4
 

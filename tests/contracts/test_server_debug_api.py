@@ -112,6 +112,28 @@ def test_analyze_latest_and_404(tmp_path, monkeypatch):
     assert client.get("/api/debug/sessions/nope/analyze").status_code == 404
 
 
+def test_discard_deletes_session(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    session = "discard-me"
+    client.post("/api/debug/log", json={"session": session, "events": [{"type": "a"}]})
+    log = tmp_path / "ui-sessions" / f"{session}.ndjson"
+    assert log.exists()
+
+    r = client.delete(f"/api/debug/sessions/{session}")
+    assert r.status_code == 200 and r.json() == {"ok": True, "removed": True}
+    assert not log.exists()                                             # logs are gone
+    assert client.get(f"/api/debug/sessions/{session}/analyze").status_code == 404  # nothing to send
+
+    # Idempotent: discarding an already-gone session is a 200 with removed=false, not a 404/500.
+    assert client.delete(f"/api/debug/sessions/{session}").json() == {"ok": True, "removed": False}
+
+
+def test_discard_rejects_bad_session_id(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    # An over-long id fails the same guard the writer uses → 400, never an unlink outside the dir.
+    assert client.delete("/api/debug/sessions/" + "x" * 200).status_code == 400
+
+
 def test_analyze_collects_edit_history(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     session = "edits-sess"

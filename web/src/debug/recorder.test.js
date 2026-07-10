@@ -139,4 +139,26 @@ describe('recording lifecycle', () => {
     expect(isRecording()).toBe(true)
     expect(dbg.currentSession()).toBe(id)
   })
+
+  it('flushNow re-drains a batch stranded by a failed flush at stop()', async () => {
+    // The final flush at stop() fails once (transient network blip during teardown), which
+    // re-buffers the batch. flushNow() (called at send-time) must re-send it so the developer
+    // gets the COMPLETE session, not a truncated one.
+    let call = 0
+    vi.stubGlobal('fetch', vi.fn(() => {
+      call += 1
+      return call === 1
+        ? Promise.reject(new Error('network blip'))
+        : Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    }))
+    start({ projectId: 'p1' })
+    event('preview.seekReq', { to: 2 })
+    stop()                       // fires flush → fetch #1 rejects → batch re-buffered, NOT lost
+    await dbg.flushed()          // let the failed flush settle (re-buffer happens in its catch)
+    await dbg.flushNow()         // re-drain → fetch #2 succeeds
+    expect(fetch).toHaveBeenCalledTimes(2)
+    const resent = JSON.parse(fetch.mock.calls.at(-1)[1].body).events.map((e) => e.type)
+    expect(resent).toContain('preview.seekReq')  // the tail survived
+    expect(resent).toContain('session.stop')     // ...including the stop marker
+  })
 })

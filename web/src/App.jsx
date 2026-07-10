@@ -302,7 +302,7 @@ function FeedbackModal({ onClose }) {
 
         {sent ? (
           <div className="feedback-sent">
-            <IconCheck /> Thanks — your {kind === 'bug' ? 'report' : 'note'} was sent.
+            <div className="feedback-sent-msg"><IconCheck /><span>Thanks — your {kind === 'bug' ? 'report' : 'note'} was sent.</span></div>
             <div className="modal-actions"><button onClick={onClose}>Close</button></div>
           </div>
         ) : (

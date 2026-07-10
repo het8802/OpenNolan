@@ -15,6 +15,7 @@ go), never to analytics.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from datetime import datetime, timezone
@@ -30,9 +31,9 @@ MAX_MESSAGE_CHARS = 5000
 _RESEND_ENDPOINT = "https://api.resend.com/emails"
 
 # Public feedback relay (website /api/feedback) — holds the Resend secret SERVER-side, so the packaged
-# app ships no key. This is the delivery path for the distributed app. Empty until the endpoint is
-# deployed; then set FEEDBACK_RELAY_URL in the packaged env (or fill this default with the public URL).
-_DEFAULT_RELAY_URL = ""
+# app ships no key. This is the delivery path for the distributed app. FEEDBACK_RELAY_URL overrides it.
+# Points at the canonical www host directly (not the apex) so a POST isn't bounced through a redirect.
+_DEFAULT_RELAY_URL = "https://www.opennolan.com/api/feedback"
 
 
 class FeedbackError(ValueError):
@@ -56,6 +57,24 @@ def _validate(kind: str, message: str) -> None:
         raise FeedbackError(f"message too long (max {MAX_MESSAGE_CHARS} chars)")
 
 
+def _debug_attachment(session: Optional[str]) -> Optional[dict[str, str]]:
+    """Build a Resend email attachment {filename, content(base64)} from a recorded session's raw
+    NDJSON log, so the developer gets the log as a FILE (not pasted into the email body). Best-effort:
+    a missing/bad/unreadable session returns None — the feedback must still send. Never raises."""
+    if not session:
+        return None
+    try:
+        from server import debug_log  # local import: only the debug-report path pays for it
+
+        raw = debug_log.read_session_bytes(session)
+        return {
+            "filename": f"debug-session-{session}.ndjson",
+            "content": base64.b64encode(raw).decode("ascii"),
+        }
+    except Exception:  # the attachment is diagnostic, never load-bearing — don't lose the feedback
+        return None
+
+
 def _append_record(record: dict[str, Any]) -> None:
     """Append one JSON line. O_APPEND makes a single small line write atomic on local fs, so a
     concurrent reader never sees a torn line."""
@@ -65,7 +84,10 @@ def _append_record(record: dict[str, Any]) -> None:
         fh.write(json.dumps(record) + "\n")
 
 
-def _maybe_email(kind: str, message: str, email: Optional[str], diagnostics: Optional[str]) -> bool:
+def _maybe_email(
+    kind: str, message: str, email: Optional[str], diagnostics: Optional[str],
+    attachments: Optional[list[dict[str, str]]] = None,
+) -> bool:
     """Send the feedback email via Resend if configured. Returns True iff an email was sent.
     Never raises into the caller — a mail failure must not fail the whole submission."""
     api_key = os.environ.get("RESEND_API_KEY")
@@ -86,15 +108,19 @@ def _maybe_email(kind: str, message: str, email: Optional[str], diagnostics: Opt
                 "subject": f"OpenNolan {kind}: {message.strip().splitlines()[0][:60]}",
                 "text": body,
                 **({"reply_to": email} if email else {}),
+                **({"attachments": attachments} if attachments else {}),
             },
-            timeout=10,
+            timeout=15,
         )
         return resp.status_code < 300
     except requests.RequestException:
         return False
 
 
-def _maybe_relay(kind: str, message: str, email: Optional[str], diagnostics: Optional[str]) -> bool:
+def _maybe_relay(
+    kind: str, message: str, email: Optional[str], diagnostics: Optional[str],
+    attachments: Optional[list[dict[str, str]]] = None,
+) -> bool:
     """POST feedback to the developer's public relay (website /api/feedback), which sends the email
     server-side with ITS OWN Resend key — so the distributed app ships no secret. Returns True iff the
     relay accepted and emailed. Best-effort: never raises into the caller (feedback is already stored)."""
@@ -105,11 +131,14 @@ def _maybe_relay(kind: str, message: str, email: Optional[str], diagnostics: Opt
     token = os.environ.get("FEEDBACK_RELAY_TOKEN")
     if token:
         headers["X-Feedback-Token"] = token
+    payload: dict[str, Any] = {"kind": kind, "message": message, "email": email, "diagnostics": diagnostics}
+    if attachments:
+        payload["attachments"] = attachments
     try:
         resp = requests.post(
             url, headers=headers,
-            json={"kind": kind, "message": message, "email": email, "diagnostics": diagnostics},
-            timeout=10,
+            json=payload,
+            timeout=15,
         )
         if resp.status_code >= 300:
             return False
@@ -126,23 +155,37 @@ def submit(
     message: str,
     email: Optional[str] = None,
     diagnostics: Optional[str] = None,
+    debug_session: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Validate + record + report a feedback submission. Raises FeedbackError on bad input."""
+    """Validate + record + report a feedback submission. Raises FeedbackError on bad input.
+
+    When `debug_session` is given (the editor's "Send debug report" flow), that recorded session's raw
+    NDJSON log is emailed to the developer as a FILE ATTACHMENT (not pasted into the body)."""
     _validate(kind, message)
+    attachment = _debug_attachment(debug_session)
+    attachments = [attachment] if attachment else None
     record = {
         "ts": _now_iso(),
         "kind": kind,
         "message": message,
         "email": email or None,
         "diagnostics": diagnostics or None,
+        "debug_session": debug_session or None,
     }
-    _append_record(record)  # durable first — never lose feedback
+    _append_record(record)  # durable first — never lose feedback (the raw log also stays on disk)
     # Analytics gets metadata only; _scrub turns "message" into "message_len" and never sends the body.
     analytics.capture(
         "feedback_submitted",
-        {"kind": kind, "message": message, "has_email": bool(email), "has_diagnostics": bool(diagnostics)},
+        {
+            "kind": kind, "message": message, "has_email": bool(email),
+            "has_diagnostics": bool(diagnostics), "has_debug_session": bool(debug_session),
+            "has_attachment": bool(attachment),
+        },
     )
     # Public relay first (the distributed-app path, no shipped secret); direct Resend is the
     # dev / self-host fallback when a local RESEND_API_KEY is configured instead.
-    emailed = _maybe_relay(kind, message, email, diagnostics) or _maybe_email(kind, message, email, diagnostics)
+    emailed = (
+        _maybe_relay(kind, message, email, diagnostics, attachments)
+        or _maybe_email(kind, message, email, diagnostics, attachments)
+    )
     return {"stored": True, "emailed": emailed}

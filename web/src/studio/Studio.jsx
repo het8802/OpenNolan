@@ -17,6 +17,7 @@ import StudioTimeline from './StudioTimeline.jsx'
 import StudioInspector from './StudioInspector.jsx'
 import StudioPreview from './StudioPreview.jsx'
 import ChatPanel from '../chat/ChatPanel.jsx'
+import DebugReportModal from './DebugReportModal.jsx'
 import dbg from '../debug/recorder.js'
 
 const POLL_MS = 500
@@ -111,11 +112,16 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
   // Dev observability: re-arm the session recorder if a session was left running before a reload
   // (survives an accidental ⌘R). The toggle lives in the toolbar; see web/src/debug/recorder.js.
   const recording = dbg.useRecording()
+  const [debugReport, setDebugReport] = useState(null) // {session} — open the "send debug report" modal on stop
   useEffect(() => { dbg.resumeIfActive({ projectId }) }, [projectId])
   const onToggleRecord = useCallback(() => {
     const session = dbg.toggle({ projectId, canvas: `${canvas.width}×${canvas.height}` })
-    if (dbg.isRecording()) flash('ok', `Debug recording on → .agents/tools/logs/ui-sessions/${session}.ndjson`)
-    else flash('ok', 'Debug recording stopped — session saved')
+    if (dbg.isRecording()) {
+      flash('ok', 'Debug recording on — reproduce the bug, then press stop to send it.')
+    } else if (session) {
+      // Stopped: make sure the final batch is persisted, THEN offer to send the session.
+      Promise.resolve(dbg.flushed()).finally(() => setDebugReport({ session }))
+    }
   }, [projectId, canvas, flash])
 
   // ── load ──────────────────────────────────────────────────────────────────
@@ -747,6 +753,10 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
             onClick={() => setPanels(p => ({ ...p, timelineOpen: true, timelineH: Math.max(TIMELINE_MIN, p.timelineH) }))}>Timeline ▴</button>
         )}
       </div>
+
+      {debugReport && (
+        <DebugReportModal session={debugReport.session} onClose={() => setDebugReport(null)} />
+      )}
     </div>
   )
 }

@@ -50,6 +50,7 @@ const state = {
   origConsole: null,
   lastMove: 0,
   throttle: {}, // type -> last-emit perfNow, for THROTTLE_MS
+  flushing: null, // promise for the in-flight flush (so callers can await the final write on stop)
 }
 
 const listeners = new Set() // UI subscribers (toggle indicator)
@@ -196,23 +197,39 @@ function removeGlobals() {
 }
 function onPageHide() { flush(true) }
 
-async function flush(useBeacon = false) {
-  if (!state.session || state.buffer.length === 0) return
+function flush(useBeacon = false) {
+  if (!state.session || state.buffer.length === 0) return state.flushing || Promise.resolve()
   const batch = state.buffer
   state.buffer = []
   const body = JSON.stringify({ session: state.session, events: batch })
-  try {
-    if (useBeacon && typeof navigator !== 'undefined' && navigator.sendBeacon) {
-      navigator.sendBeacon(ENDPOINT, new Blob([body], { type: 'application/json' }))
-    } else {
-      await fetch(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: useBeacon })
+  // Track the write as a promise so `flushed()` can await the FINAL batch (e.g. after stop(),
+  // before we offer to send the session). Never rejects — a failure re-buffers the batch.
+  const done = (async () => {
+    try {
+      if (useBeacon && typeof navigator !== 'undefined' && navigator.sendBeacon) {
+        navigator.sendBeacon(ENDPOINT, new Blob([body], { type: 'application/json' }))
+      } else {
+        await fetch(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: useBeacon })
+      }
+    } catch {
+      // Best-effort: return the batch to the front of the buffer so a transient failure
+      // doesn't drop events (bounded by MAX_BUFFER on the next push).
+      state.buffer = batch.concat(state.buffer)
     }
-  } catch {
-    // Best-effort: return the batch to the front of the buffer so a transient failure
-    // doesn't drop events (bounded by MAX_BUFFER on the next push).
-    state.buffer = batch.concat(state.buffer)
-  }
+  })()
+  state.flushing = done
+  return done
 }
+
+// Resolves once the most recent flush has finished writing. Used by the editor after stop() to
+// wait on the final batch before opening the "send debug report" modal.
+export function flushed() { return state.flushing || Promise.resolve() }
+
+// Flush whatever is still buffered NOW and resolve when the write settles. Critical at send-time:
+// if the final flush at stop() failed transiently (a network blip during teardown), its batch was
+// re-buffered here — calling this right before the report is submitted re-drains that tail to disk
+// so the backend analyzes the COMPLETE session, not a truncated one. Never rejects.
+export function flushNow() { return flush(false) }
 
 function persist() {
   try { localStorage.setItem(LS_KEY, JSON.stringify({ on: state.on, session: state.session })) } catch { /* noop */ }
@@ -278,5 +295,5 @@ export function resumeIfActive(meta = {}) {
 // React binding for the toolbar toggle indicator.
 export function useRecording() { return useSyncExternalStore(subscribe, isRecording, isRecording) }
 
-const dbg = { start, stop, toggle, event, mark, isRecording, currentSession, subscribe, useRecording, resumeIfActive }
+const dbg = { start, stop, toggle, event, mark, isRecording, currentSession, subscribe, useRecording, resumeIfActive, flushed, flushNow }
 export default dbg

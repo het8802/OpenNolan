@@ -129,6 +129,7 @@ class FeedbackRequest(BaseModel):
     message: str
     email: Optional[str] = None       # optional, so we can reply
     diagnostics: Optional[str] = None  # optional client-attached logs/context
+    debug_session: Optional[str] = None  # attach a recorded UI session's analysis (editor debug report)
 
 
 class ClientErrorReport(BaseModel):
@@ -220,6 +221,13 @@ def create_app(
     import platform
     analytics_mod.capture("app_opened", {"os": platform.platform(), "app_version": app.version})
 
+    # First launch on this install ≈ an install/"download" (a fresh install has a new settings.json,
+    # so this fires once per machine). The website "Download" button is still a waitlist placeholder,
+    # so this is the real install signal until a downloadable build ships.
+    if not settings_mod.get("app_first_run_done", False):
+        analytics_mod.capture("app_first_run", {"os": platform.platform(), "app_version": app.version})
+        settings_mod.set_value("app_first_run_done", True)
+
     def _render_store() -> RenderJobStore:
         if app.state.render_store is None:
             app.state.render_store = RenderJobStore(pdir)
@@ -282,7 +290,9 @@ def create_app(
                 detail=f"unknown pipeline_type {pt!r}",
             )
         try:
-            return create_project(pdir, req.name, pt)
+            created = create_project(pdir, req.name, pt)
+            analytics_mod.capture("project_created", {"pipeline_type": pt})
+            return created
         except ProjectExistsError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
         except ValueError as exc:  # un-sluggable name
@@ -652,7 +662,9 @@ def create_app(
         emitted (metadata only); emailed via Resend when configured. See server/feedback.py."""
         from server import feedback as feedback_mod
         try:
-            return feedback_mod.submit(body.kind, body.message, body.email, body.diagnostics)
+            return feedback_mod.submit(
+                body.kind, body.message, body.email, body.diagnostics, body.debug_session
+            )
         except feedback_mod.FeedbackError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -930,6 +942,16 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"session {session!r} not found")
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+    @app.delete("/api/debug/sessions/{session}")
+    def debug_discard(session: str) -> dict[str, Any]:
+        """Discard a recorded session's logs (the user chose not to send the debug report).
+        Idempotent — removing an already-gone session is a 200 with removed=false."""
+        try:
+            removed = debug_log_mod.delete_session(session)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"ok": True, "removed": removed}
 
     # Serve the built Mission Control UI (web/dist) for the packaged desktop app.
     # Mounted LAST so every /api/* route above takes precedence; the SPA and its

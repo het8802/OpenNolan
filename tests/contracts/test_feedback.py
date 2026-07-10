@@ -6,6 +6,7 @@ and Resend email is best-effort (configured => sent; not configured => graceful,
 
 from __future__ import annotations
 
+import base64
 import json
 
 import pytest
@@ -18,8 +19,11 @@ def _home(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENNOLAN_HOME", str(tmp_path))
     # Neutralize analytics + email by default; individual tests opt back in.
     monkeypatch.setattr(feedback.analytics, "capture", lambda *a, **k: captured.append((a, k)))
-    for var in ("RESEND_API_KEY", "FEEDBACK_TO", "FEEDBACK_FROM", "FEEDBACK_RELAY_URL", "FEEDBACK_RELAY_TOKEN"):
+    for var in ("RESEND_API_KEY", "FEEDBACK_TO", "FEEDBACK_FROM", "FEEDBACK_RELAY_TOKEN"):
         monkeypatch.delenv(var, raising=False)
+    # _DEFAULT_RELAY_URL now ships a real URL, so blank the relay by default — otherwise every test
+    # would POST to the live endpoint. Relay tests below opt back in by setting it to a URL.
+    monkeypatch.setenv("FEEDBACK_RELAY_URL", "")
     captured.clear()
     yield
 
@@ -140,6 +144,81 @@ def test_relay_failure_falls_back_and_is_graceful(monkeypatch, tmp_path):
     out = feedback.submit("bug", "still stored")           # no direct Resend key either
     assert out["stored"] is True and out["emailed"] is False
     assert (tmp_path / "feedback.jsonl").exists()
+
+
+# ── debug-report attachment (editor "send debug session" flow) ──────────────────
+
+def _write_session(session, events):
+    from server import debug_log
+
+    debug_log.append_events(session, events)
+
+
+def test_debug_attachment_built_from_session_log(tmp_path):
+    session = "2026-07-09T00-00-00-000Z-abcd"
+    _write_session(session, [
+        {"seq": 0, "type": "session.start"},
+        {"seq": 1, "type": "console", "level": "error", "data": {"args": ["boom"]}},
+        {"seq": 2, "type": "session.stop"},
+    ])
+    att = feedback._debug_attachment(session)
+    assert att["filename"] == f"debug-session-{session}.ndjson"
+    decoded = base64.b64decode(att["content"]).decode("utf-8")   # base64 round-trips to the raw NDJSON
+    assert "session.stop" in decoded and "boom" in decoded
+
+
+def test_debug_attachment_missing_or_none_is_none(tmp_path):
+    assert feedback._debug_attachment("does-not-exist") is None
+    assert feedback._debug_attachment(None) is None
+
+
+def test_submit_emails_the_log_as_a_file_attachment_not_body(monkeypatch, tmp_path):
+    session = "sess-attach"
+    _write_session(session, [{"seq": 0, "type": "session.start"}, {"seq": 1, "type": "session.stop"}])
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("FEEDBACK_TO", "het@example.com")
+    sent = {}
+
+    class FakeResp:
+        status_code = 200
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        sent["json"] = json
+        return FakeResp()
+
+    monkeypatch.setattr(feedback.requests, "post", fake_post)
+    out = feedback.submit("bug", "canvas froze", debug_session=session)
+    assert out["emailed"] is True
+
+    att = sent["json"]["attachments"][0]                 # the log is a Resend attachment…
+    assert att["filename"] == f"debug-session-{session}.ndjson"
+    assert "session.stop" in base64.b64decode(att["content"]).decode("utf-8")
+    assert "session.stop" not in sent["json"]["text"]    # …NOT pasted into the email body
+    assert captured[-1][0][1]["has_attachment"] is True  # analytics flags it (metadata only)
+
+
+def test_debug_session_missing_still_sends_feedback(tmp_path):
+    # A bad/missing session must NOT lose the feedback and must NOT fold anything into the body.
+    out = feedback.submit("bug", "no logs here", debug_session="does-not-exist")
+    assert out["stored"] is True
+    rec = json.loads((tmp_path / "feedback.jsonl").read_text().strip().splitlines()[-1])
+    assert rec["debug_session"] == "does-not-exist"
+    assert rec["diagnostics"] is None
+
+
+def test_endpoint_passes_debug_session_through(tmp_path):
+    # The HTTP route must carry debug_session into submit() (not silently drop it).
+    import tempfile
+
+    from fastapi.testclient import TestClient
+
+    from server.app import create_app
+
+    client = TestClient(create_app(projects_dir=tempfile.mkdtemp()))
+    r = client.post("/api/feedback", json={"kind": "bug", "message": "x", "debug_session": "no-such"})
+    assert r.status_code == 200 and r.json()["stored"] is True
+    rec = json.loads((tmp_path / "feedback.jsonl").read_text().strip().splitlines()[-1])
+    assert rec["debug_session"] == "no-such"
 
 
 # ── endpoint ──────────────────────────────────────────────────────────────────

@@ -37,12 +37,17 @@ export const connectApiKey = (api_key) =>
 export const disconnectAuth = () => fetch('/api/auth/disconnect', { method: 'POST' }).then(json)
 
 // In-app feedback (bug/feature/other). Stored locally + PostHog event + best-effort email.
+// Pass { debug_session } to attach a recorded editor session's analysis to the report.
 export const sendFeedback = (body) =>
   fetch('/api/feedback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }).then(json)
+
+// Discard a recorded debug session's logs (user chose not to send the debug report). Idempotent.
+export const discardDebugSession = (session) =>
+  fetch(`/api/debug/sessions/${encodeURIComponent(session)}`, { method: 'DELETE' }).then(json)
 
 // Product-analytics opt-out state (+ anonymous device id) and the toggle to flip it.
 export const getAnalytics = () => fetch('/api/settings/analytics').then(json)
