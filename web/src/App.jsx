@@ -5,6 +5,7 @@ import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, ClaudeLogo }
 import Studio from './studio/Studio.jsx'
 import ChatPanel from './chat/ChatPanel.jsx'
 import CapabilitiesModal from './CapabilitiesModal.jsx'
+import UpdateBanner from './UpdateBanner.jsx'
 import { useAgentChat } from './chat/useAgentChat.js'
 import { useAuth } from './auth/useAuth.js'
 import ConnectClaudeModal from './auth/ConnectClaudeModal.jsx'
@@ -104,6 +105,7 @@ export default function App() {
         />
         {connectModal}
         {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+        <UpdateBanner />
       </div>
     )
   }
@@ -115,6 +117,7 @@ export default function App() {
           auth={auth.status} onReconnect={() => setShowConnect(true)} />
         {connectModal}
         {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+        <UpdateBanner />
       </div>
     )
   }
@@ -144,6 +147,7 @@ export default function App() {
       </main>
       {connectModal}
       {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+      <UpdateBanner />
     </div>
   )
 }

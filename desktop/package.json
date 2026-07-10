@@ -81,8 +81,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "OWNER_PLACEHOLDER",
-        "repo": "REPO_PLACEHOLDER"
+        "owner": "het8802",
+        "repo": "OpenNolan"
       }
     ]
   }

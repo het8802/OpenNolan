@@ -11,7 +11,7 @@
 // Dev  (`npm run dev`): window loads Vite on http://localhost:5173 (Vite proxies /api -> :8000);
 //                       reuses an already-running backend on :8000, else spawns one.
 
-const { app, BrowserWindow, dialog, shell, session } = require('electron');
+const { app, BrowserWindow, dialog, shell, session, ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const http = require('node:http');
@@ -101,17 +101,59 @@ function pythonBin() {
   return 'python3';
 }
 
+// A downloaded-and-staged update ({version}), or null. Held at module scope so the renderer can
+// re-hydrate the banner after a ⌘R reload via the 'update:get-state' handler (the push event only
+// fires once, when the download finishes).
+let pendingUpdate = null;
+
 // Auto-update (packaged builds only). electron-updater checks the GitHub Releases feed (build.publish),
-// downloads a newer SIGNED build, and installs on quit. Lazy-required so a dev machine without the dep
-// (or without a packaged build) never touches it; NEVER runs in dev.
+// auto-downloads a newer SIGNED build, and — with autoInstallOnAppQuit (default true) — installs it on
+// the next quit. On top of that silent path we surface an in-app "update ready" banner (lower-left) so
+// the user can restart-and-install NOW: on 'update-downloaded' we push to the renderer, and the banner's
+// button invokes 'update:install' → quitAndInstall(). Lazy-required so a dev machine without the dep (or
+// without a packaged build) never touches it; the REAL updater never runs in dev — only the
+// OPENNOLAN_FAKE_UPDATE test hook below does.
 function initAutoUpdate() {
+  // Dev/manual test hook: OPENNOLAN_FAKE_UPDATE=<version> (or =1) skips the real updater and instead
+  // wires the SAME IPC channels + pushes a fake "downloaded" event, so the in-app banner can be seen
+  // and clicked in `npm run dev` without a signed build or a published release. install() only logs.
+  const fakeVersion = process.env.OPENNOLAN_FAKE_UPDATE;
+  if (fakeVersion) {
+    pendingUpdate = { version: fakeVersion === '1' ? '0.0.0-test' : fakeVersion };
+    ipcMain.handle('update:get-state', () => pendingUpdate);
+    ipcMain.handle('update:install', () => { console.log('[updater] (fake) would restart & install ' + pendingUpdate.version); return true; });
+    // Delay the push so the renderer has mounted its listener (getState() covers the earlier window).
+    setTimeout(() => {
+      try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update:downloaded', pendingUpdate); }
+      catch (_) { /* window gone */ }
+    }, 2000);
+    console.log('[updater] fake update armed: ' + pendingUpdate.version);
+    return;
+  }
   if (!app.isPackaged) return;
   try {
     const { autoUpdater } = require('electron-updater');
     autoUpdater.autoDownload = true;
     autoUpdater.on('error', (e) => console.error('[updater] ' + (e && e.message)));
     autoUpdater.on('update-available', (i) => console.log('[updater] update available: ' + (i && i.version)));
-    autoUpdater.on('update-downloaded', (i) => console.log('[updater] downloaded, will install on quit: ' + (i && i.version)));
+    autoUpdater.on('update-downloaded', (i) => {
+      pendingUpdate = { version: (i && i.version) || null };
+      console.log('[updater] downloaded, ready to install: ' + pendingUpdate.version);
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update:downloaded', pendingUpdate);
+      } catch (_) { /* window went away between the check and the send */ }
+    });
+    // Renderer asks on mount (and after a reload) whether an update is already staged.
+    ipcMain.handle('update:get-state', () => pendingUpdate);
+    // "Restart & update" clicked — install the staged build now. quitAndInstall() triggers before-quit,
+    // which stops the backend; set shuttingDown first so its exit handler doesn't misfire the fatal
+    // "backend stopped" dialog. No-op (returns false) if nothing is staged.
+    ipcMain.handle('update:install', () => {
+      if (!pendingUpdate) return false;
+      shuttingDown = true;
+      setImmediate(() => { try { autoUpdater.quitAndInstall(); } catch (e) { console.error('[updater] install failed: ' + (e && e.message)); } });
+      return true;
+    });
     // MUST .catch(): checkForUpdatesAndNotify() returns a promise that REJECTS on any feed failure
     // (e.g. the build.publish owner/repo placeholders 404 until they're set). The 'error' event
     // listener does NOT consume this promise, so without the catch every packaged launch throws an
@@ -522,6 +564,7 @@ async function boot() {
         await waitForHealth(backendPort).catch(() => { /* surfaced via exit handler / did-fail-load */ });
       }
       createWindow(rendererUrl());
+      initAutoUpdate(); // no-op unless OPENNOLAN_FAKE_UPDATE is set (dev test hook); real updater is packaged-only
     } else {
       if (!fs.existsSync(webDistIndex())) {
         return fatal('UI not built', 'The web UI has not been built.\n\nRun:\n  npm --prefix web run build\n\nthen start the app again. (`npm start` does this automatically.)');
