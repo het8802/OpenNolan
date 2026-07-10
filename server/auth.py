@@ -205,7 +205,13 @@ def status() -> dict:
     expires_at = meta.get("expires_at") if method == "oauth" else None
     expired = _is_expired(expires_at) if method == "oauth" else False
     authenticated = method is not None
-    needs_reauth = authenticated and (bool(err) or expired)
+    # A stale clock alone is NOT a reason to nag the user to reconnect. Our stored OAuth expiry drifts
+    # because the Agent SDK refreshes the shared credential out-of-band (rotating the refresh token we
+    # hold), so a clock-"expired" token is usually still working. Trust a real failed call (`err`) —
+    # "a live 401 is caught at runtime instead" (see _is_expired / the chat turn in app.py).
+    # `_maybe_refresh()` above still uses `expired` for best-effort proactive refresh; `expired` stays
+    # in the payload as info only.
+    needs_reauth = authenticated and bool(err)
     return {
         "authenticated": authenticated,
         "method": method,

@@ -201,6 +201,19 @@ def test_status_flags_needs_reauth_on_recorded_error(monkeypatch):
     assert s["authenticated"] is True and s["needs_reauth"] is True and s["error"] == "401"
 
 
+def test_status_does_not_nag_on_clock_expiry_alone(monkeypatch):
+    # A clock-expired OAuth token with NO recorded live auth failure must NOT flag needs_reauth: the
+    # SDK refreshes the shared credential out-of-band, so the agent keeps working. Trust a real 401.
+    past = auth._iso(auth._now() - timedelta(hours=1))
+    monkeypatch.setenv(auth.OAUTH_TOKEN_ENV, "oauth-x")
+    monkeypatch.setattr(auth, "_cli_available", lambda: False)
+    monkeypatch.setattr(auth, "_maybe_refresh", lambda: None)  # refresh can't save it (rotated token)
+    monkeypatch.setattr(auth.settings, "get",
+                        lambda key, default=None: {"expires_at": past} if key == "claude_auth" else None)
+    s = auth.status()
+    assert s["expired"] is True and s["needs_reauth"] is False
+
+
 # ── endpoints ──────────────────────────────────────────────────────────────
 
 def test_auth_status_endpoint(tmp_path, monkeypatch):
