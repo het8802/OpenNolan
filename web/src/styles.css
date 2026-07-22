@@ -506,6 +506,8 @@ select { cursor: pointer; }
 .env-name { font-size: 0.84rem; font-weight: 600; }
 .env-key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.66rem; color: var(--muted); }
 .env-desc { font-size: 0.7rem; color: var(--muted); line-height: 1.35; }
+.env-getkey { font-size: 0.7rem; color: var(--accent); text-decoration: none; width: fit-content; margin-top: 0.05rem; }
+.env-getkey:hover { text-decoration: underline; }
 .env-input { position: relative; display: flex; align-items: center; }
 .env-input input { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.78rem; padding-right: 2rem; }
