@@ -59,6 +59,18 @@ def env_path() -> Path:
     return Path(override) if override else home() / ".env"
 
 
+def user_styles_dir() -> Path:
+    """Where USER-CREATED style playbooks live (dropped in manually by the user).
+
+    Writable in both dev and the packaged app (it sits under home(), which the agent's
+    filesystem sandbox whitelists) and kept OUT of the read-only built-in ``styles/`` dir so
+    user styles never collide with, or get shadowed by, the shipped playbooks. The playbook
+    loader merges this dir with the built-ins so they show in the New Project style picker
+    (see styles/playbook_loader.py)."""
+    override = os.environ.get("OPENNOLAN_USER_STYLES_DIR")
+    return Path(override) if override else home() / "user_styles"
+
+
 def runtime_dir() -> Path:
     """Where the managed Python venv + downloaded ffmpeg + capability packs live (bootstrapper)."""
     override = os.environ.get("OPENNOLAN_RUNTIME_DIR")

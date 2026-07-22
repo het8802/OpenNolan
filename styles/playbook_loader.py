@@ -43,9 +43,15 @@ def _load_playbook_schema() -> dict:
 def load_playbook(name: str, styles_dir: Optional[Path] = None) -> dict[str, Any]:
     """Load and validate a style playbook by name.
 
+    Resolves a built-in playbook first, then falls back to the writable
+    user-styles dir (styles created by the Style Studio / create-style-from-video
+    skill), so a user's custom style is usable everywhere a shipped one is —
+    including the render path (tools/video/video_compose.py loads via this
+    function). This is the single lookup the whole app funnels style names through.
+
     Args:
         name: Playbook name (without .yaml extension).
-        styles_dir: Override directory for playbook files.
+        styles_dir: Override directory for the BUILT-IN lookup (tests).
 
     Returns:
         Validated playbook dict.
@@ -53,7 +59,11 @@ def load_playbook(name: str, styles_dir: Optional[Path] = None) -> dict[str, Any
     styles_dir = styles_dir or STYLES_DIR
     path = styles_dir / f"{name}.yaml"
     if not path.exists():
-        raise FileNotFoundError(f"Playbook not found: {path}")
+        user_path = app_paths.user_styles_dir() / f"{name}.yaml"
+        if user_path.exists():
+            path = user_path
+        else:
+            raise FileNotFoundError(f"Playbook not found: {path}")
 
     with open(path) as f:
         playbook = yaml.safe_load(f)
@@ -90,6 +100,13 @@ def list_playbooks(
     if packaged:
         allow = set(PACKAGED_PLAYBOOKS)
         names = [n for n in names if n in allow]
+    # User-created styles are ALWAYS available (the packaged allowlist only trims the
+    # shipped catalogue). Appended after built-ins; a built-in of the same name wins.
+    user_dir = app_paths.user_styles_dir()
+    if user_dir.exists():
+        for p in sorted(user_dir.glob("*.yaml")):
+            if p.stem not in names:
+                names.append(p.stem)
     return names
 
 

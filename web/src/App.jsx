@@ -25,6 +25,7 @@ const ASSET_KINDS = ['images', 'video', 'audio', 'music', 'renders']
 
 export default function App() {
   const [pipelines, setPipelines] = useState([])
+  const [styles, setStyles] = useState([])                    // available visual style playbooks
   const [projects, setProjects] = useState([])
   const [selected, setSelected] = useState(null)
   const [state, setState] = useState(null)
@@ -44,6 +45,7 @@ export default function App() {
 
   useEffect(() => {
     api.getPipelines().then(d => setPipelines(d.pipelines || [])).catch(showError)
+    api.getStyles().then(d => setStyles(d.styles || [])).catch(showError)
     refreshProjects()
     // Poll the project list so externally/agent-created projects appear live.
     const id = setInterval(refreshProjects, 4000)
@@ -92,12 +94,13 @@ export default function App() {
       <div className="app">
         <Dashboard
           pipelines={pipelines}
+          styles={styles}
           projects={projects}
           onOpen={openProject}
           auth={auth.status}
           onConnect={() => setShowConnect(true)}
-          onCreate={async (name, pipeline) => {
-            const m = await api.createProject(name, pipeline)
+          onCreate={async (name, pipeline, style) => {
+            const m = await api.createProject(name, pipeline, style)
             await refreshProjects()
             setSelected(m.project_id)   // chat hook starts a fresh conversation for the new project
             showOk(`Created "${m.name}"`)
@@ -167,7 +170,7 @@ function fmtDate(s) {
   } catch { return '' }
 }
 
-function Dashboard({ pipelines, projects, onOpen, onCreate, auth, onConnect }) {
+function Dashboard({ pipelines, styles = [], projects, onOpen, onCreate, auth, onConnect }) {
   const [creating, setCreating] = useState(false)
   const [showEnv, setShowEnv] = useState(false)
   const [showCaps, setShowCaps] = useState(false)
@@ -239,6 +242,7 @@ function Dashboard({ pipelines, projects, onOpen, onCreate, auth, onConnect }) {
                   {p.pipeline_type
                     ? <span className="tile-type">{p.pipeline_type}</span>
                     : <span className="tile-type unknown">{p.legacy ? 'unknown type' : 'agent picks'}</span>}
+                  {p.style && <span className="tile-style" title={`style: ${p.style}`}>{p.style}</span>}
                   {p.legacy && <span className="tile-legacy">existing</span>}
                 </span>
                 {p.created_at && <span className="tile-date">{fmtDate(p.created_at)}</span>}
@@ -248,7 +252,7 @@ function Dashboard({ pipelines, projects, onOpen, onCreate, auth, onConnect }) {
         })}
       </div>
       {creating && (
-        <CreateModal pipelines={pipelines} onClose={() => setCreating(false)} onCreate={onCreate} />
+        <CreateModal pipelines={pipelines} styles={styles} onClose={() => setCreating(false)} onCreate={onCreate} />
       )}
       {showEnv && <EnvModal onClose={() => setShowEnv(false)} />}
       {showCaps && <CapabilitiesModal onClose={() => setShowCaps(false)} />}
@@ -460,19 +464,25 @@ function EnvModal({ onClose }) {
   )
 }
 
-function CreateModal({ pipelines, onClose, onCreate }) {
+function CreateModal({ pipelines, styles = [], onClose, onCreate }) {
   // Packaged app ships a single pipeline → preselect it (no "agent decides").
   const single = pipelines.length === 1
   const [name, setName] = useState('')
   const [pipeline, setPipeline] = useState(single ? pipelines[0].name : '')   // '' = let the agent decide
+  const [style, setStyle] = useState('')                                       // '' = let the agent decide
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+
+  // Group styles so user-created ones (from the Style Studio) sit in their own section.
+  const builtinStyles = styles.filter(s => !s.user)
+  const userStyles = styles.filter(s => s.user)
+  const styleName = s => s.label || s.name
 
   async function submit(e) {
     e.preventDefault()
     if (!name.trim() || busy) return
     setBusy(true); setErr(null)
-    try { await onCreate(name.trim(), pipeline); onClose() }
+    try { await onCreate(name.trim(), pipeline, style); onClose() }
     catch (e) { setErr(String(e.message || e)); setBusy(false) }
   }
 
@@ -492,8 +502,23 @@ function CreateModal({ pipelines, onClose, onCreate }) {
             {pipelines.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
           </select>
         </label>
+        <label className="modal-field">
+          <span>Style</span>
+          <select value={style} onChange={e => setStyle(e.target.value)}>
+            <option value="">✨ Let the agent decide</option>
+            {userStyles.length > 0 && (
+              <optgroup label="Your styles">
+                {userStyles.map(s => <option key={s.name} value={s.name}>{styleName(s)}</option>)}
+              </optgroup>
+            )}
+            <optgroup label="Built-in styles">
+              {builtinStyles.map(s => <option key={s.name} value={s.name}>{styleName(s)}</option>)}
+            </optgroup>
+          </select>
+        </label>
         <div className="modal-hint">
-          {pipeline ? `Stages locked to the ${pipeline} pipeline.` : 'The agent reads your request and picks the best-fit pipeline.'}
+          {style ? `Visuals locked to the “${style}” style.`
+                 : 'The agent picks a visual style to match your request — or make your own with “Create New Style”.'}
         </div>
         {err && <div className="modal-err">⚠ {err}</div>}
         <div className="modal-actions">

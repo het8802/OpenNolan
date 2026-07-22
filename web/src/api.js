@@ -9,6 +9,8 @@ async function json(resp) {
 }
 
 export const getPipelines = () => fetch('/api/pipelines').then(json)
+// Visual style playbooks (built-in + user-created) for the New Project picker.
+export const getStyles = () => fetch('/api/styles').then(json)
 export const getProjects = () => fetch('/api/projects').then(json)
 
 // BYOK: read the local .env (curated variable menu + current values) and save edits back.
@@ -161,11 +163,11 @@ export const getActivity = (id, { limit, since } = {}) => {
   return fetch(`/api/projects/${id}/activity${qs ? `?${qs}` : ''}`).then(json)
 }
 
-export const createProject = (name, pipeline_type) =>
+export const createProject = (name, pipeline_type, style) =>
   fetch('/api/projects', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, pipeline_type }),
+    body: JSON.stringify({ name, pipeline_type, style }),
   }).then(json)
 
 export const uploadAsset = (id, kind, file) => {

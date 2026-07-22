@@ -2,13 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- LOAD-BEARING — DO NOT TRIM. electron-builder's signing pass (@electron/osx-sign) recurses the
+  <!-- LOAD-BEARING - DO NOT TRIM. electron-builder's signing pass (@electron/osx-sign) recurses the
        whole app and applies THIS inherit plist to every NON-top-level Mach-O, INCLUDING the bundled
        python-build-standalone interpreter (Contents/Resources/python). That interpreter is the process
        that dlopen()s pip-installed torch/onnxruntime/numba dylibs at runtime, so it MUST carry
-       disable-library-validation (+ the JIT/exec-memory keys). This plist must stay a SUPERSET of
+       disable-library-validation (plus the JIT/exec-memory keys). This plist must stay a SUPERSET of
        entitlements.mac.plist. Trimming it ("helpers don't need this") breaks native-ML dlopen ONLY on a
-       real signed+notarized build — invisible to the unsigned --dir smoke test. Keep the two identical. -->
+       real signed+notarized build - invisible to the unsigned dir-only smoke test. Keep the two identical.
+       NOTE: AMFI's entitlements parser rejects non-ASCII and the "- -" double-hyphen inside comments even
+       though plutil accepts them, so keep this comment ASCII-only. -->
   <key>com.apple.security.cs.disable-library-validation</key>
   <true/>
   <key>com.apple.security.cs.allow-dyld-environment-variables</key>

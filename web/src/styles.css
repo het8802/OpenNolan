@@ -482,6 +482,10 @@ select { cursor: pointer; }
   padding: 0.35rem 0.85rem; font-size: 0.82rem; font-weight: 550; cursor: pointer; }
 .byok-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); filter: none; }
 
+/* ── Chosen-style chip on a project tile ── */
+.tile-style { font-size: 0.68rem; padding: 0.12rem 0.5rem; border-radius: 999px;
+  background: var(--blue-soft); color: var(--blue); font-weight: 600; }
+
 .env-modal { width: min(680px, 94vw); max-height: 86vh; padding: 0; gap: 0;
   display: flex; flex-direction: column; }
 .env-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;

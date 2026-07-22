@@ -103,6 +103,7 @@ def create_project(
     name: str,
     pipeline_type: Optional[str] = None,
     *,
+    style: Optional[str] = None,
     created_at: Optional[str] = None,
 ) -> dict[str, Any]:
     """Scaffold a project workspace and write its manifest.
@@ -111,6 +112,10 @@ def create_project(
     already exists for the derived id (so the API can return 409 instead of
     silently overwriting — the exact collision both behavioral spikes hit
     when they reused the same title).
+
+    ``style`` pins the visual style playbook (a name resolvable by
+    styles.playbook_loader.load_playbook) so the agent uses it instead of
+    picking one; None = let the agent decide.
 
     ``created_at`` is injectable for deterministic tests; callers normally
     omit it and get a UTC ISO-8601 timestamp.
@@ -135,6 +140,7 @@ def create_project(
         "project_id": project_id,
         "name": name,
         "pipeline_type": pipeline_type,
+        "style": style,
         "created_at": created_at or datetime.now(timezone.utc).isoformat(),
     }
     atomic_write_json(mpath, manifest)

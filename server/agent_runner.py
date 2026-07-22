@@ -1002,10 +1002,13 @@ class AgentRunner:
         instead of inventing a new project dir from the topic (the cause of the
         'stepper stuck on pending' bug — the agent wrote to a different project)."""
         try:
-            from lib.project import get_project_pipeline_type
+            from lib.project import get_project_pipeline_type, read_project_manifest
             pt = get_project_pipeline_type(self.projects_dir, project_id)
+            _m = read_project_manifest(self.projects_dir, project_id) or {}
+            style = (_m.get("style") or "").strip() or None
         except Exception:
             pt = None
+            style = None
         # In the packaged app there is exactly one pipeline — pin it instead of
         # telling the agent to browse pipeline_defs/ (which would let it "choose").
         if not pt:
@@ -1025,8 +1028,16 @@ class AgentRunner:
                 "pipeline_type consistently for every checkpoint and update_stage call."
             )
             stage_cmd = f"python scripts/update_stage.py {project_id} <stage> <status> <pipeline_type>"
+        if style:
+            style_clause = (
+                f" The user chose the '{style}' visual style for this project — load it with "
+                f"`load_playbook('{style}')` (styles.playbook_loader) and follow it; do NOT pick a "
+                f"different style. Set it as the scene_plan's style_playbook."
+            )
+        else:
+            style_clause = ""
         return (
-            f"[PROJECT CONTEXT: You are working on the existing project '{project_id}'{pipeline_clause}.{choose_clause} "
+            f"[PROJECT CONTEXT: You are working on the existing project '{project_id}'{pipeline_clause}.{choose_clause}{style_clause} "
             f"Use EXACTLY this project_id for everything — do NOT create a new project directory. "
             f"Write artifacts to the ABSOLUTE path {self.projects_dir / project_id}/artifacts/ — your working "
             f"directory is the read-only app code, so a relative 'projects/{project_id}/...' path would write to "

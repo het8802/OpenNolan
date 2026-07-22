@@ -108,3 +108,6 @@ settings.json
 # Marketing/waitlist website — extracted to its own private repo (het8802/opennolan-website).
 # The folder still lives here locally as an independent git repo; do not track it from OpenMontage.
 website/
+# Apple App Store Connect API keys (never commit)
+*.p8
+AuthKey_*.p8

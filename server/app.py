@@ -54,6 +54,7 @@ from lib.project import (
     list_projects,
     sanitize_filename,
 )
+from styles.playbook_loader import list_playbooks, load_playbook
 from server import activity as activity_mod
 from server import analytics as analytics_mod
 from server import artifacts as artifacts_mod
@@ -70,6 +71,7 @@ from server.state import FileStateSource, StateSource
 class CreateProjectRequest(BaseModel):
     name: str
     pipeline_type: Optional[str] = None  # None/empty -> the agent picks one
+    style: Optional[str] = None          # None/empty -> the agent picks a style
 
 
 class ChatRequest(BaseModel):
@@ -270,6 +272,29 @@ def create_app(
         except FileNotFoundError:
             raise HTTPException(status_code=404, detail=f"pipeline {name!r} not found")
 
+    @app.get("/api/styles")
+    def styles() -> dict[str, Any]:
+        """Available visual style playbooks (built-in + user-created), with the
+        `identity` block the New Project picker shows. A broken user YAML is skipped
+        rather than hiding the whole list."""
+        builtins = set(list_playbooks(packaged=False))  # names shipped in styles/
+        out: list[dict[str, Any]] = []
+        for name in list_playbooks():
+            entry: dict[str, Any] = {"name": name, "user": name not in builtins}
+            try:
+                ident = (load_playbook(name).get("identity") or {})
+                entry.update({
+                    "category": ident.get("category"),
+                    "mood": ident.get("mood"),
+                    "pace": ident.get("pace"),
+                    "best_for": ident.get("best_for"),
+                    "label": ident.get("name") or name,
+                })
+            except Exception as exc:  # don't let one malformed style hide the rest
+                entry["error"] = str(exc)[:200]
+            out.append(entry)
+        return {"styles": out}
+
     @app.get("/api/projects")
     def projects() -> dict[str, Any]:
         return {"projects": list_projects(pdir)}
@@ -289,9 +314,13 @@ def create_app(
                 status_code=422,
                 detail=f"unknown pipeline_type {pt!r}",
             )
+        # style is optional too; if given it must resolve to a known playbook (built-in or user).
+        st = (req.style or "").strip() or None
+        if st is not None and st not in set(list_playbooks()):
+            raise HTTPException(status_code=422, detail=f"unknown style {st!r}")
         try:
-            created = create_project(pdir, req.name, pt)
-            analytics_mod.capture("project_created", {"pipeline_type": pt})
+            created = create_project(pdir, req.name, pt, style=st)
+            analytics_mod.capture("project_created", {"pipeline_type": pt, "style": st})
             return created
         except ProjectExistsError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
