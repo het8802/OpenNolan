@@ -111,3 +111,5 @@ website/
 # Apple App Store Connect API keys (never commit)
 *.p8
 AuthKey_*.p8
+.mcp.json
+.codex/config.toml

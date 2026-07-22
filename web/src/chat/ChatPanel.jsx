@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import { TOOL_ICON, formatToolInput, AGENT_MODELS, DEFAULT_MODEL } from './chatUtils.js'
-import { ClaudeLogo, IconAlert, IconKey, IconEye, IconEyeOff } from '../components/icons.jsx'
+import { ClaudeLogo, IconAlert, IconKey, IconEye, IconEyeOff, IconBrain, IconTool, IconMovie } from '../components/icons.jsx'
 import CapabilityInstall from '../CapabilityInstall.jsx'
 
 // Configure marked for safe, compact output
@@ -156,7 +156,7 @@ function RenderProgress() {
   }, [])
   return (
     <div className="render-progress">
-      <div className="rp-label">🎬 Rendering…</div>
+      <div className="rp-label"><IconMovie size={13} /> Rendering…</div>
       <div className="rp-bar"><div className="rp-fill" style={{ width: `${pct}%` }} /></div>
       <div className="rp-pct">{Math.round(pct)}%</div>
     </div>
@@ -166,6 +166,8 @@ function RenderProgress() {
 // ─── Question Card (agent asked a clarifying question) ──────────────────────────
 
 function QuestionCard({ q, onAnswer }) {
+  const [custom, setCustom] = useState('')
+  const send = () => { const v = custom.trim(); if (v) onAnswer(v) }
   return (
     <div className="question-card">
       {q.header && <div className="q-header">{q.header}</div>}
@@ -179,6 +181,17 @@ function QuestionCard({ q, onAnswer }) {
             dangerouslySetInnerHTML={{ __html: marked.parseInline(opt) }}
           />
         ))}
+      </div>
+      <div className="q-custom-row">
+        <input
+          className="q-custom-input"
+          type="text"
+          placeholder="Or type your own answer…"
+          value={custom}
+          onChange={e => setCustom(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); send() } }}
+        />
+        <button type="button" className="q-custom-send" onClick={send} disabled={!custom.trim()}>Send</button>
       </div>
     </div>
   )
@@ -319,16 +332,16 @@ function Message({ m, toolResults, showCost }) {
 
 function ActivityChip({ item, result }) {
   const [open, setOpen] = useState(false)
-  if (item.kind === 'thinking') return <span className="activity-chip thinking">💭 thinking…</span>
+  if (item.kind === 'thinking') return <span className="activity-chip thinking"><IconBrain size={13} /> thinking…</span>
 
-  const icon = TOOL_ICON[item.name] || '🔧'
+  const Icon = TOOL_ICON[item.name] || IconTool
   const hasResult = result != null
   const resultErr = hasResult && result.is_error
   return (
     <div className={`tool-block ${open ? 'open' : ''}`}>
       <button className={`activity-chip tool clickable ${resultErr ? 'tool-err' : ''}`} onClick={() => setOpen(o => !o)}>
         <span className="tc-caret">{open ? '▾' : '▸'}</span>
-        <span className="tc-icon">{icon}</span>
+        <span className="tc-icon"><Icon size={13} /></span>
         <span className="tc-name">{item.name}</span>
         {item.detail && <span className="tc-detail">{item.detail}</span>}
         {resultErr && <span className="tc-badge err">error</span>}

@@ -121,6 +121,17 @@ select { cursor: pointer; }
 .q-option:hover { background: var(--blue-soft); border-color: var(--blue); filter: none; }
 .q-option :is(p, code) { margin: 0; }
 .q-option code { background: #eef1f5; color: var(--blue); }
+.q-custom-row { display: flex; gap: 0.4rem; align-items: stretch; margin-top: 0.5rem; }
+.q-custom-input {
+  flex: 1; min-width: 0; border: 1.5px solid var(--blue-soft); border-radius: 8px;
+  padding: 0.5rem 0.6rem; font-size: 0.86rem; background: var(--bg); color: var(--ink);
+}
+.q-custom-input:focus { outline: none; border-color: var(--blue); background: #fff; }
+.q-custom-send {
+  flex-shrink: 0; background: var(--blue); border: 1.5px solid var(--blue); color: #fff;
+  padding: 0 0.9rem; border-radius: 8px; font-size: 0.84rem; font-weight: 600; cursor: pointer;
+}
+.q-custom-send:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Messages ── */
 .msg { padding: 0.55rem 0.75rem; border-radius: var(--radius); max-width: 95%; }

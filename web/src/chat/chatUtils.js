@@ -10,20 +10,26 @@ export const AGENT_MODELS = [
 ]
 export const DEFAULT_MODEL = AGENT_MODELS[0].id
 
+import {
+  IconFileText, IconPencil, IconTerminal, IconSearch, IconWorld,
+  IconTools, IconListCheck, IconMovie,
+} from '../components/icons.jsx'
+
+// Tool name → icon component (rendered by ChatPanel's ActivityChip).
 export const TOOL_ICON = {
-  Read: '📄',
-  Write: '✏️',
-  Edit: '✏️',
-  MultiEdit: '✏️',
-  Bash: '⌨️',
-  Glob: '🔍',
-  Grep: '🔍',
-  WebSearch: '🌐',
-  WebFetch: '🌐',
-  Skill: '🛠',
-  TodoWrite: '📋',
-  render: '🎬',
-  mcp__mc__render: '🎬',
+  Read: IconFileText,
+  Write: IconPencil,
+  Edit: IconPencil,
+  MultiEdit: IconPencil,
+  Bash: IconTerminal,
+  Glob: IconSearch,
+  Grep: IconSearch,
+  WebSearch: IconWorld,
+  WebFetch: IconWorld,
+  Skill: IconTools,
+  TodoWrite: IconListCheck,
+  render: IconMovie,
+  mcp__mc__render: IconMovie,
 }
 
 // Detect render-in-progress from a tool_use event (drives the inline render progress bar).

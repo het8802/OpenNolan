@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as api from './api.js'
 import { LineChart } from './components/LineChart.jsx'
-import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, IconMessage, ClaudeLogo } from './components/icons.jsx'
+import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, IconMessage, ClaudeLogo, IconMovie, IconMic, IconStar, IconMusic, IconListDetails } from './components/icons.jsx'
 import Studio from './studio/Studio.jsx'
 import ChatPanel from './chat/ChatPanel.jsx'
 import CapabilitiesModal from './CapabilitiesModal.jsx'
@@ -433,6 +433,11 @@ function EnvModal({ onClose }) {
                     <span className="env-name">{v.label}</span>
                     <code className="env-key">{v.key}</code>
                     {v.description && <span className="env-desc">{v.description}</span>}
+                    {v.url && (
+                      <a className="env-getkey" href={v.url} target="_blank" rel="noreferrer noopener">
+                        Get key ↗
+                      </a>
+                    )}
                   </div>
                   <div className="env-input">
                     <input
@@ -498,14 +503,14 @@ function CreateModal({ pipelines, styles = [], onClose, onCreate }) {
         <label className="modal-field">
           <span>Pipeline type</span>
           <select value={pipeline} onChange={e => setPipeline(e.target.value)} disabled={single}>
-            {!single && <option value="">✨ Let the agent decide</option>}
+            {!single && <option value="">Let the agent decide</option>}
             {pipelines.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
           </select>
         </label>
         <label className="modal-field">
           <span>Style</span>
           <select value={style} onChange={e => setStyle(e.target.value)}>
-            <option value="">✨ Let the agent decide</option>
+            <option value="">Let the agent decide</option>
             {userStyles.length > 0 && (
               <optgroup label="Your styles">
                 {userStyles.map(s => <option key={s.name} value={s.name}>{styleName(s)}</option>)}
@@ -536,7 +541,6 @@ function ProjectBar({ state, projects, selected, onBack, onEdit }) {
   const p = projects.find(x => x.project_id === selected)
   const name = state?.name || p?.name || selected
   const type = state?.pipeline_type || p?.pipeline_type || ''
-  const runtime = state?.runtime || null
   return (
     <header className="header project-bar">
       <button className="back-btn" onClick={onBack} title="Back to all projects">← Projects</button>
@@ -546,9 +550,6 @@ function ProjectBar({ state, projects, selected, onBack, onEdit }) {
         {type && <span className="pb-type">{type}</span>}
       </div>
       <div className="runtimes">
-        {runtime
-          ? <span className="chip on runtime-used" title="Composition runtime used by this project">🎬 {runtime}</span>
-          : <span className="chip off" title="No render runtime chosen yet">runtime: not set</span>}
         {onEdit && <button className="editor-open-btn" onClick={onEdit} title="Hand-edit this project's timeline">✎ Edit</button>}
       </div>
     </header>
@@ -665,7 +666,7 @@ function PipelineTab({ state, artifacts, onOpen }) {
           <div className="pl-extra-label">Cross-cutting</div>
           {dlog?.present && (
             <button className="art-chip" onClick={() => onOpen('decision_log')}>
-              <span className="art-icon">⚖</span>
+              <span className="art-icon"><IconListDetails size={14} /></span>
               <span className="art-name">Decision log</span>
               <span className="art-size">{dlog.decision_count} decision{dlog.decision_count === 1 ? '' : 's'}</span>
             </button>
@@ -1020,7 +1021,7 @@ function ScenePlanView({ c }) {
               <span className="sc-id">{s.id || `sc${i + 1}`}</span>
               {s.type && <span className="sc-type">{s.type}</span>}
               {timing(s) && <span className="sc-time">{timing(s)}</span>}
-              {s.hero_moment && <span className="sc-hero">★ hero</span>}
+              {s.hero_moment && <span className="sc-hero"><IconStar size={11} /> hero</span>}
             </div>
             {s.description && <div className="sc-desc">{s.description}</div>}
             <div className="sc-attrs">
@@ -1060,7 +1061,7 @@ function ScriptView({ c }) {
               {timing(s) && <span className="ss-time">{timing(s)}</span>}
             </div>
             {s.text && <div className="ss-text">{s.text}</div>}
-            {s.speaker_directions && <div className="ss-dir">🎙 {s.speaker_directions}</div>}
+            {s.speaker_directions && <div className="ss-dir"><IconMic size={12} /> {s.speaker_directions}</div>}
             {Array.isArray(s.enhancement_cues) && s.enhancement_cues.length > 0 && (
               <div className="ss-cues">
                 {s.enhancement_cues.map((q, j) => (
@@ -1316,7 +1317,7 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
           {/* Final render(s) — shown when the reel is done (#1) */}
           {renders.length > 0 && (
             <div className="renders">
-              <div className="renders-label">🎬 Final render</div>
+              <div className="renders-label"><IconMovie size={13} /> Final render</div>
               {renders.map((r, i) => (
                 <div key={r.path} className="render-item">
                   {/* key on path+mtime so a re-render (or a poll that first caught the
@@ -1394,7 +1395,7 @@ function AssetItem({ kind, url, name, onOpen }) {
         </div>
       )}
       {(kind === 'audio' || kind === 'music') && (
-        <div className="asset-thumb audio"><span className="asset-audio-icon">🎵</span></div>
+        <div className="asset-thumb audio"><span className="asset-audio-icon"><IconMusic size={26} /></span></div>
       )}
       <div className="asset-name">{name}</div>
     </div>
@@ -1440,7 +1441,7 @@ function AssetModal({ items, index, onClose }) {
             {item.kind === 'video' && <video src={item.url} controls autoPlay />}
             {(item.kind === 'audio' || item.kind === 'music') && (
               <div className="al-audio">
-                <div className="al-audio-icon">🎵</div>
+                <div className="al-audio-icon"><IconMusic size={44} /></div>
                 <audio src={item.url} controls autoPlay />
               </div>
             )}
