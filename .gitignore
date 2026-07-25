@@ -113,3 +113,5 @@ website/
 AuthKey_*.p8
 .mcp.json
 .codex/config.toml
+
+remotion-composer/

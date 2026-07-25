@@ -3571,15 +3571,67 @@ class VideoCompose(BaseTool):
         # Deep-copy props so we don't mutate the original
         props = json.loads(json.dumps(composition_data))
 
-        # Convert absolute file paths to file:// URIs for Remotion's
-        # Img and OffthreadVideo components
+        # Stage local assets into the composer's public/ dir and reference them
+        # relatively. Remotion v4's OffthreadVideo/Img compositor can ONLY fetch
+        # http(s) or staticFile() (public/) URLs — a raw file:// URI is rejected
+        # ("Can only download URLs starting with http:// or https://"). store_asset
+        # places our media under projects/.../assets/, which is OUTSIDE public/, so
+        # every local source must be copied in and rewritten to a public-relative
+        # path (which resolveAsset() turns into staticFile()).
+        import hashlib as _hashlib
+        import shutil as _shutil
+        _stage_root = self._composer_dir() / "public" / "_staged"
+        _stage_cache: dict[str, str] = {}
+
+        def _stage_local(ref: str) -> str:
+            """Copy an absolute/file:// local asset into public/_staged and return
+            its public-relative path. Non-local refs (http, public-relative, or
+            missing) are returned unchanged."""
+            if not ref or ref.startswith(("http://", "https://", "data:")):
+                return ref
+            raw = ref
+            if raw.startswith("file://"):
+                raw = raw[7:]
+                # file:///C:/x -> /C:/x -> C:/x
+                import re as _re
+                if _re.match(r"^/[A-Za-z]:[\\/]", raw):
+                    raw = raw[1:]
+            p = Path(raw)
+            if not p.is_absolute():
+                # public-relative or cwd-relative — only stage if it truly exists on
+                # disk (an absolute-resolved existing file); otherwise leave it for
+                # staticFile() to serve from public/.
+                resolved = Path(raw).resolve()
+                if not resolved.exists():
+                    return ref
+                p = resolved
+            if not p.exists():
+                return ref
+            key = str(p.resolve())
+            if key in _stage_cache:
+                return _stage_cache[key]
+            _stage_root.mkdir(parents=True, exist_ok=True)
+            digest = _hashlib.sha1(key.encode()).hexdigest()[:12]
+            dest = _stage_root / f"{digest}_{p.name}"
+            if not dest.exists():
+                _shutil.copy2(p, dest)
+            rel = f"_staged/{dest.name}"
+            _stage_cache[key] = rel
+            return rel
+
         for cut in props.get("cuts", []):
-            source = cut.get("source", "")
-            if source and not source.startswith(("http://", "https://", "file://")):
-                resolved = Path(source).resolve()
-                if resolved.exists():
-                    posix = resolved.as_posix()
-                    cut["source"] = f"file:///{posix}" if not posix.startswith("/") else f"file://{posix}"
+            if cut.get("source"):
+                cut["source"] = _stage_local(cut["source"])
+            for _bg in ("backgroundVideo", "backgroundImage"):
+                if cut.get(_bg):
+                    cut[_bg] = _stage_local(cut[_bg])
+            if isinstance(cut.get("images"), list):
+                cut["images"] = [_stage_local(im) for im in cut["images"]]
+
+        _audio = props.get("audio") or {}
+        for _layer in ("music", "narration"):
+            if isinstance(_audio.get(_layer), dict) and _audio[_layer].get("src"):
+                _audio[_layer]["src"] = _stage_local(_audio[_layer]["src"])
 
         # Build a custom themeConfig from the playbook's actual colors.
         # This ensures every video gets a unique visual identity derived

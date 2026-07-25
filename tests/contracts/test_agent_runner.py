@@ -278,6 +278,40 @@ class FakeClient:
         for m in self._messages:
             yield m
 
+    async def receive_messages(self):
+        # Nothing buffered between turns in this fake — the warm-client drain no-ops.
+        for m in ():
+            yield m
+
+    async def disconnect(self):
+        pass
+
+
+class DrainFakeClient:
+    """A warm client that has a COMPLETED unsolicited turn already buffered (what a
+    background-task completion leaves in the SDK stream), plus a scripted answer to the
+    next query. Models the off-by-one setup so the drain can be asserted."""
+
+    def __init__(self, buffered, response):
+        self._buffered = list(buffered)
+        self._response = response
+        self.queries: list[str] = []
+
+    async def connect(self, prompt=None):
+        pass
+
+    async def query(self, prompt, session_id="default"):
+        self.queries.append(prompt)
+
+    async def receive_messages(self):
+        # The buffered stray turn drains once, then the stream is empty.
+        while self._buffered:
+            yield self._buffered.pop(0)
+
+    async def receive_response(self):
+        for m in self._response:
+            yield m
+
     async def disconnect(self):
         pass
 
@@ -315,6 +349,38 @@ def test_run_turn_collects_text_cost_and_reuses_session():
     asyncio.run(runner.run_turn("proj", "again", on_event=lambda e: events.append(e)))
     assert fake.connects == 1
     assert fake.queries[1] == "again"
+
+
+def test_run_turn_drains_buffered_unsolicited_turn():
+    """The off-by-one regression: a completed background-task turn buffered in the stream
+    must be drained as a `background_update` and NOT returned as the answer to this message.
+    Before the fix, res.text would be the stray turn's text ('silence cut complete')."""
+    stray = [
+        AssistantMessage(content=[TextBlock(text="silence cut complete")], model="m"),
+        ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+                      num_turns=1, session_id="s", total_cost_usd=0.01, result="silence cut complete"),
+    ]
+    answer = [
+        AssistantMessage(content=[TextBlock(text="here is your 1.5x")], model="m"),
+        ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+                      num_turns=1, session_id="s", total_cost_usd=0.02, result="here is your 1.5x"),
+    ]
+    fake = DrainFakeClient(buffered=stray, response=answer)
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: fake,
+                         drain_idle_timeout_s=0.02, drain_result_timeout_s=0.05)
+    # Pre-warm the client (as if a prior turn already ran) so it is NOT fresh and the drain runs.
+    runner._clients["proj"] = fake
+
+    events: list[dict] = []
+    res = asyncio.run(runner.run_turn("proj", "1.5x this video", on_event=lambda e: events.append(e)))
+
+    # The stray turn is surfaced as a background note, correctly separated…
+    assert any(e["type"] == "background_update" and "silence cut complete" in e["text"] for e in events)
+    # …and the answer to THIS message is the 1.5x turn — no off-by-one.
+    assert res.text == "here is your 1.5x"
+    assert "silence cut complete" not in res.text
+    # The stray turn was consumed, so the real query still ran and was recorded.
+    assert fake.queries == ["1.5x this video"]
 
 
 # --- confirm round-trip mechanics ----------------------------------------

@@ -158,6 +158,10 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
             }
             return [...m, { role: 'result', ...evt }]
           })
+        } else if (evt.type === 'background_update') {
+          // A background task finished BETWEEN turns; the backend drained it so it can't be
+          // mis-attributed as the answer to this message. Render it as its own system note.
+          setMessages(m => [...m, { role: 'note', text: evt.text }])
         } else if (evt.type === 'confirm_request') {
           setPendingConfirm(evt)
         } else if (evt.type === 'question') {

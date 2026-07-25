@@ -69,6 +69,26 @@ class RenderJobStore:
         ).start()
         return job_id
 
+    def start_op(self, project_id: str, tool_name: str, tool_input: dict[str, Any]) -> str:
+        """Queue a heavy media op (any registry tool run) for `project_id` and return
+        its job_id. Same lifecycle as start_with_inputs (daemon thread, supersede,
+        consumed tagging) but runs an arbitrary registry tool IN-PROCESS instead of a
+        render. This is what lets the agent's `run_media_op` tool BLOCK its turn (answer
+        stays live) rather than detaching to a background Bash task — the CLI auto-detach
+        of a long re-encode is what broke turn attribution (the off-by-one). Tagged
+        origin="agent_op" so the runner can surface a finished op on the user's next turn
+        (AgentRunner._render_resume_note)."""
+        job_id = uuid.uuid4().hex[:12]
+        with self._lock:
+            self._jobs[job_id] = {"job_id": job_id, "project_id": project_id,
+                                  "status": "queued", "origin": "agent_op",
+                                  "tool_name": tool_name, "consumed": False}
+            self._active_by_project[project_id] = job_id  # newest job wins
+        threading.Thread(
+            target=self._run_op, args=(job_id, project_id, tool_name, dict(tool_input)), daemon=True
+        ).start()
+        return job_id
+
     def status(self, job_id: str) -> Optional[dict[str, Any]]:
         with self._lock:
             job = self._jobs.get(job_id)
@@ -260,6 +280,35 @@ class RenderJobStore:
                 proposal_packet=inputs.get("proposal_packet"),
                 hdr_policy=inputs.get("hdr_policy"),
             )
+        except Exception as exc:
+            self._set(job_id, project_id, status="failed",
+                      error=f"{type(exc).__name__}: {exc}"[:2000])
+
+    def _run_op(self, job_id: str, project_id: str, tool_name: str,
+                tool_input: dict[str, Any]) -> None:
+        """Op path: run a registry tool (silence_cutter, motion_ops, ...) in-process on
+        this daemon thread. A Stop/timeout leaves it running and the next turn surfaces
+        the result — same survival guarantee as a render job. Records the produced file
+        under output_path (tools name it `output` or `output_path`) plus the full
+        result_data for the agent to read."""
+        self._set(job_id, project_id, status="running")
+        try:
+            from tools.tool_registry import registry
+            registry.ensure_discovered()
+            tool = registry.get(tool_name)
+            if tool is None:
+                self._set(job_id, project_id, status="failed",
+                          error=f"unknown tool {tool_name!r}")
+                return
+            result = tool.execute(dict(tool_input))
+            if getattr(result, "success", False):
+                data = getattr(result, "data", None) or {}
+                out = data.get("output") or data.get("output_path")
+                self._set(job_id, project_id, status="done",
+                          result_data=data, output_path=out)
+            else:
+                err = getattr(result, "error", None) or "tool failed"
+                self._set(job_id, project_id, status="failed", error=str(err)[:2000])
         except Exception as exc:
             self._set(job_id, project_id, status="failed",
                       error=f"{type(exc).__name__}: {exc}"[:2000])

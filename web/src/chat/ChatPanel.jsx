@@ -134,8 +134,7 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
           className="model-select"
           value={model}
           onChange={e => setModel?.(e.target.value)}
-          disabled={busy}
-          title="Agent model"
+          title="Agent model (applies to your next message)"
         >
           {AGENT_MODELS.map(m => (
             <option key={m.id} value={m.id}>

@@ -109,6 +109,32 @@ def bash_uses_videocompose_render(command: str) -> bool:
     )
 
 
+# Heavy media tools that re-encode video — long enough that the Claude CLI auto-detaches
+# them to a background task and ENDS the turn (the off-by-one). Steer them to the in-process
+# `run_media_op` tool (blocks the turn, answer stays live).
+_HEAVY_OP_MARKERS = re.compile(
+    r"tools\.(?:video|audio)\.(?:silence_cutter|motion_ops|auto_reframe|object_cutout)"
+    r"|\b(?:SilenceCutter|MotionOps)\b"
+    r"|registry\.get\(\s*['\"](?:silence_cutter|motion_ops)['\"]\s*\)"
+)
+
+
+def bash_runs_heavy_media_op(command: str) -> Optional[str]:
+    """Return a label if a Bash command RUNS a heavy media op (silence_cutter, motion_ops, …)
+    via `python … .execute(…)`, else None. Such a re-encode outlives the CLI's foreground Bash
+    timeout, so the CLI auto-backgrounds it and ends the turn — the exact detach that broke
+    test-proj-2. Steer these to the in-process `run_media_op` tool instead.
+
+    Gated on `.execute(` so introspection / quick calls never match: `ffprobe`,
+    `scripts/update_stage.py`, `registry.discover()`, and `registry.get('silence_cutter').get_info()`
+    all lack `.execute(` → ALLOW. This is a STEER, not the correctness guarantee — the run_turn
+    drain catches any long op this pattern misses (e.g. an arbitrary user script)."""
+    if ".execute(" not in command:
+        return None
+    m = _HEAVY_OP_MARKERS.search(command)
+    return m.group(0) if m else None
+
+
 # --------------------------------------------------------------------------
 # Filesystem sandbox — keep the agent inside the app's OWN folders.
 #
@@ -330,6 +356,15 @@ def decide_tool(
                 "background renders break turn attribution. Call the `render` tool "
                 "with edit_decisions/asset_manifest/proposal_packet.",
             )
+        heavy_op = bash_runs_heavy_media_op(command)
+        if heavy_op:
+            return ToolDecision(
+                ACTION_DENY,
+                f"Run heavy media ops ({heavy_op}) via the in-process `run_media_op` tool, "
+                "not `python … .execute(…)` in Bash — a long re-encode gets auto-backgrounded "
+                "and ends your turn, which breaks turn attribution. Call `run_media_op` with "
+                "{tool, input}; it blocks and returns the result in this same turn.",
+            )
         # Bash is free-form; flag commands that reach outside the app workspace.
         if sandbox is not None:
             escape = bash_path_escape_reason(command, sandbox)
@@ -406,6 +441,15 @@ BLOCKS until the render finishes, and returns {success, output_path, warnings} s
 QA in the SAME turn. Pass edit_decisions (with render_runtime + renderer_family locked), \
 asset_manifest, and proposal_packet. Do NOT render by running VideoCompose render_proxies via \
 `run_in_background` Bash — a background render ends your turn and breaks message attribution.
+
+To run ANY heavy media op (silence removal, speed change, reframe, and other tools.video / \
+tools.audio re-encodes), call the `run_media_op` tool with {tool: "<registry name>", input: {...}} \
+(e.g. tool="silence_cutter" or "motion_ops"). It runs IN-PROCESS, BLOCKS until it finishes, and \
+returns {success, output_path, data, error} so you continue in the SAME turn. Do NOT run these via \
+`python -c "...execute(...)"` in Bash — a long re-encode gets auto-backgrounded, which ends your \
+turn and breaks message attribution (the answer would arrive a message late). Quick read-only calls \
+(ffprobe, scripts/update_stage.py, registry introspection) still run via Bash. After a media op \
+produces a file, route it through `store_asset` as usual.
 
 To ask the user a clarifying question, call the `ask_user` tool with your question and a list \
 of options (the user picks one in the UI and it comes back as the tool result). Use it whenever \
@@ -753,6 +797,9 @@ class AgentRunner:
     render_store: Optional[Any] = None
     render_timeout_s: int = 1800            # 30 min cap on a single in-turn render await
     render_poll_interval_s: float = 0.5     # how often the render tool polls job status
+    # Drain of stray/unsolicited turns before each user turn (the off-by-one safety net).
+    drain_idle_timeout_s: float = 0.15      # how long to wait for a buffered msg when no turn is open
+    drain_result_timeout_s: float = 5.0     # once a stray turn is mid-stream, how long to wait for its result
     # WHERE the agent's project artifacts/checkpoints live. Injected from app.create_app so the
     # agent and the read layer agree; defaults to <repo_root>/projects when omitted (dev + tests).
     # In the packaged app this is the writable App-Support projects dir, NOT inside the bundle.
@@ -959,8 +1006,45 @@ class AgentRunner:
                 str(args.get("reason") or "").strip(),
             )
 
+        # run_media_op: the agent's blocking runner for HEAVY media ops (silence_cutter,
+        # motion_ops, and other tools.video re-encodes). Runs the named registry tool
+        # IN-PROCESS on a RenderJobStore thread and BLOCKS until it finishes, then returns
+        # the result so the agent continues in the SAME turn. This replaces
+        # `python -c "...execute(...)"` in Bash — a long re-encode there gets auto-detached
+        # by the CLI, ending the turn and breaking message attribution (the off-by-one).
+        # Like `render`, the job runs on a store thread, so a Stop leaves it running and the
+        # next turn surfaces its result (see _render_resume_note). Produced files still go
+        # through store_asset — this tool returns the path; the agent picks the kind.
+        @tool(
+            "run_media_op",
+            "Run a heavy media operation (silence removal, speed change, reframe, …) IN-PROCESS. "
+            "Runs the named tool, BLOCKS until it finishes, and returns {success, output_path, "
+            "data, error} so you continue in THIS SAME TURN. Use this for any tools.video / "
+            "tools.audio re-encode instead of `python -c \"...execute(...)\"` in Bash (a "
+            "background re-encode ends your turn and breaks attribution). Quick read-only calls "
+            "(ffprobe, update_stage.py, registry introspection) still run via Bash. After it "
+            "produces a file, route that file through `store_asset` as usual.",
+            {
+                "type": "object",
+                "properties": {
+                    "tool": {"type": "string",
+                        "description": "The registry tool name to run, e.g. 'silence_cutter', 'motion_ops'."},
+                    "input": {"type": "object",
+                        "description": "The tool's own input dict (same schema you'd pass to its execute())."},
+                },
+                "required": ["tool", "input"],
+            },
+        )
+        async def run_media_op(args: dict[str, Any]) -> dict[str, Any]:
+            return await self._run_media_op(
+                project_id,
+                str(args.get("tool") or "").strip(),
+                args.get("input") or {},
+            )
+
         mc_server = create_sdk_mcp_server(
-            "mc", "1.0.0", [ask_user, render, store_asset, request_api_key, request_capability])
+            "mc", "1.0.0", [ask_user, render, store_asset, request_api_key,
+                            request_capability, run_media_op])
 
         # If a prior session for this project died, resume it so the agent
         # comes back with its full conversation context (on a fresh budget).
@@ -978,7 +1062,10 @@ class AgentRunner:
             mcp_servers={"mc": mc_server},
             # Steer the agent to ask_user (we control its UI round-trip) instead
             # of the built-in AskUserQuestion (no controllable headless I/O).
-            disallowed_tools=["AskUserQuestion"],
+            # Disallow ScheduleWakeup too: in this per-message runner a scheduled
+            # wakeup does nothing useful (the backend only reads the stream when the
+            # user sends a message) and is a pure source of unsolicited/stray turns.
+            disallowed_tools=["AskUserQuestion", "ScheduleWakeup"],
         )
         return ClaudeSDKClient(options=options)
 
@@ -1358,6 +1445,80 @@ class AgentRunner:
             # a thread, not a CLI bg task); the next turn's resume note surfaces it.
             raise
 
+    # -- run_media_op tool ---------------------------------------------------
+    def _media_op_result(self, **fields: Any) -> dict[str, Any]:
+        """Build the MCP result for run_media_op: a human summary line plus a JSON blob
+        carrying success/tool/output_path/data/error. Mirrors _render_tool_result."""
+        payload = {k: v for k, v in fields.items() if v is not None}
+        ok = bool(payload.get("success"))
+        label = payload.get("tool") or "media op"
+        summary = (f"{label} done: {payload.get('output_path') or 'ok'}" if ok
+                   else f"{label} failed: {payload.get('error', 'unknown error')}")
+        text = summary + "\n\n" + json.dumps(payload)
+        return {"content": [{"type": "text", "text": text}], "is_error": not ok}
+
+    async def _run_media_op(self, project_id: str, tool_name: str,
+                            tool_input: dict[str, Any]) -> dict[str, Any]:
+        """Start a tracked media-op job (any registry tool) on the shared RenderJobStore
+        and AWAIT it, emitting progress SSE. Returns the MCP result so the agent continues
+        in the SAME turn — the in-process, blocking replacement for running a heavy
+        re-encode via background Bash (which broke turn attribution).
+
+        Same Stop/timeout semantics as _run_render: the job runs on a store thread, so a
+        Stop or timeout leaves it running and the next turn's resume note surfaces it.
+        # ponytail: poll loop duplicated from _run_render; unify into a shared helper only
+        # if a third store-job kind ever appears."""
+        if self.render_store is None:
+            return self._media_op_result(
+                success=False, tool=tool_name, error="job store unavailable; cannot run media op in-process")
+        if not tool_name:
+            return self._media_op_result(success=False, error="tool name is required")
+        if not isinstance(tool_input, dict):
+            return self._media_op_result(success=False, tool=tool_name, error="input must be an object")
+
+        loop = asyncio.get_event_loop()
+        job_id = self.render_store.start_op(project_id, tool_name, tool_input)
+        emit = self._emit.get(project_id)
+        if emit is not None:
+            await _maybe_await(emit({"type": "media_op_started", "job_id": job_id,
+                                     "project_id": project_id, "tool": tool_name}))
+
+        deadline = loop.time() + self.render_timeout_s
+        last_status: Optional[str] = None
+        try:
+            while True:
+                st = self.render_store.status(job_id)
+                if st is None:  # superseded/dropped by a newer job
+                    return self._media_op_result(
+                        success=False, tool=tool_name, job_id=job_id,
+                        error=f"media op {job_id} was superseded by a newer job")
+                status = st.get("status")
+                if status != last_status and emit is not None:
+                    await _maybe_await(emit({"type": "media_op_progress", "job_id": job_id, "status": status}))
+                    last_status = status
+                if status == "done":
+                    self.render_store.mark_consumed(job_id)  # seen in-turn; don't re-surface next turn
+                    return self._media_op_result(
+                        success=True, tool=tool_name, job_id=job_id,
+                        output_path=st.get("output_path"), data=st.get("result_data"))
+                if status == "failed":
+                    self.render_store.mark_consumed(job_id)
+                    return self._media_op_result(
+                        success=False, tool=tool_name, job_id=job_id,
+                        error=st.get("error") or "media op failed")
+                if loop.time() > deadline:
+                    # Do NOT cancel — the job keeps running on its thread; the next turn's
+                    # resume note surfaces the finished output. Leave UNCONSUMED.
+                    return self._media_op_result(
+                        success=False, timed_out=True, tool=tool_name, job_id=job_id,
+                        error=(f"media op still running after {self.render_timeout_s}s (job {job_id}); "
+                               "it continues in the background and its result will be available on your "
+                               "next turn — do not re-run it."))
+                await asyncio.sleep(self.render_poll_interval_s)
+        except asyncio.CancelledError:
+            # User hit Stop -> leave the job running on its thread; next turn surfaces it.
+            raise
+
     async def _store_asset(self, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
         """Place a produced file into its canonical folder for the declared kind
         and return the path the agent should reference. Thin wrapper over
@@ -1393,35 +1554,105 @@ class AgentRunner:
         })
 
     def _render_resume_note(self, project_id: str) -> Optional[str]:
-        """If there's an UNCONSUMED agent render job for this project, return a note
-        telling the agent to continue from it. Fires on the user's NEXT message after
-        a Stop/timeout, so the finished render is surfaced attached to that message
-        (correct attribution, no off-by-one). Terminal states are marked consumed so
-        the note fires exactly once; running/queued are left so the 'done' note fires
-        later. None when there's nothing to surface."""
+        """If there's an UNCONSUMED agent job (a render OR a media op) for this project,
+        return a note telling the agent to continue from it. Fires on the user's NEXT
+        message after a Stop/timeout, so the finished job is surfaced attached to that
+        message (correct attribution, no off-by-one). Terminal states are marked consumed
+        so the note fires exactly once; running/queued are left so the 'done' note fires
+        later. None when there's nothing to surface.
+
+        Disjoint from run_turn's stray-turn drain: a store-thread job is surfaced HERE and
+        never produces a CLI turn for the drain to see; a stray Bash turn is surfaced by the
+        drain and never starts a store job. So the same work is never double-reported."""
         if self.render_store is None:
             return None
         try:
             job = self.render_store.active_job_for(project_id)
         except Exception:
             return None
-        if not job or job.get("consumed") or job.get("origin") != "agent":
+        if not job or job.get("consumed") or job.get("origin") not in ("agent", "agent_op"):
             return None
         status = job.get("status")
         job_id = job.get("job_id")
+        is_op = job.get("origin") == "agent_op"
+        tag = "MEDIA OP UPDATE" if is_op else "RENDER UPDATE"
+        noun = f"media op ({job.get('tool_name')})" if is_op else "render"
+        redo = "re-run it" if is_op else "re-render"
         if status == "done":
             self.render_store.mark_consumed(job_id)
-            return (f"[RENDER UPDATE: render job {job_id} COMPLETED while you were away. "
+            return (f"[{tag}: {noun} job {job_id} COMPLETED while you were away. "
                     f"Output: {job.get('output_path')}. Warnings: {job.get('warnings') or 'none'}. "
-                    f"Do NOT re-render — pick up from QA/verification of this output.]")
+                    f"Do NOT {redo} — pick up from QA/verification of this output.]")
         if status == "failed":
             self.render_store.mark_consumed(job_id)
-            return (f"[RENDER UPDATE: render job {job_id} FAILED: {job.get('error')}. "
-                    f"Diagnose the cause and decide whether to re-render.]")
+            return (f"[{tag}: {noun} job {job_id} FAILED: {job.get('error')}. "
+                    f"Diagnose the cause and decide whether to {redo}.]")
         # queued / running — surface but do NOT consume (so the 'done' note fires later)
-        return (f"[RENDER UPDATE: render job {job_id} you started is still {status}. "
-                f"Its result will be available shortly; only call the render tool again "
-                f"if you need a fresh render.]")
+        return (f"[{tag}: {noun} job {job_id} you started is still {status}. "
+                f"Its result will be available shortly; only call the tool again "
+                f"if you need a fresh run.]")
+
+    async def _drain_unsolicited(
+        self, project_id: str, client: Any, on_event: Optional[EmitFn]
+    ) -> None:
+        """Consume any turn(s) the CLI produced BETWEEN user messages — a background
+        Bash-task completion or a scheduled wakeup — before we send the next message.
+        Without this, the next receive_response() reads that buffered turn first and stops
+        at its ResultMessage, mis-attributing the prior turn's output as the answer to the
+        new message (the off-by-one). Each fully-drained turn is surfaced as a
+        `background_update` event (the UI renders it as a system note), cleanly separated
+        from the answer that's about to come.
+
+        Cancellation-safe: the SDK read suspends on a memory-stream receive() (queue-style),
+        so a timed-out anext() leaves any unread item buffered — no data lost, no stream
+        corruption (verified against claude_agent_sdk 0.2.87). We only cancel the FINAL
+        (timed-out) read and then discard this generator; successful reads never cancel.
+        # ponytail: the grace-wait bounds the rare mid-stream race (a user message arriving
+        # while a stray turn is still streaming); a persistent reader task is the fuller fix
+        # if that ever actually bites."""
+        it = client.receive_messages()
+        texts: list[str] = []
+        turn_open = False
+
+        async def _flush() -> None:
+            summary = "".join(texts).strip()
+            texts.clear()
+            if summary and on_event is not None:
+                await _maybe_await(on_event({
+                    "type": "background_update",
+                    "text": f"A background task finished between turns:\n\n{summary}",
+                }))
+
+        try:
+            while True:
+                # Short wait while idle (nothing buffered → no stray turn); longer once a
+                # stray turn is mid-stream, so we consume it whole rather than splitting it.
+                timeout = self.drain_result_timeout_s if turn_open else self.drain_idle_timeout_s
+                try:
+                    msg = await asyncio.wait_for(it.__anext__(), timeout=timeout)
+                except (asyncio.TimeoutError, StopAsyncIteration):
+                    break
+                evt = event_of(msg)
+                etype = evt.get("type")
+                if etype == "assistant":
+                    turn_open = True
+                    for itm in evt.get("items", []):
+                        if itm.get("kind") == "text":
+                            texts.append(itm["text"])
+                elif etype == "result":
+                    turn_open = False
+                    if evt.get("session_id"):
+                        self._session_ids[project_id] = evt["session_id"]
+                    await _flush()
+                # system/other messages: consumed but not surfaced or counted as a turn.
+        finally:
+            try:
+                await it.aclose()
+            except Exception:
+                pass
+            # A stray turn still mid-stream when we gave up: surface its partial text so
+            # nothing is silently dropped (rare; see the ponytail note above).
+            await _flush()
 
     async def run_turn(
         self, project_id: str, message: str, on_event: Optional[EmitFn] = None
@@ -1431,17 +1662,27 @@ class AgentRunner:
         if on_event is not None:
             self._emit[project_id] = on_event
 
+        is_fresh = self._fresh_client.pop(project_id, False)
+
+        # Warm client only: drain any stray/unsolicited turn (a background Bash-task
+        # completion or a scheduled wakeup that arrived BETWEEN messages) before we send
+        # this one, so receive_response() can't read that buffered turn and mis-attribute
+        # it as the answer to THIS message (the off-by-one). A fresh client has never had a
+        # turn, so nothing is buffered — skip it (and avoid touching a just-connected stream).
+        if not is_fresh:
+            await self._drain_unsolicited(project_id, client, on_event)
+
         # On the first turn of a freshly-(re)created client, ground the agent in
         # on-disk progress so it RESUMES the project instead of starting over.
         # (When the SDK session was resumed, this is a harmless reminder; when the
         # client is cold — e.g. after a backend restart — it's what preserves the work.)
         prompt = message
-        if self._fresh_client.pop(project_id, False):
+        if is_fresh:
             prompt = f"{self._first_turn_preamble(project_id)}\n\n{message}"
         else:
             # Warm client (e.g. resumed after Stop, where interrupt() keeps the client):
             # the fresh-client preamble won't run, so surface any unconsumed finished
-            # render here — attached to THIS user message, so it's correctly attributed.
+            # render/media-op here — attached to THIS user message, so it's correctly attributed.
             render_note = self._render_resume_note(project_id)
             if render_note:
                 prompt = f"{render_note}\n\n{message}"

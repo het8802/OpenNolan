@@ -50,6 +50,10 @@ class FakeStore:
         self.started.append((project_id, inputs))
         return self.job_id
 
+    def start_op(self, project_id, tool_name, tool_input):
+        self.started.append((project_id, tool_name, tool_input))
+        return self.job_id
+
     def status(self, job_id):
         s = self._statuses[self._i] if self._i < len(self._statuses) else self._statuses[-1]
         self._i += 1
@@ -75,6 +79,11 @@ class FakeClient:
 
     async def receive_response(self):
         for m in self._messages:
+            yield m
+
+    async def receive_messages(self):
+        # Nothing buffered between turns in this fake — the warm-client drain no-ops.
+        for m in ():
             yield m
 
     async def disconnect(self):
@@ -163,6 +172,114 @@ def test_run_render_without_store_errors_cleanly():
     res = asyncio.run(runner._run_render("proj", {"edit_decisions": {"cuts": []}}))
     assert res["is_error"] is True
     assert "render store unavailable" in res["content"][0]["text"]
+
+
+# --- _run_media_op (generalized in-process blocking op) -------------------
+
+def test_run_media_op_blocks_and_returns_in_turn():
+    store = FakeStore([
+        {"status": "queued"},
+        {"status": "running"},
+        {"status": "done", "output_path": "assets/video/cut.mp4",
+         "result_data": {"output": "assets/video/cut.mp4", "silence_removed_seconds": 49.5}},
+    ])
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None,
+                         render_store=store, render_poll_interval_s=0.0)
+    events: list[dict] = []
+    runner._emit["proj"] = lambda e: events.append(e)
+
+    res = asyncio.run(runner._run_media_op("proj", "silence_cutter", {"input_path": "x.mov"}))
+    payload = _payload(res)
+    assert payload["success"] is True
+    assert payload["output_path"] == "assets/video/cut.mp4"
+    assert payload["tool"] == "silence_cutter"
+    assert res["is_error"] is False
+    assert any(e["type"] == "media_op_started" for e in events)
+    assert any(e["type"] == "media_op_progress" for e in events)
+    assert store.consumed == ["job1"]          # seen in-turn -> won't re-fire next turn
+    assert store.started == [("proj", "silence_cutter", {"input_path": "x.mov"})]
+
+
+def test_run_media_op_failed_returns_error():
+    store = FakeStore([{"status": "failed", "error": "bad codec"}])
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None,
+                         render_store=store, render_poll_interval_s=0.0)
+    res = asyncio.run(runner._run_media_op("proj", "motion_ops", {"operation": "speed"}))
+    payload = _payload(res)
+    assert payload["success"] is False
+    assert "bad codec" in payload["error"]
+    assert res["is_error"] is True
+    assert store.consumed == ["job1"]
+
+
+def test_run_media_op_timeout_does_not_cancel_job():
+    store = FakeStore([{"status": "running"}])  # never finishes
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None,
+                         render_store=store, render_poll_interval_s=0.0, render_timeout_s=0)
+    res = asyncio.run(runner._run_media_op("proj", "silence_cutter", {"input_path": "x.mov"}))
+    payload = _payload(res)
+    assert payload["timed_out"] is True
+    assert res["is_error"] is True
+    assert store.consumed == []                # left UNCONSUMED -> next turn surfaces it
+
+
+def test_run_media_op_cancellation_keeps_job_running():
+    store = FakeStore([{"status": "running"}])
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None,
+                         render_store=store, render_poll_interval_s=10)  # long sleep -> cancel mid-wait
+
+    async def go():
+        task = asyncio.create_task(runner._run_media_op("proj", "silence_cutter", {"input_path": "x.mov"}))
+        await asyncio.sleep(0.02)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(go())
+    assert store.consumed == []                # job NOT cancelled, NOT consumed
+
+
+def test_run_media_op_without_store_errors_cleanly():
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)  # no render_store
+    res = asyncio.run(runner._run_media_op("proj", "silence_cutter", {"input_path": "x.mov"}))
+    assert res["is_error"] is True
+    assert "job store unavailable" in res["content"][0]["text"]
+
+
+def test_media_op_resume_note_completed_fires_once(tmp_path):
+    store = _store_with_job(tmp_path, origin="agent_op", tool_name="silence_cutter",
+                            status="done", output_path="assets/video/cut.mp4")
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None, render_store=store)
+    note = runner._render_resume_note("p")
+    assert note and "MEDIA OP UPDATE" in note and "COMPLETED" in note
+    assert "silence_cutter" in note and "assets/video/cut.mp4" in note
+    assert runner._render_resume_note("p") is None       # consumed -> fires once
+
+
+# --- heavy-media-op deny steer --------------------------------------------
+
+def test_bash_steer_denies_heavy_media_op():
+    from server.agent_runner import bash_runs_heavy_media_op
+    cmd = ('python -c "from tools.video.silence_cutter import SilenceCutter; '
+           "SilenceCutter().execute({'input_path': 'x.mov'})\"")
+    assert bash_runs_heavy_media_op(cmd)
+    d = decide_tool("Bash", {"command": cmd})
+    assert d.action == ACTION_DENY
+    assert "run_media_op" in d.reason
+
+
+def test_bash_steer_allows_introspection_and_quick_calls():
+    from server.agent_runner import bash_runs_heavy_media_op
+    ok = [
+        "ffprobe -i x.mov",
+        ".venv/bin/python scripts/update_stage.py p edit in_progress inst",
+        '.venv/bin/python -c "from tools.tool_registry import registry; registry.discover()"',
+        ('.venv/bin/python -c "from tools.tool_registry import registry; '
+         "print(registry.get('silence_cutter').get_info())\""),
+    ]
+    for cmd in ok:
+        assert bash_runs_heavy_media_op(cmd) is None, cmd
+        assert decide_tool("Bash", {"command": cmd}).action == ACTION_ALLOW, cmd
 
 
 # --- _render_resume_note --------------------------------------------------

@@ -151,3 +151,64 @@ def test_active_job_for_and_mark_consumed(tmp_path):
     assert job["job_id"] == jid and job["consumed"] is False
     store.mark_consumed(jid)
     assert store.active_job_for("demo")["consumed"] is True
+
+
+# --- start_op (generalized: run any registry tool on a job thread) --------
+
+class FakeOpTool:
+    """Stub registry tool: returns success/failure without touching ffmpeg."""
+
+    def __init__(self, name, *, succeed=True, data=None, error=None):
+        self.name = name
+        self._succeed = succeed
+        self._data = data or {}
+        self._error = error
+
+    def execute(self, inputs):
+        if self._succeed:
+            return SimpleNamespace(success=True, data=self._data, error=None)
+        return SimpleNamespace(success=False, data=None, error=self._error or "op failed")
+
+
+@pytest.fixture
+def registry_sandbox():
+    """Snapshot/restore the process-wide registry so a test can inject a fake tool and
+    mark 'tools' as already-discovered (skips the heavy real import) without bleeding."""
+    from tools.tool_registry import registry
+    tools = dict(registry._tools)
+    pkgs = set(registry._discovered_packages)
+    registry._discovered_packages.add("tools")  # ensure_discovered() no-ops -> no real import
+    try:
+        yield registry
+    finally:
+        registry._tools.clear(); registry._tools.update(tools)
+        registry._discovered_packages.clear(); registry._discovered_packages.update(pkgs)
+
+
+def test_start_op_runs_registry_tool_on_thread(tmp_path, registry_sandbox):
+    registry_sandbox._tools["fake_cut"] = FakeOpTool("fake_cut", data={"output": "/tmp/out.mp4", "x": 1})
+    store = _store(tmp_path)
+    jid = store.start_op("demo", "fake_cut", {"input_path": "a.mov"})
+    st = _wait(store, jid)
+    assert st["status"] == "done", st
+    assert st["output_path"] == "/tmp/out.mp4"
+    assert st["result_data"] == {"output": "/tmp/out.mp4", "x": 1}
+    assert st["origin"] == "agent_op"
+    assert st["tool_name"] == "fake_cut"
+
+
+def test_start_op_failure_records_error(tmp_path, registry_sandbox):
+    registry_sandbox._tools["fake_cut"] = FakeOpTool("fake_cut", succeed=False, error="ffmpeg exploded")
+    store = _store(tmp_path)
+    jid = store.start_op("demo", "fake_cut", {})
+    st = _wait(store, jid)
+    assert st["status"] == "failed"
+    assert "ffmpeg exploded" in st["error"]
+
+
+def test_start_op_unknown_tool_fails_cleanly(tmp_path, registry_sandbox):
+    store = _store(tmp_path)
+    jid = store.start_op("demo", "does_not_exist", {})
+    st = _wait(store, jid)
+    assert st["status"] == "failed"
+    assert "does_not_exist" in st["error"]
