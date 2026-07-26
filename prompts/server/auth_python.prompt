@@ -1,0 +1,78 @@
+% Generates: server/auth.py  — Python 3, stdlib-only HTTP (urllib), type-hinted, `from __future__ import annotations`.
+% Edge cases (PKCE math, classification, expiry, precedence, persistence) are pinned by tests/contracts/test_auth.py — keep this prompt at the contract level.
+
+# Anthropic account authentication for the OpenNolan desktop app
+
+Write `server/auth.py`: connect the local AI agent to the user's Anthropic
+account two ways, persisting **secrets to the BYOK `.env`** and **non-secret
+metadata (method, expiry) to `settings.json`**.
+
+1. **"Sign in with Claude"** — the OAuth 2.0 + PKCE flow `claude setup-token`
+   uses. Open claude.ai's authorize page in the browser; the user approves and
+   pastes back a `code#state` string; exchange it for an OAuth token stored as
+   `CLAUDE_CODE_OAUTH_TOKEN` (the var the Claude Agent SDK reads). Uses the
+   Pro/Max subscription — no per-token API billing. The manual paste-code
+   variant needs no loopback server or custom URL scheme.
+2. **API key fallback** — the user pastes an Anthropic API key; VERIFY it with a
+   live call before saving it as `ANTHROPIC_API_KEY`.
+
+A live auth failure mid-run (expired/revoked token, rejected key) is recorded via
+`mark_auth_error` so `status()` reports `needs_reauth` until the next success —
+the UI prompts a reconnect instead of failing silently.
+
+## Dependencies
+- `from server import env_config, settings`.
+  - `env_config.write_env_vars(dict)` writes the BYOK `.env`; `env_config.reload_env()` reloads it. Neither can UNSET a var, so after writing also mutate `os.environ` directly so THIS process/session uses the new credential.
+  - `settings.get(key, default=None)` / `settings.set_value(key, value)` for metadata.
+- `_cli_available()`: lazily `from server.agent_runner import claude_cli_available` and call it; any import/call error → False. (Dev machines auth from a logged-in `claude` CLI with no env token.)
+
+## Constants
+- OAuth (each env-overridable via `OPENNOLAN_OAUTH_*`, exact defaults required):
+  `CLIENT_ID`=`9d1c250a-e61b-44d9-88ed-5944d1962f5e`,
+  `AUTHORIZE_URL`=`https://claude.ai/oauth/authorize`,
+  `TOKEN_URL`=`https://console.anthropic.com/v1/oauth/token`,
+  `REDIRECT_URI`=`https://console.anthropic.com/oauth/code/callback`,
+  `SCOPES`=`org:create_api_key user:profile user:inference` — these mirror the public Claude Code CLI client.
+- API-key check: `MODELS_URL`=`https://api.anthropic.com/v1/models` (cheapest authed GET: 200 valid / 401 bad), `ANTHROPIC_VERSION`=`2023-06-01`.
+- `_USER_AGENT`=`OpenNolan/0.1.0` — sent on EVERY request. console.anthropic.com sits behind Cloudflare, which 403s the default Python-urllib UA ("Error 1010: browser_signature_banned") and silently breaks the token exchange.
+- Env var names: `OAUTH_TOKEN_ENV`=`CLAUDE_CODE_OAUTH_TOKEN` (Agent SDK reads it), `REFRESH_TOKEN_ENV`=`CLAUDE_CODE_REFRESH_TOKEN` (internal), `API_KEY_ENV`=`ANTHROPIC_API_KEY`.
+- Tunables: `_HTTP_TIMEOUT`=15, `_PENDING_TTL`=600 (started flow valid 10 min), `_EXPIRY_SKEW`=60 (treat a token expired this early), `_REFRESH_THROTTLE`=60 (≤1 silent refresh/min).
+- `_pending: dict[state -> {"verifier", "ts"}]` (in-memory, single-user), plus a module `_last_refresh_attempt` float.
+- `AuthError(Exception)` — user-facing failure (bad code, rejected key, network); the app layer surfaces it as HTTP 400.
+
+## Helpers
+- `_b64url(bytes)`: urlsafe base64, no `=` padding. `_now()`: aware UTC. `_iso(dt)`: `dt.isoformat()`.
+- `_http_json(url, method="GET", *, headers=None, body=None) -> (status, dict)`: minimal stdlib JSON HTTP, no extra deps. Headers always include `Accept: application/json` + the app User-Agent; JSON-encode `body` with `Content-Type` when given. Returns `(status, parsed_or_{})`; on `HTTPError` return `(code, parsed_body_or_{"error": raw[:400]})` — NEVER raise on non-2xx; on `URLError` raise `AuthError` with a friendly "couldn't reach Anthropic, check your connection" message.
+- `_err_message(payload) -> str`: dig a human message from an error body. If `error` is a dict, use its `message`/`error_description`; else fall through `error_description`, `error`, `message`, `detail`, `title` (last two are Cloudflare-style).
+- `_is_expired(expires_at) -> bool`: missing/unparseable → False (unknown expiry assumed valid; a live 401 is caught at runtime instead); naive datetime → assume UTC; expired iff `now >= expiry - _EXPIRY_SKEW`.
+- `_prune_pending()`: drop `_pending` entries older than `_PENDING_TTL`.
+- `_reset_runner(app_state)`: if `app_state.agent_runner` is set, null it so the next chat turn rebuilds with the new credentials.
+
+## Runtime auth-error flag
+- `mark_auth_error(detail)`: save `claude_auth_error` = `{"detail": detail[:400], "ts": iso-now}`.
+- `clear_auth_error()`: clear it if present.
+- `classify_auth_error(text) -> bool`: True when text looks like a *credential* problem (reconnect helps), deliberately NOT a generic tool/network error. Match `401`/`403` only as standalone `\b`-bounded tokens, OR any known phrase: authentication_error / authentication error, invalid api key, invalid x-api-key, x-api-key header, oauth token, token (has) expired / is expired, invalid_grant, invalid_token, unauthorized, "please run /login", "run `claude`", credit balance is too low, insufficient credit, billing. (Empty/None → False.)
+
+## `status() -> dict`
+Single source of truth the UI polls. First call `_maybe_refresh()`. Detect `method`
+by precedence **oauth > api_key > cli** (`OAUTH_TOKEN_ENV` env, else `API_KEY_ENV`
+env, else `_cli_available()`). `authenticated = method is not None`. Read
+`claude_auth` meta + `claude_auth_error`; `expires_at`/`expired` only for oauth.
+**`needs_reauth = authenticated and a recorded error exists` — a stale clock alone
+must NOT nag**: the Agent SDK refreshes the shared credential out-of-band (rotating
+our refresh token), so a clock-"expired" token usually still works — trust a real
+failed call. Return keys: `authenticated, method, needs_reauth, expired,
+expires_at, obtained_at, error` (`error` = the recorded detail string or None).
+
+## OAuth flow
+- `start_oauth() -> {"authorize_url", "state"}`: PKCE — `verifier=_b64url(32 random bytes)`, `challenge=_b64url(sha256(verifier))`, `state=_b64url(32 random bytes)`. Prune, store `{verifier, ts}` under `state`. Authorize URL query: `code=true, client_id, response_type=code, redirect_uri, scope, code_challenge, code_challenge_method=S256, state`.
+- `finish_oauth(code_input, app_state=None) -> status()`: split on `#` into `code`/`state` (strip both). Empty input → AuthError. Look up `_pending[state]`; if absent but exactly one flow is in flight, use it; else AuthError ("this sign-in link expired"). POST `TOKEN_URL` with `grant_type=authorization_code` + `code, state, redirect_uri, client_id, code_verifier`. Pop the pending entry. On non-2xx or missing `access_token` → AuthError (append `_err_message` if any). Else `_store_oauth`, `clear_auth_error`, `_reset_runner`, return `status()`.
+- `_store_oauth(payload)`: `access_token` → `OAUTH_TOKEN_ENV`; `refresh_token` (if any) → `REFRESH_TOKEN_ENV`. **OAuth wins** — if an API key is set, clear it. `write_env_vars` + `reload_env`, then force `os.environ`: set the OAuth (+refresh) vars and `pop(API_KEY_ENV)`. Derive `expires_at` from `expires_in` (seconds, if > 0). Save `claude_auth` = `{method: "oauth", obtained_at, expires_at}`.
+- `_maybe_refresh()`: best-effort silent refresh. Skip if an API key is set, no refresh token held, or the stored token isn't clock-expired; throttle to one attempt per `_REFRESH_THROTTLE`. POST `TOKEN_URL` with `grant_type=refresh_token` + `refresh_token, client_id, scope`; swallow AuthError; on success `_store_oauth` + `clear_auth_error`. Leaves `needs_reauth` intact on failure so the user can reconnect manually.
+
+## API key fallback
+- `set_api_key(key, app_state=None) -> status()`: strip; empty → AuthError. `_validate_api_key`; invalid → AuthError(detail). Save `key` → `API_KEY_ENV`, clear OAuth + refresh tokens (env write + `os.environ.pop`). Save `claude_auth` = `{method: "api_key", obtained_at, expires_at: None}`. Clear error, reset runner, return `status()`.
+- `_validate_api_key(key) -> (ok, detail)`: GET `MODELS_URL` with `x-api-key` + `anthropic-version`. 200 → `(True, "")`. 401/403 → `(False, "…rejected that API key…")` (detail must contain "rejected"). Other status → `(False, "couldn't verify the key (HTTP {code})" + _err_message)`. Network AuthError → `(False, str(exc))`.
+
+## Disconnect
+- `disconnect(app_state=None) -> status()`: forget all three credential vars (env write blanks + `os.environ.pop`), set `claude_auth` = None, clear error, reset runner. Leaves a logged-in `claude` CLI, if any, intact.

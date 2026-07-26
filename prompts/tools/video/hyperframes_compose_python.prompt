@@ -1,0 +1,204 @@
+% Generate `tools/video/hyperframes_compose.py`: a `HyperFramesCompose(BaseTool)` that owns the
+% HTML/CSS/GSAP render path end-to-end — workspace materialization, `hyperframes lint`,
+% `hyperframes validate`, and `hyperframes render`. It is the sibling of `video_compose` (FFmpeg +
+% Remotion): `video_compose` delegates here when `edit_decisions.render_runtime == "hyperframes"`,
+% and pipelines may call it directly for lint-only / validate-only / scaffold-only work. The module
+% docstring should say it deliberately does NOT chase parity with every Remotion scene component
+% (see `skills/core/hyperframes.md` for Phase-1 scope).
+%
+% `from __future__ import annotations`. Import json, logging, os, re, shutil, subprocess, time,
+% `pathlib.Path`, typing `Any, Optional`, and from `tools.base_tool`: BaseTool, Determinism,
+% ExecutionMode, ResourceProfile, ResumeSupport, RetryPolicy, ToolResult, ToolRuntime,
+% ToolStability, ToolStatus, ToolTier. `log = logging.getLogger("hyperframes_compose")`.
+% Module-level extension sets: `_IMAGE_EXTENSIONS` (png/jpg/jpeg/bmp/tiff/tif/webp/gif),
+% `_VIDEO_EXTENSIONS` (mp4/mov/webm/mkv/m4v), `_AUDIO_EXTENSIONS` (mp3/wav/m4a/aac/ogg/flac).
+%
+% BaseTool already provides get_info(), the ToolResult dataclass, and the contract attributes with
+% defaults — override only what this tool needs and do NOT re-implement the base machinery.
+
+## Class metadata
+name "hyperframes_compose", version "0.1.0", tier CORE, capability "video_post",
+provider "hyperframes", stability BETA, execution_mode SYNC, determinism DETERMINISTIC,
+runtime LOCAL. `dependencies = ["cmd:npx", "cmd:ffmpeg"]`.
+`install_instructions`: Node.js >= 22 + FFmpeg; the CLI is fetched on first use via
+`npx hyperframes` (npm package `hyperframes`). It MUST warn that the monorepo develops the
+package as `@hyperframes/cli` but publishes as `hyperframes`, and that `npx @hyperframes/cli`
+returns 404 — do NOT use it. Suggest verifying with `npx hyperframes doctor` / the `doctor` op.
+`agent_skills = ["hyperframes","hyperframes-cli","hyperframes-registry","website-to-hyperframes",
+"gsap-core","gsap-timeline"]`.
+`capabilities = ["hyperframes_render","hyperframes_lint","hyperframes_validate",
+"hyperframes_doctor","scaffold_workspace","add_block"]`.
+`best_for`: HTML/CSS/GSAP composition (kinetic typography, promos, launch reels), motion-graphics
+briefs the Remotion scene library doesn't fit, website-to-video, registry-block scenes.
+`not_good_for`: word-level caption burn, avatar/lip-sync presenter, existing React scene stack —
+all stay on Remotion in Phase 1. `fallback_tools = ["video_compose"]`.
+`resource_profile = ResourceProfile(cpu_cores=4, ram_mb=3072, vram_mb=0, disk_mb=2000,
+network_required=False)`; `retry_policy = RetryPolicy(max_retries=0)`;
+`resume_support = ResumeSupport.FROM_START`;
+`idempotency_key_fields = ["operation","workspace_path","edit_decisions"]`;
+`side_effects`: writes HTML/CSS/JS into workspace_path, copies assets into workspace_path/assets/,
+writes MP4 to output_path. `user_visible_verification`: play the MP4 (pacing/typography/audio) and
+inspect index.html via `npx hyperframes preview`.
+
+## input_schema
+JSON-schema object, required `["operation"]`. `operation` enum with per-value descriptions:
+render (materialize + lint + validate + render to MP4), lint, validate (browser-based),
+doctor (env check), scaffold_workspace (materialize but do not render), add_block
+(`hyperframes add <name>`). Other properties: `block_name` (registry block/component for add_block),
+`workspace_path` (target dir, typically `projects/<name>/hyperframes/`, required for every op except
+doctor), `output_path` (MP4, render only), `edit_decisions` object (required for render/scaffold),
+`asset_manifest` object (resolves asset IDs → paths), `playbook` object (drives the style bridge),
+`profile` string (media profile name), `quality` enum draft/standard/high default standard,
+`fps` enum 24/30/60 default 30, `strict` bool default false (fail render on any lint error),
+`skip_contrast` bool default false (skip WCAG contrast during validate).
+
+## Availability / runtime check
+Class constants `_NODE_FLOOR_MAJOR = 22`, `_NPM_PACKAGE = "hyperframes"`, and a process-level
+`_npm_resolve_cache: Optional[dict[str, str]] = None` (shape `{"version": ...}` or `{"error": ...}`)
+so the first call pays the cost and get_info spam is free.
+
+- `_node_major_version() -> Optional[int]` (classmethod): `shutil.which("node")`; run `node --version`
+  (timeout 5); parse the leading `vN.` major; None if node missing / fails / unparseable.
+- `_resolve_npm_package() -> dict[str,str]` (classmethod, cached, NEVER raises): return the cache if
+  set. First try the locally-provisioned package (OPN-3): `from lib import provision`; if
+  `provision.hyperframes_ok()`, read the version from
+  `provision.hyperframes_root()/node_modules/hyperframes/package.json` (fallback "local"), cache
+  `{"version": ...}` — this resolves OFFLINE, skipping the 5s round-trip. Otherwise `npm view
+  hyperframes version` (timeout 5): npm missing → error "npm not on PATH"; TimeoutExpired → an
+  offline/slow-registry error; other OSError/SubprocessError → error naming the exception type;
+  non-zero exit with 404/E404 in stderr → "npm package `hyperframes` not found (404)", else the
+  stderr tail; empty stdout → "npm view returned empty version"; else `{"version": <stdout>}`.
+- `_runtime_check() -> dict[str, Any]`: check local binaries first (node present and >= floor, npx,
+  ffmpeg), accumulating a `reasons` list. ONLY when there are no local reasons, call
+  `_resolve_npm_package()` and append a reason if it errored (so a missing-node run doesn't also show
+  a confusing npm error). Return `runtime_available` (= no reasons), node_major, ffmpeg_available,
+  npx_available, npm_package, npm_package_version, npm_resolve_error, reasons.
+- `get_status()`: AVAILABLE iff runtime_available else UNAVAILABLE.
+- `get_info()`: super().get_info() + `hyperframes_runtime` = the check; when unavailable, add a
+  `setup_offer` (effort "1-minute fix" when npx+ffmpeg already present else a 5-minute install,
+  the install_instructions, and an `unlocks` blurb).
+- `estimate_cost(inputs) -> 0.0`. `estimate_runtime(inputs)`: 30.0 + 0.5 × the summed
+  `out_seconds - in_seconds` (clamped ≥ 0) over edit_decisions.cuts.
+
+## execute + operations
+`execute` reads `inputs["operation"]`, starts a timer, dispatches to the matching `_doctor/
+_scaffold/_lint/_validate/_render/_add_block`, and returns a failure ToolResult "Unknown operation:
+<op>" for anything else. Wrap the dispatch in try/except (log.exception, return
+`ToolResult(success=False, error=f"{type(e).__name__}: {e}")`). Stamp
+`result.duration_seconds = round(elapsed, 2)`.
+
+- `_doctor`: run `_runtime_check`; if not available return failure listing the reasons. Else run the
+  CLI `doctor` via `_run_hf` (timeout 180, warms the npm cache); report exit_code + stdout/stderr
+  tails; success iff exit 0.
+- `_scaffold`: `_require_workspace`; pull edit_decisions/asset_manifest/playbook/profile. Fail if
+  `edit_decisions.cuts` is empty (message names cuts[]). Resolve (width,height,fps) via
+  `_resolve_dimensions`. Create the workspace, `compositions/`, and `assets/`. Resolve + stage cut
+  assets (`_resolve_and_stage_assets`) and audio (`_resolve_audio_refs`). Run the style bridge
+  (`_style_bridge`) → css_vars + design_md. Write `hyperframes.json` (registry =
+  `https://raw.githubusercontent.com/heygen-com/hyperframes/main/registry`, paths
+  blocks="compositions", components="compositions/components", assets="assets"). Write `DESIGN.md`
+  when non-empty. Compute total duration and write `index.html` via `_generate_index_html` (title
+  from edit_decisions.metadata.title else `OpenNolan <renderer_family|composition>`). Return
+  success with operation, workspace, width/height/fps, total_duration_seconds, cut_count,
+  asset_copies; artifacts = [index.html].
+- `_lint` / `_validate`: `_require_workspace`; fail if no index.html ("Run scaffold_workspace
+  first."). Run `hyperframes lint --json` (timeout 120) / `hyperframes validate --json` (timeout
+  300, append `--no-contrast` when skip_contrast). Data = exit_code + parsed `report`
+  (`_parse_json_output`) or a stdout tail, plus a stderr tail; success iff exit 0.
+- `_add_block`: `_require_workspace`; fail if no block_name or the workspace doesn't exist (tell them
+  to scaffold first). Run `hyperframes add <block> --json --no-clipboard` (timeout 300). Same
+  report/tail shape as lint; success iff exit 0.
+- `_render`: full pipeline. First `_runtime_check`; if unavailable return failure that this is a
+  governance BLOCKER — do NOT silently fall back to another runtime without user approval. Resolve
+  output_path (default `workspace/renders/final.mp4`), mkdir its parent. Then, recording each stage
+  into a `steps` dict: (1) `_scaffold` — bail on failure; (2) `_lint` — on failure, bail only when
+  `strict`, else log a warning and continue; (3) `_validate` (threading skip_contrast) — always bail
+  on failure ("HyperFrames render is blocked — fix and re-run"); (4) render via
+  `hyperframes render --output <path> --fps <fps> --quality <quality>` (timeout 1800). Bail on
+  non-zero exit; also bail if exit 0 but the output file is missing (point at stdout_tail for the
+  real path). Success data = operation, output, workspace, width/height/fps, quality, steps;
+  artifacts = [output_path].
+
+## Scaffold helpers + HTML generation
+- `_require_workspace(inputs) -> Path` (static): raise ValueError "workspace_path is required for
+  this operation" when absent, else `Path(raw).resolve()`.
+- `_resolve_dimensions(profile_name, fps_in) -> (w,h,fps)` (static): try
+  `lib.media_profiles.get_profile(name)` → its width/height/fps; on any failure fall back to
+  1920×1080 at fps_in.
+- `_compute_total_duration(cuts)` (static): max out_seconds (0.0 for empty).
+- `_resolve_and_stage_assets(cuts, assets, workspace) -> (resolved_cuts, copies)`: build an id→asset
+  lookup. Per cut, if `source` is an asset id swap in its path; then if the source file exists and is
+  NOT inside the workspace tree (`_is_inside`), copy it into `assets/` (skip the copy when a dest of
+  equal size already exists) and repoint the cut's source at the staged copy, recording {from,to}.
+  Assets must live under the workspace because HyperFrames resolves `src=` relative to index.html.
+- `_resolve_audio_refs(audio, assets, workspace) -> {"narration":[...], "music": ...}`: for each
+  narration segment with a resolvable `asset_id` whose file exists, stage it the same way and append
+  {src, start_seconds, end_seconds (None when ≤ start)}. For `audio.music.asset_id`, stage it and
+  emit {src, volume (default 0.15), fade_in_seconds, fade_out_seconds}; else music stays None.
+- `_is_inside(path, root)` (static): True iff `path.resolve()` is relative_to `root.resolve()`.
+- `_style_bridge(playbook, edit_decisions) -> (css_vars, design_md)`: delegate to
+  `lib.hyperframes_style_bridge.style_bridge`; on any import/exec failure fall back to a built-in
+  default derived from playbook.visual_language.color_palette + typography (first item of any
+  list-valued color). The fallback MUST emit these CSS var keys: --color-bg (#0B0F1A),
+  --color-fg (#F5F5F5), --color-accent (#F59E0B), --color-primary (#2563EB), --font-heading (Inter),
+  --font-body (Inter), --ease-primary (cubic-bezier(0.65,0,0.35,1)), --duration-entrance (0.6s),
+  plus a short `# DESIGN` markdown summary of the resolved palette + fonts.
+
+`_generate_index_html(cuts, audio_refs, width, height, total_duration, css_vars, title) -> str`
+emits a HyperFrames-contract index.html. Requirements the runtime depends on:
+- A single root element `<div data-composition-id="root" data-start="0"
+  data-duration="{total}" data-width="{width}" data-height="{height}">` containing all clips + audio.
+- `<style>` with `:root { <css_vars> }`, a body background/color/font from the vars, absolute-inset
+  `.clip` rules, `object-fit: cover` for image/video clips, and a centered `.text-card` with a large
+  `h1` (uses --font-heading) + `.subtitle` (uses --color-accent).
+- Load GSAP from a CDN `<script>`. A trailing inline `<script>` creates
+  `const tl = gsap.timeline({ paused: true })`, runs the collected entrance tweens (or a `// no
+  tweens` placeholder), and assigns `window.__timelines["root"] = tl` (init `window.__timelines`
+  first). Escape the title.
+- Audio: per narration ref emit `<audio id="nar-{j}" data-start data-duration data-track-index="2"
+  src data-volume="1">` (duration = end−start when end>start, else total−start); music (when present)
+  emits `<audio id="music" data-start="0" data-duration="{total}" data-track-index="3" src
+  data-volume="{volume}">`. Paths run through `_rel_from_workspace`, attrs through `_escape_attr`.
+
+`_cut_to_html(index, cut, width, height) -> (html, tween|None)` picks a scene shape by cut.type/ext.
+All visual clips carry `id="cut-{index}"`, `data-track-index="1"`, `data-start`, and a
+`data-duration` of `max(0.1, out_seconds - in_seconds)`:
+- text_card / hero_title / callout, or (no source but text present): a `.clip.text-card` div with an
+  escaped `<h1>` (fallback "Scene {n+1}") + optional `.subtitle` from cut.subtitle/caption, plus a
+  mild GSAP `tl.from(... y:40, opacity:0, power3.out ...)` entrance offset to `in_seconds + 0.1`.
+- image ext: `<img class="clip image-clip">` + a scale/opacity `power2.out` entrance tween at
+  `in_seconds`.
+- video ext: `<video class="clip video-clip" muted playsinline>`, no tween.
+- `.html`/`.htm` source: a `.clip.composition-clip` with `data-composition-id` (the file stem) +
+  `data-composition-src` + data-width/height, no tween.
+- anything else: a placeholder `.text-card` (text/reason/"Scene {n+1}"), no tween — the render still
+  succeeds and lint/validate surface the issue.
+
+## Utilities
+- `_run_hf(args, *, cwd, timeout, check) -> CompletedProcess`: invoke the CLI, intentionally
+  bypassing `self.run_command` because callers parse non-zero lint/validate/render exit codes
+  themselves (never raise CalledProcessError). Prefer the locally-provisioned CLI
+  (`provision.hyperframes_root()/node_modules/.bin/hyperframes`) when it exists, else
+  `["npx","--yes","hyperframes", *args]`. On Windows (`os.name == "nt"`) resolve cmd[0] via
+  `shutil.which`. Run with capture/text/timeout/cwd and `check=False`; on TimeoutExpired return a
+  synthetic `CompletedProcess(returncode=124, ...)` with `\n[timeout after {timeout}s]` appended to
+  stderr so callers get a uniform shape.
+- `_parse_json_output(stdout) -> Optional[Any]` (static): tolerate banner lines by slicing between
+  the first `{` and last `}` and `json.loads`; None on empty/unbalanced/decode error.
+- `_f(v)` (static): `f"{float(v):.3f}"` with trailing zeros and a bare dot stripped (so 3.0→"3").
+- `_escape_text(s)` (static): escape `& < >`. `_escape_attr(s)`: `_escape_text` then escape `"`.
+- `_rel_from_workspace(path)` (static): already-relative paths pass through (posix slashes);
+  otherwise return the tail starting at the last `assets`/`compositions` path segment, else
+  `assets/<basename>`.
+
+% BEHAVIORAL NOTES — verified by tests/tools/test_hyperframes_compose.py (unit) and
+% tests/qa/test_09_hyperframes_compose.py (opt-in subprocess); keep the spec abstract and let the
+% tests pin the exact strings: install_instructions naming (`npx hyperframes`, 404 on
+% `@hyperframes/cli`); _runtime_check returning runtime_available=False when the npm package can't
+% resolve even with node/ffmpeg/npx on PATH, and True with npm_package_version when it does;
+% get_info exposing the runtime dict; unknown-operation and missing-workspace_path both surfacing as
+% failure ToolResults; scaffold emitting the four root attributes (data-composition-id="root",
+% data-start="0", a data-duration matching the timeline total, data-width/height), the paused GSAP
+% `window.__timelines["root"]` timeline, `.clip` elements, staged assets referenced by a relative
+% `assets/<name>` path, hyperframes.json (paths.blocks == "compositions"), and DESIGN.md; and
+% scaffold rejecting empty cuts.

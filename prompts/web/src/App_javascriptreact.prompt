@@ -1,0 +1,328 @@
+% Generate `web/src/App.jsx`: the root React component for the OpenNolan "Mission
+% Control" web UI (a single-page app served same-origin by the FastAPI backend and
+% loaded by the Electron shell). One default-exported `App`, plus co-located
+% presentational sub-components — no router, no external state library.
+%
+% All backend I/O goes through the thin `api` client (`import * as api from './api.js'`);
+% call its exported functions by the names below, never `fetch` directly. Other imports:
+%   - `LineChart` from './components/LineChart.jsx' (dependency-free SVG line chart)
+%   - icons from './components/icons.jsx': IconKey, IconEye, IconEyeOff, IconCheck, IconX,
+%     IconAlert, IconMessage, ClaudeLogo, IconMovie, IconMic, IconStar, IconMusic, IconListDetails
+%   - `Studio` from './studio/Studio.jsx' (full-screen manual editor)
+%   - `ChatPanel` from './chat/ChatPanel.jsx' (agent chat column)
+%   - `CapabilitiesModal` from './CapabilitiesModal.jsx', `UpdateBanner` from './UpdateBanner.jsx'
+%   - hooks `useAgentChat` from './chat/useAgentChat.js', `useAuth` from './auth/useAuth.js'
+%   - `ConnectClaudeModal` from './auth/ConnectClaudeModal.jsx'
+%
+% Styling is entirely via CSS class names owned by web/src/styles.css — this file writes
+% NO inline styles except the dynamic ones called out below (tile cover gradients, score
+% colors, chart legend/bar colors). Preserve the class names given; they are the contract
+% with the stylesheet.
+%
+% Module constants:
+%   - STATUS_LABEL: stage-status → human label — pending:'pending', in_progress:'running',
+%     awaiting_human:'needs you', completed:'done', failed:'failed', error:'error'.
+%   - ASSET_KINDS = ['images','video','audio','music','renders']. 'renders' is READ-ONLY
+%     (not uploadable): the agent's HyperFrames clips, served as `agent_renders` — distinct
+%     from the finished "Final render" in `renders`.
+
+## App (root)
+
+State: `pipelines`, `styles`, `projects` (arrays), `selected` (project id | null), `state`
+(polled project state | null), `toast` ({kind:'ok'|'error', text} | null), `uploadTick`
+(int bumped to refresh the asset listing), `editing` (bool — full-screen editor open),
+`showConnect` (bool — auth modal open). One shared `auth = useAuth()` (source of truth is the
+backend; `auth.refresh()` re-checks) and one shared `chat = useAgentChat(selected, {onError:
+showError, onAuthError: () => auth.refresh()})` so the project window and the editor share a
+single conversation revived from disk when `selected` changes.
+
+Effects:
+- On mount: `api.getPipelines()`→pipelines, `api.getStyles()`→styles, `refreshProjects()`, and
+  poll `refreshProjects` every 4000ms (so agent/externally-created projects appear live).
+- On `selected`: clear state when none; else poll `api.getState(selected)` every 1500ms with an
+  `alive` guard; swallow errors.
+
+Helpers: `showError(e)` sets an error toast for 5s; `showOk(text)` an ok toast for 3s;
+`refreshProjects()` = `api.getProjects()`→projects (catch showError); `openProject(id)` sets
+selected. A shared `connectModal` element (rendered in every branch) — present only when
+`showConnect`; renders `ConnectClaudeModal` with `initialStatus={auth.status}`, onClose clears
+the flag, onConnected clears the flag + `auth.refresh()` + `showOk('Connected to Claude')`.
+
+Three render branches, each a `<div className="app">` also containing `connectModal`, the toast
+(`<div className={\`toast ${toast.kind}\`}>`), and `<UpdateBanner />`:
+1. No `selected` → `<Dashboard>` (props: pipelines, styles, projects, onOpen=openProject,
+   auth=auth.status, onConnect=open the connect modal, onCreate). onCreate(name, pipeline, style):
+   `api.createProject`, refreshProjects, `setSelected(m.project_id)`, `showOk(\`Created "${m.name}"\`)`.
+2. `editing` → `<Studio projectId={selected} state={state} onClose={stop editing} chat={chat}
+   auth={auth.status} onReconnect={open connect modal} />`.
+3. Otherwise a project view: `<ProjectBar>` (onEdit → start editing, onBack → clear selected+editing)
+   over a `<main className="grid">` holding `<ChatPanel chat disabled={!selected} auth onReconnect>`,
+   `<WorkPanel state selected>`, and `<AssetPanel>`. AssetPanel.onUpload(kind, file):
+   `api.uploadAsset`, showOk, bump uploadTick; errors → showError.
+
+## Dashboard
+
+Props: pipelines, styles=[], projects, onOpen, onCreate, auth, onConnect. Local flags:
+`creating`, `showEnv`, `showCaps`, `showFeedback`. Sort projects by `created_at` descending.
+`connected = auth?.authenticated`, `needsReauth = !!auth?.needs_reauth`. Guard: `auth === null`
+means the first status check is still in flight — render NOTHING auth-related until it resolves
+(don't flash the sign-in CTA).
+
+Header (`dash-header`): brand ("● OpenNolan · Mission Control"), a subtitle with the project count
+(pluralized), and — only when `auth && connected` — a "Re-authenticate with Claude" button
+(class `claude-btn claude-btn-sm reauth-btn`, extra `warn` when needsReauth) that calls onConnect.
+Then three `byok-btn` buttons: Capabilities (opens CapabilitiesModal), Feedback (IconMessage, opens
+FeedbackModal), BYOK (IconKey, opens EnvModal).
+
+Below the header:
+- `auth && !connected` → an `auth-hero` panel inviting "Sign in with Claude to get started" with a
+  `claude-btn claude-btn-lg` "Authenticate with Claude" (ClaudeLogo) → onConnect.
+- `auth && connected && needsReauth` → an `auth-warn-bar` (IconAlert + message + a `linkish`
+  "Re-authenticate" → onConnect).
+
+Tile grid (`dash-grid`): a "New project" tile (`tile tile-new`, ＋) that opens the create modal,
+then one `tile tile-project` per sorted project. Each tile: a `tile-cover` whose background is a
+`linear-gradient(135deg, …)` of two HSL colors derived from `hueOf(pipeline_type || project_id)`,
+overlaid with the uppercased first character of name/id as `tile-mono`; a `tile-body` with the name,
+a `tile-meta` row (pipeline_type as `tile-type`, or `agent picks`/`unknown type` when absent —
+`unknown` class + 'unknown type' when `p.legacy`; the style as `tile-style` when set; an `existing`
+badge when `p.legacy`), and `fmtDate(created_at)` when present.
+
+Modals rendered on their flags: CreateModal(pipelines, styles, onClose, onCreate), EnvModal,
+CapabilitiesModal, FeedbackModal.
+
+Helpers `hueOf(s)` (fold char codes: `h = (h*31 + code) % 360`) and `fmtDate(s)`
+(`new Date(s).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'})`,
+'' on invalid) live at module scope near Dashboard.
+
+## FeedbackModal
+
+One place for "tell us something" AND the anonymous-usage opt-out (co-located on purpose: where we
+ask for feedback we also disclose telemetry and let the user turn it off). State: `kind`
+('bug'|'feature'|'other', default 'bug'), `message`, `email`, `busy`, `err`, `sent`, and
+`analyticsDisabled` (null = still loading; load via `api.getAnalytics()`→`!!a.disabled`).
+`toggleAnalytics()` flips optimistically then `api.setAnalytics(next)`, reverting on failure.
+`submit`: require a non-empty message and not busy; `api.sendFeedback({kind, message:trimmed,
+email:trimmed||null})` → set sent; on error show it and clear busy.
+
+Layout: a `modal-overlay`/`modal feedback-modal` (overlay click closes; inner stops propagation),
+an `env-head` with title "Feedback" + subtitle and an `am-close` (IconX). When `sent`, a
+`feedback-sent` thank-you (report vs note by kind) with a Close button; else a `feedback-body`
+form: an error line when `err`, a Type `<select>` (bug/feature/other), a Message `<textarea>`
+(rows 5, maxLength 5000, autoFocus, placeholder varies by kind), an optional Email `<input
+type=email>`, and actions Cancel / submit (label "Sending…"/"Send", disabled while busy or empty).
+Always below: a `feedback-privacy` block with a checkbox `checked={analyticsDisabled === false}`,
+`disabled` while null, onChange toggleAnalytics, labeled "Share anonymous usage & crash data"
+(hint: no account, no file contents, anonymous device id only).
+
+## EnvModal (BYOK)
+
+Reads the curated variable menu + current values from `api.getEnv()` and writes edits back with
+`api.saveEnv(draft)`. State: `vars` (null until loaded), `draft` (key→value map, seeded from vars),
+`reveal` (key→bool plaintext), `path`, `err`, `busy`, `saved`. On mount load vars+path and seed the
+draft with each `v.value || ''`. `setVal(key,val)` updates draft and clears `saved`. `save()`:
+`api.saveEnv(draft)` → replace vars, reseed draft from the response, and set `saved` to
+`Saved N variable(s) to .env` (or 'No changes') from `res.changed.length`.
+
+Group the vars by `v.group` preserving first-seen order. Render a `modal env-modal`: an `env-head`
+(IconKey "Bring your own keys" + subtitle showing the local `.env` path), a scrollable `env-body`
+with one `env-group` per group and an `env-row` per var. Each row's label block shows `v.label`,
+`v.key` (as `<code>`), optional `v.description`, and an optional "Get key ↗" link (`v.url`, opens in
+a new tab). Each input is `type` password when `v.secret && !reveal[key]` else text (value
+`draft[key] ?? ''`, placeholder "not set", autoComplete off, spellCheck false); secret rows get an
+`env-eye` toggle (IconEyeOff/IconEye). Footer `env-actions`: the `saved` note when present, Close,
+and a Save button ("Saving…"/"Save to .env", disabled while busy or unloaded).
+
+## CreateModal
+
+Props: pipelines, styles=[], onClose, onCreate. If exactly one pipeline exists (packaged app),
+preselect it and disable the pipeline select (no "agent decides"); else default `pipeline=''`.
+`style` defaults ''. `submit` requires a name and not busy → `await onCreate(name.trim(), pipeline,
+style); onClose()`, showing errors inline and clearing busy on failure.
+
+A `modal` form: Name input (autoFocus), a "Pipeline type" `<select>` (a "Let the agent decide" option
+unless single, then one option per pipeline `name`), and a "Style" `<select>` — "Let the agent
+decide", then an optgroup "Your styles" for `styles.filter(s => s.user)` and an optgroup
+"Built-in styles" for the rest, each option labeled `s.label || s.name`. A `modal-hint` reads
+"Visuals locked to the “<style>” style." when a style is chosen, else prompts to let the agent pick
+or make one with "Create New Style". Error line + Cancel/Create actions.
+
+## ProjectBar
+
+Props: state, projects, selected, onBack, onEdit. Resolve the display name/type from `state` then
+the matching project then the id. A `header project-bar`: a `back-btn` "← Projects" (onBack), a
+`pb-title` (● + name + optional `pb-type`), and a `runtimes` group with an `editor-open-btn`
+"✎ Edit" (onEdit) shown only when onEdit is set.
+
+## WorkPanel (Pipeline | Activity tabs)
+
+Props: state, selected. State: `tab` ('pipeline'|'activity'), `artifacts`, `activity`,
+`openArtifact` (artifact key to inspect | null). Poll `api.getArtifacts(selected)` every 2000ms
+always (the Pipeline spine stays live). Poll `api.getActivity(selected)` every 2000ms ONLY while the
+Activity tab is showing (it's heavier). Render a `panel work` with a `work-tabs` toggle, then the
+active tab (`PipelineTab` or `ActivityTab`), and an `ArtifactModal` when `openArtifact` is set
+(onOpen sets it, onClose clears it). "No project selected." empty state when none.
+
+Module helpers near here: `prettyKey(k)` (snake_case → Title Case), `fmtBytes(n)` ('' when falsy,
+B/KB/MB), `fmtDateTime(s)` (month/day/hour/minute) and `fmtTime(s)` (hour/minute/second) — both ''
+on invalid dates. `ACTIVITY_GROUPS` = ordered [category, label] pairs: project→'Project files',
+skill→'Skills', pipeline_def→'Pipeline def', tool→'Tools', web→'Web', framework→'Framework',
+other→'Other'. `OP_LABEL` maps op codes to verbs (read→read, write→wrote, edit→edited, exec→ran,
+search→searched, fetch→fetched, skill/tool/todo→themselves).
+
+### PipelineTab
+
+Props: state, artifacts, onOpen. Prefer `artifacts.stages` (status + produced artifacts + nested
+data), falling back to `state.stages` before the manifest loads. Show a `pl-head` (name · pipeline
+type or 'agent picks'), an `ol.stepper` of `StageRow`s, an empty note when no stages, and — when
+there are `artifacts.extra_artifacts` or a present `decision_log` — a `pl-extra` "Cross-cutting"
+block: a Decision-log chip (IconListDetails, "N decisions") opening `'decision_log'`, then one
+`art-chip` per extra (prettyKey name + fmtBytes size) opening its key. Finally, `state.next_stage`
+as a "Next: …" line when set.
+
+### StageRow
+
+Props: s, onOpen. Expandable `<li className={\`step ${s.status} ${open?'open':''}\`}>`. The
+`step-head` button (toggles open only when there's detail: any artifacts, review, style_playbook,
+timestamp, or human_approval_required) shows a bullet, the stage name, a count badge when there are
+artifacts, the STATUS_LABEL, a `pulse` when in_progress, and a caret when expandable. Expanded
+`step-detail`: "Updated <fmtDateTime>" when timestamp; an approval line (✓ approved / ⏳ awaiting
+approval) when `human_approval_required`; "Style · <style_playbook>" when set; an `sd-arts` grid of
+`art-chip`s (each with the `canonical` class when `a.canonical`, prettyKey name, fmtBytes size,
+opening `a.key`); and an `sd-review` block rendering `s.review` via `GenericValue` when present.
+
+### ActivityTab
+
+Props: activity, artifacts, state, onOpen. State: `view` ('files'|'timeline'). Render
+`HowItWasMade`, an `act-toggle` (Files/Timeline), then: a loading note when no activity; an empty
+note when loaded with zero events; otherwise `FilesList` or `TimelineList` from `activity.events`.
+
+`HowItWasMade` (props summary, artifacts, state): a `hiwm` card titled "How this was made" with
+`HiwmRow`s — Pipeline (chips: the type or 'agent picks', plus any `summary.pipeline_defs` other than
+it), Style (the first stage `style_playbook`, if any), Runtime (`state.runtime`), Skills
+(`summary.skills`), Tools (`summary.tools`). `HiwmRow({label, chips})` drops falsy chips, renders
+nothing if empty, else a key + `hiwm-chip` spans.
+
+`FilesList` (props events, artifacts, onOpen): dedup events by `${category}|${label}` where label =
+`e.label || basename(e.target) || e.target || e.tool`; per key aggregate the set of ops, a count, and
+the latest `ts`. Build the set of inspectable artifact keys from every stage artifact, every extra
+artifact, and 'decision_log' when present; `artKeyFor(target)` returns the base filename (minus
+`.json`) if it's in that set, else null. Group rows by category, sort each group by latest ts
+descending, and render in `ACTIVITY_GROUPS` order: a `files-group` per non-empty category (head =
+label + count) with a `file-row` per row (op badges via OP_LABEL, the label, a `×N` count when >1);
+rows whose target maps to an artifact key get the `clickable` class, an onClick opening it, and a
+"view →" affordance.
+
+`TimelineList` (props events): newest-first (reversed) `tl-row`s — fmtTime(ts), an op badge, the
+`e.label || e.tool`, and the target (title-attr'd).
+
+## ArtifactModal + renderers
+
+`ArtifactModal({selected, artKey, onClose})`: load `api.getArtifact(selected, artKey)` into `data`
+(reset on key change), track `err` and a `raw` toggle. A `modal artifact-modal` with an `am-head`
+(prettyKey title + an `am-sub` "from <stage> · <source>" when present) and `am-actions`: a Raw
+JSON/Formatted toggle (only when `data.content != null`) and an `am-close`. The body shows the error,
+a loading note, or — when content is present — either a `<pre>` of `JSON.stringify(content,null,2)`
+(raw) or `<ArtifactView artKey content />` (formatted).
+
+`ArtifactView({artKey, content})`: non-object content → `GenericValue`. Dispatch by artKey to a
+marquee view: 'scene_plan'→ScenePlanView, 'script'→ScriptView, 'decision_log'→DecisionLogView,
+'render_report'→RenderReportView. Content-signal reports render via `ContentSignalView` when
+`contentSignalReport(content)` matches OR the key starts with 'content_signal_report'; everything
+else → `GenericValue`.
+
+Content-signal SHAPE detection (so any re-score or hand-written file renders as the chart, keyed on
+shape not filename): `looksLikeContentSignal(c)` = object with a numeric `headline_score` and a
+non-array object `sub_scores`. `contentSignalReport(c)` returns `c` if it matches, else — if `c.output`
+matches — `{model: c.model, ...c.output}` (lifting `model` for the chip from a raw Replicate
+prediction dump), else null.
+
+### Generic schema-driven renderer
+
+`GenericValue({value, k})` renders any JSON without raw dumps: null/undefined → `gv-null` "—";
+boolean → `gv-bool yes|no`; a URL string → a `gv-link` (`isUrl` = matches `^https?://`); other
+scalars → `gv-scalar` via `fmtScalar(k, v)` (numbers whose key matches cost/usd/price/amount/spent/
+budget/reserved → `$v.toFixed(2)`; keys ending 'seconds' → `v + 's'`; else String); empty array →
+`gv-null` "none"; an all-scalar array → a `gv-list`; a mixed array → `gv-cards` (objects via
+`GenericObject`, else `GenericValue`); objects → `GenericObject`. `GenericObject({obj})` → a `gv-obj`
+of `gv-row`s (add `nested` when the value is an object/array), each a prettyKey `gv-key` + a
+`gv-value` recursing into `GenericValue`. Empty object → `gv-null` "empty".
+
+### Marquee views
+
+Shared bits: `Chip({label, val})` → `mv-chip`; `timing(s)` → `${start}–${end}s` (using '?' for a
+missing bound, '' when both absent). Each view is a `mv` with an `mv-summary` chip row.
+
+- ScenePlanView(c): summary chips from `c.style_playbook` and `c.metadata.global`
+  (render_runtime→runtime, dimensions→size, fps, plus scene count). Then `scene-cards`, one per
+  `c.scenes`: a `scene-card` (`hero` class when `hero_moment`) with an id (`s.id` or `scN`), type,
+  timing, a hero badge (IconStar), a description, an `sc-attrs` row (framing/movement/role), and an
+  `sc-assets` list of `type · source: description` from `required_assets`.
+- ScriptView(c): summary chips title / duration (`total_duration_seconds`+'s') / section count. An
+  `ol.script-secs` over `c.sections`: id, prettyKey label, timing, the text, `speaker_directions`
+  (IconMic), and `enhancement_cues` as `type @Ns: description`.
+- DecisionLogView(c): a decision-count chip, then `decision-cards` over `c.decisions`: a head with
+  prettyKey category and "N% conf" (`Math.round(confidence*100)`), the subject, an `options_considered`
+  list where the option whose `option_id === d.selected` gets the `chosen` class + "✓ " and shows
+  `o.reason` (others show `o.rejected_because || o.reason`) plus an optional score, and the overall
+  `d.reason`.
+- RenderReportView(c): summary chips grammar / runtime (`c.workspace.runtime`) / render time. One
+  `render-out` per `c.outputs` (path + a meta row of resolution, fps, duration, codec, fmtBytes size,
+  prettyKey platform_target). Then `ro-block` lists for `verification_notes` and (with a `warn` class)
+  `warnings`.
+
+### ContentSignalView (Meta TRIBE v2)
+
+Module constants: `CS_COLORS` mapping the five dimensions to hex — attention '#c8643c' (the accent,
+plotted bold), emotion '#b8503f', reward '#4a8a55', social_relevance '#3b6ea5', novelty '#c9952b';
+`CS_ORDER = ['attention','emotion','reward','social_relevance','novelty']`. `scoreColor(v)` →
+`var(--green)` ≥67, `var(--amber)` ≥45, else `var(--red)`.
+
+`ContentSignalView({c})`: gather the dimension set from `sub_scores` keys ∪ timeline keys (minus the
+'t' axis), ordered by CS_ORDER first then any extras. Track `shown` (a Set) defaulting to 'attention'
+(or the first dim) — legend buttons toggle a dim in/out. `xOf(p,i)` = numeric `p.t` else the index;
+`xMax` = `c.video_duration_s` or the max x. Build one series per dim {key, prettyKey label, CS_COLORS
+color, `bold` when attention, `hidden` when not shown, points [{x, y:Number(p[dim])||0}]}.
+
+Layout (`mv cs`): summary chips — model (shown as "Meta TRIBE v2"), scoring (`v<scoring_version>`),
+duration, cost (`$…`), and a "cache: hit" chip when `cache_hit`. A `cs-scores` block: a `cs-headline`
+showing `Math.round(headline_score)/100` colored by `scoreColor`, labeled "virality signal
+(advisory)"; and `cs-subs` — per dim a name, `Math.round(sub_scores[dim] ?? 0)`, and a `cs-bar` whose
+fill width is the clamped 0–100 score, background CS_COLORS. When there's a timeline: a `cs-chart`
+with a legend of toggle buttons (on-state borders/dots use the dim color), the shared `<LineChart
+series xMax xLabel="time (s)" yLabel="score" />`, and a `cs-weak` callout naming the lowest-attention
+moment (x + score) as the spot to re-cut; else an empty note. Finally `license_note` and a `warn`
+warnings list when present.
+
+## AssetPanel
+
+Props: selected, onUpload, uploadTick. State: `activeKind` (default 'images'), `data`, an `inputRef`,
+`dragging`, and `viewer` ({items, index} | null — the lightbox). Poll `api.listAssets(selected)`
+every 4000ms (re-run on `uploadTick`). `handleFiles(files)` uploads the first file to `activeKind`.
+
+`renders = data.renders` (finished reels). The active grid reads `data.agent_renders` when the tab is
+'renders' else `data.kinds[activeKind]`. Build lightbox item lists via `api.fileUrl(selected, path,
+mtime)` — the mtime is a cache-bust token so a freshly finished render (same path, new bytes) reloads
+without a page refresh; render-tab items are tagged kind 'video'.
+
+Render a `panel assets` (title "Assets"; "Select a project…" when none). When selected, an
+`assets-scroll`:
+- When there are `renders`, a `renders` block (IconMovie "Final render") with one `render-item` per
+  render — a `<video controls>` KEYED on `${path}:${mtime}` (so a re-render, or a poll that caught the
+  file mid-write, remounts and re-fetches), plus a "⛶ Full screen" button (opens the lightbox on the
+  renders list) and a "⤓ <name>" download link.
+- An `asset-tabs` row of ASSET_KINDS buttons, each showing a `(count)` from its listing.
+- An `asset-grid`: an empty note or one `AssetItem` per grid item (onOpen → lightbox on the grid list).
+- A `dropzone` (click-to-choose + drag/drop → handleFiles) shown for every kind EXCEPT 'renders'.
+- The `AssetModal` lightbox when `viewer` is set.
+
+`AssetItem({kind, url, name, onOpen})`: a clickable/keyboard-activatable `asset-item` — an `<img>` for
+images; a muted `<video>` thumb with a ▶ badge for video; a music-icon thumb (IconMusic) for
+audio/music (the real player lives in the lightbox so a single click always opens it) — plus the name.
+
+`AssetModal({items, index, onClose})`: a center lightbox over the app. Local `i` (seeded from index,
+resync on index change); prev/next wrap around. A window `keydown` listener: Esc closes, ←/→ step. An
+`asset-lightbox` with a head (name, ⤓ download, ✕ close), an `al-stage` with prev/next nav buttons
+(only when >1 item) and an `al-media` KEYED on the url (remount for a fresh load/autoplay) rendering an
+image, a `<video controls autoPlay>`, or an audio player (IconMusic + `<audio controls autoPlay>`),
+and an "i / N" counter when multiple.

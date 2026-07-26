@@ -1,0 +1,116 @@
+% Generate `web/src/studio/StudioTimeline.jsx`: a real pixels-per-second Studio timeline (zoom +
+% horizontal scroll). Top → bottom: stacked OVERLAY-TRACK lanes (highest track on top = highest z,
+% matching the renderer's ascending-track compositing), then the MAIN clips lane (drag-reorder +
+% edge-trim cuts), then audio lanes (one row PER KIND: music / narration / sfx). Every lane carries a
+% STICKY left-hand LABEL (frozen during horizontal scroll, spreadsheet-style) with an eye toggle that
+% hides that track from the PREVIEW only (view state — the doc/export are untouched).
+%
+% Imports: `useEffect, useRef, useState` from 'react'; `* as interp` from '../editor/interp.js';
+% `fmtTime, overlayType, groupAudioLanes` from './model.js'. All clamping/structure lives in interp.js
+% — this file is pointer math + layout only.
+%
+% Class names (`st-*`) are the CONTRACT with web/src/styles.css and StudioTimeline.test.jsx — keep them
+% exact. Clip/overlay/audio labels carry NO emoji or icon glyph (just the text/basename). Test coverage:
+% StudioTimeline.test.jsx pins every render-contract detail (block-per-item, derived pixel positions,
+% labels, selection/disabled gating, DnD payload, eye-toggle keys, `.st-lane-off`); the pointer-driven
+% drags need layout so they're E2E — spec them precisely below.
+
+## Props
+`doc, dur, zoom, playhead, selection, sourceMetas, playing, onSeek, onSelect, onTrim, onTrimBegin,
+onReorder, onZoom, onAssetDrop, onOverlayMove, onOverlayTrim, onOverlayDragBegin, onOverlayResolve,
+onAutoArrange, onAudioDragBegin, onMoveSfx, onMoveNarration, onTrimNarration, onSetMusicLevels,
+onTrimMusic, onMoveMusic, hidden, onToggleHidden, onTogglePlay, onSplit, onDuplicate, onDelete`.
+
+## Constants & layout math
+`LABEL_W = 128` (sticky label-gutter width); `LANE_PAD = LABEL_W + 14` (px before t=0: reserves the
+label column + a gap — EVERY block sits at `LANE_PAD + seconds*zoom`); `DRAG_THRESHOLD = 4`;
+`OV_LANE_H = 28` (overlay lane row height, drives dy→track math); `MUSIC_LANE_H = 44` (taller: holds a
+gain line). `ASSET_DND = 'application/x-opennolan-asset'`. Content width = `max(dur*zoom, 600) +
+LANE_PAD*2`. Ruler ticks every `niceStep(zoom)` seconds (target ~90px apart: first of
+[0.5,1,2,5,10,15,30,60,120,300] ≥ `90/zoom`, else 600) over `[0, dur]`. `xToTime(clientX)` maps a page
+x to `[0,dur]` seconds via the scroll container's rect + scrollLeft − LANE_PAD, ÷ zoom, clamped.
+`baseName(p)` = last `/`-segment.
+
+## Derivation from the doc
+`cuts = doc.cuts`, `overlays = doc.overlays`; `starts = interp.cutStarts(doc)`,
+`interp.cutDuration(c)` for clip widths (`max(8, dur*zoom)`); `audio = interp.audioClips(doc)`,
+`audioLanes = groupAudioLanes(audio)`. Overlay lanes: `maxTrack = interp.overlayTracks(doc).max`; draw
+rows `topTrack = maxTrack+1` DOWN to `0` (highest track on top), where the extra `topTrack` row is an
+EMPTY "New track" lane inviting a drop / drag-up.
+
+## Head bar (`.st-tl-head`)
+- Left ops: Split (disabled only when no selection AND no cuts), Duplicate (needs a `cut` selection),
+  Delete (`st-danger`, needs any selection), Arrange (`onAutoArrange`, needs ≥2 overlays).
+- Center: play/pause transport (`onTogglePlay`, aria-label Play/Pause, ⏸ when playing else ▶).
+- Right: `{fmtTime(dur)} total`, then a zoom stepper: − / range input min 20 max 240 / + (±20 per step,
+  clamped to [20,240]).
+
+## Sticky lane label + preview-hide eye
+`laneLabel(name, hideKey?, extraClass?)` → a `.st-lane-label` (` off` when hidden) that
+`stopPropagation`s pointerdown so it never deselects. When `hideKey` is given it renders an eye button
+(`.st-lane-eye`, `aria-pressed`) → `onToggleHidden(hideKey)`, with an inline `st-*` eye / eye-off SVG.
+`isHidden(key)` reads the `hidden` Set (guarded for a missing `.has`). Hide keys: `main`, `ov:<track>`,
+`aud:<kind>`; a hidden lane also gets `.st-lane-off` on its lane element.
+
+## Scroll surface & lanes
+`.st-tl-scroll` (` drop` while an asset drags over; `dragOver`/`dragLeave` toggle `dropping`) wraps
+`.st-tl-content` (width = contentW, sets `--st-label-w`). PointerDown on the surface that isn't a
+`.st-clip/.st-ov/.st-aud/.st-ruler/.st-lane-label` → `onSelect(null)` (deselect → Assets tab).
+- Ruler (`.st-ruler`, sticky `.st-ruler-corner` over the gutter): pointerdown outside a label seeks and
+  begins a `scrub` drag; ticks are `.st-tick` at `LANE_PAD + t*zoom` labelled `fmtTime(t)`.
+- Overlay track lanes (`trackRows.map`): `.st-lane-ov` (` st-lane-ov-new` for the top empty lane,
+  ` st-lane-off` when hidden), height OV_LANE_H, accepts an asset drop as `{lane:'overlay', track}`.
+  Each overlay of that track → `.st-ov` (` sel`; ` kf` when it has keyframes) at `LANE_PAD+start*zoom`,
+  width `max(10,(end-start)*zoom)`, label = text overlays `“{text.slice(0,18)}”` else basename of
+  `asset_id`/`overlayType`; body pointerdown (unless on a `.st-trim`) → `ov-press` drag with
+  `ghost = currentTarget` and `onBegin: onOverlayDragBegin`, plus left/right `.st-trim` handles
+  (stopPropagation) → `ov-trim-in`/`ov-trim-out`. The new lane also shows a "+ drop here…" hint.
+- Main cuts lane (`.st-lane-cuts`, hide key `main`): each cut → `.st-clip` (` sel`) at
+  `LANE_PAD+starts[i]*zoom`, label `baseName(source)` + ` · {speed}×` when speed≠1, and a
+  `fmtTime(cutDuration)` time tag; body pointerdown → `press` drag (ghost); left/right `.st-trim` →
+  `trim-in`/`trim-out` with `onBegin: onTrimBegin`. Drops as `{lane:'cuts'}`.
+- Audio lanes (per `audioLanes` row; if none, one `.st-lane-audio` with an empty hint): lane
+  `.st-lane-audio-{kind}`, name Music/Narration/SFX, music lane height MUSIC_LANE_H. Item x =
+  `LANE_PAD+start*zoom`; width = 12px for a `point`, else `max(8,(end-start)*zoom)`. Drops `{lane:'audio'}`.
+  All audio blocks are `.st-aud` divs (not buttons), share `onBegin: onAudioDragBegin`, and a bare tap
+  selects `{kind:'audio', audioKind, index}`.
+  - music (`.st-aud-music`): draggable body → `aud-music-move`; `.st-trim` edges → `aud-music-trim-in/out`;
+    a draggable `.st-aud-gain` line (vertical volume → `aud-music-gain`) whose top maps volume within the
+    bed; plus non-interactive `.st-aud-fade-in`/`.st-aud-fade-out` shape previews with width = fade
+    seconds × zoom (fades themselves are edited in the properties panel).
+  - narration (`.st-aud-narration`): draggable body → `aud-narr-move`; edge `.st-trim` → `aud-narr-trim-in/out`.
+  - sfx (`.st-aud-sfx pt`): a draggable point marker → `aud-sfx-move`, no children.
+- Playhead: `.st-playhead` at `LANE_PAD + playhead*zoom`.
+
+## The unified pointer drag (`beginDrag(e, spec)`)
+One synchronous setup shared by every draggable — NO HTML5 DnD for in-timeline manipulation (the only
+HTML5-DnD path is the cross-panel asset drop). Snapshots start x/y + everything off `spec` at
+pointerdown so mid-drag re-renders don't disturb it; attaches window pointermove/up/cancel; tears them
+down on up/cancel/unmount via a `dragCleanup` ref (a mount-cleanup effect also runs it so a drag never
+leaks window listeners if Studio remounts). A `ghost` element (when given) gets `translateX(dx)` +
+raised z during a reorder, reset on teardown. Modes:
+- cut: `scrub` (seek `xToTime`); `trim-in`/`trim-out` (`onTrim` with `in/out_seconds += (dx/zoom)*speed`);
+  `press` → `reorder` past DRAG_THRESHOLD in x — on up compute the target index from clip centers vs the
+  dragged clip's new center and `onReorder(index, target)` if it changed.
+- overlay: `ov-trim-in`/`ov-trim-out` (`onOverlayTrim(index, {start/end_seconds += dx/zoom})`);
+  `ov-press` → `ov-move` past threshold in x OR y → `onOverlayMove(index, {start, track})` where
+  `start = max(0, start+dx/zoom)` and `track = clamp([0,topTrack], round(track) + round(-dy/OV_LANE_H))`
+  (dragging UP raises the track).
+- audio: `aud-press` → `spec.moveMode` past threshold (`aud-{sfx,narr,music}-move` →
+  `onMoveSfx/onMoveNarration/onMoveMusic(index, max(0, start+dx/zoom))`); `aud-narr-trim-*` /
+  `aud-music-trim-*` → `onTrimNarration/onTrimMusic(index, {start/end_seconds})`; `aud-music-gain` →
+  `onSetMusicLevels(index, {volume: clamp01(origVol - dy/gainH)})` (dragging UP is louder).
+- A press that never moves past threshold ends in `press`/`ov-press`/`aud-press` → TAP → `onSelect`
+  (`{kind:'cut',id}` / `{kind:'overlay',index}` / `{kind:'audio',audioKind,index}`).
+
+## Undo semantics
+Snapshot LAZILY on the first real move (`snapOnce` → `spec.onBegin?.()` once), NOT at pointerdown, so a
+bare click/tap adds no undo entry and never wipes the redo stack. Move/trim/gain apply live and belong
+to that one start-of-drag snapshot. After an overlay drag that actually moved (`ov-move`/`ov-trim-*`),
+`onUp` calls `onOverlayResolve?.(index)` — folded into the same undo step — to float it off any new
+same-track overlap.
+
+## Asset drop (`onLaneDrop`, `dragOver`)
+`dragOver` allows the drop (`dropEffect='copy'`, sets `dropping`) only when the dataTransfer carries
+`ASSET_DND` and `onAssetDrop` exists. `onLaneDrop(e, lane, track?)` parses `{kind, path}` from the
+payload and calls `onAssetDrop(kind, path, xToTime(e.clientX), {lane, track})` (bad JSON ignored).

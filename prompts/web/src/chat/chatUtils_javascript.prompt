@@ -1,0 +1,36 @@
+% Generate `web/src/chat/chatUtils.js`: tiny, pure chat helpers shared by the agent
+% hook (`useAgentChat`) and the chat view (`ChatPanel`), so both the pipeline window
+% and the editor can import them. No React, no side effects — just `export`s.
+
+## Model dropdown
+`AGENT_MODELS`: exported array of `{ id, label, recommended? }` for the chat-header
+model picker; the first entry is the default and the only one with `recommended: true`.
+Ids MUST match `server/agent_runner.py` AGENT_MODELS (the backend validates against them):
+- `claude-opus-4-8` — "Opus 4.8" (recommended)
+- `claude-sonnet-5` — "Sonnet 5"
+- `claude-haiku-4-5-20251001` — "Haiku 4.5"
+
+`DEFAULT_MODEL` = `AGENT_MODELS[0].id`.
+
+## Tool icons
+`TOOL_ICON`: map from tool name → icon component (imported from `../components/icons.jsx`,
+rendered by ChatPanel's ActivityChip): Read→IconFileText; Write/Edit/MultiEdit→IconPencil;
+Bash→IconTerminal; Glob/Grep→IconSearch; WebSearch/WebFetch→IconWorld; Skill→IconTools;
+TodoWrite→IconListCheck; render & mcp__mc__render→IconMovie.
+
+## isRenderCommand(item)
+True iff `item` is a render-in-progress `tool_use` (drives the inline render progress bar,
+which appears on tool_use and clears on the matching tool_result). False unless
+`item.kind === 'tool_use'`. True for the in-process render tool (`name` is `mcp__mc__render`
+or `render`); otherwise true only for a `Bash` whose lowercased `detail` mentions any of
+`npx remotion`, `ffmpeg`, `npm run render`, or `hyperframes render`.
+
+## formatToolInput(item)
+Pretty-print a tool_use `input` (`item.input || {}`) for the expandable activity chip:
+- `Bash` → `input.command || ''`.
+- `Write`/`Edit`/`MultiEdit`/`NotebookEdit`: let `path = input.file_path || input.path || ''`;
+  if `input.content != null` return `` `${path}\n\n${input.content}` ``; else if
+  `input.old_string` or `input.new_string` is non-null return a diff block
+  `` `${path}\n\n- - - old - - -\n${old_string}\n\n+ + + new + + +\n${new_string}` ``
+  (each string defaulting to `''`); else just `path`.
+- anything else → `JSON.stringify(input, null, 2)`.

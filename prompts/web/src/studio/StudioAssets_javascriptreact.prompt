@@ -1,0 +1,73 @@
+% Generate `web/src/studio/StudioAssets.jsx`: the Assets tab in the Studio properties panel,
+% shown when nothing is selected. It mirrors the agent window's asset kinds and is where images
+% come from now that +Image left the toolbar. Pure display + click-to-add — every mutation goes
+% through the interp mutators wired in Studio (this component only calls the on* callbacks).
+% Clicking an asset ADDS it to the timeline in the way that fits its kind:
+%   image → image overlay · video → appended cut · music → music bed · audio → SFX at playhead
+%
+% Imports: `useRef, useState` from 'react'; namespace `* as api` from '../api.js';
+% `IconPlay, IconMusic` from '../components/icons.jsx'. No inline styles except the one small
+% margin nudge called out below. Class names are the contract with web/src/styles.css — keep them
+% exact. The renders-tab behaviour is pinned by StudioAssets.test.jsx.
+
+Module constants:
+- `KINDS = ['images', 'video', 'audio', 'music', 'renders']` — the tab order. `'renders'` is NOT
+  a user-uploadable kind: it surfaces the agent's HyperFrames clips (the backend's top-level
+  `agent_renders` array, from {project}/hf/renders) which behave like videos on the timeline, so
+  its tab has no upload dropzone.
+- `HINT`: a per-kind one-line hint string — images "click to add as an overlay · or drag onto the
+  timeline", video "click to append a clip · or drag onto the timeline", audio "click to drop an
+  SFX at the playhead", music "click to set the music bed", renders "AI-rendered clips · click to
+  append, or drag onto the timeline".
+
+Default-export `StudioAssets({ projectId, assets, background, onAddImage, onAddClip, onAddSfx,
+onSetMusic, onSetBackground, onUploadAsset })`.
+
+State: `kind` ('images'), `dragging` (false), `inputRef` (useRef null).
+- `filesFor(k)` → `k === 'renders' ? assets?.agent_renders : assets?.kinds?.[k]`, defaulting to
+  `[]`. `files = filesFor(kind)`. `isVideoKind = kind === 'video' || kind === 'renders'`.
+- `onPick(path)`: images → onAddImage, `isVideoKind` → onAddClip (a render IS a video clip),
+  music → onSetMusic, else onAddSfx.
+- `handleFiles(fl)`: when `onUploadAsset` and `fl?.length`, call `onUploadAsset(kind, fl[0])`.
+
+Render an `aside.st-inspector.st-assets`:
+- When `onSetBackground` is passed, a `<BackgroundControl projectId images={assets?.kinds?.images
+  || []} background onSetBackground />` at the top.
+- `<h3 className="st-insp-head">Assets</h3>`.
+- `.asset-tabs`: one `button.asset-tab` per KIND (`active` when selected), onClick sets `kind`,
+  label is the kind name plus ` (N)` when `filesFor(k).length` is nonzero.
+- `.st-hint` showing `HINT[kind]`.
+- `.asset-grid`: a `p.empty` "No {kind} yet." when `files` is empty; otherwise map `files` to a
+  `div.asset-item.clickable` (key `f.path`, `title="{f.name} — click to add, or drag onto the
+  timeline"`, `role="button"`, `tabIndex={0}`, `draggable`):
+  - onDragStart: tag the payload kind — renders drag as `'video'` (so the timeline's drop handler
+    routes them to a cut, not an image overlay), every other kind as itself. Set the DnD data on
+    `'application/x-opennolan-asset'` to `JSON.stringify({ kind: dndKind, path: f.path })` and
+    `effectAllowed = 'copy'`.
+  - onClick → `onPick(f.path)`; onKeyDown Enter or Space → preventDefault then `onPick(f.path)`.
+  - Body by kind: images → `<img>` from `api.fileUrl(projectId, f.path, f.mtime)`, alt `f.name`,
+    lazy. Video kinds → `.asset-thumb.video` wrapping a muted playsInline `<video>` (same fileUrl,
+    `preload="metadata"`) and a `.asset-play` span holding `<IconPlay />`. Audio/music →
+    `.asset-thumb.audio` with a `.asset-audio-icon` span holding `<IconMusic size={26} />`. Then a
+    `.asset-name` with `f.name`.
+- Upload dropzone, only when `onUploadAsset` is passed AND `kind !== 'renders'`: a `.dropzone`
+  (add `drag` while `dragging`) — click opens `inputRef`; onDragOver preventDefault + set dragging;
+  onDragLeave clears it; onDrop preventDefault, clears dragging, `handleFiles(e.dataTransfer.files)`.
+  Text "Drop a <strong>{kind}</strong> file here, or click to choose" plus a hidden
+  `<input type="file">` (ref `inputRef`) whose onChange calls `handleFiles(e.target.files)`.
+
+Module helper `BackgroundControl({ projectId, images, background, onSetBackground })` — the
+project-wide canvas background behind ALL main clips (visible where a moved/scaled clip doesn't
+cover the frame). Black by default; the user picks a solid color or any project image. Writes
+`metadata.background` via `onSetBackground` (null = back to black).
+- `isBlack = !background`; `isColor`/`isImage` = `background?.type` is 'color'/'image'; `colorVal`
+  = `background.color` when it matches `/^#[0-9a-fA-F]{6}$/`, else '#000000'.
+- `section.st-sec.st-bg-ctrl`: a `.st-sec-h` "Canvas background"; a `.st-bg-row` with a
+  `button.st-chip` "Black" (`on` when isBlack → `onSetBackground(null)`), a `label.st-bg-swatch`
+  (`on` when isColor, title "Solid color background") wrapping `<input type="color" value={colorVal}>`
+  whose onChange calls `onSetBackground({ type: 'color', color: e.target.value })`, and a `.st-hint`
+  "solid color" with `style={{ margin: 0 }}`.
+- When `images.length`, a `.st-hint` "or use an image (covers the canvas):" and a `.st-bg-images`
+  mapping each image to a `button.st-bg-img` (`on` when isImage and `background.asset_id ===
+  img.path`, title `img.name`, onClick `onSetBackground({ type: 'image', asset_id: img.path })`)
+  holding an `<img>` from `api.fileUrl(projectId, img.path, img.mtime)`, alt `img.name`, lazy.

@@ -1,0 +1,47 @@
+% Generate `lib/pipeline_loader.py`: OpenNolan's pipeline-manifest loader — it loads,
+% validates, and queries the pipeline YAML manifests in `pipeline_defs/`.
+% Use `from __future__ import annotations`; import `json`, `pathlib.Path`,
+% `typing.Any/Optional`, `yaml`, `jsonschema`, `from lib import app_paths`.
+
+Module constants, resolved once from the repo root (the parent of `lib/`):
+- `PIPELINE_DEFS_DIR` = `<repo>/pipeline_defs`; `SCHEMA_PATH` =
+  `<repo>/schemas/pipelines/pipeline_manifest.schema.json`.
+- `PACKAGED_PIPELINES: tuple[str, ...] = ("instagram-fast-reel",)` — the only pipeline the
+  packaged Mac app offers/validates. The bundle still ships every manifest as inert data;
+  this is a runtime filter, not a bundle trim. A dev checkout keeps them all.
+
+- `load_pipeline(name, defs_dir=None) -> dict[str, Any]` — read `<defs_dir>/<name>.yaml`
+  (default `PIPELINE_DEFS_DIR`), `FileNotFoundError` naming the path if absent, `yaml.safe_load`,
+  `jsonschema.validate` against the schema at `SCHEMA_PATH`, return the manifest.
+- `list_pipelines(defs_dir=None, *, packaged=None) -> list[str]` — the `*.yaml` stems in
+  `defs_dir`. `packaged` defaults to `app_paths.is_packaged()` (pass explicitly in tests);
+  when packaged, restrict to `PACKAGED_PIPELINES`.
+
+Manifest queries iterate `manifest["stages"]` (list of stage dicts keyed by `name`):
+
+- `_condition_is_active(condition, context) -> bool` — no condition → True; a condition with
+  no context → False; else `bool(context.get(condition))`.
+- `get_reference_input_config(manifest) -> dict` — `manifest.get("reference_input", {})`,
+  falsy coerced to `{}`; `pipeline_supports_reference_input(manifest) -> bool` reads its
+  `"supported"` flag. Reference input defaults to disabled.
+- `get_stage_sub_stages(manifest, stage_name, *, context=None, include_inactive=True)` — the
+  matched stage's `sub_stages` (empty if absent). Default returns all; `include_inactive=False`
+  keeps only sub-stages whose `condition` is active.
+- `get_stage_order(manifest, *, include_sub_stages=False, context=None) -> list[str]` — ordered
+  stage names. With `include_sub_stages=True`, append each stage's sub-stages as
+  `"<stage>.<sub_stage>"` after their parent, filtered via `get_stage_sub_stages` with
+  `include_inactive=(context is None)`.
+- `get_required_tools(manifest) -> set[str]` — union across stages of `preferred_tools`,
+  `fallback_tools`, `tools_available`, each sub-stage's `tools_available`, and the
+  reference-input config's `analysis_tools`.
+- `get_stage_skill(manifest, stage_name) -> Optional[str]` and
+  `get_stage_review_focus(manifest, stage_name) -> list[str]` — the matched stage's `skill`
+  (else None) / `review_focus` (else `[]`).
+
+Capability-extension enforcement over the four types `custom_scripts`, `custom_playbooks`,
+`custom_skills`, `custom_tools`, read from `manifest["extensions"]`, each defaulting to False:
+- `ExtensionNotPermitted(PermissionError)`.
+- `check_extension_permitted(manifest, extension_type) -> None` — `ValueError` for an unknown
+  type; else `ExtensionNotPermitted` unless the flag is enabled. Its message names the pipeline
+  and the offending type and states how to enable it (`extensions.<type>: true`).
+- `get_permitted_extensions(manifest) -> dict[str, bool]` — all four flags with defaults applied.

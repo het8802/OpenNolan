@@ -1,0 +1,79 @@
+% Generate `server/debug_log.py`: the dev-observability sink + "query, don't read" analyzer for
+% the editor's UI session recorder. The Studio recorder (`web/src/debug/recorder.js`) batch-POSTs
+% timestamped events (console output, uncaught errors, user interactions, domain events such as
+% scrub/seek) to `POST /api/debug/log`; this module appends them one JSON object per line (NDJSON)
+% and provides a compact analyzer so agents NEVER load a raw session (thousands of lines / tens of
+% thousands of tokens) into context. Module docstring must explain that rationale and the path:
+%   <home>/.agents/tools/logs/ui-sessions/<session>.ndjson
+% noting `home()` is the writable data root (repo checkout in dev — next to the gitignored
+% `.agents/tools/logs/backend.log` — or ~/Library/Application Support/OpenNolan when packaged),
+% and that `OPENNOLAN_DEBUG_LOG_DIR` redirects the directory (used by tests to stay hermetic).
+
+`from __future__ import annotations`. Import json, os, re; `Counter` from collections; `datetime`
+and `timezone`; `Path`; typing `Any, Iterator, Optional`; and `from lib import app_paths`.
+
+`_SESSION_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")` — ids are minted client-side; this tight
+charset ensures a session name can never inject a path separator or escape the logs dir.
+
+`logs_dir() -> Path`: `OPENNOLAN_DEBUG_LOG_DIR` if set, else `app_paths.home() / ".agents" /
+"tools" / "logs" / "ui-sessions"`; `mkdir(parents=True, exist_ok=True)` then return it.
+
+`_session_path(session) -> Path`: raise `ValueError("invalid session id")` unless `session` matches
+`_SESSION_RE`; return `logs_dir() / f"{session}.ndjson"`. Every public reader/writer routes through
+this, so none can touch a file outside `logs_dir()`.
+
+`append_events(session, events: list) -> int`: append each event to the file (open "a", utf-8) as
+one compact line — `json.dumps(ev, ensure_ascii=False, separators=(",", ":"))` + "\n"; SKIP any
+event that isn't a dict. Return the number of lines written.
+
+`list_sessions() -> list[dict]`: for each `*.ndjson` in `logs_dir()`, a dict `{session: stem, bytes:
+st_size, mtime: <mtime as UTC-aware ISO string>}`; return sorted newest-first by mtime.
+
+`latest_session() -> Optional[str]`: the newest `list_sessions()` entry's session, or None.
+
+`delete_session(session) -> bool`: `_session_path` (validates id → can't escape), unlink it; return
+True, or False on FileNotFoundError (idempotent — the user chose not to send it). Docstring notes it
+raises ValueError on a bad id, same guard as the writer.
+
+% --- emailing a session as a file attachment (feedback flow) ---
+`MAX_ATTACHMENT_BYTES = 2_500_000` — cap the emailed log at ~2.5 MB raw; base64 inflates ~33%
+(→ ~3.4 MB), which must stay under the 4.5 MB Vercel serverless request-body limit the relay runs
+behind. A repro is seconds of clicks so this is generous. Mark with a `ponytail:` comment that it's
+a single global cap; upgrade to gzip + a bigger cap if huge sessions ever need full fidelity.
+
+`read_session_bytes(session, max_bytes=MAX_ATTACHMENT_BYTES) -> bytes`: raw NDJSON bytes. Raise
+FileNotFoundError if missing. If the file is ≤ max_bytes return it whole; otherwise seek to the LAST
+max_bytes (most recent events — where a repro's failure lands), drop everything up to and including
+the first newline (so no torn leading JSON object survives), and prefix a valid-NDJSON truncation
+marker line: `{"type":"session.truncated","note":"showing last <kept> of <total> bytes"}`.
+
+`_iter_events(session) -> Iterator[dict]`: raise FileNotFoundError if missing; yield each line
+parsed as JSON, skipping blank lines, parse failures, and non-dict values.
+
+`_ERROR_TYPES = {"error", "unhandledrejection", "preview.video.error", "preview.video.stalled"}` —
+always surfaced verbatim. `_EDIT_TYPES = {"edit.commit", "edit.undo", "edit.redo"}` (discrete editing
+actions from Studio.jsx, whose `data` is a summarizeDocChange() diff). `_MAX_EDITS = 60`.
+
+`analyze_session(session, *, sample=15) -> dict`: the compact, token-bounded report agents read
+INSTEAD of the raw log (also driven by `scripts/debug_session.py`). Raise FileNotFoundError if
+missing. Iterate `_iter_events` once, accumulating:
+- an event-type histogram keyed on `type` (default "?");
+- `first_wall`/`last_wall` = first and last non-empty `wall` seen;
+- `started` = the `data` of the first `session.start`/`session.resume` event;
+- errors (capped at 40): any event whose type is in `_ERROR_TYPES`, or a `console` event with
+  `level` in ("error", "warn"), kept verbatim;
+- an ordered edit log: for each `_EDIT_TYPES` event count it and (up to `_MAX_EDITS`) append
+  `{seq, t, type, **data}`;
+- the source-video seek lifecycle. `preview.seekReq` → requests++ (and fired++ if its `data.fired`).
+  `preview.video.seeking` → if a prior 'seeking' is still pending it was SUPERSEDED before finishing
+  (the stuck-canvas signature) so append it to a stuck sample (up to `sample`) as `{seq, t, **data}`;
+  make this event the new pending one and started++. `preview.video.seeked` → finished++, clear pending.
+
+Build the report dict — always: session, file (str path), bytes, events (total), first_wall,
+last_wall, started, histogram (most-common-ordered dict), errors. Add `edits` = {total, log} only if
+any edits were seen. Add `seeks` only if any requests or seeks started: {requests, fired, started,
+finished, superseded_before_finishing (= started − finished), completion_rate (finished/started
+rounded to 3, or None when none started), stuck_sample}. When completion_rate is not None and < 0.6,
+append to `notes` a line stating what % of source-video seeks never completed (canvas freeze on
+scrub) and naming the prime suspect: the paused-scrub seek in StudioPreview sets `video.currentTime`
+without guarding on `v.seeking`, so a seek issued mid-seek is coalesced/dropped. Return the report.

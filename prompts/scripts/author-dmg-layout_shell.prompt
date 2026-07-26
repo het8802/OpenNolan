@@ -1,0 +1,49 @@
+% Generate `scripts/author-dmg-layout.sh`: a manual, GUI-only step that regenerates the
+% OpenNolan install-DMG look. It writes two COMMITTED assets that `scripts/build-dmg.sh`
+% bakes into every .dmg:
+%   desktop/build/dmg-background.tiff   HiDPI window background artwork
+%   desktop/build/dmg.DS_Store          Finder window layout (background ref + icon positions)
+%
+% Why separate & manual (say so in the header comment): a *programmatically* written
+% background alias does NOT render on recent macOS (26 / Darwin 25) — the window comes up
+% white. A Finder-AUTHORED reference renders and keeps rendering when copied into the final
+% image, but needs a GUI Finder session + Automation permission CI may lack — so author once,
+% commit, and keep the build headless. Requires macOS GUI + Python with Pillow.
+%
+% `set -euo pipefail`. REPO_ROOT from the script's own dir. Python = repo `.venv/bin/python`
+% if executable, else `python3`. Volume name `OpenNolan` MUST stay in sync with `DMG_VOLNAME`
+% in build-dmg.sh (the background ref resolves against a volume of that name). `echo "==> ..."`
+% per stage.
+
+Stage 1 — render the background artwork with an inline Python (Pillow) heredoc into a mktemp
+dir, then combine into one HiDPI tiff with
+`tiffutil -cathidpicheck <1x> <2x> -out desktop/build/dmg-background.tiff`.
+
+The artwork, on a 660×400 base canvas rendered at 2× (save 2×-downscaled `bg.tiff` and full
+`bg@2x.tiff`); palette cream `(249,244,236)` → edge `(243,237,226)`, terracotta `(217,105,74)`,
+ink `(43,42,40)`, subtle `(150,143,133)`; font `HelveticaNeue.ttc` (bold = index 10):
+- vertical gradient cream→edge, darkening ~5% toward the bottom
+- centered bold headline "Move OpenNolan to Applications" (26pt, ink) with a short centered
+  terracotta rule bar beneath it
+- centered subtitle "Drag the icon into the folder to install" (13pt regular, subtle)
+- a horizontal terracotta arrow (line + filled triangle head) between the two icon slots,
+  from the app icon toward the Applications icon
+- "OPENNOLAN" wordmark, bottom-left, 12pt bold terracotta
+Icon slots (also the AppleScript positions and the arrow endpoints): app at `(180,195)`,
+Applications at `(480,195)`, icon radius 64 — all in base units, ×2 for the render.
+
+Stage 2 — author the .DS_Store by driving Finder:
+- Scratch dir via `mktemp -d /private/tmp/opennolan-dmg.XXXXXX`, NOT per-user `$TMPDIR` —
+  Finder bakes the scratch image's absolute path into the .DS_Store and this is a public repo,
+  so we must not commit a user-specific temp-container hash (runtime uses the relative
+  `.background:background.tiff` ref, so the baked path is irrelevant at runtime).
+- Detach any stale `/Volumes/OpenNolan*` (tolerant). `hdiutil create` a 20m HFS+ image, volname
+  `OpenNolan`, attach read-write no-autoopen, assert it mounted at exactly `/Volumes/OpenNolan`.
+- Populate: `.background/background.tiff` (copy of the artwork), a placeholder `OpenNolan.app`
+  dir, and an `Applications` symlink to `/Applications`.
+- `osascript` telling Finder to open the disk and set: icon view; toolbar & statusbar off;
+  window bounds `{400,120,1060,520}`; not arranged; icon size 128; background picture
+  `file ".background:background.tiff"`; position `OpenNolan.app` = `{180,195}`, `Applications`
+  = `{480,195}`; `update without registering applications`; delay 1; close.
+- `sync`, brief sleep, copy the volume's `.DS_Store` to `desktop/build/dmg.DS_Store`, detach,
+  clean up temp dirs, and echo a reminder to commit both `desktop/build` assets.

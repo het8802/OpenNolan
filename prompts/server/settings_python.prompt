@@ -1,0 +1,33 @@
+% Generate `server/settings.py`: local user preferences for the packaged desktop app — small JSON
+% values that are NOT secrets (secrets live in the BYOK `.env`). Module-level functions, no class.
+% `from __future__ import annotations`. Import json, os, tempfile, uuid; `Path`; typing `Any`; and
+% `from lib import app_paths`.
+
+% Design contract (state in the module docstring): prefs are stored as one JSON object at
+% `<app_paths.home()>/settings.json`, so they sit next to the user's data (App Support in the
+% packaged app, repo root in dev) and never inside the read-only bundle. Reads must NEVER raise —
+% a missing OR corrupt file must fall back to defaults, never brick the backend. Writes are ATOMIC:
+% serialize to a temp file in the same directory, fsync, then `os.replace`, so a crash or a
+% concurrent reader never sees a half-written file.
+
+## Constants
+- `_DEFAULTS: dict[str, Any] = {"analytics_disabled": False}` — analytics is opt-OUT (on by default;
+  `False` = allowed). This is the only baked-in default; everything else is written on demand.
+
+## API
+- `read_all() -> dict` — `_DEFAULTS` overlaid with whatever is on disk. If the file is missing,
+  unreadable, non-JSON, or not a JSON object, return the defaults (swallow `JSONDecodeError`/`OSError`);
+  only a dict from disk overlays the defaults.
+- `get(key, default=None) -> Any` — `read_all().get(key, default)`.
+- `set_value(key, value) -> dict` — read current, set the one key, write atomically, return the full
+  post-write dict.
+- `device_id() -> str` — a stable, anonymous per-install id for analytics (NO PII): `dev-<uuid4 hex>`,
+  generated once and persisted (via `set_value`) so it is reused across launches; consumed by
+  `server.analytics`.
+
+## Helpers
+- `_path()` = `app_paths.home() / "settings.json"`.
+- `_write_atomic(data)` — `mkdir(parents=True, exist_ok=True)` the parent, `tempfile.mkstemp` in that
+  same dir (so `os.replace` is atomic on one filesystem), `json.dump(indent=2)` then flush + `os.fsync`,
+  then `os.replace(tmp, path)`. On ANY `BaseException`, unlink the temp file (ignore unlink errors) and
+  re-raise.

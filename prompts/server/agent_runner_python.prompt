@@ -1,0 +1,368 @@
+% Generate `server/agent_runner.py`: the headless agent runner for Mission Control.
+% It wraps the Claude Agent SDK as the engine that drives OpenNolan pipelines (the same
+% engine a human Claude Code session uses), adding the safety/plumbing layer a headless run
+% needs: a code-level tool-permission policy, a filesystem sandbox, a hard cost ceiling
+% (SDK-native `max_budget_usd`), a re-asserted contract system prompt, in-process MCP tools
+% (ask_user / render / store_asset / request_api_key / request_capability / run_media_op),
+% and a per-project persistent session with resume + off-by-one turn-attribution safety.
+% Auth: the SDK reads it from the environment — the docstring notes to use the machine's
+% Claude subscription via CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`) and to unset
+% ANTHROPIC_API_KEY (which would bill per-token instead).
+%
+% `from __future__ import annotations`. Import: asyncio, json, os, re, shlex, shutil, sys,
+% tempfile; dataclasses(dataclass, field); pathlib.Path; typing(Any, Awaitable, Callable,
+% Optional); and `record_tool_use` from server.activity. Lazy-import inside functions:
+% claude_agent_sdk types, lib.app_paths, lib.provision, lib.project, lib.checkpoint,
+% lib.pipeline_loader, server.env_config, server.editor (so the module imports cheaply and
+% dev/test paths don't drag in the packaged-app machinery).
+
+## Constants
+
+- `DEFAULT_MODEL = "claude-opus-4-8"` (most capable; strongest long-horizon agentic model).
+- `AGENT_MODELS: dict[str,str]` — id→display label of the models the UI dropdown offers, kept
+  in sync with web/src/chat/chatUtils.js: opus-4-8 "Opus 4.8" (default), "claude-sonnet-5"
+  "Sonnet 5", "claude-haiku-4-5-20251001" "Haiku 4.5". An unknown id is ignored elsewhere.
+- `DEFAULT_MAX_BUDGET_USD = 15.0`, `DEFAULT_CONFIRM_TIMEOUT_S = 300`,
+  `DEFAULT_ANSWER_TIMEOUT_S = 900` (users take a while to answer).
+- `SAFE_TOOLS` (run unattended): Read, Glob, Grep, LS, NotebookRead, TodoWrite, WebSearch,
+  WebFetch. `WRITE_TOOLS` (legitimate — the agent writes artifacts/checkpoints): Write, Edit,
+  NotebookEdit, MultiEdit.
+- `ACTION_ALLOW="allow"`, `ACTION_CONFIRM="confirm"`, `ACTION_DENY="deny"` (hard-deny with a
+  steering message, no user prompt). `ToolDecision` = dataclass(action:str, reason:str).
+
+## Bash pattern detectors
+
+OpenNolan tools run as Python *through Bash*, so a tool-NAME allowlist can't gate risk — the
+risk is in the command string.
+
+- `_DESTRUCTIVE_PATTERNS`: list of (compiled regex, label). Cover recursive/force `rm -rf`,
+  wildcard `rm …*`, mkfs/shred, `dd if=`, write-to-device `> /dev/…` (but not null/stdout/
+  stderr), `sudo`, `chmod 777`, `curl|wget … | sh/bash/zsh/python`, network upload/exfil
+  (`curl|wget` with `-d/--data/-T/--upload-file/-F/--form`), `git push`, `git reset --hard`,
+  `git clean -…f`, and a fork bomb. `bash_destructive_reason(command) -> Optional[str]` returns
+  the first matching label (else None). These route Bash to CONFIRM.
+- `bash_uses_videocompose_render(command) -> bool`: True iff the command matches BOTH
+  `render_proxies` AND `VideoCompose|video_compose`. Rendering through background Bash makes the
+  CLI auto-resume the agent in an unsolicited turn (the off-by-one). Specific markers so
+  non-render ffmpeg/remotion and other video_compose ops (compose/encode/burn_subtitles) are
+  untouched. Routes to DENY (steer to the in-process `render` tool).
+- `bash_runs_heavy_media_op(command) -> Optional[str]`: gated on `.execute(` being present (so
+  introspection / ffprobe / update_stage / registry.get(...).get_info() never match), then
+  returns the matched marker if the command runs a heavy re-encode via
+  `tools.video|audio.(silence_cutter|motion_ops|auto_reframe|object_cutout)`, the class names
+  SilenceCutter|MotionOps, or `registry.get("silence_cutter"|"motion_ops")`. Such a re-encode
+  outlives the CLI's foreground Bash timeout, so the CLI auto-backgrounds it and ends the turn.
+  Routes to DENY (steer to `run_media_op`). This is a STEER, not the correctness guarantee — the
+  run_turn drain catches any long op it misses.
+
+## Filesystem sandbox
+
+Keep the agent inside the app's OWN folders. The cwd and SDK `add_dirs` are only hints; they
+don't stop reading ~/Documents or /etc/passwd. Enabled in the packaged app or via
+`OPENNOLAN_AGENT_SANDBOX`; a plain dev checkout runs unsandboxed exactly as before.
+
+- `Sandbox` = frozen dataclass(base: Path, roots: tuple[Path,...]). `base` resolves relative
+  paths (the agent cwd); `roots` are the only trees the agent may touch.
+- `_PATH_TOOLS`: the file tools whose input names a path (Read/Write/Edit/MultiEdit/
+  NotebookRead/NotebookEdit/LS/Glob/Grep). `_BASH_OK_PATHS`: harmless device paths a shell may
+  reference (/dev/null,/dev/stdout,/dev/stderr,/dev/tty). `_truthy(value)` for the env flag.
+- `_resolve_under(path_str, base, *, expand_vars=False) -> Path`: expanduser (and expandvars
+  when `expand_vars`, so `$HOME/.ssh` resolves to the real home when scanning Bash), join under
+  base if relative, `.resolve()` (never raises — fall back to normpath).
+- `_within(path_str, sandbox, *, expand_vars=False) -> bool`: resolved path equals a root or is
+  under one.
+- `_tool_paths(tool_name, ti) -> list[str]`: the paths a call would touch — file_path/
+  notebook_path for read/write tools, path for LS, and for Glob/Grep the `path` plus an
+  absolute/`~` `pattern` (a `/Users/**` glob root can escape too).
+- `_bash_tokens(command) -> list[str]`: shlex-tokenize RESPECTING quotes (a quoted path with a
+  space — the app's own data dir lives under `~/Library/Application Support/…` — stays ONE
+  token) and splitting off `; | & < > ( )`; tolerant of an unterminated quote (keep the prefix
+  lexed before the error); fall back to `command.split()`.
+- `_looks_like_path(s)`: starts with `/ ~ ./ ../ $HOME ${HOME}` (a bare relative token resolves
+  in-bounds, so it's not flagged). `_path_candidates(token)`: yield the token, plus the value of
+  a real assignment/flag head (`VAR=/path`, `--out=/path`) — the `=` split gated to a var/flag
+  regex so a URL query like `?a=/y` isn't mis-split.
+- `bash_path_escape_reason(command, sandbox) -> Optional[str]`: first path-like candidate that
+  resolves OUTSIDE the sandbox (strip trailing punctuation; skip `//…` URL authorities; skip
+  `_BASH_OK_PATHS`; check with `expand_vars=True`), else None. Best-effort STATIC analysis —
+  defense-in-depth; the file-tool boundary is the hard guarantee.
+- `build_sandbox(repo_root, projects_dir) -> Optional[Sandbox]`: None unless
+  `app_paths.is_packaged()` or OPENNOLAN_AGENT_SANDBOX is truthy. Otherwise base = resolved
+  repo_root; roots = de-duped resolved set of {base, app_paths code_root/home/projects_dir/
+  runtime_dir/cache_dir, the passed projects_dir, and ephemeral temp: gettempdir, /tmp,
+  /private/tmp, /var/folders}. Media/generation tools legitimately stage scratch in temp.
+
+## Permission policy
+
+`decide_tool(tool_name, tool_input, sandbox=None) -> ToolDecision`:
+1. If `sandbox` set and tool in `_PATH_TOOLS`: any `_tool_paths` entry not `_within` → DENY with
+   a message that the path is outside the app workspace (file tools name their target directly,
+   so this is unambiguous).
+2. SAFE_TOOLS or WRITE_TOOLS → ALLOW.
+3. `AskUserQuestion` or a name starting `mcp__mc__` (our in-process ask_user/render/… tools) →
+   ALLOW.
+4. Bash: `bash_uses_videocompose_render` → DENY (steer to `render`);
+   `bash_runs_heavy_media_op` → DENY (steer to `run_media_op`); if sandbox set and
+   `bash_path_escape_reason` → CONFIRM ("reaches outside the app workspace"); if
+   `bash_destructive_reason` → CONFIRM; else ALLOW.
+5. Any other/unknown/MCP tool → CONFIRM (conservative).
+
+`ConfirmHandler = Callable[[str, dict, str], Awaitable[bool]]`.
+`make_can_use_tool(confirm_handler=None, sandbox=None)` → the SDK `can_use_tool(tool_name,
+tool_input, context)` coroutine: ALLOW→PermissionResultAllow; DENY→PermissionResultDeny(reason);
+CONFIRM→ask the handler (approve→Allow, else Deny "Denied by user: …"); with NO handler a
+flagged call is DENIED ("Blocked (no confirm handler): …") — the safe unattended default.
+
+## System prompt
+
+`AGENT_SYSTEM_PROMPT`: a string that re-asserts the repo contract for a headless run. It must
+tell the agent it is the OpenNolan production agent running HEADLESS (steered via a Mission
+Control UI between turns) and instruct it to: read AGENT_GUIDE.md and follow Rule Zero; read the
+per-stage director skill and any Layer-3 skill before generating; write checkpoints/artifacts to
+the ABSOLUTE project dir from its PROJECT CONTEXT message (NOT relative to the read-only code
+cwd, NOT pipelines/); drive the UI stepper with
+`python scripts/update_stage.py <project_id> <stage> <in_progress|completed|awaiting_human>
+<pipeline_type>`; STOP and mark awaiting_human at approval gates; present BOTH render runtimes
+(Remotion AND HyperFrames) and record a render_runtime_selection with both in options_considered;
+render only via the in-process `render` tool (blocks in-turn, returns {success,output_path,
+warnings}) — never background Bash/VideoCompose (breaks turn attribution); run any heavy media op
+via `run_media_op` (not `python -c "…execute(…)"` in Bash) while quick read-only calls stay on
+Bash; ask questions via `ask_user`; on a missing CLOUD key call `request_api_key` with the EXACT
+env-var name then retry (vs open BYOK by hand); on a missing LOCAL dep call `request_capability`
+with the pack (transcription/vision/bg-removal/beat-sync/tts) then retry (never raw pip); save
+EVERY produced file via `store_asset` by KIND (never hand-write into assets/, hf/renders/, or
+renders/); and announce cost before any paid generation and never exceed the budget.
+
+## CLI / auth / subprocess env
+
+- `_CLI_FALLBACK_LOCATIONS`: the same `claude` locations the SDK's `subprocess_cli._find_cli`
+  searches (/usr/local/bin and ~/.npm-global,~/.local,~/node_modules/.bin,~/.yarn/bin,
+  ~/.claude/local under home).
+- `claude_cli_available() -> bool`: `shutil.which("claude")` or any fallback location is a file.
+  The SDK drives this CLI, which self-authenticates from its own stored login (e.g. Keychain),
+  so a resolvable CLI means the agent can run even without an env token.
+- `auth_configured() -> bool`: an env credential (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY)
+  OR `claude_cli_available()`.
+- `agent_subprocess_path() -> str`: prepend the managed venv bin (`app_paths.runtime_dir()/
+  venv/bin`) to the inherited PATH so the agent's bare `python` is the app's Python (which has
+  OpenNolan's deps) — fixes OPN-4. Dev-safe: the venv bin is absent in a checkout, so resolution
+  falls through to the active dev venv.
+- `agent_add_dirs(projects_dir) -> list[str]`: `[str(projects_dir)]` only if it exists (a
+  `--add-dir` at a nonexistent path aborts the CLI launch), else `[]`. Exposes the writable
+  project data dir (outside the read-only code cwd in the packaged app) as a first-class
+  workspace.
+
+## build_agent_options
+
+`build_agent_options(repo_root, *, projects_dir=None, model=DEFAULT_MODEL,
+max_budget_usd=DEFAULT_MAX_BUDGET_USD, confirm_handler=None, resume=None, mcp_servers=None,
+disallowed_tools=None) -> ClaudeAgentOptions`. In a packaged run (OPENNOLAN_CODE_ROOT set) print
+a non-fatal stderr WARNING if the managed venv python is missing. Build the sandbox (log its
+roots to stderr when on). Return ClaudeAgentOptions with cwd=str(repo_root),
+system_prompt=AGENT_SYSTEM_PROMPT, model, max_budget_usd, permission_mode="default" (so
+can_use_tool is consulted), setting_sources=["project"] (load CLAUDE.md → the contract applies),
+can_use_tool=make_can_use_tool(confirm_handler, sandbox), resume, mcp_servers or {},
+disallowed_tools or [], env={"PATH": agent_subprocess_path()}, add_dirs=agent_add_dirs(
+projects_dir). `resume` is a prior session_id the SDK restores (full history) so a died session
+comes back with context intact on a fresh budget.
+
+## Event normalization (SDK messages → serializable event dicts for SSE)
+
+- `_truncate_input(tool_input, limit=4000)`: shallow-copy the dict, truncating long string
+  values (generous so the UI can expand the full command/content).
+- `_tool_detail(name, inp) -> {"label": …}`: the most useful display field — file_path/path for
+  read/write tools; Bash → first non-empty line capped at 120 chars; Glob/Grep pattern;
+  WebSearch query; WebFetch url (80); Skill skill/name; else "".
+- `event_of(message) -> dict`: normalize one SDK message.
+  - AssistantMessage → `{"type":"assistant","items":[…]}` where blocks map to items: TextBlock→
+    {kind:text,text}; ToolUseBlock→{kind:tool_use,name,id,input:_truncate_input,detail:label};
+    ToolResultBlock→{kind:tool_result,tool_use_id,is_error,content} (truncate string content at
+    2000); ThinkingBlock→{kind:thinking}.
+  - UserMessage → emit only ToolResultBlocks (same shape) as a `{"type":"assistant"}` event; if
+    none, `{"type":"other","repr":"UserMessage"}`.
+  - ResultMessage → {type:result, is_error, num_turns, total_cost_usd, result, stop_reason,
+    session_id}.
+  - SystemMessage → {type:system, subtype}. Anything else → {type:other, repr:classname}.
+- `TurnResult` = dataclass(text:str, is_error:bool, num_turns:int, total_cost_usd:Optional[float]).
+- `EmitFn = Callable[[dict], Any]` (sync or async). `_maybe_await(value)`: await it if a
+  coroutine. `_text_result(payload)`: an MCP text result wrapping `json.dumps(payload)`, with
+  `is_error` set when the payload has an `"error"` key.
+
+## AgentRunner
+
+Manages one persistent Claude SDK session per project (created lazily on the first turn and
+reused, so context and the awaiting_human→approve→resume flow survive across turns).
+`client_factory(project_id)` is injectable for tests.
+
+Fields (dataclass): repo_root: Path; model=DEFAULT_MODEL; max_budget_usd=DEFAULT_MAX_BUDGET_USD;
+confirm_timeout_s / answer_timeout_s = the DEFAULT_* values; client_factory:
+Optional[Callable[[str],Any]]; render_store: Optional[Any] (shared RenderJobStore injected from
+the app; None in tests → the render/media tools error cleanly); render_timeout_s=1800;
+render_poll_interval_s=0.5; drain_idle_timeout_s=0.15; drain_result_timeout_s=5.0; projects_dir:
+Optional[Path]. Init-false private state (all `field(default_factory=…, init=False)`): `_clients`
+(project→live client), `_emit` (project→current EmitFn), `_pending` (confirm_id→Future),
+`_confirm_seq`, `_answers` (question_id→Future), `_question_seq`, `_key_requests`, `_key_seq`,
+`_cap_requests`, `_cap_seq`, `_session_ids` (project→last session_id), `_resume_next`
+(project→rebuild-with-resume), `_fresh_client` (project→just-(re)created), `_models`
+(project→UI-selected model).
+
+`__post_init__`: coerce repo_root to Path; default `projects_dir` to `repo_root/projects` when
+None (dev+tests; the app injects the writable App-Support dir); default client_factory to
+`_default_client_factory`.
+
+### In-process MCP tools (`_default_client_factory`)
+
+Build a `mc` MCP server (`create_sdk_mcp_server("mc","1.0.0",[…])`) with these `@tool`s, each
+delegating to a private async method and closing over `project_id`. The tool DESCRIPTION strings
+must teach the agent the same rules the system prompt states (why to use them and when NOT to);
+keep them faithful to that guidance:
+- `ask_user` {question, options[list], header?} → `_ask_user`; returns the picked option as an
+  MCP text result.
+- `render` (all fields optional: edit_decisions, asset_manifest, output_path, proxies_dir,
+  hdr_policy enum[auto,preserve,tonemap,sdr], proposal_packet) → `_run_render`. Runs IN-PROCESS,
+  BLOCKS, returns {success,output_path,warnings,error}; omitting edit_decisions renders the saved
+  artifact from disk.
+- `store_asset` {kind enum[image,video,audio,music,render,final_render], src, name?} →
+  `_store_asset`. The agent declares a KIND, never a folder; content-idempotent.
+- `request_api_key` {env_var (exact name), provider?, reason?} → `_request_api_key` (missing
+  CLOUD key; secure in-chat input).
+- `request_capability` {pack enum[transcription,vision,bg-removal,beat-sync,tts], reason?} →
+  `_request_capability` (missing LOCAL pack; maps to lib.provision.PACKS).
+- `run_media_op` {tool (registry name), input(object)} → `_run_media_op`. Blocking in-process
+  runner for heavy re-encodes.
+
+Then: `resume = self._session_ids.get(project_id)` iff `_resume_next.pop(project_id, False)`;
+build options via `build_agent_options(self.repo_root, projects_dir=self.projects_dir,
+model=self._model_for(project_id), max_budget_usd=self.max_budget_usd, confirm_handler=confirm,
+resume=resume, mcp_servers={"mc": mc_server}, disallowed_tools=["AskUserQuestion",
+"ScheduleWakeup"])` and return `ClaudeSDKClient(options=options)`. Disallow AskUserQuestion
+(uncontrollable headless I/O → steer to ask_user) and ScheduleWakeup (useless here and a pure
+source of stray turns). The confirm closure calls `self._confirm(project_id, …)`.
+
+### Session helpers
+
+- `_model_for(project_id)`: the UI override in `_models` else `self.model`.
+- `_get_client(project_id)`: reuse `_clients[project_id]`; else build via client_factory,
+  `await connect()`, store it, and mark `_fresh_client[project_id]=True`.
+- `_project_context(project_id) -> str`: the first-turn binding instruction so the agent uses the
+  UI-selected project_id (not a new dir invented from the topic). Read `pipeline_type` and
+  `style` from the manifest (best-effort). If no pipeline_type but the app is packaged, pin
+  `PACKAGED_PIPELINES[0]` (one pipeline in the app — don't let it browse pipeline_defs). Compose a
+  `[PROJECT CONTEXT: …]` string: names the existing project_id and (if known) the pipeline; if
+  unknown, tells it to pick a best-fit pipeline from pipeline_defs/ and use it consistently; if a
+  style is set, tells it to `load_playbook('<style>')` (styles.playbook_loader) and set it as the
+  scene_plan style_playbook. Must say to use EXACTLY this project_id and NOT create a new project
+  directory, give the ABSOLUTE artifacts path (`{projects_dir/project_id}/artifacts/`), tell it to
+  route every asset through store_asset, and include the concrete `update_stage.py <project_id> …`
+  command with the status meanings.
+- `_resume_preamble(project_id) -> Optional[str]`: None for a brand-new project (no completed
+  stages AND no artifact json). Else a `[RESUMING WORK …]` note listing pipeline_type, completed
+  stages, next stage (lib.checkpoint get_completed_stages/get_next_stage), and the artifact
+  filenames, telling the agent to recover context and continue from the next stage without redoing
+  completed work. Swallow any error → None (durable on-disk safety net independent of SDK resume).
+- `_first_turn_preamble(project_id)`: join `_project_context` (always) + `_resume_preamble` (if
+  any) + `_render_resume_note` (if any) with newlines.
+
+### UI round-trips (confirm / question / key / capability)
+
+Each: get the project's `_emit`; if none, return the safe default (confirm→False deny; ask_user→a
+"proceed with your best judgment" string; key/cap→a text result with provided/installed False).
+Otherwise bump a seq, mint an id (`{project_id}:{prefix}{seq}`), create a Future in the matching
+dict, emit the request event, and `await asyncio.wait_for(future, timeout)` (confirm_timeout_s for
+confirm; answer_timeout_s for question/key; `max(answer_timeout_s, 3600)` for capability — installs
+run up to ~2.6 GB), popping the dict entry in `finally` and returning the default on TimeoutError.
+- `_confirm` → emits `confirm_request` {confirm_id, tool, reason, input:_truncate_input}; returns
+  bool.
+- `_ask_user(project_id, header, question, options)` → emits `question` {question_id, header,
+  question, options}; returns the answer string.
+- `_request_api_key(project_id, env_var, provider, reason)` → error result if env_var empty; look
+  up label/description via `server.env_config.describe_var` (best-effort); emits `api_key_request`
+  {key_request_id, env_var, provider|label, label, description, reason}; returns `_text_result`
+  {provided, env_var, detail} — the detail tells the agent to RETRY on true, or not-retry/skip on
+  false. The raw key is NEVER returned to the model (it's persisted server-side by the endpoint).
+- `_request_capability(project_id, pack, reason)` → error result if `pack not in
+  provision.PACKS`; if `provision.pack_installed(pack)` already, return installed:true "RETRY"; else
+  emits `capability_request` {cap_request_id, pack, label, size_mb, reason}; returns `_text_result`
+  {installed, pack, detail}.
+- Resolvers called by the HTTP endpoints, each returning True iff a live pending Future matched
+  (not already done) and setting its result: `resolve_confirm(confirm_id, approved)`,
+  `resolve_answer(question_id, answer)`, `resolve_key_request(key_request_id, provided)` (called
+  AFTER the key is persisted), `resolve_capability_request(cap_request_id, installed)` (called AFTER
+  the install stream finished).
+
+### render / run_media_op (blocking in-process jobs on the shared RenderJobStore)
+
+These replace background Bash: a job runs on a RenderJobStore THREAD (not a CLI background task),
+so nothing auto-resumes the agent — the tool is just a blocking call, which eliminates the
+off-by-one. On Stop (CancelledError) or timeout the job is LEFT RUNNING and the next turn's resume
+note surfaces it.
+
+- `_render_tool_result(**fields)` / `_media_op_result(**fields)`: drop None fields, build a human
+  summary line (success→output_path, else failure→error) plus `\n\n` + json.dumps(payload); MCP
+  result with `is_error = not success`.
+- `_build_render_inputs(project_id, args)`: collect the supplied render keys (edit_decisions,
+  asset_manifest, output_path, proxies_dir, hdr_policy, proposal_packet); when edit_decisions is
+  omitted, load the saved edit_decisions + asset_manifest from disk via server.editor
+  (best-effort).
+- `_run_render(project_id, args)`: error result if `render_store is None` or no edit_decisions
+  (supplied or on disk). Else `job_id = render_store.start_with_inputs(project_id, inputs)`, emit
+  `render_started`, then poll `render_store.status(job_id)` every render_poll_interval_s until a
+  render_timeout_s deadline: emit `render_progress` on status change; None status → superseded
+  error; "done" → mark_consumed + success result (output_path, warnings, final_review_status);
+  "failed" → mark_consumed + failure; past deadline → do NOT cancel, return a timed_out result
+  telling the agent it continues in the background and its result arrives next turn (leave
+  UNCONSUMED). Re-raise CancelledError (leave the job running).
+- `_run_media_op(project_id, tool_name, tool_input)`: mirror _run_render for an arbitrary registry
+  tool. Guard render_store/tool_name/dict-input; `job_id = render_store.start_op(project_id,
+  tool_name, tool_input)`; emit `media_op_started`/`media_op_progress`; on done return success with
+  output_path + data (`result_data`). (ponytail note: poll loop intentionally duplicated from
+  _run_render; unify only if a third store-job kind appears.)
+- `_store_asset(project_id, args)`: thin wrapper over `lib.project.place_asset` (the single writer
+  into the asset tree). Require `src`; resolve it under repo_root when relative; require `kind`.
+  Return `_text_result` with a repo-relative `path` (`projects/{project_id}/{res.path}`), the
+  project_relative form, kind, and deduped; ValueError/FileNotFoundError → `{"error": …}` (recover,
+  don't kill the turn).
+- `_render_resume_note(project_id)`: if the store has an UNCONSUMED agent job (origin agent or
+  agent_op) for this project, return a `[RENDER UPDATE …]` / `[MEDIA OP UPDATE …]` note: done →
+  mark_consumed + "COMPLETED while you were away, output …, do NOT re-render/re-run, pick up from
+  QA"; failed → mark_consumed + "FAILED: … diagnose and decide whether to re-run"; queued/running →
+  surface but do NOT consume (so the done note fires later). None otherwise. Disjoint from the
+  run_turn drain: a store-thread job is surfaced HERE and never makes a CLI turn; a stray Bash turn
+  is surfaced by the drain and never starts a store job — so work is never double-reported.
+
+### Turn loop
+
+- `_drain_unsolicited(project_id, client, on_event)`: before sending the next user message, consume
+  any turn(s) the CLI produced BETWEEN messages (a background Bash-task completion or a scheduled
+  wakeup) so the next `receive_response()` can't read that buffered turn and mis-attribute it as the
+  answer (the off-by-one). Iterate `client.receive_messages()` with `asyncio.wait_for`: use
+  drain_idle_timeout_s while idle (no stray turn buffered) and drain_result_timeout_s once a turn is
+  mid-stream (so it's consumed whole); break on TimeoutError/StopAsyncIteration. Accumulate assistant
+  text; on a result event update `_session_ids` and flush accumulated text as a `background_update`
+  event ("A background task finished between turns:\n\n<summary>"). In finally, aclose the iterator
+  and flush any partial text. Cancellation-safe: a timed-out anext leaves the unread item buffered
+  (verified vs claude_agent_sdk 0.2.87). (ponytail note: the grace-wait bounds the rare mid-stream
+  race; a persistent reader task is the fuller fix if it ever bites.)
+- `run_turn(project_id, message, on_event=None) -> TurnResult`: get/create the client; register
+  `_emit[project_id]=on_event`; pop `_fresh_client`. On a WARM client, first `_drain_unsolicited`.
+  Build the prompt: a fresh client prepends `_first_turn_preamble`; a warm client prepends any
+  `_render_resume_note` (so a finished render/media op after a Stop is attributed to THIS message).
+  `await client.query(prompt)`, then stream `client.receive_response()`: emit each `event_of`;
+  accumulate assistant text; on each tool_use call `record_tool_use(projects_dir, project_id, name,
+  detail)` (defensive — persists the Activity tab across restarts); on the result event set
+  is_error/num_turns/total_cost_usd and remember session_id. In finally: drop `_emit`; if the turn
+  errored (budget ceiling, transport crash), set `_resume_next[project_id]=True`, pop and disconnect
+  the dead client (best-effort) — the NEXT turn rebuilds resuming the same session_id so context
+  survives; on-disk artifacts are untouched. Return TurnResult with the joined text.
+- `interrupt(project_id) -> bool`: send the SDK `interrupt()` to the live client (True) — the
+  session/context survive, the current turn ends, the next message continues; False if no live
+  client or on error.
+- `switch_session(project_id, session_id)`: align the live session to a stored thread. No-op if it
+  already matches and a client exists; else disconnect the live client; for a real session_id set
+  `_session_ids` + `_resume_next=True` (rebuild WITH resume), for None clear both (brand-new thread →
+  fresh session). Single live session per project.
+- `set_model(project_id, model)`: ignore an empty/unknown id (not in AGENT_MODELS) and a no-op
+  (already the current `_model_for`). Else set `_models[project_id]`, disconnect the live client so
+  the next turn rebuilds with the new model, and if there is an existing session_id set
+  `_resume_next=True` so context survives the swap. Safe to call every turn.
+- `aclose()`: disconnect every live client (best-effort) and clear `_clients`.

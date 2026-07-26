@@ -1,0 +1,16 @@
+% Generate `web/src/test/setup.js`: the Vitest global setup (wired as `setupFiles` in
+% `vite.config.js`) for React component tests. It registers jest-dom matchers and unmounts
+% React trees between tests, plus two jsdom polyfills the studio's UI depends on.
+
+Import `@testing-library/jest-dom/vitest` (adds `toBeInTheDocument` etc.). Run
+`cleanup()` from `@testing-library/react` in an `afterEach` so queries never see a prior render.
+
+## jsdom polyfills (jsdom omits both; install only if absent)
+- `scrollIntoView`: the chat view auto-scrolls to the newest message. Define
+  `HTMLElement.prototype.scrollIntoView` as a no-op when missing.
+- `PointerEvent`: the studio drags via `pointerdown` → window move/up, so tests must simulate
+  real `clientX/clientY`. jsdom has no `PointerEvent`, and `fireEvent.pointer*` would drop the
+  coordinates. When `window.PointerEvent` is undefined, define a `MouseEvent` subclass (MouseEvent
+  carries clientX/clientY/button) whose constructor also sets `pointerId` (default 1),
+  `pointerType` (default `'mouse'`), and `isPrimary` (default true) from its params. Assign it to
+  both `window` and `globalThis`.

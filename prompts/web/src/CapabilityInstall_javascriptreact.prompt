@@ -1,0 +1,44 @@
+% Generate `web/src/CapabilityInstall.jsx`: one lazy capability pack row with an Install
+% button that streams the pip install (progress bar + latest line) into the managed runtime.
+% Shared by BOTH the Capabilities settings panel and the agent's on-demand install card, so
+% the streaming logic lives here once. Imports `useEffect, useRef, useState` and `* as api
+% from './api.js'`. No inline styles — the `cap-*` class names below are the contract with
+% web/src/styles.css.
+
+Default-export `CapabilityInstall({ pack, label, sizeMb, installed, reason, onInstalled, autostart = false })`.
+
+State machine `status`: idle → installing → done | error, seeded to 'done' when `installed`
+is truthy (else 'idle'). Also `pct` (0, or 100 when installed), `latest` line string, `err`,
+and refs `abortRef` (in-flight AbortController) and `startedRef` (autostart-fired guard).
+
+`install()` — no-op if already installing. Set installing / clear err / pct 3 / latest
+"Starting install…", open an AbortController into abortRef, then `for await` over
+`api.provisionStream(pack, signal)` (yields `{type:'log'|'done'|'error', ...}` frames):
+- `log`: if `line`, show it as `latest`; nudge `pct` toward 92 (`+1.1`, clamped) — pip gives
+  no clean %, so we creep on activity and let `done` snap to 100.
+- `done`: pct 100, status done, latest "Installed.", call `onInstalled?.(pack)` — fired ONCE,
+  only on a real done frame.
+- `error`: set `err` (`f.error` || 'Install failed'), status error.
+Track whether a done or error frame was seen. The backend always ends a run with one of them,
+so a clean end-of-stream having seen NEITHER means the connection was cut mid-install (backend
+crash / socket drop) — treat that as error with a "did not complete — the connection ended
+before it finished. Try again." message, NOT success (else we'd mark the pack installed and
+have the agent retry a dependency that isn't actually there). On a thrown error: if the signal
+was aborted, silently reset to idle / pct 0; otherwise status error with the message. Always
+clear abortRef in `finally`.
+
+Effects: when `autostart` is set, fire `install()` once (guarded by startedRef, only from an
+idle status). On unmount, abort any in-flight stream so the fetch reader never leaks.
+
+Helper `fmtSize(mb)`: '' when null; `${(mb / 1024).toFixed(1)} GB` at ≥1024, else `${mb} MB`.
+
+Render a `cap-item cap-${status}` div:
+- a `cap-row` with `cap-info` (`cap-label` = `label || pack`; a `cap-size` fmtSize(sizeMb)
+  when sizeMb is set; a `cap-reason` when reason is set) and a `cap-action`:
+  - done → `cap-badge done` "Installed"
+  - idle → `cap-btn` "Install" (onClick install)
+  - error → `cap-btn` "Retry" (onClick install)
+  - installing → `cap-badge working` "Installing… {rounded pct}%"
+- while installing: a `cap-bar` holding an `<i>` whose width is `${pct}%`, then a `cap-latest`
+  div showing `latest` (also as its title).
+- on error: a `cap-err` div "⚠ {err}".

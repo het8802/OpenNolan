@@ -1,0 +1,112 @@
+% Generate `styles/playbook_loader.py`: OpenNolan's style-playbook loader plus the design
+% intelligence (color, typography, accessibility) that validates a playbook before render.
+% Use `from __future__ import annotations`; import `colorsys`, `json`, `pathlib.Path`,
+% `typing.Any/Optional`, `yaml`, `jsonschema`, `from lib import app_paths`.
+
+Module constants:
+- `STYLES_DIR = Path(__file__).resolve().parent` — the `styles/` dir itself.
+- `PACKAGED_PLAYBOOKS: tuple[str, ...] = ("anthropic-editorial-animated",
+  "greg-isenberg-product-explainer")` — the only two styles the packaged Mac app offers
+  (the pair the instagram-fast-reel pipeline is built around). A dev checkout keeps them all.
+- `SCHEMA_PATH` = `<repo>/schemas/styles/playbook.schema.json` (repo root = parent of `styles/`).
+
+## Loader API
+
+- `_load_playbook_schema() -> dict` — `json.load` the schema at `SCHEMA_PATH`.
+- `load_playbook(name, styles_dir=None) -> dict[str, Any]` — resolve `<styles_dir>/<name>.yaml`
+  (default `STYLES_DIR`); if absent, fall back to `app_paths.user_styles_dir()/<name>.yaml`;
+  if that is also absent, `FileNotFoundError` naming the built-in path. `yaml.safe_load`,
+  `validate_playbook`, return the dict. `styles_dir` overrides the BUILT-IN lookup only (tests).
+  This is the single lookup the whole app (including the render path) funnels style names through,
+  so a user's custom style is usable everywhere a shipped one is.
+- `validate_playbook(playbook) -> None` — `jsonschema.validate` against the schema.
+- `list_playbooks(styles_dir=None, *, packaged=None) -> list[str]` — the `*.yaml` stems in
+  `styles_dir` (skip `__pycache__`). `packaged` defaults to `app_paths.is_packaged()` (pass it
+  explicitly in tests); when packaged, restrict to `PACKAGED_PLAYBOOKS`. Then ALWAYS append the
+  sorted stems of `app_paths.user_styles_dir()` (if it exists) not already listed — user styles
+  are always available; the packaged allowlist trims only the shipped catalogue, and a built-in
+  wins a name collision.
+
+## Color helpers (pure Python; no external deps)
+
+- `_hex_to_rgb(hex) -> (r,g,b)` — strip `#`; expand 3-char shorthand; drop the alpha of an 8-char
+  hex (first 6 chars); parse each byte 0-255.
+- `_has_alpha(hex) -> bool` — the hex (minus `#`) is 8 chars.
+- `_composite_alpha(fg_hex, bg_hex) -> str` — alpha-composite an `#RRGGBBAA` foreground over an
+  opaque `#RRGGBB` background: `alpha = last_byte/255`, per channel `round(alpha*fg + (1-alpha)*bg)`,
+  return via `_rgb_to_hex`.
+- `_rgb_to_hex(r,g,b) -> str` — clamp+round each channel to 0-255, uppercase `#RRGGBB`.
+- `_srgb_linearize(c) -> float` — WCAG sRGB→linear: `c/12.92` if `c <= 0.04045` else
+  `((c+0.055)/1.055)**2.4`.
+- `_relative_luminance(hex) -> float` — WCAG relative luminance
+  `0.2126*R + 0.7152*G + 0.0722*B` on linearized channels.
+- `_hex_to_hsl(hex) -> (h,s,l)` / `_hsl_to_hex(h,s,l) -> str` — round-trip via `colorsys`, hue in
+  degrees (0-360), s and l in 0-1.
+
+`validate_contrast(fg_hex, bg_hex) -> dict` — WCAG 2.1 ratio `(Llight+0.05)/(Ldark+0.05)` from the
+two luminances, rounded to 2 dp. Return `{foreground, background, ratio, normal_text: {AA: ratio>=4.5,
+AAA: ratio>=7}, large_text: {AA: ratio>=3, AAA: ratio>=4.5}}`. (Black-on-white ≈ 21:1, white-on-white = 1:1.)
+
+`check_color_blind_safety(colors) -> dict` — flag hue pairs that collapse under deuteranopia,
+protanopia, or tritanopia. For each unordered color pair, skip it when either color is near-gray
+(saturation < 0.15) or their lightness differs by > 0.3 (distinguishable regardless of hue);
+otherwise flag it if both hues fall inside one of that deficiency's confusion ranges (a small
+per-deficiency table of hue-range pairs: red↔green for deuteranopia/protanopia, blue↔yellow and
+cyan↔pink for tritanopia; ranges may wrap past 360). Return `{safe: bool, colors_analyzed: int,
+issues: [{type, color_a, color_b, severity: "warning", message}]}`. Red+green of similar lightness
+is flagged; grays and a single color are safe.
+
+`validate_palette(playbook) -> list[dict]` — accessibility issues for the palette. Read
+`visual_language.color_palette` (`background` default `#FFFFFF`, `text` default `#000000`, `muted`).
+Emit issue dicts `{pair, ratio, severity, message}` where severity is `error` when a pair fails AA,
+`warning`/`info` for softer misses:
+- text-on-background: error if not AA-normal, else info if not AAA-normal.
+- muted-on-background (if present): error if it fails AA even for large text, else warning if it
+  fails AA for normal text.
+- each `overlays[name]` with both `bg` and `text`: composite any alpha color over the page
+  background first, then error if the pair fails AA-normal.
+- run `check_color_blind_safety` over primary + accent + chart palette (from
+  `color_palette.chart_palette` or top-level `chart_palette`) when ≥2 colors; append each CVD issue
+  as a warning `{pair, severity, message}`.
+
+`generate_harmony(base_hex, harmony_type) -> list[str]` — HSL hue offsets from the base (base first):
+complementary `[0,180]`, analogous `[-30,0,30]`, triadic `[0,120,240]`, split-complementary
+`[0,150,210]`; else `ValueError` listing the valid types.
+
+## Typography intelligence
+
+- `TYPE_SCALE_RATIOS: dict[str, float]` = `{minor_second:1.067, major_second:1.125, minor_third:1.2,
+  major_third:1.25, perfect_fourth:1.333, golden:1.618}`.
+- `compute_type_scale(base_size, ratio="major_third") -> dict` — resolve `ratio` from the table or
+  parse it as a float (`ValueError` if neither). Return `{ratio_name (the name, or "custom" for a
+  numeric ratio), ratio_value (rounded 4dp), base_size_px, sizes}` where `sizes` scales the base by
+  the ratio: `caption = base/r`, `body = base`, `subheading = base*r`, `heading = base*r**2`,
+  `display = base*r**3` (all rounded) — strictly increasing caption→display.
+- `validate_type_hierarchy(playbook) -> list[dict]` — heuristic warnings over `playbook.typography`
+  (roles `headings, body, code, stat_card`, each optionally with `weight`/`size_multiplier`). Flag
+  (issue dicts `{roles, severity, message}`): heading weight not greater than body weight (warning);
+  `stat_card` size_multiplier ≤ 1.0 (warning); heading−body weight gap < 200 (info); and, if
+  `scale_system` names a ratio < 1.1, that it is too tight for video (info).
+
+- `suggest_font_pairing(primary_font) -> list[dict]` — a curated known-good pairings DB keyed by
+  primary font name, each pairing `{font, category, rationale}`; direct lookup first, else fall back
+  by keyword in the (lowercased) name — mono/code → mono set, serif (not sans) → serif set,
+  otherwise the sans set. Every branch returns ≥1 suggestion. Include entries for at least Inter,
+  Space Grotesk, IBM Plex Sans, Lora, Playfair Display, JetBrains Mono, and Fira Code (e.g. Inter →
+  Lora/Playfair Display/JetBrains Mono).
+
+## Accessibility audit
+
+- `MIN_VIDEO_BODY_SIZE_PX = 24`.
+- `validate_accessibility(playbook) -> dict` — a pre-render aggregate. Collect issues, each tagged
+  with a `category`:
+  - `validate_palette` results, category `contrast` if the issue has a `ratio` else `color_blind`.
+  - font size: if `typography.scale_system` is set, `compute_type_scale(24, scale_system)` and warn
+    (category `font_size`) when its caption < 16px; otherwise info when `stat_card.size_multiplier`
+    < 2.0.
+  - `validate_type_hierarchy` results under category `typography`.
+  - top-level `chart_palette` (≥2 colors) through `check_color_blind_safety`, unsafe pairs as
+    `color_blind` warnings.
+  - `typography.weight_matrix` (roles `title, heading, body, caption` in priority order): warn under
+    `typography` if any role's weight exceeds a higher-priority role's.
+  Return `{pass: error_count==0, error_count, warning_count, total_issues, issues}`.

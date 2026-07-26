@@ -1,0 +1,21 @@
+% Generate `lib/env_loader.py`: the OpenNolan environment-variable loader.
+% It loads a BYOK `.env` file and gives typed access to env config.
+% Use `python-dotenv` and `from __future__ import annotations`.
+
+Provide three functions:
+
+- `load_env(project_root: Optional[Path] = None) -> None`
+  Load the BYOK `.env` into `os.environ`.
+  - When `project_root` is None, resolve the file via `lib.app_paths.env_path()`
+    (import `lib.app_paths` lazily inside the function). This picks the repo `.env`
+    in dev and the App-Support `.env` in the packaged app, so tools and the agent
+    subprocess inherit keys saved through the BYOK panel.
+  - Otherwise use `<project_root>/.env`.
+  - Only call `load_dotenv` if the resolved path exists.
+
+- `get_env(key: str, default: Optional[str] = None) -> Optional[str]`
+  Return `os.environ.get(key, default)`.
+
+- `require_env(key: str) -> str`
+  Return the variable, or raise `EnvironmentError` when it is missing, with the
+  message: `Required environment variable {key!r} is not set`.

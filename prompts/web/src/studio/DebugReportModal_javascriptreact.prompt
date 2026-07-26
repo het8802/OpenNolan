@@ -1,0 +1,58 @@
+% Generate `web/src/studio/DebugReportModal.jsx`: the modal shown when the user STOPS a debug
+% recording in the editor. It is the same shell as the app's Feedback modal (reuses its
+% `feedback-modal`/`modal-*`/`feedback-*` CSS classes), but the recorded session rides along —
+% on Send, the backend attaches a compact analysis of the session to the feedback so the
+% developer gets the trace with the report. Discard is a two-step, no-accident action: the first
+% click only asks to confirm, and only the confirm actually deletes the session logs (otherwise
+% they stay on disk). Closing the modal (✕ / overlay click) keeps the logs — neither sent nor
+% discarded — so a stray click never destroys a repro.
+%
+% Imports: `useState` from 'react'; `* as api from '../api.js'`; `dbg from '../debug/recorder.js'`;
+% `IconX, IconCheck` from '../components/icons.jsx'. No inline styles — the class names below are
+% the contract with web/src/styles.css.
+
+Default-export `DebugReportModal({ session, onClose })`.
+
+State: `message`, `email` (both ''), `busy`, `sent`, `discarded`, `confirmDiscard` (all false),
+`err` (null).
+
+`send(e)` (async): `e.preventDefault()`; early-return if `busy || sent || confirmDiscard` — the
+`confirmDiscard` guard matters because while the discard prompt shows, the form has no submit
+button, so Enter in the lone email field would implicitly submit and must NOT send. Set busy,
+clear err, then `await dbg.flushNow()` FIRST (drains any tail re-buffered by a failed stop-flush
+before the backend reads the log), then `await api.sendFeedback({ kind: 'bug', message:
+message.trim() || 'Debug session (no description provided).', email: email.trim() || null,
+debug_session: session })`; on success `setSent(true)`. On throw, `setErr(String(e.message || e))`
+and reset busy (leave busy true on success — the modal switches to the sent view).
+
+`discard()` (async): early-return if busy; set busy, clear err, `await
+api.discardDebugSession(session)`, `setDiscarded(true)`; on throw setErr + reset busy.
+
+Render a `modal-overlay` (onClick `onClose`) wrapping a `modal feedback-modal` (onClick
+stopPropagation). Inside, an `env-head`: an `env-head-text` with `<h3>Send debug report</h3>` and
+an `env-sub` "Your debug recording is attached. Add what went wrong and send it straight to the
+developer.", plus an `am-close` IconX button (onClick onClose, title/aria-label "Close").
+
+Then one of three states:
+- `sent` → a `feedback-sent`: a `feedback-sent-msg` (`<IconCheck />` + "Thanks — your report and
+  the debug recording were sent.") and a `modal-actions` with a Close button (onClick onClose).
+- else `discarded` → same `feedback-sent` shape, message "Debug session discarded — nothing was
+  sent."
+- else a `<form className="feedback-body" onSubmit={send}>` containing:
+  - a `modal-err` "⚠ {err}" when err;
+  - a `dbg-attach` note: "Only what you did after you started recording — your clicks, scrubs, and
+    any errors — is attached. Nothing else from your project is sent.";
+  - a `modal-field` label "What happened?" wrapping a textarea (rows 5, maxLength 5000, autoFocus,
+    value message, placeholder "Describe the bug — what you did, what you expected, and what went
+    wrong.");
+  - a `modal-field` label "Email " + a `modal-hint` (style marginTop 0) "(optional — so we can
+    reply)" wrapping an `<input type="email">` (value email, placeholder "you@example.com");
+  - then branch on `confirmDiscard`:
+    - true → a `dbg-discard` block: a `dbg-discard-msg` "If you discard, the debug session logs
+      will be deleted and **not** sent. This can't be undone." (the "not" is bolded), and a
+      `modal-actions` with a `modal-cancel` type=button "Keep logs" (onClick setConfirmDiscard
+      false) and a `dbg-discard-go` type=button (onClick discard) reading "Discarding…" while busy
+      else "Discard logs". Both disabled while busy.
+    - false → a `modal-actions` with a `modal-cancel` type=button "Discard" (onClick
+      setConfirmDiscard true) and a type=submit button reading "Sending…" while busy else "Send
+      report". Both disabled while busy.

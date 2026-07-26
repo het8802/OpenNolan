@@ -1,0 +1,57 @@
+% Generate `web/src/studio/StudioKeyframes.jsx`: the keyframe editor for one selected overlay in
+% the Studio properties panel — animation presets, a per-dimension keyframe table, and a curve
+% preview. The dimensions offered are exactly what the FFmpeg export path renders (text: x/y/opacity;
+% image/video: + scale; rotation is never animated), and the preview is drawn with the SAME
+% `interpolateAt` linear math the renderer uses, so the curve matches the export. Pure editor — every
+% mutation goes through the on* callbacks wired in Studio.
+%
+% Imports: `useState` from 'react'; `interpolateAt` from '../editor/interp.js'; `LineChart` from
+% '../components/LineChart.jsx'; and `kfDimsFor, presetKeyframes, EASINGS, round3` from './model.js'.
+% Class names (st-*) are the contract with web/src/styles.css — keep them exact. No inline styles.
+
+Module constant `SAMPLES = 48` (curve sample count).
+
+Default-export `StudioKeyframes({ ov, index, kind, ffmpeg, playhead, onSetKeyframes,
+onUpsertKeyframe, onRemoveKeyframe })`.
+
+Derived:
+- `dims = kfDimsFor(ov)` (model.js gates by overlay kind). Local state `dim` (init `dims[0]`);
+  `activeDim = dims.includes(dim) ? dim : dims[0]` — the selection can go stale when the overlay
+  changes, so always fall back to the first valid dim.
+- `kfs`: `ov.keyframes || []`, copied and sorted ascending by numeric `t`.
+- `start = Number(ov.start_seconds) || 0`; `end = Number(ov.end_seconds) || start + 1`.
+- `setKfs(next)` → `onSetKeyframes(index, next)`.
+- `editField(kfIndex, patch)`: map kfs applying `patch` to the row at `kfIndex`; if `patch.t != null`
+  re-sort by numeric t; `setKfs`.
+- `addAtPlayhead()`: `t = round3(clamp(playhead, start, end))`; look up the current value with
+  `interpolateAt(kfs, activeDim, t)`; if null default it (opacity→1, scale→1, else 0); call
+  `onUpsertKeyframe(index, { t, [activeDim]: round3(val), easing: 'linear' })`.
+- `applyPreset(name)`: `const next = presetKeyframes(name, ov)`; `if (next) setKfs(next)` (presets
+  that need a positioned overlay return null and are no-ops).
+- Curve preview: `animated = kfs.some(k => k[activeDim] != null)`. When animated, sample `SAMPLES + 1`
+  points evenly across [start, end], calling `interpolateAt` per point, pushing `{ x: t, y: v }` for
+  non-null v and tracking `yMax` (min 1). Build a single `series` entry `{ key/label: activeDim,
+  color: 'var(--accent)', points, bold: true }`.
+- `motionPresetsOk = kind !== 'text'`.
+
+Render a `section.st-sec.st-kf`:
+- `.st-sec-h` "Keyframes" + a `.st-hint` span showing `kfs.length` when > 0.
+- `.st-kf-presets` row of `button.st-link`: always "fade in" (fade_in) and "fade out" (fade_out);
+  only when `motionPresetsOk`: "slide ←" (slide_in_left), "slide →" (slide_in_right), "pop" (pop),
+  "ken burns" (ken_burns); when `kfs.length > 0` a trailing `.st-danger` "clear" that `setKfs([])`.
+- `.st-row.st-kf-ctrl`: a `label.st-f` "Dimension" wrapping a `<select value={activeDim}>` of `dims`
+  (setDim on change); and a `.st-btn` labelled `+ at {playhead.toFixed(1)}s` (title mentions
+  add/update at the playhead) calling `addAtPlayhead`.
+- When `animated`, a `.st-kf-chart` holding `<LineChart series xMax={end} yMax yTicks={[0, yMax]}
+  height={120} xLabel="t (s)" yLabel={activeDim} />`.
+- When `kfs.length > 0`, a `table.st-kf-table` with head `t | {activeDim} | easing | (blank)` and one
+  row per keyframe (key = index):
+  - `t`: `<input type="number" step={0.1} min={0}>` → `editField(i, { t: round3(Number(value)) })`.
+  - value: `<input type="number" step={0.1}>` (placeholder "—"), where an empty string writes
+    `undefined` (clears the dim on that keyframe) else `round3(Number(value))`.
+  - easing: `<select>` over `EASINGS`, defaulting the value to 'linear'.
+  - a `.st-link.st-danger` "✕" calling `onRemoveKeyframe(index, i)`.
+- A closing `.st-hint`: for text overlays "FFmpeg renders x / y / opacity for text; scale & rotation
+  are ignored."; otherwise "FFmpeg renders x / y / scale / opacity; rotation is ignored." Append
+  " Preview reflects FFmpeg behavior." when `!ffmpeg`, then " Easing is approximated linearly in
+  preview."

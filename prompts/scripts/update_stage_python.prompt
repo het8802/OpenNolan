@@ -1,0 +1,34 @@
+% Generate `scripts/update_stage.py`: a tiny CLI the headless agent uses to flip a pipeline
+% stage's status by delegating to `lib.checkpoint.write_checkpoint`. Its one value-add over
+% calling that function directly is auto-loading the stage's canonical artifact and turning a
+% missing one into an actionable error instead of an opaque CheckpointValidationError.
+%
+% Module docstring IS the help text (printed on too-few args): the usage line
+% `python scripts/update_stage.py <project_id> <stage> <status> [pipeline_type]`, the four status
+% values, a couple of examples (research in_progress / completed, proposal awaiting_human, all with
+% `animated-explainer`), and the artifact rule detailed below (optional at in_progress; auto-loaded
+% and required at completed/awaiting_human; missing file errors with the exact path).
+
+As a standalone script, insert the repo root (`Path(__file__).resolve().parent.parent`) at
+`sys.path[0]` before `from lib import app_paths` and
+`from lib.checkpoint import CANONICAL_STAGE_ARTIFACTS, write_checkpoint`.
+
+Module constants: `VALID` = the four status values above; `NEEDS_ARTIFACT` = {"completed", "awaiting_human"}.
+
+`main()`:
+- If fewer than 4 argv, print `__doc__` and `sys.exit(1)`.
+- Read `project_id`, `stage`, `status` from argv[1:4]; `pipeline_type` = argv[4] if present else None.
+- If `status not in VALID`, print an error naming the allowed set and the bad value to stderr, exit 1.
+- Resolve the writable projects dir via `app_paths.projects_dir()` — NOT a bare relative "projects";
+  in the packaged app the cwd is the READ-ONLY bundle, so a relative path would write there and
+  silently fail.
+- Auto-load the canonical artifact: `canonical = CANONICAL_STAGE_ARTIFACTS.get(stage)`. When
+  `status in NEEDS_ARTIFACT and canonical`, read `<projects_dir>/<project_id>/artifacts/<canonical>.json`.
+  If that file is missing, print an error with the full path and a hint to write the artifact JSON
+  there first, then exit 1. Parse it with `json.loads`; on OSError/JSONDecodeError print the path and
+  error, exit 1. Store it as `artifacts[canonical] = <parsed>`. Otherwise `artifacts` stays `{}`.
+- Call `write_checkpoint(projects_dir, project_id, stage, status, artifacts=artifacts, pipeline_type=pipeline_type)`
+  and print a `✓ {project_id} / {stage} → {status}  [{path}]` confirmation of the returned path.
+  (Stage validity, artifact-schema checks, etc. are `write_checkpoint`'s job, not this script's.)
+
+Guard with `if __name__ == "__main__": main()`.

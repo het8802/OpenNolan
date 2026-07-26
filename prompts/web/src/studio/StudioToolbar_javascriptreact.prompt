@@ -1,0 +1,41 @@
+% Generate `web/src/studio/StudioToolbar.jsx`: the Studio project toolbar — GLOBAL, non-transport
+% actions only. Transport (play/pause) and clip ops (split/duplicate/delete) live in the TIMELINE
+% toolbar (StudioTimeline.jsx); adding images moved to the Assets tab (StudioInspector.jsx). This bar
+% keeps: undo/redo, ＋Text, canvas size, a debug-record toggle, the preview-mode toggle, Save, Render.
+% Only tools the FFmpeg render path actually composes appear here.
+%
+% Imports: `CANVAS_PRESETS` from './model.js'; `IconUndo, IconRedo` from '../components/icons.jsx'. No
+% inline styles — every `st-*` class name below is the CONTRACT with web/src/styles.css and
+% StudioToolbar.test.jsx, so keep them exact. StudioToolbar.test.jsx pins the presence/titles/gating of
+% every control (and asserts transport, clip ops & +Image are ABSENT) — match those exact strings.
+
+Default-export `StudioToolbar({ doc, canvas, ffmpeg, canUndo, canRedo, dirty, rendering, hasRender,
+previewMode, onUndo, onRedo, onSave, onRender, onPreviewMode, onAddText, onCanvas, recording,
+onToggleRecord })`. (`doc`/`ffmpeg` are accepted for the call contract but unused here.)
+
+`curCanvas = ${canvas.width}×${canvas.height}` (`×` = U+00D7). Root is a `.st-tools` div holding `.st-grp`
+groups left-to-right, with the final group `.st-grp .st-grp-right`.
+
+## Left groups
+- Group 1 — two `.st-ico` buttons: Undo (`onUndo`, disabled `!canUndo`, title "Undo (⌘Z)", aria-label
+  "Undo", `<IconUndo />`) and Redo (`onRedo`, disabled `!canRedo`, title "Redo (⇧⌘Z)", aria-label "Redo",
+  `<IconRedo />`).
+- Group 2 — a `.st-btn` `onAddText`, title "Add a text overlay", text "＋ Text" (U+FF0B fullwidth plus).
+- Group 3 — a `.st-canvas` label: a `<span>Canvas</span>` + a `<select>` (title `Output ${curCanvas}`). Its
+  value is the CANVAS_PRESETS entry whose width+height match `canvas` (by `.label`), else ''. Options are
+  every preset (`key`/`value` = `p.label`); when no preset matches, prepend a `value=""` option reading
+  `${curCanvas} (custom)`. onChange: look up the picked preset by label and, if found, `onCanvas({ width,
+  height })`.
+
+## Right group (`.st-grp-right`)
+- Debug-record toggle — ONLY rendered when `onToggleRecord` is truthy. A `.st-ico .st-rec` button (add
+  ` on` when `recording`), `onClick={onToggleRecord}`, `aria-pressed={!!recording}`, wrapping a lone
+  `.st-rec-dot` span. When recording: title "Stop debug recording (writes the session log to disk)",
+  aria-label "Stop debug recording". Else: title "Record a debug session — console, clicks & scrubs →
+  .agents/tools/logs/ui-sessions", aria-label "Record debug session".
+- Preview-mode toggle — a `.st-toggle` span with two segmented `.st-seg` buttons (append ` on` to the
+  active one per `previewMode`): "Source" (`onPreviewMode('source')`, title "Live source scrub") and
+  "Render" (`onPreviewMode('render')`, disabled `!hasRender`, title "Composed render").
+- Save — a `.st-btn` `onSave`, disabled `!dirty`, title "Save (⌘S)", text "Save".
+- Render — a `.st-btn .st-primary` `onRender`, disabled `rendering`, title "Render preview (render-once)",
+  text "Rendering…" while `rendering` else "Render".

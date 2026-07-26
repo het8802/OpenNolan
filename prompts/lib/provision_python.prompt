@@ -1,0 +1,163 @@
+% Generate `lib/provision.py`: OpenNolan's first-run dependency provisioner + dependency
+% doctor. The bundled python-build-standalone interpreter ships with NO third-party packages,
+% so first run builds a managed virtualenv and installs deps into it. Core deps install
+% eagerly (the backend can't `import fastapi` without them); heavy ML installs LAZILY as
+% on-demand capability packs; the JS render engines (Remotion + HyperFrames) install eagerly
+% but best-effort.
+%
+% CRITICAL: this module runs in TWO contexts — (1) by the bundled interpreter via
+% scripts/provision.py BEFORE the venv exists, and (2) in-process by the backend inside the
+% venv — so it MUST import with the STANDARD LIBRARY ONLY (no fastapi/pydantic/etc.).
+% Use `from __future__ import annotations`. Import only stdlib (json, os, platform, shutil,
+% subprocess, sys, tempfile, urllib.request, pathlib.Path, typing) plus `from lib import app_paths`.
+% Everything writable lives under `app_paths.runtime_dir()`; read-only sources under `app_paths.code_root()`.
+% Give the module a docstring that documents the runtime/ layout (venv, bin, composition/{remotion,
+% hyperframes,browsers}, manifest.json) and the atomicity + staleness invariants below.
+
+## Constants
+
+- `MANIFEST_SCHEMA = 1`.
+- `CORE_REQUIREMENTS = ("requirements-ui.txt", "requirements.txt")` — installed eagerly, relative to code_root.
+- `NODE_FLOOR_MAJOR = 22` — HyperFrames' minimum; Remotion 4.x is happy here too.
+- `ProgressCb = Callable[[str], None]` (text lines) and `StepCb = Callable[[float, float, str], None]`
+  (determinate progress: `(start_pct, end_pct, label)` on the current run's 0-100 scale; endpoints that
+  only want text pass no StepCb). Helper `_step(step, pct, end, label)` calls it only when non-None.
+- `PACKS: dict[str, dict]` — the lazy capability-pack registry. Each entry has `label` (human string),
+  `pip` (list of packages), `check` (an import name proving it loaded), `size_mb` (rough disk cost):
+  transcription (torch, torchaudio, faster-whisper, whisperx / check faster_whisper / 2600),
+  vision (mediapipe, opencv-python-headless / mediapipe / 400),
+  bg-removal (rembg, onnxruntime / rembg / 300),
+  beat-sync (librosa / librosa / 250),
+  tts (piper-tts / piper / 120).
+
+## Paths (all derive from `app_paths.runtime_dir()`)
+
+`venv_dir()`=…/venv, `venv_python()`=…/venv/bin/python, `bin_dir()`=…/bin, `manifest_path()`=…/manifest.json,
+`composition_dir()`=…/composition, `remotion_root()`=…/composition/remotion,
+`hyperframes_root()`=…/composition/hyperframes, `browsers_dir()`=…/composition/browsers.
+
+## Runtime discovery (bundled binary → sibling → PATH)
+
+- `node_bin() -> Optional[str]` — `OPENNOLAN_NODE` (if it exists), else `shutil.which("node")`.
+- `npm_bin()` / `npx_bin()` — via a shared `_tool_beside_node(name, env_var)`: explicit env override,
+  then a sibling file next to `node_bin()`, then PATH. (env vars `OPENNOLAN_NPM` / `OPENNOLAN_NPX`.)
+- `_uv() -> Optional[str]` — `OPENNOLAN_UV` (if it exists) else `shutil.which("uv")`; None ⇒ fall back to venv pip.
+- `base_python() -> str` — the interpreter that BUILDS the venv: `OPENNOLAN_PYTHON` or `sys.executable`.
+- `_base_python_id()` / `_node_id()` — run `--version` on base_python / node_bin and return the trimmed
+  output; these stable ids are stamped in the manifest so an app-update version bump invalidates the
+  install. `_base_python_id` falls back to `platform.python_version()` on error; `_node_id` returns "".
+- `_node_major() -> Optional[int]` — the integer major from `_node_id()` (strip a leading "v"), or None.
+
+## Manifest (atomic)
+
+`_read_manifest() -> dict` — parse manifest.json, returning `{}` if missing/corrupt/not-a-dict.
+`_write_manifest(data)` — mkdir the parent, write via `tempfile.mkstemp` + fsync + `os.replace` into place
+(a `/state` poll must never read a half-written file); unlink the temp and re-raise on any failure.
+
+## Status / doctor
+
+`forced() -> bool` — `OPENNOLAN_FORCE_PROVISION` in {1,true,yes}. When set, EVERY `*_ok()` returns False
+(so a fully-provisioned dev machine can still watch the whole flow). Each predicate below short-circuits
+False on `forced()`.
+
+- `venv_ok()` — venv_python exists AND the manifest's `schema` == MANIFEST_SCHEMA AND `base_python` ==
+  `_base_python_id()` (schema/python drift ⇒ stale ⇒ rebuild).
+- `core_ok()` — `venv_ok()` and the manifest's `core_installed` is truthy.
+- `ffmpeg_ok()` — BOTH `ffmpeg` and `ffprobe` resolve (on PATH or in `bin_dir()`); ffprobe is required
+  because probe/HDR-detection shell out to it, so an ffmpeg-only env still 503s.
+- `node_ok()` — `_node_major()` is not None and >= NODE_FLOOR_MAJOR.
+- `remotion_ok()` — remotion_root has both `package.json` and `node_modules`.
+- `hyperframes_ok()` — hyperframes_root has `node_modules/.bin/hyperframes` (a local CLI, no live npm needed).
+- `composition_ok()` — node_ok and remotion_ok and hyperframes_ok, AND the manifest has
+  `composition_installed` truthy and `node_version` == `_node_id()` (Node drift ⇒ rebuild, mirroring venv_ok).
+- `pack_installed(name)` — name is in the manifest's `packs` list.
+- `doctor() -> dict` — structured status for /api/doctor + the setup UI: home, forced, base_python, and
+  every `*_ok` flag above, plus `packs` = {name: pack_installed(name)} and
+  `pack_meta` = {name: {label, size_mb}} for all PACKS.
+
+## Installer plumbing
+
+`_run(cmd, progress, env=None)` — `subprocess.Popen` streaming stdout+stderr line-by-line to `progress`
+(echo the `$ cmd` first); merge `env` over `os.environ`; raise RuntimeError on non-zero exit.
+`_pip_install(target_python, args, progress)` — install into `target_python`'s environment. Prefer uv
+(`uv pip install --python <target> --only-binary=:all: …`) else `<target> -m pip install --only-binary=:all: …`.
+WHEELS ONLY: a user has no compiler, so a source build is a dead first-run.
+
+## Core provisioning — `provision_core(progress=None, step=None)`
+
+Build the managed venv + install core deps + ffmpeg. Atomic + idempotent. Steps (with `_step` progress):
+1. Fresh venv in a temp `runtime/venv.building` (rmtree it first). Use `uv venv --seed --python base_python()`
+   when uv is available, else `base_python() -m venv`. `--seed` is REQUIRED — `uv venv` omits pip by default,
+   leaving lazy pip-based pack installs with no `python -m pip`.
+2. Install each existing `CORE_REQUIREMENTS` file (as `-r <path>` under code_root) via `_pip_install`;
+   raise if none are found.
+3. Verify: `<building_python> -c "import fastapi, uvicorn, pydantic"` before trusting the venv.
+4. Atomically swap: rmtree the final `venv_dir()`, then `os.replace(building, final)`.
+5. ffmpeg BEST-EFFORT: call `provision_ffmpeg(progress, step, span=(60.0, 97.0))` inside try/except —
+   never fail core provisioning on an ffmpeg hiccup; on failure log a `[warn]` and continue.
+6. Record success: write a new manifest {schema, base_python:_base_python_id(), core_installed:True,
+   packs: carried from the old manifest}, and CARRY over `node_version`/`composition_installed` if present
+   (a core rebuild must not wipe an already-installed composition tier — composition_ok re-checks Node drift itself).
+Use start/end pct pairs so the bar creeps during long silent subprocesses and lands at exactly (100, 100).
+
+## Lazy packs — `provision_pack(name, progress=None)`
+
+Reject an unknown name (ValueError) and a non-`core_ok()` runtime (RuntimeError). `_pip_install` the pack's
+`pip` list into `venv_python()`, then VERIFY it imports (`<venv_python> -c "import <check>"` — torch
+installing-but-not-importing is the #1 real failure). Add the name to the manifest's `packs` (sorted, deduped)
+and write it back.
+
+## ffmpeg
+
+Module-level `FFMPEG_URLS` (ffmpeg/ffprobe download URLs, defaulting to the martin-riedl.de static arm64
+macOS "latest" redirect, overridable via `OPENNOLAN_FFMPEG_URL`/`OPENNOLAN_FFPROBE_URL`) and `FFMPEG_SHA256`
+(sha256 of each EXTRACTED binary, overridable via `OPENNOLAN_FFMPEG_SHA256`/`OPENNOLAN_FFPROBE_SHA256`,
+default "" = unpinned = dev-only, warns). Document the PINNING CONTRACT: ship a versioned URL + sha for a
+reproducible release; a blank sha falls back to the "latest" redirect UNVERIFIED. `_sha256_file(path)` hashes
+in 1 MiB chunks.
+
+`provision_ffmpeg(progress=None, step=None, span=(0.0, 100.0))` — ensure ffmpeg + ffprobe exist. `span` is
+this call's slice of the caller's 0-100 scale; split it equally between the two binaries, each reporting REAL
+byte progress within its sub-slice (throttle emits to ~0.5% increments so the NDJSON pipe isn't flooded).
+- DEV shortcut: when NOT `app_paths.is_packaged()` and both binaries are already on PATH, use them as-is and return.
+  PACKAGED: ALWAYS download our own into `bin_dir()` — do NOT trust a `shutil.which` hit, because the
+  Finder-launched backend runs with a minimal PATH (only /usr/bin:/bin + runtime/bin that main.js prepends),
+  so a dev/Homebrew ffmpeg found during provisioning would not be on the backend's runtime PATH.
+- For each (name, url): skip if `bin_dir()/name` already exists. Download via `_download_binary`. If a sha is
+  pinned, verify and re-download once on mismatch, then FAIL (never trust a mismatched binary — unlink it);
+  if unpinned, warn and accept. `chmod 0o755`, then `xattr -dr com.apple.quarantine` and ad-hoc
+  `codesign --force --sign -` so a hardened, notarized parent can spawn it.
+- Finally verify BOTH `bin_dir()/ffmpeg -version` and `bin_dir()/ffprobe -version` actually execute.
+
+`print_ffmpeg_shas(progress=None) -> dict` — download the CONFIGURED URLs to a temp dir and return
+`{name: sha256}` — the fill-in step for the pins. Clean up the temp dir in `finally`.
+
+## Composition tier (Remotion + HyperFrames) — OPN-3
+
+The two JS engines install into the WRITABLE runtime (the bundle is read-only) by copying the read-only
+source out of code_root and running `npm ci` there, so source + node_modules stay colocated.
+
+- `_npm_ci(project, progress)` — require `npm_bin()` (RuntimeError naming NODE_FLOOR_MAJOR if missing);
+  run `npm ci --no-audit --no-fund --prefix <project>` with env `{npm_config_update_notifier:"false", CI:"1"}`.
+- `_install_engine(name, src, progress, step=None, span=(0,100), label=None) -> Path` — copy `src` (excluding
+  node_modules/.git/out/dist) into `composition_dir()/<name>.building`, `_npm_ci` it, then rmtree the final
+  and `os.replace` into place. ATOMIC: a crash/failure must never leave a half-install at the trusted final
+  path. Emit a "Preparing…" step for the copy (~first 15% of the span) then "Installing … packages…".
+- `_ensure_browsers(progress)` — BEST-EFFORT pre-fetch of each engine's headless browser into
+  `browsers_dir()` (env `REMOTION_BROWSER_CACHE`/`PUPPETEER_CACHE_DIR`/`PLAYWRIGHT_BROWSERS_PATH` all point
+  there) so the first render needs no download: run Remotion's `browser ensure` and HyperFrames' `doctor` if
+  their local `.bin` exists, catching + warning on failure (the engines re-fetch on demand).
+- `provision_composition(progress=None, step=None)` — require `node_ok()` (RuntimeError). Install Remotion
+  from `code_root()/remotion-composer` over span (0,38), then HyperFrames from
+  `code_root()/composition/hyperframes` over span (38,66) (raise if either source `package.json` is missing),
+  then `_ensure_browsers` over (66,97). Stamp the manifest `node_version=_node_id()` +
+  `composition_installed=True`. Step frames must be monotonic and end at exactly (100, 100). Called eagerly
+  but BEST-EFFORT by the caller (main.js catches failures — the editor still opens ffmpeg-only).
+
+## Download helper — `_download_binary(url, dest, on_bytes=None)`
+
+`urllib.request.urlopen` → a `.download` temp file, reading 1 MiB chunks and firing
+`on_bytes(read, total_or_None)` (total from Content-Length) per chunk. Then: if the temp is a zip, extract
+the member whose name ends with `dest.name` (fallback: first member) through a temp file + `os.replace`;
+else `os.replace` the raw download. Going through a temp + os.replace means a kill mid-extract never leaves a
+truncated binary at `dest` (dest.exists() is trusted as "complete" on the next run).

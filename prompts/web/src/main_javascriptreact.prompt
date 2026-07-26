@@ -1,0 +1,22 @@
+% Generate `web/src/main.jsx`: the React entry point. It mounts `App` (from `./App.jsx`)
+% into `#root` via `createRoot`, inside `<React.StrictMode>` and an in-file `ErrorBoundary`,
+% and installs global browser error handlers. All crash paths funnel to
+% `reportClientError` (from `./api.js`, which handles dedup/capping and never throws) so
+% failures reach PostHog instead of leaving a white screen. Also imports `./styles.css`.
+% The `crash-*` class names below are the contract with styles.css.
+
+## ErrorBoundary (class component — only classes can be error boundaries)
+Catches render-tree errors so the app shows a recoverable panel instead of a white screen.
+State `{ crashed: false }`; `static getDerivedStateFromError()` → `{ crashed: true }`.
+`componentDidCatch(error, info)` reports via
+`reportClientError('react-boundary', error?.message || String(error), error?.stack, { componentStack: (info?.componentStack || '').slice(0, 2000) })`.
+`render()`: when not crashed, `this.props.children`; else a `crash-screen` > `crash-card`
+div with an `<h2>` "Something went wrong", a `<p>` explaining the error was reported and a
+reload usually fixes it, and a "Reload OpenNolan" `<button>` calling `window.location.reload()`.
+
+## Global handlers (for errors outside React's render tree — event handlers, async, promises)
+- `window` `'error'` → `reportClientError('window.onerror', e?.message || 'error', e?.error?.stack, { filename: e?.filename, line: e?.lineno, col: e?.colno })`.
+- `window` `'unhandledrejection'` → with `r = e?.reason`, `reportClientError('unhandledrejection', r?.message || String(r), r?.stack)`.
+
+## Mount
+`createRoot(document.getElementById('root')).render(<React.StrictMode><ErrorBoundary><App /></ErrorBoundary></React.StrictMode>)`.

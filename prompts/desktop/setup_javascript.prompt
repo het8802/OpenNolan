@@ -1,0 +1,46 @@
+% Generate `desktop/setup.js`: the renderer script for the FIRST-RUN SETUP window
+% (`setup.html`). It draws the provisioning progress UI while `main.js` installs the
+% local video engine and its dependencies into Application Support.
+%
+% External (not inline) so it runs under the page's strict `script-src 'self'` CSP — an
+% inline <script> is silently blocked, which used to render the window blank. Wrap in
+% `'use strict'` + an IIFE. It consumes the one-way progress feed the preload exposes as
+% `window.openNolanSetup` (see `setup-preload.js`: `onProgress`/`onStep`/`onDone`/`onError`).
+%
+% DOM contract (from `setup.html`): `#log` (scrolling log), `#stage` (big current-step
+% line), `#detail` (small secondary line), `#fill` (the progress bar `<i>`, starts with
+% class `indet`), `#pct` (percentage text).
+
+## Log
+- `line(text, cls?)`: append a `<div>` (with the optional class) to `#log`, set its
+  textContent, and keep the log pinned to the bottom. Unless we've already failed, mirror
+  the newest line into `#detail`, truncated to 90 chars + `…`, so motion stays visible even
+  when the log is scrolled away.
+
+## Determinate progress
+State: `display` (what the bar shows), `ceil` (where the current step will land),
+`haveStep`, `failed`. `render()` sets `#fill` width to `display` (one decimal, `%`) and
+`#pct` to `Math.floor(display)%`.
+
+Wire the feed when `window.openNolanSetup` exists:
+- `onProgress` → `line`.
+- `onStep({pct, end, label})`: ignore once failed. Raise `display` to `pct` and `ceil` to
+  `end` (fall back to `display` when `end` is null), both clamped to 0-100 and never moving
+  backwards. On the FIRST step, leave the indeterminate slide: set `haveStep`, remove
+  `indet`, and snap the width with the transition disabled + a forced reflow — otherwise the
+  40%-wide slider visibly drains backwards to the real (small) pct over the transition. If
+  `label`, set `#stage`. Then `render()`.
+- `onDone`: if not failed, set `#stage` to `Finishing up…`.
+- `onError(msg)`: mark failed; `#stage` = `Setup failed`, `#detail` = `See the log below.`,
+  clear `#pct`; turn `#fill` into a full-width error bar (drop `indet`, add `err`); log
+  `msg` with the `err` class.
+
+Else (no bridge — the preload didn't load): surface the failure in `#stage`/`#detail`
+instead of sitting on a blank window.
+
+## Silent-install creep
+Every 200ms, while a step is active and not failed, ease `display` toward `ceil` by 0.1% of
+the remaining gap (`+= (ceil - display) * 0.001`) so a multi-minute `uv`/`npm ci` still
+reads as alive. Purely exponential — asymptotically approaches but never reaches `ceil`
+(~0.5%/s of the gap: ~26% consumed after 60s, ~59% after 3min). Skip the tick once the gap
+is negligible (< 0.05).

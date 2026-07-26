@@ -1,0 +1,62 @@
+% Generate `server/feedback.py`: in-app feedback / bug reports for the packaged desktop app.
+% Module-level functions, no class. `from __future__ import annotations`. Import base64, json, os;
+% `datetime`/`timezone`; typing `Any, Optional`; `requests`; `from lib import app_paths`; and
+% `from server import analytics`.
+
+% Design contract — a submission ALWAYS does three things, in resilience order (state this in the
+% module docstring, with the flow `submit -> append jsonl -> capture event -> maybe email`):
+%   1. DURABLE FIRST — append a JSON line to `<app_paths.home()>/feedback.jsonl` so feedback is
+%      never lost, even with no network and no keys.
+%   2. METADATA-ONLY ANALYTICS — pass the raw body to `analytics.capture`, which scrubs it
+%      (`message` -> `message_len`) so the body never reaches analytics (see analytics.py).
+%   3. BEST-EFFORT EMAIL — try the public relay first, direct Resend as fallback. Neither path may
+%      raise into the caller; the full body goes ONLY to the local record and the email.
+
+## Constants
+- `VALID_KINDS = {"bug", "feature", "other"}`; `MAX_MESSAGE_CHARS = 5000`.
+- `_RESEND_ENDPOINT = "https://api.resend.com/emails"`.
+- `_DEFAULT_RELAY_URL = "https://www.opennolan.com/api/feedback"` — the developer's public relay
+  (website `/api/feedback`) that holds the Resend secret server-side, so the distributed app ships
+  no key. Use the canonical `www` host (not the apex) to avoid a redirect on POST. Override via
+  `FEEDBACK_RELAY_URL` (tests set "" to disable, or a test URL).
+
+## API
+`FeedbackError(ValueError)` — invalid submission; the endpoint maps it to HTTP 400.
+
+`submit(kind, message, email=None, diagnostics=None, debug_session=None) -> dict` — validate, then
+run the three steps above in order, then return `{"stored": True, "emailed": <bool>}`.
+- Validate: `kind` in `VALID_KINDS`; `message` required (non-empty after strip) and
+  `<= MAX_MESSAGE_CHARS`; else raise `FeedbackError`.
+- Record = `{ts, kind, message, email or None, diagnostics or None, debug_session or None}`
+  (`ts` = current UTC isoformat), appended durably BEFORE any network call.
+- `analytics.capture("feedback_submitted", {kind, message, has_email, has_diagnostics,
+  has_debug_session, has_attachment})` — raw `message` (scrubbed downstream); `has_*` are booleans.
+- `emailed = _maybe_relay(...) or _maybe_email(...)`.
+- When `debug_session` is given (editor "Send debug report" flow), attach that session's raw NDJSON
+  log to the email as a FILE (never in the body): pass `attachments=[att] if att else None` to both
+  delivery paths.
+
+`_debug_attachment(session) -> Optional[dict]` — a Resend attachment `{filename:
+"debug-session-<session>.ndjson", content: <base64 of raw NDJSON>}`. Lazy-import `server.debug_log`
+and call `read_session_bytes(session)`. Returns `None` for a falsy session or ANY exception (missing/
+bad/unreadable) — feedback must still send. Never raises.
+
+`_maybe_email(kind, message, email, diagnostics, attachments=None) -> bool` — send via Resend iff
+`RESEND_API_KEY` and `FEEDBACK_TO` are both set (else `False`). `from` = `FEEDBACK_FROM` env or
+`"OpenNolan <onboarding@resend.dev>"`; subject `"OpenNolan <kind>: <first message line, 60-char
+cap>"`; text body `"[<kind>] feedback from the OpenNolan app\n\n<message>"` with a `"Reply-to:
+<email>"` block and a `--- diagnostics ---` block appended only when present. Include `reply_to` and
+`attachments` keys only when set. POST with Bearer auth, `timeout=15`; return `status_code < 300`;
+`requests.RequestException` -> `False`.
+
+`_maybe_relay(kind, message, email, diagnostics, attachments=None) -> bool` — POST to the relay URL
+(`FEEDBACK_RELAY_URL` env or `_DEFAULT_RELAY_URL`; falsy -> `False`) so it emails server-side with
+its own key. JSON `{kind, message, email, diagnostics}` plus `attachments` when set; add header
+`X-Feedback-Token` when `FEEDBACK_RELAY_TOKEN` is set. `timeout=15`. Non-2xx -> `False`; on 2xx
+return the body's `emailed` flag, treating a non-JSON body as delivered (`True`);
+`requests.RequestException` -> `False`.
+
+## Helpers
+- `_feedback_path()` = `app_paths.home() / "feedback.jsonl"`.
+- `_append_record(record)` — `mkdir(parents=True, exist_ok=True)` the parent, open "a" (utf-8),
+  write `json.dumps(record) + "\n"`. `O_APPEND` keeps one small line atomic vs a concurrent reader.

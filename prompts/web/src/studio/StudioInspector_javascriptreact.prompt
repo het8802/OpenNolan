@@ -1,0 +1,143 @@
+% Generate `web/src/studio/StudioInspector.jsx`: the Studio properties panel for the current
+% selection, driven by the DECLARATIVE `propertySchema.js`. The selection resolves to one clip
+% type (video_main / image_main / video_overlay / image_overlay / text / music / narration / sfx)
+% and that type's schema decides which sections/fields appear. Plain inputs (number / text / color
+% / select) bind to a dotted path via getAtPath/buildPatch; SPECIAL controls (clip transform, crop,
+% speed presets, audio-mix, text position, keyframes) render bespoke sub-UI. EVERY write flows
+% through the schema-safe interp mutators passed in from Studio (the on* callbacks), so a Save can
+% never 422. Nothing selected → fall through to the Assets tab.
+%
+% Imports: `useEffect, useRef, useState` from 'react'; from './model.js' — `TRANSITIONS,
+% TEXT_ANCHORS, SPEED_PRESETS, anchorToXY, overlayKind, overlayType, isImageSource, scrubValue,
+% roundTo, fmtScrub, clipPositionXY, isScaleObject, scaleAxes`; from './propertySchema.js' —
+% `PROPERTY_SCHEMA, PROPERTY_TITLES, getAtPath, buildPatch`; default `StudioKeyframes` from
+% './StudioKeyframes.jsx'; default `StudioAssets` from './StudioAssets.jsx'.
+%
+% Class names (`st-*`) are the contract with web/src/styles.css — keep them exact. Selection
+% routing, the scrub-field drag/click/type/arrow undo model, the color picker, the polymorphic
+% clip-scale lock, and the overlay string-anchor self-heal are all pinned by StudioInspector.test.jsx.
+
+## The undo model (shared by every editable control)
+Discrete edits COMMIT (`onUpdate` / `onCommit` → one history step). A continuous gesture — a scrub
+drag, a held arrow key, a swatch drag — must be ONE undo step: call `onScrubBegin` (the snapshot)
+exactly once, lazily, on the first real change, then stream every subsequent change through `onLive`
+(no history). A gesture that changes nothing (bare click, arrow already at a bound, retype of the
+same value) snapshots and writes NOTHING.
+
+Module helpers: `baseName(p)` = last `/`-segment (or p). `SCRUB_THRESHOLD = 3` px of horizontal
+movement before a press counts as a drag rather than a click-to-type.
+
+## ScrubField({ label, value, onScrubBegin, onLive, onCommit, step=0.1, min, max, suffix })
+An After-Effects/CapCut value bar: drag horizontally to change the number, or click it to type an
+exact value. Renders as a `label.st-f.st-f-scrub` (`<span>{label}</span>` + control).
+- Reading value: `num = Number(value)`; `hasNum` when value is non-empty/non-null and finite.
+  `bounded` when min AND max are finite and max>min; a bounded field shows a `.st-scrub-fill` span
+  whose width % is the value's clamped position in [min,max]. Unbounded → no fill.
+- Display mode: a `div.st-scrub` `role="slider" tabIndex=0`, title "Drag to adjust · click to type",
+  with `aria-label`, `aria-valuenow` (num, else the scrub start value — a slider always carries one),
+  `aria-valuemin/max`, and `aria-valuetext`. Body = the fill span (if any) + a `.st-scrub-val`
+  showing `fmtScrub(num)+suffix`, or a `.st-scrub-auto` "auto" when unset.
+- Drag (onPointerDown, left button only, preventDefault): capture startX and a start value
+  (`num`, else min, else 0). Add WINDOW pointermove/up/cancel listeners (no pointer capture, matching
+  the timeline). On the first move past SCRUB_THRESHOLD: fire onScrubBegin, add `st-scrubbing` to
+  body, mark moved. Each move → `onLive(scrubValue({ start, dx, step, min, max, fine: shiftKey }))`
+  (1px≈one step; Shift = fine). pointerup: teardown (remove listeners, drop the body class); if it
+  never became a drag, open the type-in editor instead. Keep a teardown ref and run it on unmount so
+  an in-flight drag can't leak.
+- Type-in editor: a bare click (double-click, or Enter/Space) opens an `<input type="number">`
+  (step/min/max) seeded with `fmtScrub(num)`, auto-focused + selected. Commit on blur/Enter via
+  `onCommit(roundTo(bound(n), 0.001))` — clamped to [min,max] but keeping sub-step precision (do NOT
+  quantize to `step`); NaN/empty/unchanged commits nothing; Escape cancels.
+- Arrow keys (onKeyDown): Up/Right = +, Down/Left = −, one `step` (×10 with Shift) via scrubValue,
+  coalescing like a drag (snapshot once, onLive per repeat, keyup/blur ends the run); a move blocked
+  by a bound is a no-op. `preventDefault` + `stopPropagation` on handled keys so the editor's global
+  Space/Escape/arrow/Delete shortcuts don't also fire.
+
+## TextField({ label, value, onCommit, area }) / ColorField / SelectField
+- **TextField**: local draft synced from `value`; `<input type="text">` or `<textarea rows={2}>`
+  (when `area`); commit on blur, and on Enter for the single-line input.
+- **cssColorToHex(color)** (module helper): resolve any CSS/ffmpeg color to `#rrggbb` for the native
+  swatch — pass through/expand `#rgb`/`#rrggbb`, else resolve named colors through a throwaway canvas
+  2d context; default `#ffffff` for unknown/empty or when there's no canvas (jsdom).
+- **ColorField({ label, value, onScrubBegin, onLive, onCommit })**: a `.st-color` with a native
+  `input[type=color].st-color-swatch` (value = cssColorToHex(value)) beside an
+  `input[type=text].st-color-text` (placeholder "white, #ff0000…", so named ffmpeg colors stay
+  typeable). Dragging the swatch coalesces into ONE undo step (snapshot once on the first change,
+  then onLive per change; reset the once-flag on swatch blur). The text input commits on blur only
+  when it differs from `value`, and on Enter.
+- **SelectField({ label, value, options, onCommit })**: a `<select>` of `{value,label}` options,
+  committing on change.
+
+## resolveOptions(field, assets, currentValue)
+Options for a select field. `field.options` verbatim if present; else by `field.optionsFrom`:
+`transitions`→TRANSITIONS, `anchors`→TEXT_ANCHORS mapped to `{value,label}`, or an asset pool from
+`assets.kinds` — `video`, `images`, `imagesAndVideo`, `music` (music+audio), `audio` (audio+music) —
+mapped to `{value:path, label:name}`. If `currentValue` isn't in the pool, prepend it as
+`"{baseName} (current)"` so the current selection is never lost.
+
+## Special controls (all get onUpdate=commit, live, onScrubBegin)
+- **ClipTransform({ cut, canvas, meta, onUpdate, live, onScrubBegin })** — main-clip placement into
+  `transform.{scale,position}` (position = box top-left in canvas px via `clipPositionXY(cut, meta,
+  canvas)`). Scale is polymorphic (schema oneOf): a UNIFORM number (× the fit-size), or a per-axis
+  `{x,y}` canvas-fraction box (e.g. `{x:1,y:0.5}` = split-screen panel). `isScaleObject` picks the
+  mode; `scaleAxes` yields `{sx,sy}`. A `st-check` "Lock aspect (uniform scale)" checkbox (checked
+  when NOT an object) toggles as ONE commit: ON collapses `{x,y}`→ the X-axis number; OFF expands
+  n→`{x:n,y:n}`. Locked → a single "Scale" field (min 0.05); unlocked → a `st-row` of "Scale X" /
+  "Scale Y" (min 0). Then a `st-row` of "X" / "Y" position (px, step 1). Scrub edits stream through
+  live, commits through onUpdate, each patch merging into the existing `transform`. A `st-hint`
+  explains the mode.
+- **SpeedPresets({ value, onCommit })** — a `.st-speed` of `button.st-chip` per `SPEED_PRESETS`
+  (label "{s}×", `on` when it matches the current speed, default 1), committing that number.
+- **CropControl({ cut, canvas, meta, onUpdate, live, onScrubBegin })** — crop in SOURCE pixels, so
+  seed W/H defaults from `meta.width/height` (ffprobe), falling back to canvas. No crop → a
+  `button.st-link` "+ add crop" seeding `{x:0,y:0,width:sw,height:sh}`. Present → "remove crop"
+  (deletes `transform.crop`) + X/Y (min 0) and W/H (min 1) scrub rows + a "source pixels…" hint.
+- **AudioMixControl({ ov, onUpdate, live, onScrubBegin })** — a `st-check` enabling
+  `audio_mix.enabled` (seeding `{volume:1}`), and when enabled a "Volume" scrub (0..2, step 0.1).
+- **TextPositionControl({ ov, canvas, onUpdate, live, onScrubBegin })** — text position is a named
+  anchor (string/nullish) OR a free `{x,y}`. A SelectField of the anchors plus a `__xy__` "Custom
+  X/Y" sentinel; choosing `__xy__` converts the current anchor to coords via `anchorToXY`. When free,
+  show X/Y scrub fields. A "drag the text on the canvas…" hint.
+
+## Field({ field, obj, onUpdate, ctx }) — dispatch by field.control
+`value = getAtPath(obj, field.path)`; `commit`/`live` build a patch with `buildPatch` and route
+through `onUpdate` / `ctx.live`. Map: `number`→ScrubField (label/step/min/max/suffix, default via
+`field.default`, onScrubBegin=`ctx.snapshot`); `text`→TextField; `color`→ColorField;
+`textarea`→TextField `area` (plus a "text can't be empty" hint when `field.required`);
+`select`→SelectField (options via resolveOptions, plus a source length/dimensions hint from
+`ctx.meta` when `field.meta`); `speedPresets`→SpeedPresets; `clipTransform`→ClipTransform;
+`crop`→CropControl; `audioMix`→AudioMixControl; `textPosition`→TextPositionControl;
+`keyframes`→StudioKeyframes (passed `ov=obj`, `index=ctx.overlayIndex`, `kind=overlayKind(obj)`,
+ffmpeg/playhead + the keyframe callbacks). A `required` text/textarea commits only a non-blank value.
+Unknown control → null.
+
+## SchemaForm({ type, obj, onUpdate, ctx })
+An `h3.st-insp-head` = `PROPERTY_TITLES[type]` (append ` · {ctx.idLabel}` when set), then each section
+of `PROPERTY_SCHEMA[type]` as a `section.st-sec`: an optional `.st-sec-h` title, its fields as
+`<Field>` (key `f.key`), and an optional `.st-hint`.
+
+## Default export StudioInspector(props)
+Props: `projectId, doc, canvas, ffmpeg, selCut, selOverlayIndex, selAudio, selAudioObj, playhead,
+assets, sourceMetas`, the mutators `onUpdateCut, onUpdateOverlay, onNormalizeOverlay, onUpdateAudio,
+onSetKeyframes, onUpsertKeyframe, onRemoveKeyframe`, the live variants `onLiveUpdateCut,
+onLiveUpdateOverlay, onLiveUpdateAudio, onScrubBegin`, and the asset adders `onAddImage, onAddClip,
+onAddSfx, onSetMusic, onSetBackground, onUploadAsset`.
+
+`selOverlay` = the overlay at `selOverlayIndex` (or null). An effect self-heals it: a non-text
+overlay with a STRING position is invalid for the renderer (anchors are text-only), so normalize it
+once to `anchorToXY(pos, canvas)` via `onNormalizeOverlay` (falling back to onUpdateOverlay) — routed
+non-historied so mere selection never pushes an undo step.
+
+Render (first match wins), each an `aside.st-inspector` wrapping a `<SchemaForm>`:
+1. `selCut` → type `isImageSource(cut.source) ? 'image_main' : 'video_main'` (derive from the object,
+   not a doc re-lookup); onUpdate = `onUpdateCut(cut.id, patch)`; ctx = `{ canvas, ffmpeg, assets,
+   meta: sourceMetas[cut.source], idLabel: cut.id, live: onLiveUpdateCut(cut.id,…), snapshot:
+   onScrubBegin }`.
+2. `selOverlay` → type from `overlayType`: text/video_overlay/image_overlay; onUpdate =
+   `onUpdateOverlay(index, patch)`; ctx adds `playhead, overlayIndex, onSetKeyframes/onUpsert/
+   onRemove` and `live: onLiveUpdateOverlay(index,…)`.
+3. `selAudioObj` → type from `selAudio.audioKind` (music / narration / sfx); onUpdate = onUpdateAudio;
+   ctx `{ canvas, assets, live: onLiveUpdateAudio, snapshot: onScrubBegin }`; plus a `.st-hint` noting
+   deletion is via the timeline toolbar 🗑 (⌫).
+4. Nothing selected → `<StudioAssets>` (projectId/assets/`background=doc.metadata.background` + the
+   add/background/upload handlers) — clicking outside any clip shows Assets, not a blank panel.

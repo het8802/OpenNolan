@@ -1,0 +1,38 @@
+% Generate `lib/app_paths.py`: OpenNolan's single source of truth for WHERE it reads
+% code (read-only) vs. WHERE it writes user data (writable). The split exists so the
+% notarized Mac app — a read-only `.app` bundle — keeps code in the bundle while user
+% data lives outside it (e.g. `~/Library/Application Support/OpenNolan`).
+% Use `from __future__ import annotations`; import only `os` and `pathlib.Path`.
+
+Compute `_REPO_ROOT` once at import as the repo checkout root — the parent of `lib/`,
+i.e. `Path(__file__).resolve().parent.parent`. It is the historical default for every
+path, so dev is behavior-preserving: with no env vars set, everything resolves under it.
+
+Every function returns a `Path` and reads `os.environ` on EACH call (never cached at
+import), so a subprocess that sets these vars is picked up live.
+
+Two independent roots — do not conflate them:
+
+- `code_root()` — read-only code/skills/tools/guides root. `OPENNOLAN_CODE_ROOT` or `_REPO_ROOT`.
+- `home()` — writable data root. `OPENNOLAN_HOME` or `_REPO_ROOT`.
+
+These derive from `home()`, but an explicit per-path override env var wins when set:
+
+| function            | override env var            | default            |
+|---------------------|-----------------------------|--------------------|
+| `projects_dir()`    | `OPENNOLAN_PROJECTS_DIR`     | `home()/projects`  |
+| `env_path()`        | `OPENNOLAN_ENV_FILE`         | `home()/.env`      |
+| `user_styles_dir()` | `OPENNOLAN_USER_STYLES_DIR`  | `home()/user_styles` |
+| `runtime_dir()`     | `OPENNOLAN_RUNTIME_DIR`      | `home()/runtime`   |
+| `cache_dir()`       | `OPENNOLAN_CACHE_DIR`        | `home()/cache`     |
+
+Purpose hints for the docstrings: `projects_dir` = per-project artifacts/assets/renders/
+checkpoints; `env_path` = the BYOK `.env`; `user_styles_dir` = user-dropped style playbooks,
+kept OUT of the read-only built-in `styles/` dir and merged in by `styles/playbook_loader.py`;
+`runtime_dir` = managed venv + downloaded ffmpeg + capability packs; `cache_dir` = ML
+framework caches (HF_HOME/TRANSFORMERS_CACHE/piper/rembg).
+
+- `is_packaged() -> bool` — True when running inside the packaged Mac app. Return
+  `bool(os.environ.get("OPENNOLAN_CODE_ROOT"))`: the Electron shell sets that var only in a
+  packaged build, so it is the single signal gating packaged-only behavior (the restricted
+  pipeline/style catalogue and the agent's filesystem sandbox).

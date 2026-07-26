@@ -1,0 +1,110 @@
+% Generate `web/src/api.js`: the thin client for the OpenNolan "Mission Control"
+% read/write API. Every export is a one-line wrapper over `fetch` against the
+% same-origin FastAPI backend — plain functions / `export const` arrows, no class,
+% no HTTP library, no base-URL constant (paths are hard-coded `/api/...` relative).
+% JSON requests send a `Content-Type: application/json` header and a
+% `JSON.stringify`d body; the one upload uses FormData; a few helpers just build
+% URL strings and are never fetched here.
+
+## Response helper
+Module-local async `json(resp)`: on `!resp.ok`, read the error body
+(`await resp.json().catch(() => ({}))`) and throw
+`new Error(body.detail || \`${resp.status} ${resp.statusText}\`)`; else return
+`resp.json()`. Every plain endpoint below is `fetch(...).then(json)`.
+
+## Endpoints
+Each is an `export const`; format is `name(args) → METHOD path [body]`, all
+`.then(json)`. `id`/`tid`/`jobId` interpolate raw; `session`/`key` are
+`encodeURIComponent`d. "body = X" means the raw arg is the JSON body (pass-through).
+
+App-level:
+- `getPipelines() → GET /api/pipelines`
+- `getStyles() → GET /api/styles`  (visual style playbooks for the New Project picker)
+- `getProjects() → GET /api/projects`
+- `getCapabilities() → GET /api/capabilities`
+- `getDoctor() → GET /api/doctor`  (first-run/runtime + capability-pack health)
+
+BYOK `.env` + Anthropic auth:
+- `getEnv() → GET /api/env`  ·  `saveEnv(vars) → PUT /api/env {vars}`
+- `getAuthStatus() → GET /api/auth/status`
+- `startOAuth() → POST /api/auth/oauth/start`
+- `finishOAuth(code) → POST /api/auth/oauth/finish {code}`
+- `connectApiKey(api_key) → POST /api/auth/api-key {api_key}`
+- `disconnectAuth() → POST /api/auth/disconnect`
+
+Feedback / analytics / debug sessions:
+- `sendFeedback(body) → POST /api/feedback` body = body  (may carry `{debug_session}`)
+- `discardDebugSession(session) → DELETE /api/debug/sessions/${enc(session)}`  (idempotent)
+- `getAnalytics() → GET /api/settings/analytics`
+- `setAnalytics(disabled) → PUT /api/settings/analytics {disabled}`
+
+Project:
+- `createProject(name, pipeline_type, style) → POST /api/projects {name, pipeline_type, style}`
+- `getState(id) → GET /api/projects/${id}/state`
+- `listAssets(id) → GET /api/projects/${id}/assets`
+- `uploadAsset(id, kind, file) → POST /api/projects/${id}/assets` — FormData with
+  fields `kind` and `file`, no JSON header
+- `getArtifacts(id) → GET /api/projects/${id}/artifacts`
+- `getArtifact(id, key) → GET /api/projects/${id}/artifacts/${enc(key)}`
+
+Manual editor / render:
+- `getEditDecisions(id) → GET /api/projects/${id}/edit_decisions`
+- `saveEditDecisions(id, doc) → PUT /api/projects/${id}/edit_decisions` body = doc
+- `startRender(id) → POST /api/projects/${id}/render`
+- `getRenderStatus(id, jobId) → GET /api/projects/${id}/render/${jobId}`
+- `getSourceMeta(id, ref) → GET /api/projects/${id}/source_meta?ref=${enc(ref)}`
+  (source duration/dimensions for trim bounds; duration may be null sans ffprobe)
+
+Agent interaction (unblock a waiting tool / control the run):
+- `confirmTool(id, confirm_id, approved) → POST .../agent/confirm {confirm_id, approved}`
+- `answerQuestion(id, question_id, answer) → POST .../agent/answer {question_id, answer}`
+- `provideKey(id, body) → POST .../agent/provide-key` body = body  (answer a
+  `request_api_key` prompt: save the BYOK key or decline)
+- `provideCapability(id, cap_request_id, installed) → POST .../agent/provide-capability {cap_request_id, installed}`
+  (answer a `request_capability` prompt after the UI installed / user declined)
+- `stopAgent(id) → POST /api/projects/${id}/agent/stop`
+
+Chat threads (all under `/api/projects/${id}/threads`):
+- `listThreads(id) → GET`  ·  `getThread(id, tid) → GET .../${tid}`
+- `createThread(id, title) → POST {title}`  ·  `saveThread(id, tid, body) → PUT .../${tid}` body = body
+
+## Activity feed
+`getActivity(id, { limit, since } = {})`: build `URLSearchParams`, set `limit`/`since`
+only when truthy, and `GET /api/projects/${id}/activity` appending `?${qs}` only if the
+query string is non-empty. `.then(json)`.
+
+## URL builders (return strings; never fetched)
+- `fileUrl(id, path, v)` → `/api/projects/${id}/file?path=${enc(path)}`, plus
+  `&v=${enc(v)}` when `v != null`. `v` is an optional cache-bust token (e.g. mtime) so
+  a changed file's URL changes and `<video>`/`<img>` re-fetch instead of serving a
+  stale/mid-write copy.
+- `frameUrl(id, path, t)` → `/api/projects/${id}/frame?path=${enc(path)}&t=${enc(t)}`
+  (a single still at time `t` for cheap scrub preview).
+- `sourceUrl(id, ref)` → `/api/projects/${id}/source?ref=${enc(ref)}`
+  (a cut's Range-served source clip for live `<video>` scrubbing pre-render).
+
+## Streaming generators
+Both are `export async function*`. They fetch with `{ signal }`, and on `!resp.ok`
+throw the same body.detail-or-status error as `json()` (messages `install failed
+(${status})` / `chat failed (${status})`). Both read `resp.body.getReader()` with a
+`TextDecoder({ stream: true })` into a running `buffer`, `try/catch`-ignore any
+malformed JSON, and yield one parsed object per frame.
+
+- `provisionStream(pack, signal)` — `POST /api/provision/${enc(pack)}`. Frames are
+  **NDJSON** (`\n`-delimited, NOT SSE): split the buffer on each `\n`, trim, skip
+  blank lines, `JSON.parse` and yield each; flush a trailing non-empty buffer after
+  the stream ends. Yields `{ type:'log'|'done'|'error', ... }` while pip runs.
+- `chatStream(id, message, thread_id, signal, model)` — `POST /api/projects/${id}/chat`
+  body `{ message, thread_id, model }`. Frames are **SSE**: split the buffer on `\n\n`,
+  within each frame take the line starting with `data:`, and yield
+  `JSON.parse(line.slice(5).trim())`. (POST is why EventSource can't be used.)
+
+## Crash reporter
+`reportClientError(source, message, stack, context)` — fire-and-forget, called from
+`window.onerror` / the React ErrorBoundary, so it must NEVER throw (would loop) and
+must NOT use `json()`. Wrap the whole body in a `try/catch` that swallows. Dedup + cap
+via a module-local `_reported` Set keyed `${source}:${String(message).slice(0,200)}`:
+return early if the key is already present or `_reported.size > 25`, else add it and
+`fetch('/api/telemetry/error', { method:'POST', <json header>, body: JSON.stringify({
+source, message: String(message).slice(0,1000), stack: stack ? String(stack).slice(0,8000)
+: null, context }) }).catch(() => {})`.

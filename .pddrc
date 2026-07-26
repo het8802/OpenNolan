@@ -1,0 +1,159 @@
+version: "1.0"
+
+contexts:
+  default:
+    defaults:
+      generate_output_path: "pdd/"
+      test_output_path: "tests/"
+      example_output_path: "context/"
+      default_language: "python"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3
+
+  agents:
+    paths:
+      - ".agents/**"
+    defaults:
+      prompts_dir: "prompts/.agents"
+      generate_output_path: ".agents"
+      default_language: "python"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3
+  claude:
+    paths:
+      - ".claude/**"
+    defaults:
+      prompts_dir: "prompts/.claude"
+      generate_output_path: ".claude"
+      default_language: "python"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3
+  pdd:
+    paths:
+      - ".pdd/**"
+    defaults:
+      prompts_dir: "prompts/.pdd"
+      generate_output_path: ".pdd"
+      default_language: "log"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3
+  desktop:
+    paths:
+      - "desktop/**"
+    defaults:
+      prompts_dir: "prompts/desktop"
+      generate_output_path: "desktop"
+      default_language: "javascript"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3
+  lib:
+    paths:
+      - "lib/**"
+    defaults:
+      prompts_dir: "prompts/lib"
+      generate_output_path: "lib"
+      default_language: "python"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3
+  schemas:
+    paths:
+      - "schemas/**"
+    defaults:
+      prompts_dir: "prompts/schemas"
+      generate_output_path: "schemas"
+      default_language: "python"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3
+  scripts:
+    paths:
+      - "scripts/**"
+    defaults:
+      prompts_dir: "prompts/scripts"
+      generate_output_path: "scripts"
+      default_language: "python"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3
+  server:
+    paths:
+      - "server/**"
+    defaults:
+      prompts_dir: "prompts/server"
+      generate_output_path: "server"
+      default_language: "python"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3
+  styles:
+    paths:
+      - "styles/**"
+    defaults:
+      prompts_dir: "prompts/styles"
+      generate_output_path: "styles"
+      default_language: "python"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3
+  tests:
+    paths:
+      - "tests/**"
+    defaults:
+      prompts_dir: "prompts/tests"
+      generate_output_path: "tests"
+      default_language: "python"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3
+  tools:
+    paths:
+      - "tools/**"
+    defaults:
+      prompts_dir: "prompts/tools"
+      generate_output_path: "tools"
+      default_language: "python"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3
+  web:
+    paths:
+      - "web/**"
+    defaults:
+      prompts_dir: "prompts/web"
+      generate_output_path: "web"
+      default_language: "javascriptreact"
+      strength: 0.818
+      temperature: 0.0
+      target_coverage: 80.0
+      budget: 10.0
+      max_attempts: 3

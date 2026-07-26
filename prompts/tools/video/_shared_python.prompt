@@ -1,0 +1,173 @@
+% Generate `tools/video/_shared.py`: shared helpers imported by the provider-specific
+% video-generation tools (heygen_video, wan_video, hunyuan_video, ltx_video_local,
+% ltx_video_modal, cogvideo_video, ...). It holds the model registries, cost/runtime
+% estimators, the diffusers-based local generation path, the HeyGen + Modal API paths,
+% image-upload helpers, and ffprobe/HDR inspection.
+% Use `from __future__ import annotations`. Module-level imports: os, shutil, subprocess,
+% time, pathlib(Path), typing(Any); `from tools.base_tool import ToolResult, ToolStatus`.
+% Everything else (requests, torch, diffusers, PIL, base64, io, json) is imported lazily
+% inside the function that needs it, so importing this module never requires the heavy stack.
+
+## Model registries (module-level dicts, exact values — provider tools import these by name)
+
+`HEYGEN_PROVIDERS` — HeyGen workflow `provider` string → `{name, quality, speed}`:
+veo_3_1(Google VEO 3.1, highest, slow), veo_3_1_fast(Google VEO 3.1 Fast, high, medium),
+veo3(Google VEO 3, high, slow), veo3_fast(Google VEO 3 Fast, high, medium),
+veo2(Google VEO 2, medium, medium), kling_pro(Kling Pro, high, medium),
+kling_v2(Kling v2, medium, fast), sora_v2(Sora v2, high, slow),
+sora_v2_pro(Sora v2 Pro, highest, slow), runway_gen4(Runway Gen-4, high, medium),
+seedance_lite(Seedance Lite (1.x), medium, fast), seedance_pro(Seedance Pro (1.x), high, medium),
+ltx_distilled(LTX Distilled, low, fastest).
+Add a NOTE comment on the seedance entries: HeyGen's `seedance_lite`/`seedance_pro` map to
+Seedance 1.x; Seedance 2.0 is only via Video Agent / Avatar Shots endpoints (not the workflow
+provider param) — for 2.0 use `seedance_video` (fal.ai) or `seedance_replicate`.
+
+The four local-diffusers registries share the field set `{name, hf_id, [hf_i2v_id],
+pipeline_class, vram_mb, quality, speed, t2v, i2v, license, default_width, default_height,
+default_num_frames, fps}`:
+
+`WAN_VARIANTS`:
+- wan2.1-1.3b: Wan 2.1 (1.3B), hf_id Wan-AI/Wan2.1-T2V-1.3B-Diffusers,
+  hf_i2v_id Wan-AI/Wan2.1-I2V-14B-480P-Diffusers, WanPipeline, 8000, high, medium,
+  t2v/i2v True, Apache-2.0, 832x480, 81 frames, 16 fps.
+- wan2.1-14b: Wan 2.1 (14B), hf_id Wan-AI/Wan2.1-T2V-14B-Diffusers,
+  hf_i2v_id Wan-AI/Wan2.1-I2V-14B-480P-Diffusers, WanPipeline, 24000, highest, slow,
+  t2v/i2v True, Apache-2.0, 1280x720, 81, 16.
+
+`HUNYUAN_VARIANTS`:
+- hunyuan-1.5: HunyuanVideo 1.5, hf_id tencent/HunyuanVideo-1.5, HunyuanVideoPipeline,
+  14000, high, medium, t2v/i2v True, Apache-2.0, 848x480, 121, 24. (no hf_i2v_id)
+
+`LTX_LOCAL_VARIANTS`:
+- ltx2-local: LTX-2 (Local), hf_id Lightricks/LTX-2, LTXPipeline, 12000, high, medium,
+  t2v/i2v True, LTX-2-Community, 768x512, 121, 24. (no hf_i2v_id)
+
+`COGVIDEO_VARIANTS`:
+- cogvideo-5b: CogVideoX 1.5 (5B), hf_id THUDM/CogVideoX-5b, CogVideoXPipeline, 12000,
+  medium, medium, t2v/i2v True, Apache-2.0, 720x480, 49, 8.
+- cogvideo-2b: CogVideoX (2B), hf_id THUDM/CogVideoX-2b, CogVideoXPipeline, 6000, medium,
+  fast, t2v True / i2v False, Apache-2.0, 720x480, 49, 8.
+
+`LTX2_FRAME_COUNTS` — duration hint → frame count: 1s 25, 2s 49, 3s 73, 4s 97, 5s 121,
+6.7s 161, 8s 193.
+
+## Gating + estimators
+
+- `local_generation_enabled() -> bool`: env `VIDEO_GEN_LOCAL_ENABLED` in {true,1,yes} (lowercased).
+- `local_generation_status() -> ToolStatus`: UNAVAILABLE unless enabled AND both `diffusers`
+  and `torch` import; else AVAILABLE.
+- `local_install_instructions() -> str`: tells the user to set `VIDEO_GEN_LOCAL_ENABLED=true`
+  and `pip install diffusers transformers accelerate torch pillow requests`, on a GPU matching
+  the tool's VRAM profile.
+- `estimate_quality_cost(quality) -> float`: highest 0.50, high 0.35, low 0.15, else 0.20.
+- `estimate_speed_runtime(speed) -> float`: fastest 30, fast 60, medium 120, slow 300, else 120.
+- `estimate_local_runtime(speed) -> float`: fast 120, medium 240, slow 600, else 240.
+
+## Local diffusers path
+
+`load_diffusers_pipeline(pipeline_class, model_id, enable_offload)`: lazy-import diffusers+torch;
+`getattr(diffusers, pipeline_class)`; dtype = bfloat16 if `torch.cuda.is_bf16_supported()` else
+float16; `.from_pretrained(model_id, torch_dtype=dtype)`; if `enable_offload`
+`enable_model_cpu_offload()` else `.to("cuda")`; if the pipe has a non-None `vae`, call
+`enable_tiling()`/`enable_slicing()` when present; return the pipeline.
+
+`load_reference_image(inputs, width, height)`: lazy-import io.BytesIO, requests, PIL.Image. Open
+`reference_image_path` (convert RGB), else fetch `reference_image_url` (requests.get timeout 60,
+raise_for_status, RGB), else return `ToolResult(success=False, error="image_to_video requires
+reference_image_url or reference_image_path")`. On success return the image resized to
+(width,height) with LANCZOS. (Callers must isinstance-check the result for ToolResult.)
+
+`generate_local_video(*, tool_name, variants, default_variant, inputs) -> ToolResult`:
+- variant = `inputs.get("model_variant", default_variant)`; if not in `variants` → error listing
+  the sorted keys.
+- meta = variants[variant]; prompt = `inputs["prompt"]`; operation = get("operation",
+  "text_to_video"); seed = get("seed"); enable_offload = get("enable_model_offload", True).
+- If operation is image_to_video but `meta["i2v"]` is falsy → error "{name} does not support
+  image_to_video."
+- width/height/num_frames from inputs falling back to the meta defaults; fps = meta["fps"].
+- model_id = meta["hf_i2v_id"] when image_to_video AND that key exists, else meta["hf_id"].
+- Build the pipeline via `load_diffusers_pipeline`. generation_args = prompt, num_frames, width,
+  height, num_inference_steps=get("num_inference_steps", 30). If seed is not None add
+  `generator = torch.Generator(device="cpu").manual_seed(seed)`. For image_to_video, load the
+  reference image and return it if it's a ToolResult, else pass as `image`. For CogVideoXPipeline
+  add `negative_prompt="worst quality, low quality, blurry, distorted, watermark"`.
+- Run the pipeline; frames = `output.frames[0]` if it has `frames` else `output.images`.
+- output_path = Path(get("output_path", f"{tool_name}_{variant}.mp4")); mkdir parents;
+  `export_to_video(frames, str(output_path), fps=fps)` (from diffusers.utils).
+- Return success ToolResult, data = provider(=tool_name), model_variant, provider_name(=name),
+  mode "local", prompt, model_id, width, height, num_frames, fps,
+  duration_seconds=round(num_frames/fps, 2), operation, output(str path), format "mp4", license,
+  plus `**probe_output(output_path)`; artifacts=[path], seed=seed, model=model_id.
+
+## HeyGen API path
+
+`poll_heygen(execution_id, api_key, timeout=600) -> str`: poll GET
+`https://api.heygen.com/v1/workflows/executions/{execution_id}` (header `X-Api-Key`) until a
+deadline of now+timeout. Read `json()["data"]`; on status "completed" return
+`data.output.video.video_url` or `data.output.video_url` (RuntimeError if neither); on status in
+{failed, error} RuntimeError with `data.get("error","Unknown")`. Sleep with exponential backoff
+starting 5s, ×1.2, capped 30s, and never past the deadline. TimeoutError if the deadline passes.
+
+`upload_image_fal(image_path) -> str`: needs env `FAL_KEY` or `FAL_AI_API_KEY` (RuntimeError
+otherwise); FileNotFoundError if the file is missing. content_type by extension (png→image/png,
+jpg/jpeg→image/jpeg, webp→image/webp, default image/png). POST
+`https://rest.alpha.fal.ai/storage/upload/initiate` (Authorization `Key {api_key}`, json
+{content_type, file_name}); PUT the raw bytes to the returned `upload_url`; return `file_url`.
+
+`upload_image_heygen(image_path, api_key) -> str`: FileNotFoundError if missing. First try HeyGen
+v2 presigned upload: POST `https://api.heygen.com/v2/assets/upload` (X-Api-Key, json
+{content_type image/png, file_name}); on 200 read `upload_url` and `url`/`file_url`, PUT the
+bytes, return the file url. Swallow ANY exception from that branch and fall back to
+`upload_image_fal(image_path)`.
+
+`generate_heygen_video(inputs) -> ToolResult`: needs env `HEYGEN_API_KEY` (else error). provider =
+get("provider_variant", "veo_3_1"); validate against HEYGEN_PROVIDERS (error listing sorted keys).
+prompt = inputs["prompt"]; aspect_ratio = get("aspect_ratio", "16:9"); operation =
+get("operation", "text_to_video"). workflow_input = {prompt, provider, aspect_ratio}; for
+image_to_video resolve a `reference_image_url` — upload `reference_image_path` via
+`upload_image_heygen` when only the path is given, error if neither, then add it to workflow_input.
+POST `https://api.heygen.com/v1/workflows/executions` json {workflow_type "GenerateVideoNode",
+input: workflow_input}; read `data.execution_id` (error if absent). `poll_heygen(...timeout=600)`,
+then download the video (requests.get timeout 120) to output_path = Path(get("output_path",
+f"heygen_video_{execution_id}.mp4")) (mkdir parents, write_bytes). Return success ToolResult, data
+= provider "heygen", provider_variant, provider_name(=meta name), mode "api", prompt, aspect_ratio,
+operation, execution_id, output, format "mp4"; artifacts=[path], model=provider.
+
+## Modal LTX-2 API path
+
+`generate_ltx_modal_video(inputs) -> ToolResult`: needs env `MODAL_LTX2_ENDPOINT_URL` (else error).
+prompt, operation, aspect_ratio(default 16:9). width/height from inputs; if either is None derive
+from aspect (16:9→1024x576, 9:16→576x1024, else 512x512). num_frames = get("num_frames",
+LTX2_FRAME_COUNTS.get(get("duration_hint","5s"), 121)); if `(num_frames-1) % 8 != 0` snap it down
+to the nearest `8n+1`. payload = prompt, width, height, num_frames, fps 24,
+steps=get("num_inference_steps", 30), negative_prompt "worst quality, low quality, blurry,
+distorted, watermark, text, logo"; add `seed` if given. For image_to_video: base64 the
+`reference_image_path` bytes into `input_image`, else pass `reference_image_url` as
+`input_image_url`, else error. POST the endpoint (timeout 300). Write output to Path(get(
+"output_path","ltx_video_modal.mp4")): if the response content-type contains "video" or
+"octet-stream" write bytes directly, else parse json for `video_url`/`url` (error if neither) and
+download it (timeout 120). Return success ToolResult, data = provider "ltx-modal", provider_name
+"LTX-2 (Modal)", mode "modal", prompt, width, height, num_frames, fps 24,
+duration_seconds=round(num_frames/24, 2), operation, output, format "mp4"; artifacts=[path],
+seed=get("seed"), model "ltx-2".
+
+## ffprobe + HDR inspection
+
+`probe_output(path) -> dict[str, Any]`: coerce to Path first (callers pass str or Path — note this
+in a comment). Start with `file_size_bytes` from `path.stat().st_size`. If `shutil.which("ffprobe")`
+is missing, return that alone. Otherwise run `ffprobe -v quiet -print_format json -show_format
+-show_streams <path>` (capture, text, timeout 10, check False); on returncode 0 parse it and add
+duration_seconds (float of format.duration or 0), file_size_mb (rounded MB), and from the first
+video stream: video_width, video_height, video_codec, and the color metadata pix_fmt,
+color_transfer, color_primaries, color_space (needed by `is_hdr_source` to avoid silently
+tonemapping HDR). Swallow all exceptions and return whatever was gathered.
+
+`is_hdr_source(path) -> dict[str, Any]`: detect HDR so callers never silently tonemap HDR→SDR.
+Module constant `_HDR_TRANSFERS = {"arib-std-b67": "hlg", "smpte2084": "pq", "smpte-st-2084":
+"pq"}`. Return the not-HDR default `{hdr False, kind None, transfer None, primaries None,
+color_space None, pix_fmt None, bit_depth 8}` when the file is missing. Otherwise `probe_output`
+it, lowercase color_transfer and pix_fmt, kind = `_HDR_TRANSFERS.get(transfer)`, bit_depth = 10
+when pix_fmt contains any of "10le"/"10be"/"p010" else 8, and return {hdr: kind is not None, kind,
+transfer or None, primaries, color_space, pix_fmt, bit_depth} pulling primaries/color_space/pix_fmt
+from the probe (each `or None`). 10-bit + BT.2020 WITHOUT an HDR transfer is wide-gamut-not-HDR →
+hdr False (never fabricate HDR from SDR).

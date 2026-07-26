@@ -1,0 +1,53 @@
+% Generate `scripts/build-dmg.sh`: the canonical entry point for building a distributable (or
+% locally testable) Apple-Silicon `OpenNolan.app` + `.dmg`. It wraps `npm --prefix desktop run dist`
+% (electron-builder) with guardrails: detach stale mounts, auto-detect a Developer ID cert
+% (present → signed+notarized, absent → unsigned local build), build the .dmg ourselves, verify it
+% (`hdiutil verify`), and print where it landed + how to test it.
+%
+% The leading `#` header comment must double as the `--help` text: usage lines for every flag, the
+% signing/notarization env vars (CSC_NAME | CSC_LINK+CSC_KEY_PASSWORD; APPLE_API_KEY+APPLE_API_KEY_ID+
+% APPLE_API_ISSUER; or APPLE_ID+APPLE_APP_SPECIFIC_PASSWORD+APPLE_TEAM_ID — release machine only), and
+% a pointer to docs/RELEASE-mac.md for the full release process.
+%
+% `set -euo pipefail`. REPO_ROOT resolved from the script's own dir (runnable from anywhere);
+% DESKTOP=$REPO_ROOT/desktop. TTY-gated color helpers step/info/warn/die (warn+die → stderr, die exits 1).
+
+Flags (loop over "$@"): --dir (fast path: unpacked .app only via `npm run dist:dir`, skip the .dmg),
+--publish (signed build + upload to the GitHub Releases auto-update feed via `npm run dist -- --publish
+always`), --unsigned (force unsigned even if a cert exists), -h/--help (print the header comment with its
+leading `# ` stripped). Unknown flag → die. --dir and --publish are mutually exclusive.
+
+Preflight: die unless macOS; warn if not arm64 (build targets arm64, no cross-build); die if node/npm
+missing or desktop/ absent; `npm --prefix desktop install` on first run (electron-builder not yet in
+desktop/node_modules/.bin). Then detach any stale `/Volumes/OpenNolan*` mounts (tolerant).
+
+Signing mode: SIGNED unless --unsigned; signed when CSC_NAME/CSC_LINK is set OR `security find-identity
+-v -p codesigning` shows a "Developer ID Application". When unsigned, export CSC_IDENTITY_AUTO_DISCOVERY=false
+so electron-builder skips signing + notarization.
+
+--publish preflight: die unless SIGNED (electron-updater verifies signatures on macOS); die if
+desktop/package.json still has OWNER_PLACEHOLDER/REPO_PLACEHOLDER in build.publish; warn if no
+GH_TOKEN/GITHUB_TOKEN.
+
+Build: `cd desktop`, then run dist:dir (--dir) | dist -- --publish always (--publish) | dist.
+
+DMG builder — do NOT use electron-builder's dmg target. Its final `hdiutil convert` reliably fails on
+managed Macs (endpoint-security agents like Kandji/Crowdstrike intercept disk-image reads → "Resource
+temporarily unavailable" on large images). Instead build with `hdiutil create -srcfolder`, which reads
+plain files and works identically on managed and unmanaged machines. `build_dmg(app, out)` stages a
+mktemp folder = a `ditto`'d OpenNolan.app + an `Applications` symlink + a dot-hidden `.background/
+background.tiff` + `.DS_Store` — the last two copied from the COMMITTED assets desktop/build/
+dmg-background.tiff and desktop/build/dmg.DS_Store (they give the install window its cream artwork +
+icon layout; die with a "run scripts/author-dmg-layout.sh" hint if either is missing). `chflags hidden`
+the .background dir, then `hdiutil create -srcfolder <stage> -volname "$DMG_VOLNAME" -format UDZO -o
+<out> -quiet`. DMG_VOLNAME="OpenNolan" MUST match the volume name author-dmg-layout.sh used (the
+background reference resolves against a volume of that name). If SIGNED, codesign the finished .dmg with
+the Developer ID (warn, don't fail, if it can't). Clean up the temp dir.
+
+Report: --dir → assert dist/mac-arm64/OpenNolan.app exists, print it + its size + an `open` command, exit
+0. Otherwise read VERSION from desktop/package.json, set DMG=dist/OpenNolan-${VERSION}-arm64.dmg, run
+build_dmg, `hdiutil verify` it, and print the path + size. When SIGNED, warn that the .dmg is NOT yet
+notarized/stapled (a public release must run `xcrun notarytool submit` + `xcrun stapler staple` — see
+docs/RELEASE-mac.md); and under --publish, warn that electron-builder uploaded the zip + latest-mac.yml
+but NOT this .dmg, so upload it manually with `gh release upload`. When unsigned, print local-install
+instructions (open the .dmg, drag to Applications, then `xattr -cr` the installed app to clear quarantine).

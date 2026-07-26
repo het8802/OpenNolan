@@ -1,0 +1,91 @@
+% Generate `lib/project.py`: OpenNolan's project workspace creation and discovery.
+% A project lives at `projects/<project_id>/` and is identified by a `project.json`
+% manifest written at creation. The manifest is the single source of truth for two
+% things the filesystem can't answer: (1) which dirs are real projects (vs scratch
+% dirs like `_analysis`/`demos`, stray files, legacy folders — a dir is a project iff
+% it has a manifest OR legacy evidence, see below), and (2) a project's `pipeline_type`
+% before any checkpoint exists (a fresh, not-yet-run project has no checkpoint to read
+% it from). Layout: `project.json`, `artifacts/`, `assets/{images,video,audio,music}/`,
+% `renders/`.
+% Use `from __future__ import annotations`. Import: hashlib, json, re, shutil,
+% datetime(datetime, timezone), pathlib.Path, typing(Any, Optional), and
+% `atomic_write_json` from lib.atomic_io.
+
+## Constants
+
+- `MANIFEST_NAME = "project.json"`; `ASSET_SUBDIRS = ("images", "video", "audio", "music")`.
+- `KIND_DIRS: dict[str, str]` — the single source of truth for where each asset kind
+  lands. The agent declares a KIND, never a folder. Exactly: image→`assets/images`,
+  video→`assets/video`, audio→`assets/audio`, music→`assets/music`,
+  render→`hf/renders` (intermediate per-scene clips / building blocks),
+  final_render→`renders` (the one assembled deliverable). Keeping `render` out of
+  `renders/` is what stops intermediate clips masquerading as the final render.
+- `_SLUG_RE = re.compile(r"[^a-z0-9]+")`.
+
+`ProjectExistsError(Exception)` — raised when creating a project whose id already exists.
+
+## Ids, filenames, paths
+
+- `slugify(name) -> str`: kebab-case id — lowercase, strip, collapse non-`[a-z0-9]` runs
+  to `-`, strip leading/trailing `-`. Raise ValueError if the result is empty.
+- `sanitize_filename(filename) -> str`: safe basename for an uploaded file, or ValueError.
+  Take `Path(filename).name` (strips directory components), then reject empty,
+  whitespace-only, `.`, `..`, or any name containing `/`, `\`, or a null byte. (On POSIX a
+  Windows-style `..\..\x.exe` arrives as one such name and is rejected.)
+- `project_dir(projects_dir, project_id) -> Path` = `Path(projects_dir)/project_id`.
+- `manifest_path(projects_dir, project_id) -> Path` = `project_dir/MANIFEST_NAME`.
+
+## Creation & reading
+
+`create_project(projects_dir, name, pipeline_type=None, *, style=None, created_at=None) -> dict`
+— scaffold a workspace and write its manifest; return the manifest dict.
+- Derive the id via `slugify(name)`. Raise `ProjectExistsError` if the manifest already
+  exists (so the API can 409 instead of silently overwriting on a reused title).
+- mkdir (parents, exist_ok) `artifacts/`, each `assets/<sub>/`, and `renders/`.
+- Manifest keys: version "1.0", project_id, name, pipeline_type, style,
+  `created_at` (arg, else `datetime.now(timezone.utc).isoformat()` — the arg is injectable
+  for deterministic tests). `style` pins a visual playbook name; None = agent decides.
+- Write with `atomic_write_json`.
+
+- `read_project_manifest(...) -> Optional[dict]`: the loaded `project.json`, or None if absent.
+- `is_project(...) -> bool`: whether the manifest exists.
+
+## Legacy / agent-created dirs
+
+`_infer_legacy_project(projects_dir: Path, project_id) -> Optional[dict]`: synthesize a
+manifest for a real project dir that has no `project.json` (predates manifests, or the agent
+made it directly). It counts as a project iff it has a top-level `checkpoint_*.json`, a
+non-empty `artifacts/`, or a non-empty `renders/`; otherwise return None (excludes scratch
+dirs and stray files). `pipeline_type` from the latest checkpoint's `pipeline_type` (None if
+missing or `"unknown"`); `created_at` from the dir's mtime (ISO, `""` on failure). Returns a
+dict with version "1.0", project_id, name=project_id, pipeline_type, created_at, `legacy: True`.
+
+`get_project_record(...) -> Optional[dict]`: the canonical "is this a real project, and what
+is it" resolver — the manifest if present, else `_infer_legacy_project`, else None. Prefer
+this over `read_project_manifest` so legacy dirs are first-class everywhere.
+
+`list_projects(projects_dir) -> list[dict]`: every child dir whose `get_project_record` is
+not None, sorted by `created_at` descending (newest first). `[]` if the projects dir is absent.
+
+`get_project_pipeline_type(...) -> Optional[str]`: prefer the manifest's `pipeline_type`
+(works for an empty project). Else lazily `from lib.checkpoint import get_latest_checkpoint`
+and return the latest checkpoint's `pipeline_type` (None if missing/`"unknown"`); swallow any
+import/read failure and return None.
+
+## Asset placement
+
+The single writer into a project's asset tree — the agent declares a KIND and the folder is
+derived, never passed in. Exposed as the `store_asset` SDK tool (server/agent_runner.py).
+
+- `asset_dir(projects_dir, project_id, kind) -> Path` = `project_dir / KIND_DIRS[kind]`;
+  raise ValueError naming the sorted known kinds on an unknown kind (a typo fails loudly).
+- `_sha256(path) -> str`: streaming SHA-256, reading in 1 MiB chunks.
+- `place_asset(projects_dir, project_id, kind, src, name=None, *, move=False) -> dict`:
+  move/copy a produced file to its canonical location for `kind`. `src` must be an existing
+  file (else FileNotFoundError). mkdir the dest dir. Target name = `sanitize_filename(name or
+  src.name)`. Content-idempotent: if the target exists with identical bytes, reuse it
+  (`deduped=True`, no recopy); if the name is taken by DIFFERENT bytes, disambiguate with a
+  `<stem>.<sha256[:8]><suffix>` name so nothing is clobbered (deduped if that hashed name
+  already holds the same bytes). Otherwise `shutil.move` (when `move`) or `shutil.copy2` the
+  file (skip when target resolves to src). Return `{"path", "abs_path", "kind", "deduped"}`
+  where `path` is relative to the project dir (e.g. `assets/images/foo.png`).

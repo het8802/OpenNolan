@@ -1,0 +1,372 @@
+% Generate `tools/video/video_compose.py`: a `VideoCompose(BaseTool)` — the pipeline-facing
+% composition surface. It takes `edit_decisions` + `asset_manifest` + audio and delegates to the
+% technical runtime LOCKED at proposal stage in `edit_decisions.render_runtime`:
+%   - `remotion`    → React frame-accurate render via `npx remotion render` (default; scene-component
+%                     stack, word-level captions, TalkingHead/CinematicRenderer).
+%   - `hyperframes` → HTML/CSS/GSAP via the sibling `hyperframes_compose` tool (kinetic typography,
+%                     promos, website-to-video, registry blocks).
+%   - `ffmpeg`      → FFmpeg concat/trim/xfade (simple cuts, or when the approved path names FFmpeg).
+% GOVERNANCE (state this in the module docstring): silent runtime swaps are forbidden. If the chosen
+% runtime is unavailable or fails, surface a STRUCTURED BLOCKER and wait for the agent to re-ask the
+% user — never substitute a different engine.
+%
+% `from __future__ import annotations`. Import json, logging, math, re, subprocess, time,
+% `pathlib.Path`, typing `Any, Optional`, and from `tools.base_tool`: BaseTool, Determinism,
+% ExecutionMode, ResourceProfile, RetryPolicy, ResumeSupport, ToolResult, ToolStability, ToolTier.
+% BaseTool already provides get_info(), the ToolResult dataclass, `self.run_command(cmd, timeout=…)`
+% (raises CalledProcessError on non-zero), and the contract attributes — override only what's needed.
+
+## Class metadata
+name "video_compose", version "0.1.0", tier CORE, capability "video_post", provider "ffmpeg",
+stability EXPERIMENTAL, execution_mode SYNC, determinism DETERMINISTIC.
+`dependencies=["cmd:ffmpeg"]`; `install_instructions` → ffmpeg.org download;
+`agent_skills=["remotion-best-practices","remotion","ffmpeg"]`;
+`capabilities=["compose_cuts","burn_subtitles","overlay_assets","encode_profile","remotion_render"]`.
+`resource_profile=ResourceProfile(cpu_cores=4, ram_mb=2048, vram_mb=0, disk_mb=5000, network_required=False)`;
+`retry_policy=RetryPolicy(max_retries=1, retryable_errors=["Conversion failed"])`;
+`resume_support=ResumeSupport.FROM_START`; `idempotency_key_fields=["operation","input_path","edit_decisions"]`;
+`side_effects=["writes video file to output_path"]`;
+`user_visible_verification=["Play the composed output and verify cuts, subtitles, and overlays"]`.
+`best_for`: final render for explainer/animation pipelines; image-to-video spring animations, animated
+text/stat cards, charts, complex transitions (Remotion); pure video concat/trim + xfade (FFmpeg).
+`not_good_for`: HDR sources when no 10-bit encoder — detect with `is_hdr_source()` and handle per
+AGENT_GUIDE first.
+Class constant `_REMOTION_COMPONENTS = ["text_card","stat_card","callout","comparison","progress",
+"chart","bar_chart","line_chart","pie_chart","kpi_grid"]` (surfaced in get_info when Remotion is up).
+
+## input_schema
+JSON-schema object, required `["operation"]`. `operation` enum with a per-value description blob:
+- `compose` — low-level concat cuts + audio + subtitles (FFmpeg only).
+- `render` — HIGH-LEVEL, PREFERRED: resolves asset IDs and routes to Remotion (images/animations) or
+  FFmpeg (video-only). Unlike compose it does NOT drop `overlays[]` / `layer` routing.
+- `render_proxies` — render each scene SOLO to a content-cached proxy, return an ffmpeg-runtime
+  assemble EDL (render-once / NLE model; re-edits are cheap concats).
+- `remotion_render` — render via Remotion (Node.js).
+- `burn_subtitles` — burn a subtitle file into an existing video.
+- `overlay` — composite `overlays[]` onto a base video.
+- `encode` — re-encode to a target profile/codec.
+
+Other properties (all optional unless noted): `input_path`, `output_path`; `edit_decisions` object
+(required for compose/render); `asset_manifest` object (resolves asset IDs in `cuts[].source` → paths,
+required for render); `proposal_packet` object (STRONGLY recommended — final_review compares
+`production_plan.render_runtime` vs `edit_decisions.render_runtime` to flag runtime_swap_detected;
+without it, falls back to `edit_decisions.metadata.proposal_render_runtime`); `narration_transcript_path`
+(word-level transcript JSON — with script enables transcript_comparison to catch TTS failures like
+Chirp3-HD reading a period as the word "dot"); `script_path` / `script_text` (source narration for that
+diff); `subtitle_path`; `subtitle_style` object (ASS styling: font/font_size/primary_color/outline_color/
+outline_width/margin_v/alignment; also read from `edit_decisions.subtitles`); `overlays` array (see
+Overlays); `audio_path` (mixed audio to mux); `profile` (media-profile name from `lib.media_profiles`,
+e.g. youtube_landscape/tiktok/instagram_reels); `options` object (`subtitle_burn` default true,
+`two_pass_encode` default false); `codec` (default "libx264"), `crf` (default 23), `preset` (default
+"medium"); `hdr_policy` enum auto|preserve|tonemap|sdr (default auto — see HDR).
+
+Each `overlays[]` item: `asset_path`; `type` enum image|video|text (absent → inferred: asset present =
+image/video, `text` present = text); `text` (text overlays; special chars escaped, `%{…}` expansion
+disabled); `font_path` (.ttf/.ttc, else a resolved bold sans); `font_size` (default 48); `color` (ffmpeg
+color, default white); `box` object (color default black, opacity 0–1 default 0.5, padding default 10);
+`position` (named anchor like "bottom-center" OR `{x,y}`; flat `x`/`y` also accepted); `pts_offset_seconds`
+(shift a VIDEO overlay so its first frame lands at this project time); `width`/`height` (either alone →
+other derived aspect-preserving); `start_seconds`/`end_seconds`; `opacity` 0–1 (static, combines
+multiplicatively with keyframed); `audio_mix` object (`enabled` default false, `volume` 0–2 default 1.0 —
+delay to start_seconds, trim to the window, amix `duration=first`, skip-with-warning when the source has
+no audio). Overlay motion also comes from `keyframes[]` items `{t, x, y, scale, opacity, easing}`.
+
+## Availability, get_info, execute
+- `_composer_dir()` → the Remotion project to render from: prefer the PROVISIONED writable copy
+  (`lib.provision.remotion_root()` when it has package.json + node_modules; OPN-3 packaged app), else
+  the in-repo `../../remotion-composer`.
+- `_remotion_available()` → npx on PATH AND composer_dir has package.json AND node_modules.
+- `_hyperframes_available()` → delegate to `HyperFramesCompose()._runtime_check()["runtime_available"]`
+  (single source of truth), False on any import error.
+- `get_info()` extends `super().get_info()` with `render_engines = {"ffmpeg": True, "remotion": …,
+  "hyperframes": …}` (+ backwards-compat alias `render_runtimes`); per-runtime notes (when up: what each
+  is for; when down: the specific missing piece + how to fix); `remotion_components` when Remotion is up;
+  a `runtime_governance` note (locked at proposal, no silent swaps, blocker-on-failure); and `hdr_encode`
+  = `{available, encoders, note}` from `_hdr_encoders()` (guide the agent to preserve HDR when the source
+  is HDR, else surface the limitation before tonemapping).
+- `_hdr_encoders()` (static) → the available 10-bit-HEVC-capable encoders among ("hevc_videotoolbox",
+  "libx265"), probed from `ffmpeg -encoders`; `[]` if ffmpeg missing.
+- `execute(inputs)`: read `operation`, start a timer, try/except dispatch to `_compose`/`_render`/
+  `_render_proxies`/`_remotion_render`/`_burn_subtitles`/`_overlay`/`_encode` (unknown → failure
+  ToolResult "Unknown operation: <op>"; any exception → `ToolResult(success=False, error=str(e))`), and
+  stamp `result.duration_seconds`.
+
+## HDR preservation (the color-management spine)
+render_proxies edits HDR footage exactly like SDR: HDR is PRESERVED end-to-end (10-bit HEVC main10 +
+HLG/PQ color tags), never silently tonemapped. When a timeline MIXES HDR footage with SDR graphics/
+stills, LIFT the graphics UP into the HDR (BT.2020) container so everything composites in one color space
+(Het 2026-06-22); the whole timeline shares ONE target color taken from the first HDR source so proxies
+concat with `-c copy`. Flag the SDR→HDR promotion as a visual-review item in comments; the machine part
+(10-bit + HLG/PQ tags on output) is asserted in tests.
+- `_is_valid_color_token(v)` (static) → False for None/""/unknown/reserved/unspecified/n-a.
+- `_resolve_hdr_target(src_info)` → canonical `{kind, primaries, trc, colorspace}` with BT.2020
+  fallbacks (trc defaults by kind: PQ→smpte2084, else HLG arib-std-b67).
+- `_zscale_available()` (classmethod, cached on the class) → ffmpeg has the zscale filter (libzimg).
+- `_promote_sdr_to_hdr_vf(target)` → ONE zscale node fully specifying input (full-range-limited BT.709)
+  AND output (BT.2020 + the timeline's HLG/PQ transfer) + `format=yuv420p10le`; `""` when zscale absent
+  (keep source SDR). (zimg refuses a partial transfer-only convert on untagged SDR — declare both ends.)
+- `_tonemap_hdr_to_sdr_vf(src_kind)` → linearize → `tonemap=hable` → BT.709 8-bit; `format=yuv420p`
+  best-effort when zscale absent. Used only for hdr_policy=tonemap/sdr (or auto with no HDR encoder).
+- `_video_output_args(hdr_encode, codec, crf, preset, fps_str=None)` → the `-c:v …` tail for one
+  segment. `hdr_encode is None` → legacy 8-bit SDR (`-c:v <codec> -crf -preset -pix_fmt yuv420p`),
+  BYTE-IDENTICAL to before. Present with an `encoder` set → 10-bit HEVC main10: `hevc_videotoolbox`
+  (ignores crf → bitrate target 16M/maxrate 20M/bufsize 32M) or `libx265` (crf/preset + `-x265-params
+  colorprim=/transfer=/colormatrix=`), then stream color tags (`-color_primaries/-color_trc/-colorspace`)
+  and `-tag:v` when present — without these a 10-bit file is treated as SDR. Present with `encoder=None`
+  (tonemap case) → SDR via `<codec>` but emit EXPLICIT BT.709 tags (the source's BT.2020/PQ tags would
+  otherwise mislabel the 8-bit output as HDR). Append `-r <fps_str>` only when given.
+
+## `_compose` — FFmpeg concat path
+Reads edit_decisions/cuts, resolves the canvas (`_resolve_canvas`), and normalizes EVERY cut to that
+canvas into a temp segment, then joins them. Contract: only `compose` skips overlays[]/layer routing —
+emit a WARNING when a cut carries `layer=='overlay'` and tell the caller to use `render` instead.
+- Per video cut: input-level seek (`-ss` before `-i`) + `-t` trim, `_segment_base_vf` (crop→[HDR]→scale→
+  pad→setsar→fps), speed via `setpts` + `atempo` (`_build_atempo`), audio transcoded to AAC 192k/48k/
+  stereo — or `anullsrc` synthesized when the source has no audio stream (`_has_audio_stream`), so the
+  concat layout is uniform. Per still-image cut: REJECT out≤in (prevents an infinite loop), loop to
+  duration/speed seconds, synthesize silent stereo. Both encode via `_video_output_args`.
+- Transform/background compositing (`_segment_base_vf(..., apply_transform=True)`) applies ONLY when
+  `inputs["composite_background"]` dict is present — NEVER from metadata — so the solo-proxy render and
+  its cache key stay unchanged.
+- Joins: no transitions → concat-demuxer copy (legacy byte-identical, duration = sum of cuts); any
+  transition → `_transitions_concat` (xfade+acrossfade). Then optional subtitle burn (re-encode
+  preserving 10-bit + color tags when HDR) and audio_path mux (`-map 0:v -map 1:a -shortest`).
+- Return data: cut_count, has_subtitles, has_mixed_audio, profile, canvas, `used_xfade`,
+  `transitions_applied`, `xfade_filtergraph`, warnings; artifacts `[output_path]`. On CalledProcessError,
+  surface the ffmpeg stderr tail. Clean up temp segments/dirs in `finally`.
+
+### Segment & canvas helpers
+- `_resolve_canvas(edit_decisions, profile_name)` (static) → `(error, w, h, fps)`,
+  `metadata.compose_target` > profile (`lib.media_profiles.get_profile`) > 1920×1080@30; compose_target
+  must be numeric, positive, and even (yuv420p 4:2:0) or it errors.
+- `_segment_base_vf(cut, idx, target_w, target_h, fps_str, *, bg_color="black", bg_image=None,
+  apply_transform=False, seg_seconds=None, hdr_vf_prefix="")` (static) → `(error, vf_parts, complex_spec)`.
+  Crop FIRST in source pixels (positive numeric w/h required); HDR prefix next (source resolution).
+  apply_transform=False → the exact legacy single-input tail (scale…decrease, pad…color, setsar=1, fps),
+  `complex_spec=None`. apply_transform=True → resolve `transform.scale` (uniform number OR `{x,y}` per-axis
+  → even box ≥2) and `transform.position` (named anchor via `_split_anchor`/`_anchor_xy`, or `{x,y}`); fit
+  the clip inside its box aspect-preserved. Fully-on-canvas + no bg_image → a single `pad`; otherwise a
+  multi-input `complex_spec` (`{inputs, filtergraph, vlabel}`) overlaying the fg on a bg (looped image
+  object-fit:cover, or a lavfi color source) — requires a positive `seg_seconds` to bound the bg input.
+- `_is_image` (`_IMAGE_EXTENSIONS` png/jpg/jpeg/bmp/tiff/tif/webp), `_has_alpha` (yuva/rgba/… pix_fmt via
+  `_shared.probe_output` — alpha assets can't be zscale-lifted into HDR), `_normalize_ffmpeg_color`
+  (`#RRGGBB`→`0xRRGGBB`, pass `0x…` and bare names, junk → fallback), `_has_audio_stream` (ffprobe).
+
+### Transitions (FFmpeg xfade)
+`_XFADE_MAP` maps names → xfade transitions with snake_case aliases; dissolve/crossfade collapse to
+`fade` (so beat_cutter/template output renders on FFmpeg, not as a route-to-Remotion signal); wipe/slide/
+circle/zoom families included. `_HARD_CUT_NAMES = {"","cut","none","hard","hard_cut"}`.
+`TRANSITION_DUR_MIN/MAX/DEFAULT = 0.1/2.0/0.5`. `_clamp_transition_duration` clamps to [0.1,2.0].
+`_resolve_joins(cuts, metadata)` → per A→B join (None for hard cut, else `{type, duration}`):
+`B.transition_in` wins over `A.transition_out`; duration from the winning cut → metadata
+`default_transition_duration` → 0.5; unknown names degrade to `fade` WITH a warning.
+`_transitions_concat(...)` chains xfade (video, after `settb=AVTB` on each input) + acrossfade (audio),
+splicing hard-cut joins as the concat filter so mixed timelines render in one pass; xfade offsets are
+computed from POST-normalization PROBED segment durations (`_probe_duration_seconds`) — requested in/out
+math drifts via fps rounding + AAC priming. Cap each fade by material available on both sides (error if
+<~0.1s). Encode via `_video_output_args` + AAC 192k/48k/stereo.
+
+## `_render` — high-level, preferred
+Validate edit_decisions/asset_manifest; resolve asset IDs (id→path lookup, substitute into
+`cuts[].source`); run `_pre_compose_validation` (blocker gate). REQUIRE `edit_decisions.render_runtime`
+(missing = governance violation error). Route: `hyperframes` → `_render_via_hyperframes`; `ffmpeg` →
+`_render_via_ffmpeg`; `remotion` (default) → `_remotion_render` when `_needs_remotion(cuts)` else FFmpeg.
+A chosen runtime failing is a BLOCKER — no silent downgrade. Profile from `profile`/`output_profile`;
+subtitle burn from `options`/edit_decisions. On success + output exists, run `_run_final_review` and
+attach it to `data` (`final_review`, `final_review_status`); status "fail"/"revise"→re_render downgrades
+the ToolResult to failure.
+- `_needs_remotion(cuts)` → True when any cut is an image, a Remotion scene type, or carries an
+  animation/transform.animation; pure-video also → True (Remotion handles video via OffthreadVideo).
+  Transitions are NOT a trigger (FFmpeg xfade handles them). Never consulted when render_runtime=ffmpeg.
+- `_get_composition_id(renderer_family)` (classmethod) → Remotion composition id from a static map
+  (explainer-data/teacher/animation-first/product-reveal/screen-demo → Explainer; cinematic-trailer/
+  documentary-montage → CinematicRenderer; presenter → TalkingHead; social-reel → SocialReel), ValueError
+  listing valid families otherwise.
+- `_build_theme_from_playbook(playbook_name, composition_data)` → a Remotion ThemeConfig from the loaded
+  playbook's `visual_language.color_palette` + `typography` + `motion.pace` (gradient list → first stop;
+  Inter/JetBrains-Mono font defaults; springConfig + transitionDuration from pace; caption highlight/
+  background colors from palette luminance). Falls back to edit_decisions metadata colors/fonts, else None.
+- `_pre_compose_validation(edit_decisions, resolved_cuts, scene_plan)` → None to proceed, or a failure
+  ToolResult that BLOCKS: (1) DeliveryPromise violations (`metadata.delivery_promise`), (2) slideshow-risk
+  verdict "fail" (`score_slideshow_risk`; "revise" only warns), (3) missing `renderer_family` (must be set
+  at proposal). Import/eval errors warn and proceed.
+
+## `_render_via_ffmpeg` — explicit FFmpeg render
+Resolve canvas; split `resolved_cuts` into base (layer≠"overlay") and PiP overlay-layer cuts (fail if no
+base). Bridge `edit_decisions.audio`→audio_path, `.subtitles`→subtitle_path, `metadata.background`→
+`composite_background`. Build PiP overlay entries via `_build_layer_overlay_entries`, `_compose` the base,
+then `_overlay` the PiP + graphics onto it (unlink the base intermediate — no `out_base.mp4` left behind),
+apply structured audio, run final_review. Return data incl. `layer_overlay_cuts`; clean up the PiP temp
+dir in `finally`.
+- `_build_layer_overlay_entries(all_cuts, ..., temp_dir)` → `(error, entries)`. Two passes: validate each
+  overlay-layer cut (positive speed; numeric in/out with span>0; source exists and is not an image;
+  `transform.scale` in (0,1] default 0.30; `transform.position` a NAMED anchor default "top-right"; crop
+  positive) while tracking the base timeline start (accounting for xfade join shortening via
+  `_resolve_joins` — parity with the base concat); then trim+crop+setpts each cut, strip audio, probe
+  dims, size width = canvas_w×scale (even) with aspect-preserved height, place via `_anchor_xy`, and emit
+  an overlay dict with `pts_offset_seconds == start_seconds` (first frame lands at render start).
+- `_split_anchor(anchor)` (classmethod) → `(vertical, horizontal)` from a name like "bottom-center"
+  ("center"→("center","center")), else None. `_anchor_xy(parts, cw, ch, bw, bh, margin)` → pixel (x,y)
+  (left=margin, center=(cw-bw)//2, right=cw-bw-margin; likewise vertical).
+- `_cleanup_dir(d)` (static) → best-effort flat unlink + rmdir, swallow OSError.
+
+## `_render_proxies` — render-once / NLE model
+Render each scene SOLO to a content-cached proxy ONCE, then hand back an FFmpeg-runtime assemble EDL so
+re-editing the ARRANGEMENT (order, transitions, speed, transform/crop, audio, subtitles) is a cheap
+concat; only a scene whose CONTENT changes re-renders. Uses `tools.video.render_cache` (`ProxyCache`,
+`file_content_hash`). Require a valid locked `render_runtime` (remotion|hyperframes|ffmpeg). Resolve
+canvas; fold a `playbook_identity` (ref + content-hash) into keys for remotion/hyperframes (a playbook
+edit must miss cache; ffmpeg ignores playbook). `proxies_dir` default `renders/proxies`.
+- HDR (ffmpeg runtime only — remotion/hyperframes proxies are SDR by construction): detect HDR among
+  on-disk video sources (`is_hdr_source`); pick timeline mode from `hdr_policy`: auto→preserve when any
+  HDR (else SDR), preserve (force; blocker if no 10-bit HEVC encoder; mixed HDR+SDR also needs zscale to
+  promote), tonemap/sdr→force SDR. One shared target color from the first HDR source. Reject overlay-layer
+  cuts (can't flatten PiP into a solo proxy). Accumulate hdr_warnings; report the decision.
+- Per cut: reject overlay layer; compute a source content-hash (file sha, else "unresolved:"+asset hash);
+  validate duration; build a solo single-cut edit_decisions (strip transition/speed/transform/reason;
+  ffmpeg keeps the SOURCE trim window, remotion/hyperframes re-zero to 0..duration; BAKE crop into the
+  ffmpeg proxy at native resolution); compute a per-scene hdr_encode + identity; build a cache identity
+  (render_runtime, renderer_family, canvas, playbook_identity, trim window, solo spec minus source,
+  source_hash, scene hdr identity) → key; content-addressed filename `{scene_id}.{key[:16]}.mp4`. Under
+  `cache.lock(key)`, on `cache.get` hit record `cache_hit=True`; on miss call `_render_scene_proxy`, then
+  `cache.put`. Fail with scene context on a scene error.
+- `_render_scene_proxy(render_runtime, solo_ed, asset_manifest, proxy_path, profile, hdr_encode)` → mkdir
+  parent then route: ffmpeg → `_compose(solo_ed, hdr_encode=…)`; remotion → `_remotion_render`;
+  hyperframes → `_render_via_hyperframes`.
+- `_build_assemble_edl(original, proxies, hdr_meta)` → an edit_decisions with `render_runtime="ffmpeg"`:
+  one cut per proxy (source=proxy_path, in=0, out=duration) carrying the original cut's speed/transition_*
+  and transform MINUS crop (crop is already baked — re-applying on a canvas-sized proxy goes OOB); pass
+  through renderer_family/overlays/audio/music/subtitles/transitions; metadata drops
+  proposal_render_runtime, sets `assemble_of_proxies=True` + `proxy_render_runtime`, and attaches
+  `metadata["hdr"]` when hdr_meta (signals `_render_via_ffmpeg` to keep 10-bit through concat/overlays).
+  MUST be rendered via operation="render" (NOT compose — compose drops overlays/layer routing).
+- Return: `proxies[]` (scene_id, proxy_path, duration_seconds, cache_hit), `assemble_edit_decisions`,
+  `n_scenes`/`n_cached`/`n_rendered`, canvas, render_runtime, `hdr_handling` (policy, source_hdr,
+  decision, encoder, target), warnings; optionally persist `assemble_edl_path`. When `output_path` is
+  given, also call `_render` on the assemble EDL to produce the final video and merge warnings.
+
+## `_render_via_hyperframes` / `_remotion_render`
+- `_render_via_hyperframes(...)` → delegate to `HyperFramesCompose.execute(...)` (playbook, edit_decisions,
+  asset_manifest, resolved_cuts, quality/fps/strict/skip_contrast). Unavailable = explicit BLOCKER (no
+  silent swap). On success run the same final_review.
+- `_remotion_render(inputs)` → `npx remotion render <composer>/src/index.tsx <composition_id> <output>
+  --props <json>` from `_composer_dir()` (so npx finds node_modules; timeout ~600s). STAGE local assets
+  into `public/_staged/` (nested `_stage_local`: pass through http/https/data URIs; `file://`→raw path
+  incl. Windows `file:///C:/`; resolve existing relative paths; copy absolute/resolved to
+  `_staged/{sha1(path)[:12]_name}`, memoized) and rewrite cut source/backgroundVideo/backgroundImage/
+  images + audio music/narration `.src` — Remotion v4 rejects `file://`. Build props (composition_data or
+  edit_decisions + themeConfig via `_build_theme_from_playbook`); optional `--width/--height` from profile;
+  clean up the props file. Blocker when Remotion unavailable; require output to exist post-render.
+
+## Overlays, text, keyframes (`_overlay`)
+Composite `overlays[]` onto `input_path` via ONE `filter_complex`. Sort by ascending `track` (stable, so
+array order breaks ties; default 0). Per overlay build inputs + filter parts by kind:
+- Text (`_is_text_overlay`: type=="text" OR text present with no asset) → `_build_drawtext_filter`.
+- Image (png/jpg/webp/bmp/tif) → static or keyframed; aspect-preserve when one dim omitted; opacity via
+  colorchannelmixer (static) or geq (keyframed).
+- GIF → gif demuxer with `-ignore_loop 0` + `-t end_seconds` to BOUND the infinite loop (else framesync
+  on an unbounded input encodes forever — require end_seconds).
+- Video → input as-is; `pts_offset_seconds` shifts the stream so frame 0 lands at that project time.
+Validate width/height>0, opacity∈[0,1], audio_mix.volume∈[0,2], pts_offset≥0. Audio: build an amix chain
+(adelay to start, atrim to the window, volume) anchored on the base track (anullsrc when the base is
+silent), `normalize=0`, `duration=first` (output length = base length); skip-with-warning when an overlay
+source has no audio. Keyframed overlays → `_keyframe_overlay`. HDR base → promote opaque overlays into the
+HDR space (`:format=yuv420p10`), warn that alpha overlays composite in SDR (color approximate) and that
+drawtext onto an HDR base is approximate. Timeout ~1800s. Return data: `overlay_count`,
+`audio_mixed_count`, warnings.
+- `_escape_drawtext_value(value)` (static) → dual-layer ffmpeg escaping (graph parser then option parser;
+  `\` and `'` → four backslashes, `:` → `\:`, `,;[]` → one backslash); `%` NOT escaped (expansion=none).
+- `_resolve_drawtext_font(font_path, idx)` → `(file, error)`: explicit path if it exists, else the
+  `text_card_gen._FONT_CANDIDATES` bold-sans list, else an error (`.ttc` loads face 0).
+- `_validate_ff_color(value, label)` (classmethod) → error string unless the value matches a safe color
+  charset (name / `#RRGGBB` / `0xRRGGBB[AA]` / `name@alpha`) — blocks filtergraph option injection.
+- `_build_drawtext_filter(ov, i, prev_label, out_label)` → `(error, filter, warnings)`: validate text/
+  font_size/color/opacity/box; position priority keyframed x/y > `{x,y}` > flat x/y > named anchor
+  (default bottom-center, ~5% canvas margin, expressions in text_w/text_h); static opacity<1 combines
+  multiplicatively with any keyframed alpha; warn that scale/rotation keyframes aren't rendered (drawtext
+  animates x/y/alpha only); emit drawtext with `expansion=none` and an `enable=between(t,…)` window.
+- Keyframe machinery: `_kf_points(keyframes, dim)` → sorted `(t, value)` for a dimension;
+  `_piecewise_linear_expr(pts, var="t")` → an ffmpeg if(lt(…)) interpolation tree, constant-held outside
+  the range (single point → constant; `var="T"` for geq frame-time); `_ease_progress(name, u)` samples
+  easing (ease-in u², ease-out 1−(1−u)², ease-in-out smoothstep, spring damped-sine overshoot, else
+  linear; e(0)=0, e(1)=1); `_eased_points(keyframes, dim)` bakes easing per interval by subdividing into
+  `EASING_SUBDIVISIONS` segments (linear/no-op passes through; "step" holds then jumps); `_simple_fade_plan
+  (opac)` fast-paths pure fade-in/out (`[]` when constant-opaque; `None` → render via geq for dips/partials;
+  else `fade=t=in/out`); `_probe_dimensions(path)` → `(w,h)` or None; `_keyframe_overlay(...)` →
+  `{filters, warnings}` building the overlay chain — opacity MUST precede an `eval=frame` scale
+  (colorchannelmixer for static/constant, fade for a simple plan, else geq per-pixel alpha), scale is
+  center-anchored when natural dims are known (warn + top-left otherwise), position keyframed or from a
+  default; warn that rotation keyframes aren't supported.
+
+## Structured audio
+`edit_decisions.audio` is "structured" when a stem carries asset ids: `music` (object OR array of regions,
+each `{asset_id, start_seconds, end_seconds, volume, fade_in_seconds, fade_out_seconds, ducking}`),
+`narration.segments[].asset_id`, `sfx[].asset_id` — vs a pre-mixed `audio.path`.
+- `_music_regions(audio)` → normalize music object|array → a list of regions.
+- `_has_structured_audio(audio)` → any stem has asset_id/segments.
+- `_structured_audio_tracks(audio, resolve)` → `{tracks, ducking}` (speech/music/sfx roles anchored at
+  start_seconds, per-region music with its own volume/fades, ducking from the first region that sets it),
+  or None; pure I/O.
+- `_mix_structured_audio(audio, asset_lookup, workdir, base_audio_path=None)` → resolve stems (asset
+  lookup, else literal path), call `AudioMixer.full_mix(tracks, ducking, normalize=True)` → a mixed m4a,
+  or None. A `base_audio_path` (footage VO) is prepended as a speech track so music ducks under it.
+- `_apply_structured_audio_mix(output_path, edit_decisions, asset_manifest, inputs)` → post-assemble
+  remux, None on success / warning string on non-fatal skip. Skip when `audio.path` exists or no
+  structured audio. Heuristic: a NARRATION stem REPLACES the base audio; NO narration → extract the
+  base-clip audio and LAYER music+sfx over it (ducking preserves the VO). Remux `-map 0:v -map 1:a -c:v
+  copy` (HDR-safe).
+
+## `_burn_subtitles` / `_encode` + style/atempo helpers
+- `_burn_subtitles(inputs)` → bake an ASS/SRT file via the `subtitles=` filter with a `force_style` from
+  `_build_subtitle_style` (escape the path colon), copy audio, use codec/crf; artifacts `[output_path]`.
+- `_encode(inputs)` → re-encode to codec/crf/preset (defaults libx264/23/medium), optionally applying a
+  media profile (resolution/fps) and `options.two_pass_encode`; HDR via `_video_output_args`.
+- `_resolve_subtitle_style(explicit, edit_decisions, playbook)` → layered dict (explicit >
+  `edit_decisions.subtitles.style` > playbook typography/palette > defaults: Inter, 28, bold, outline 2,
+  margin_v 40, alignment 2). `_build_subtitle_style(style)` → the ASS `force_style` string.
+- `_build_atempo(factor)` → chain atempo stages (each limited to 0.5–2.0) to reach an arbitrary factor.
+- `_parse_probe_fps(fps_str)` (static) → parse `"num/den"` (or a bare float) → fps, 0.0 on error.
+
+## Governance / final_review + transcript
+- `_run_final_review(output_path, edit_decisions, proposal_packet, narration_transcript_path,
+  script_text)` → a structured `final_review` `{version, output_path, status, checks, issues_found,
+  recommended_action}` from: technical_probe (ffprobe container/duration/resolution/fps/codec/audio),
+  visual_spotcheck (sampled frames, crude black-frame heuristic), audio_spotcheck (volumedetect →
+  silence/clipping/narration/music inference), promise_preservation (RUNTIME-SWAP detection: proposal vs
+  edit_decisions render_runtime, fallback `metadata.proposal_render_runtime`, SKIPPED when
+  `assemble_of_proxies` — a two-phase ffmpeg assemble is not a swap; plus DeliveryPromise silent-downgrade
+  check), subtitle_check, and transcript_comparison. Critical issues (silent downgrade, delivery
+  violation, effective silence, ffprobe fail, TTS punctuation leak) → status "revise"/re_render; no
+  container → "fail".
+- `_read_text_file`, `_tokenize` (lowercase word tokens, keep hyphens/apostrophes), and
+  `_compare_transcript_to_script(transcript_path, script_text)` → `{transcript_matches_script,
+  word_accuracy, script_word_count, transcript_word_count, spurious_punctuation_words, issues}`: flag
+  transcript words in a TTS-punctuation-leak set that aren't in the script (catches Chirp3-HD reading "."
+  as "dot"), and require word_accuracy ≥ 0.9 (set-overlap, order-insensitive) with no leaks to match.
+
+% BEHAVIORAL NOTES — keep the spec ABSTRACT and let the tests pin exact strings/enums/constants:
+%   HDR: tests/tools/test_hdr_detection.py, test_ffmpeg_hdr_preserve.py — is_hdr_source keys
+%   (hdr/kind/bit_depth/transfer), get_info hdr_encode shape, preserve→yuv420p10le + bt2020/HLG tags,
+%   mixed→zscale promote, tonemap→explicit bt709, data.hdr_handling, assemble metadata.hdr.enabled/kind,
+%   distinct preserve/tonemap cache keys, pure-SDR unchanged.
+%   Transitions/canvas/transform: test_compose_transitions.py, test_ffmpeg_clip_transform_background.py —
+%   transition_in wins, the _XFADE_MAP names + [0.1,2.0] clamp + default_transition_duration, used_xfade/
+%   transitions_applied/xfade_filtergraph, concat fallback duration, compose_target>profile + even-dim
+%   validation, scale number|{x,y}, named anchors + {x,y}, metadata.background color(#→0x)/image(→black
+%   fallback), legacy letterbox byte-identical, PiP position must be a named anchor.
+%   Overlays/keyframes/text: test_compose_overlay_v2.py, test_video_compose_keyframes.py,
+%   test_compose_text_layers.py, test_ffmpeg_render_overlays.py, test_ffmpeg_image_cut_and_track.py —
+%   z-order by track (stable), width-only aspect, GIF bounded loop, audio_mix.volume∈[0,1] + window RMS,
+%   silent-source skip+warn, easing set + EASING_SUBDIVISIONS + center-anchored scale, _simple_fade_plan
+%   vs geq, colorchannelmixer-before-scale, drawtext dual-escape + expansion=none + anchors + color/font
+%   injection rejection + scale-keyframe warning, still-image cut loops + out>in, single-pass no-overlay
+%   leaves no _base file, asset_manifest id resolution.
+%   Structured audio: test_compose_structured_audio.py — _has_structured_audio true for music/narration/
+%   sfx & false for path, tracks roles + ducking spec, music array per-region truncation, narration
+%   replaces vs layers-over-base-VO.
+%   Governance/proxies: test_documentary_governance.py, tests/contracts/test_render_proxies.py,
+%   tests/qa/test_05_video_compose.py — render_engines keys, unavailable runtime blocker + unknown-runtime
+%   error, _get_composition_id("documentary-montage")=="CinematicRenderer", ProxyCache key content-
+%   sensitivity + orphan miss, assemble EDL forces ffmpeg + assemble_of_proxies + source→proxy_path,
+%   render_proxies data (proxies/n_rendered/n_cached), distinct windows → distinct keys, project-relative
+%   source resolution, and the compose/burn_subtitles/encode/overlay op smoke paths.

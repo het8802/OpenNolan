@@ -1,0 +1,157 @@
+% Generate `web/src/studio/StudioPreview.jsx`: the Studio preview stage with a real transport
+% (play/pause) and WYSIWYG overlay editing, in two modes:
+%  • SOURCE — a rough pre-render preview. A canvas-aspect "safe frame" (the output 1080×1920 etc.)
+%    is CONTAIN-fit inside the stage; the clip is letterboxed inside it (mirroring the renderer's
+%    scale+pad) and EVERY overlay visible at the playhead is composited on top in CANVAS coordinates,
+%    z-ordered by `track`. The PLAYHEAD is the master clock; a single persistent <video> (or <img>
+%    for a still cut) is slaved to it. Overlays and the main clip are draggable on the canvas.
+%  • RENDER — plays the composed MP4 (preview == export; overlays are already baked in).
+%
+% Imports: `useCallback, useEffect, useMemo, useRef, useState` from 'react'; `* as api` from
+% '../api.js'; `* as interp` from '../editor/interp.js'; from './model.js' — `fmtTime,
+% previewAudioTracks, overlayType, isImageSource, clipBox, clipPositionXY`; default `dbg` from
+% '../debug/recorder.js'.
+%
+% Class names (`st-*`) are the CONTRACT with web/src/styles.css — keep them exact. The safe-frame,
+% the `.st-frame-media` <video>/<img> (video vs <img> for an image cut), the `.st-ov-canvas` overlay
+% compositing (visible-at-playhead filter + ascending-track sort + intrinsic-image sizing + video
+% overlay preload/mute), pointerdown-selects-overlay, the `.st-clip-box` uniform/non-uniform scale
+% box, and the color/image project background are all pinned by StudioPreview.test.jsx.
+
+## Props
+`projectId, doc, canvas, playhead, previewMode, renderPath, renderVersion, playing, selection,
+sourceMetas = {}, hidden, onScrub, onPlayingChange, onSelectOverlay, onOverlayPosition,
+onOverlayDragBegin, onClipPosition, onClipDragBegin`.
+
+## Per-track preview hide (view-only; doc/export untouched)
+`hidden` is a Set of keys this canvas skips: `main`, `ov:<track>`, `aud:<kind>`. `isHidden(key)`
+(guarded for a missing `.has`). Hidden `main` → the clip is replaced by a "Video track hidden — click
+the eye in the timeline to show it" message; hidden `ov:<track>` → those overlays drop; hidden
+`aud:<kind>` → filtered out of the audio set so its <audio> unmounts and stops.
+
+## Derivation from the doc at the playhead
+`hit = interp.cutAtTime(doc, playhead)` → `cut`, `sourceRef = hit.cut.source`, `sourceTime`.
+`dur = interp.timelineDuration(doc)`. `isImg = isImageSource(sourceRef)`. `overlays = doc.overlays`.
+`background = interp.getBackground(doc)`.
+
+## Safe-frame sizing and the frame zoom `scale`
+The clip + overlays are absolutely positioned, so measure the STAGE with a ResizeObserver and set the
+frame's px size by CONTAIN-fitting `canvas`'s aspect into the stage rect (`frameSize = {w,h}` state;
+re-measure on previewMode/canvas change). `scale = frameSize.w / canvas.width` (0 until measured) —
+the zoom mapping CANVAS px → frame px everywhere. Intrinsic asset sizes (unsized image/video) are
+measured on load into a `natDims` map keyed by `asset_id` (`measureNat(id,w,h)`, dedup identical
+updates), so an unsized overlay draws at intrinsic-px × `scale` (matching the renderer).
+
+## Refs and the live/mode snapshots
+Refs: `srcRef` (source <video>), `renRef` (render <video>), `frameRef`, `stageRef`, `ovDrag`,
+`clipDrag` (drag-teardown fns), `audioEls` (Map key→<audio>), `ovVideoEls` (Map overlayIndex→<video>).
+`playheadRef` mirrors `playhead`; `liveRef` mirrors `{doc, previewMode, dur, onScrub, onPlayingChange,
+audioTracks: visibleAudioTracks}`; `modeRef` mirrors `{playing, previewMode, isImg}`. These let the
+rAF loop and media event listeners read fresh values WITHOUT re-subscribing per frame.
+`audioTracks = useMemo(previewAudioTracks(doc))`; `visibleAudioTracks` filters out `aud:<kind>` hides.
+
+## Audio / overlay-video sync helpers (module scope)
+- `syncAudioEls(els, tracks, t, active)` — drive each music/narration/sfx <audio> to project time.
+  `local = t - tr.start`; the window END bounds narration AND any track with a finite `end`
+  (`min(end-start, assetDur)`, else assetDur). Audible when `active && local ∈ [-0.05, windowEnd)`:
+  set clamped volume, seek to `max(0,local)` only when drift > 0.3, play if paused; else pause.
+- `pauseAllAudio(els)` — pause every element in the Map (used for <audio> and overlay <video>).
+- `syncOverlayVideos(els, overlays, t, {play})` — drive each registered overlay <video> (keyed by
+  index) so a dropped video overlay is WYSIWYG (plays live, no re-render). `target = max(0, t-start)`;
+  outside `[start,end]` (small epsilon) → pause. When `play`: seek on drift > 0.34 (readyState≥1),
+  play if paused & readyState≥2. When paused (scrub): pause, then seek-to-frame on drift > 0.05.
+
+## The paused-scrub seek chaser (source <video>)
+Setting currentTime on every scrub tick piles seeks onto a mid-seek element and the frame freezes;
+chase the LATEST target instead. `seekTargetRef` holds the DESIRED source time; `chaseSeek`
+(useCallback, no deps — reads only refs) issues a seek only when NOT playing, mode is source, not an
+image, the element is ready (readyState≥1) and NOT already seeking, and drift > 0.05 (log
+`preview.seekReq` via `dbg`). A source+paused effect (deps previewMode/sourceRef/sourceTime/playing/
+isImg/chaseSeek) pauses the video, records `seekTargetRef = sourceTime` (null when no source), and
+kicks the chaser. A second effect attaches `seeking/seeked/stalled/waiting/error/loadedmetadata/
+loadeddata/canplay` listeners that mirror state to `dbg` and RE-CHASE on `seeked/loadedmetadata/
+loadeddata/canplay` (the convergence that lands the final frame).
+
+## RENDER-mode transport
+One effect plays/pauses `renRef` on `playing` (deps previewMode/playing/renderPath); another seeks it
+to `playhead` when paused and drift > 0.25.
+
+## Master clock (rAF loop, dep = `playing` only)
+While playing, a `requestAnimationFrame` loop reading `liveRef`/`playheadRef`:
+- render mode → mirror `renRef.currentTime` out via `onScrub`.
+- source mode → advance the playhead by wall-clock `dt` (clamped ≤ 0.05s), `onScrub(t)`. At `t ≥ dur`:
+  snap to `dur`, `onPlayingChange(false)`, pause the source video and all audio, stop. Otherwise slave
+  the source <video> to the cut under `t` (via `interp.cutAtTime`): set `playbackRate` to the cut's
+  `speed` (min 0.0625), seek on drift > 0.34 (readyState≥1, not seeking), play if paused & readyState≥2.
+  Then `syncAudioEls(...,true)` and `syncOverlayVideos(...,{play:true})`.
+Cleanup cancels the frame. Separate effects: source+paused seeks each overlay video to its frame
+(`{play:false}`) on playhead/doc change; any non-(playing&source) state pauses all audio AND overlay
+videos; an unmount effect pauses the source video + audio + overlay videos and runs any live drag
+teardown.
+
+## Canvas dragging
+- `beginOverlayDrag(e, index)` — selects the overlay, then drags it to set `position.{x,y}` in CANVAS
+  px. Origin: for an object-positioned overlay read the keyframed/`position` x/y directly (NOT the
+  post-transform rect, which is the SCALED box → would jump); anchored text (string/null position on a
+  text overlay) has no numeric x/y, so derive its origin from the element rect relative to the frame.
+  Window pointermove/up/cancel listeners; only past `OV_DRAG_THRESHOLD` (3px) does it become a drag —
+  then fire `onOverlayDragBegin` ONCE (one undo step) and stream rounded `onOverlayPosition(index,
+  {x,y})` per move. Keep a teardown ref.
+- `beginClipDrag(e)` — same model for the MAIN clip → `onClipPosition(cut.id, {x,y})` (origin =
+  `clipPositionXY(cut, sourceMetas[sourceRef], canvas)`, snapshot via `onClipDragBegin`). A press that
+  never becomes a drag toggles play (`onPlayingChange(!playing)`) — preserves click-to-play. No cut /
+  no handler / unmeasured frame → just toggle play.
+
+## Layout
+`clipBoxStyle`: before measuring (scale≤0) or no cut → `{inset:0}` (fill the frame so the persistent
+<video> never remounts); else `left/top/width/height` in frame px from `clipBox(meta, canvas,
+cut.transform.scale)` and `clipPositionXY(cut, meta, canvas)` × `scale` — pass `transform.scale`
+THROUGH (uniform number OR per-axis `{x,y}` box) so the preview box == the rendered box.
+`visibleOverlays`: `overlays` with index, drop `ov:<track>`-hidden and those whose `[start,end]`
+window (default `end=start`) excludes the playhead, sorted ASCENDING by rounded `track` (lower first →
+higher tracks paint last/on top, matching the renderer's z-order).
+
+## renderOverlay({o, i})
+Selected when `selection.kind==='overlay' && selection.index===i`. Interpolate `opacity/scale/x/y`
+keyframes at the playhead (`interp.interpolateAt`), falling back to `o.opacity`/`o.position`.
+`common` = `className "st-ov-canvas"` (+ ` sel`), base style `{opacity, zIndex: track+1}`,
+`onPointerDown → beginOverlayDrag`.
+- Anchor text (text overlay, string/null position) → absolute at `TEXT_ANCHOR_CSS[pos||'center']`
+  (its left/top + `translate(tx,ty)`), containing `renderTextInner(o, scale)`.
+- Otherwise absolute at `x/y` (canvas px × scale); box width = explicit `position.width` else
+  `natDims[asset_id].w`, `× scale` (undefined until measured, height auto → aspect preserved);
+  `transform: scale(kfs)` center-anchored when the scale keyframe ≠ 1 (matches FFmpeg's center scale).
+  Then branch by `overlayType`: `text` → `renderTextInner`; `video` → a <video> registered into
+  `ovVideoEls` (src `api.sourceUrl`, `muted` unless `o.audio_mix?.enabled`, playsInline, preload=auto,
+  onLoadedMetadata → measureNat with videoWidth/Height); else an <img> (draggable false, onLoad →
+  measureNat with naturalWidth/Height).
+
+## renderTextInner(o, scale) — module scope
+A `span.st-ov-text` approximating the FFmpeg drawtext box: `fontSize = (o.font_size||48)*scale`;
+padding from `(o.box.padding ?? 10)*scale` (as `${pad*0.4}px ${pad}px`); background
+`rgba(0,0,0,{box.opacity ?? 0.5})` when opacity > 0 else transparent; color `o.color||'white'`;
+text `o.text||'text'`.
+
+## Markup
+Root `div.st-stage` (ref stageRef). Always mount the `visibleAudioTracks` as keyed hidden <audio>
+(src `api.sourceUrl`, preload=auto, registered into `audioEls`).
+- SOURCE → `div.st-safe-frame` (ref frameRef, explicit frameSize w/h, `background` = a color bg).
+  Image background (`background.type==='image'`) → an `img.st-bg-media` cover layer. When a source
+  exists and `main` isn't hidden → `div.st-clip-box` (+ ` sel` when the cut is selected) styled by
+  `clipBoxStyle`, onPointerDown `beginClipDrag`, wrapping an `img.st-frame-media` (image cut) or the
+  ONE persistent `video.st-frame-media` (no `key` — src follows the playhead), playsInline preload=auto.
+  Else a `.st-stage-empty` (hidden-track vs "No clip under the playhead."). Then, once `scale>0`, a
+  `div.st-ov-layer` of `visibleOverlays.map(renderOverlay)`. When paused with a source, a
+  `button.st-stage-play` ("▶", aria-label Play) that plays.
+- RENDER → when `renderPath`, a `video.st-video` (src `api.fileUrl(projectId, renderPath,
+  renderVersion)`, controls, playsInline) wired: onPlay/onPause/onEnded → `onPlayingChange`;
+  onTimeUpdate/onSeeked → `onScrub` when appropriate. Else `.st-stage-empty` "No render yet — hit
+  Render.".
+- Footer `div.st-stage-tc`: source mode → `src {fmtTime(sourceTime)} · timeline {fmtTime(playhead)} /
+  {fmtTime(dur)}`; render mode → just the timeline pair.
+
+## Constants
+`OV_DRAG_THRESHOLD = 3`. `TEXT_ANCHOR_CSS`: the 9 named anchors (top/center/bottom × left/center/
+right) → `{left, top, tx, ty}` CSS placing text by that anchor inside the frame (edges at 3%/4%/96%/
+97%, centers at 50%, with the matching translate to pin the box corner/edge). This approximates the
+renderer's drawtext anchor placement.

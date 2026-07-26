@@ -1,0 +1,175 @@
+% Generate `desktop/main.js`: the OpenNolan Electron main process.
+% It is a thin shell that spawns the existing FastAPI backend as a child process,
+% waits until it is healthy, then opens a window that loads the UI *over http* from
+% that same backend — same-origin, so the frontend's relative `/api` calls work with
+% no CORS and none of the file:// asset/fetch breakage.
+%
+% `'use strict'`, CommonJS `require`. Node builtins: child_process.spawn, path, http,
+% https, net, fs, os. Electron: app, BrowserWindow, dialog, shell, session, ipcMain.
+%
+% Two run modes:
+%   Prod (`npm start`):  backend on a free port serves web/dist -> window loads http://127.0.0.1:<port>
+%   Dev  (ELECTRON_DEV=1): window loads Vite on http://localhost:5173; reuse an
+%                          already-running backend on :8000, else spawn one.
+% `DEV = process.env.ELECTRON_DEV === '1'`. `REPO_ROOT = path.resolve(__dirname, '..')`.
+
+## Paths & interpreters
+
+Branch dev vs packaged on `app.isPackaged` (NOT DEV — `process.resourcesPath` is only
+meaningful when packaged). Provide helpers:
+
+- `codeRoot()` — read-only backend/code tree. Packaged: `resourcesPath/backend`; dev: REPO_ROOT.
+- `webDistIndex()` — `codeRoot()/web/dist/index.html` (the built UI ships inside the backend tree
+  because FastAPI serves it from code_root()/web/dist).
+- `bundledPython()` — base interpreter that PROVISIONS the venv. Packaged: `resourcesPath/python/bin/python3`;
+  dev: repo `.venv/bin/python` if present, else `'python3'`.
+- `venvPython()` — the managed venv interpreter at `<home>/runtime/venv/bin/python`.
+- `uvBin()` — bundled uv. Packaged: `resourcesPath/uv/uv`; dev: `OPENNOLAN_UV` or `'uv'`.
+- `nodeDir()` — bundled Node runtime dir. Packaged: `resourcesPath/node`; dev: null.
+  `nodeBin()` — `nodeDir()/bin/node` or null in dev.
+- `pythonBin()` — which Python runs the BACKEND. `OPENNOLAN_PYTHON` override wins; packaged: the
+  provisioned venv python if it exists, else `bundledPython()`; dev: repo `.venv` then `'python3'`.
+
+`home` throughout = `process.env.OPENNOLAN_HOME || app.getPath('userData')`.
+
+## Module state
+
+Track: `backend` (uvicorn child or null), `backendPort`, `mainWindow`, `setupWin`,
+`shuttingDown`, `backendDead` (set when our child exits so the health wait bails fast),
+`fatalShown` (show at most one fatal dialog), `provisionChild`, `pendingUpdate`, and a
+25-line ring buffer `stderrTail` of recent backend stderr.
+
+## Crash reporting (Electron layer)
+
+The backend's PostHog reporter can't see main-process crashes, renderer "aw snap"s, or the
+case that matters most — the backend NEVER BECOMING HEALTHY — so POST straight to PostHog.
+Constants (env-overridable): `POSTHOG_KEY` (public write-only key, default
+`phc_s9P9JiTbBgmzqYGwug8ciiLnWsCSJF62Vz5UGRJsPGBE`), `POSTHOG_HOST` (default
+`https://us.i.posthog.com`).
+
+- `scrubText(s)` — collapse `os.homedir()` to `~`, then redact absolute paths under
+  `/Users/ /home/ /var/ /private/ /tmp/` to `[path]` (mirror server/analytics.py so both reporters redact alike).
+- `reportDesktopError(source, err)` — must NEVER throw. No-op unless `app.isPackaged` (dev crashes
+  surface in the terminal). Cap at 20 sends total (`errorsSent`). Read the SAME `<home>/settings.json`
+  the Python side writes; missing/corrupt file => opted in; return if `analytics_disabled`. Mark
+  `internal` from `OPENNOLAN_INTERNAL` (truthy unless 0/false/no) or `~/.opennolan-internal` exists.
+  POST to `/capture/` event `desktop_error`, distinct_id `settings.device_id || 'desktop-unknown'`,
+  properties: scrubbed message (≤500) + stack (≤8000), source, `app.getVersion()`, platform, arch,
+  packaged:true, env:'packaged', internal. 4s timeout; swallow all errors.
+- `fatal(title, message)` — once only. Report FIRST (`source:'fatal'`, message=title as the grouping key,
+  stack=message detail — this fires for "backend won't start/exited", the crash most likely to lose a new
+  user). Then `shuttingDown=true`, stopProvision(), stopBackend(), flip any live setup window into its
+  error state via `setupSend('setup:error', message)`, `dialog.showErrorBox`, `app.quit()`.
+
+Wire report-only (no forced exit, matching the no-handler default) handlers for
+`process` uncaughtException (`main-uncaught`) / unhandledRejection (`main-rejection`), and `app`
+`render-process-gone` (`renderer-gone`) / `child-process-gone` (`child-gone`), each also logging to console.
+
+## Auto-update (packaged only)
+
+`initAutoUpdate()`:
+- Dev/manual test hook `OPENNOLAN_FAKE_UPDATE=<version>` (or `=1` -> `0.0.0-test`): skip the real
+  updater, wire the same IPC channels, and after a 2s delay push a fake `update:downloaded` so the
+  in-app banner can be seen/clicked in dev; `update:install` only logs.
+- Else no-op unless packaged. Lazy-`require('electron-updater')` inside a try/catch (a dev machine
+  without the dep never touches it). `autoDownload = true`. On `update-downloaded`, set
+  `pendingUpdate = {version}` and send `update:downloaded` to the renderer (guard destroyed window).
+- IPC `update:get-state` returns `pendingUpdate` (renderer asks on mount and after ⌘R reload, since
+  the push fires only once). IPC `update:install`: no-op false if nothing staged; else `shuttingDown=true`
+  first (so the backend-exit handler doesn't misfire the fatal dialog) and `quitAndInstall()` on setImmediate.
+- MUST `.catch()` `checkForUpdatesAndNotify()` — it REJECTS on any feed failure (placeholder
+  owner/repo 404s), and the 'error' listener does not consume the promise, so without the catch every
+  packaged launch throws unhandledRejection.
+
+## First-run provisioning (Lane E, packaged only)
+
+The bundled interpreter has no packages, so on first run build a managed venv + core deps + ffmpeg into
+`<home>/runtime`, driven by `bundledPython()` running `codeRoot()/scripts/provision.py`. Dev uses the repo .venv.
+
+- `provisionEnv()` — process.env plus `OPENNOLAN_HOME`, `OPENNOLAN_CODE_ROOT=codeRoot()`,
+  `OPENNOLAN_PYTHON=bundledPython()`, `OPENNOLAN_UV=uvBin()`; if `nodeBin()`, also `OPENNOLAN_NODE` and
+  prepend `nodeDir()/bin` to PATH (so sibling npm/npx resolve).
+- `runProvision(args, onFrame)` -> Promise. Spawn `bundledPython()` on provision.py with args, cwd
+  `codeRoot()`, `provisionEnv()`, `stdio ['ignore','pipe','pipe']`, **detached:true** (process-group leader
+  so stopProvision can signal the whole group — a bare kill would orphan a live uv/npm grandchild). Parse
+  NDJSON stdout line-by-line into frames `{type:'log'|'step'|'doctor'|'done'|'error', ...}` (non-JSON line ->
+  `{type:'log', line}`); relay each to onFrame; stderr -> log frames. Track `provisionChild`; resolve last
+  frame on exit 0, else reject with `last.error` or `provisioning exited <code>`.
+- `stopProvision()` — kill an in-flight run (user cancelled setup). Signal the process GROUP
+  (`process.kill(-pid, sig)`, fall back to `child.kill`) SIGTERM then SIGKILL after 3s. Safe because
+  provisioning is atomic on the Python side (`.building` + os.replace), so a kill never leaves a half-install.
+
+Setup window: `createSetupWindow()` -> Promise resolving on `did-finish-load`; 640x480, non-resizable,
+bg `#FBF7F0`, title "Setting up OpenNolan", loads `setup.html` with `setup-preload.js`
+(contextIsolation, no nodeIntegration, sandbox). `setupSend(channel, payload)` tolerates a mid-flight close.
+
+`ensureProvisioned()` — packaged only. Run `provision.py --doctor`; if it reports `core_ok` AND
+`composition_ok`, return. Otherwise plan the phases to run (`core` if !coreReady, `composition` if
+!compositionReady, always `backend`) and map each onto a global 0-100 bar weighted by
+`SETUP_WEIGHTS = {core:58, composition:36, backend:6}`. Open the setup window and run each needed phase,
+relaying frames: `log` -> `setup:progress`; `step` -> `setup:step {pct,end,label}` with pct/end remapped
+from the run's own 0-100 into that phase's global slice.
+  - CORE (`--core`, venv+ffmpeg) is REQUIRED — failure is fatal (backend can't import fastapi).
+  - COMPOSITION (`--composition`, Node engines, OPN-3) is BEST-EFFORT — on failure only warn to console +
+    `setup:progress` + advance the bar, and let the editor open on the ffmpeg-only path. But if
+    `shuttingDown` (user cancelled), rethrow so a kill isn't misread as an engine failure.
+  - On success send `setup:done` and step the bar to 99 "Starting OpenNolan…". On error send `setup:error`
+    and rethrow (boot's catch surfaces the fatal dialog).
+  - Leave the setup window OPEN — closing it here would create a zero-window moment that fires
+    'window-all-closed' and quits the app. If `shuttingDown` after the doctor probe, return (don't start a
+    pointless install mid-quit).
+
+`handoffFromSetup()` — send the bar to 100 "Ready.", then close the setup window only AFTER the main
+window's `did-finish-load` (or a 4s fallback), so there's never a zero-window gap.
+
+## Health & backend
+
+- `freePort()` — OS-assigned free port on 127.0.0.1 (net.createServer, listen 0).
+- `probeHealth(port, timeoutMs=1500)` -> Promise<bool>, never rejects: GET `/api/health`, true iff
+  200 and JSON `status === 'ok'`.
+- `waitForHealth(port, timeoutMs=30000)` — poll every 300ms until healthy (resolve), the deadline passes,
+  or `backendDead` (both reject with a descriptive message).
+- `recordStderr(buf)` — tee to `[backend]` stderr and push non-blank lines into `stderrTail` (cap 25).
+- `startBackend(port)` — spawn `pythonBin()` on `-m uvicorn server.app:app --host 127.0.0.1 --port <port>`,
+  cwd `codeRoot()`, `stdio ['ignore','pipe','pipe']`. Tee stdout to `[backend]`, stderr to recordStderr.
+  Env: dev sets only `OPENNOLAN_PROJECTS_DIR` (default `REPO_ROOT/projects`). Packaged sets
+  `OPENNOLAN_HOME`, `OPENNOLAN_CODE_ROOT`, `OPENNOLAN_PROJECTS_DIR` (default `<home>/projects`),
+  `OPENNOLAN_UV`, `OPENNOLAN_NODE`, the three browser caches
+  (`REMOTION_BROWSER_CACHE`/`PUPPETEER_CACHE_DIR`/`PLAYWRIGHT_BROWSERS_PATH` all ->
+  `<home>/runtime/composition/browsers`), and a PATH ordered `<home>/runtime/bin` (ffmpeg) >
+  `nodeDir()/bin` > system. On child exit set `backend=null; backendDead=true` and, unless
+  `shuttingDown`, `fatal('OpenNolan backend stopped', …)` including the last ~20 stderr lines (or, with no
+  output, a reinstall hint when packaged / a `pip install -r requirements-ui.txt` hint in dev).
+- `stopBackend()` — SIGTERM the child, escalate to SIGKILL after 3s if still alive.
+
+## Window & CSP
+
+`rendererUrl()` — dev `http://localhost:5173`, else `http://127.0.0.1:<backendPort>`.
+
+`applyCsp()` — prod only (skip in dev; Vite HMR needs inline/eval/ws). Add an
+`onHeadersReceived` handler that SCOPES the policy to `http(s)://` responses only and passes file://
+through untouched (an unscoped rewrite lands on the setup window's file:// load and, lacking
+`script-src 'unsafe-inline'`, silently blocks its script — the "blank setup window" bug). Policy:
+`default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline';
+font-src 'self' data:; connect-src 'self'`.
+
+`createWindow(url)` — 1440x900 (min 960x600), bg `#FBF7F0`, title "OpenNolan", preload `preload.js`
+(contextIsolation, no nodeIntegration, sandbox). Pin the window to its own origin: on `will-navigate`
+to a different origin preventDefault and, if http(s), `shell.openExternal`; `setWindowOpenHandler`
+denies and opens http(s) externally. On `did-fail-load` of the main frame (ignore code -3 ERR_ABORTED),
+in DEV show a fatal "Vite dev server not reachable" hint. Then `loadURL(url)`.
+
+## Boot & lifecycle
+
+`boot()` (run on `app.whenReady()`), all wrapped so a throw (unless `shuttingDown`, which is a user
+cancel) calls `fatal('OpenNolan failed to start', …)` with the stderr tail:
+- Always `applyCsp()` first.
+- DEV: port 8000; if nothing healthy there, own a backend (`startBackend` + best-effort `waitForHealth`);
+  createWindow; `initAutoUpdate()` (no-op unless the fake-update hook is set).
+- Prod: fatal "UI not built" if `webDistIndex()` is missing. `await ensureProvisioned()`; bail if
+  `shuttingDown`. `freePort()`, `startBackend`, `waitForHealth` (90s if a setup window is up — a cold venv
+  compiles every .pyc on import — else 30s), createWindow, `handoffFromSetup()`, `initAutoUpdate()`.
+
+Lifecycle: `activate` recreates a window if none and `backendPort` is set. `window-all-closed` (macOS
+included — closing the setup window mid-install lands here too as a cancel), `before-quit`, and
+`process 'exit'` all stop provisioning and the backend; the first two also set `shuttingDown` and quit.

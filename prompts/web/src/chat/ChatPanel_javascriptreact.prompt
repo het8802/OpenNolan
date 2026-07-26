@@ -1,0 +1,123 @@
+% Generate `web/src/chat/ChatPanel.jsx`: the agent conversation view. PRESENTATIONAL — all
+% state + handlers come from a `chat` bundle (the shape returned by useAgentChat), so this file
+% holds no chat state of its own. Rendered by BOTH the pipeline window (App) and the editor
+% (Studio) so the agent panel is identical in both; the optional `className` lets the editor
+% restyle it inside a resizable panel without forking the markup.
+%
+% Imports: `useEffect, useRef, useState` from 'react'; `marked` from 'marked'; `TOOL_ICON,
+% formatToolInput, AGENT_MODELS, DEFAULT_MODEL` from './chatUtils.js'; `ClaudeLogo, IconAlert,
+% IconKey, IconEye, IconEyeOff, IconBrain, IconTool, IconMovie` from '../components/icons.jsx';
+% default `CapabilityInstall` from '../CapabilityInstall.jsx'. Configure marked ONCE at module
+% load with `{ breaks: true, gfm: true }`.
+%
+% No inline styles except the dynamic progress-bar widths called out below. The class names
+% here are the contract with web/src/styles.css — preserve them.
+
+Default-export `ChatPanel({ chat, disabled = false, className = '', auth, onReconnect })`,
+destructuring from `chat`: messages, input, setInput, busy, pendingConfirm, pendingQuestion,
+pendingKeyRequest, pendingCapability, renderingStage, toolResults, threads, activeThread,
+model (defaulting to DEFAULT_MODEL), setModel, send, stop, newChat, loadThread, resolveConfirm,
+answerQuestion, provideKey, skipKeyRequest, resolveCapability.
+
+Refs: `endRef` (scroll anchor), `msgsRef` (the scroller), `stickRef` (=true; auto-scroll only
+while parked at the bottom), `taRef` (composer textarea).
+
+`showCost = auth?.method === 'api_key'`. Per-turn cost is the SDK's token spend priced at API
+rates — only real money under BYOK (`api_key`). Under a Claude subscription (`oauth`) or a
+logged-in CLI (`cli`) the agent runs on the user's plan and isn't billed per token, so the
+figure would mislead — hide it there (and while auth is still unknown).
+
+Effects:
+- Auto-scroll `endRef` into view (smooth) whenever [messages, pendingConfirm, pendingQuestion,
+  pendingKeyRequest, pendingCapability, renderingStage] change — but ONLY if `stickRef.current`,
+  so a user who scrolled up to read history stays parked.
+- `onMessagesScroll` sets `stickRef.current` to whether the scroller is within 80px of the bottom.
+- Grow the composer with its content up to 220px (`height:auto` then `min(scrollHeight, 220)`),
+  then scroll inside it; re-run on `input`.
+
+Layout — a `section` with classes `panel chat` + `className` (trimmed):
+- `chat-header`: an `<h2>` "Agent" and a `chat-header-actions` group holding a `thread-select`
+  (only when `threads?.length > 0`; value `activeThread || ''`, onChange loads a non-empty value,
+  disabled while busy, first option "Switch thread…"/"History…" by whether a thread is active,
+  then one option per thread by `thread_id`→`title`) and a `new-chat-btn` "＋" (newChat, disabled
+  while busy, title "New chat").
+- `messages` div (ref msgsRef, onScroll): when no messages an `empty` `<p>` ("Select or create a
+  project to start." when disabled, else "Tell the agent what to make."); one `<Message>` per
+  message (passing toolResults + showCost); `<RenderProgress>` when renderingStage; the confirm
+  card when pendingConfirm; finally the `endRef` div.
+- Confirm card (`confirm-card`): a "⚠ Confirm command" title, the `reason`, a `<pre>` of
+  `input.command` (falling back to `JSON.stringify(input)`), and Allow/Block buttons calling
+  `resolveConfirm(true|false)`.
+- After the scroller: `<QuestionCard>` when pendingQuestion, `<ApiKeyCard>` when pendingKeyRequest,
+  `<CapabilityCard>` when pendingCapability.
+- Auth reconnect bar (`auth-reconnect`), only when `auth && (!auth.authenticated ||
+  auth.needs_reauth) && onReconnect`: an IconAlert + message ("Claude sign-in needs attention…"
+  when authenticated, else "Connect your Anthropic account to use the agent.") and a
+  `claude-btn claude-btn-sm` (ClaudeLogo) labeled "Reconnect"/"Sign in with Claude" → onReconnect.
+- `composer` form (onSubmit → send): a `composer-input` textarea (ref taRef, rows 1, placeholder
+  varying by busy, value/onChange from input/setInput, Enter-without-Shift sends, disabled when
+  `disabled || busy`); then, while busy, a `stop-btn` "■ Stop" (title "Stop the agent" → stop),
+  otherwise a submit "Send" (disabled when `disabled || !input.trim()`).
+- `composer-bar`: a `model-select` (value model, onChange `setModel?.(...)`, title "Agent model")
+  mapping AGENT_MODELS to options labeled `m.label` plus " · Recommended" when `m.recommended`.
+
+## RenderProgress
+
+An indeterminate bar for an in-flight render. Local `pct` creeping via a 400ms interval
+(`+1.5`, clamped to 90 — a real % isn't available). Renders a `render-progress`: an IconMovie
+"Rendering…" label, an `rp-bar` whose `rp-fill` width is `${pct}%`, and the rounded pct.
+
+## QuestionCard({ q, onAnswer })
+
+The agent asked a clarifying question. Local `custom`. Renders a `question-card`: `q.header`
+when set; the question body as parsed markdown (`marked.parse(q.question)`); a `q-options` list
+of buttons, each rendering an option as inline markdown and calling `onAnswer(opt)`; and a
+`q-custom-row` free-text input (Enter or the Send button submits the trimmed value when non-empty).
+
+## ApiKeyCard({ req, onProvide, onSkip })
+
+A secure in-chat prompt for a missing BYOK key: the user pastes it, it's saved to their local
+BYOK `.env`, and the agent's blocked tool retries. Masked by default; posted only to the local
+backend, never to the model. Local value/reveal/busy/err; `provider = req.provider || req.label
+|| req.env_var`. `save()`: no-op on empty/busy; await `onProvide(trimmed)`, and on throw show
+the error while keeping the card open to retry (clear busy). `skip()`: await `onSkip()` (busy
+around it). Layout (`apikey-card`): an `ak-header` (IconKey) "{provider} key needed"; an
+`ak-reason` "The agent needs your {provider} API key {req.reason}." (or "…to continue." when no
+reason) plus an `ak-desc` when `req.description`; an input row — an `ak-input` (type text/password
+by reveal, placeholder `env_var`, autoFocus, spellCheck off, autoComplete off, Enter → save) and
+an `ak-reveal` toggle (IconEye/IconEyeOff); an `ak-err` (IconAlert) when err; `ak-actions` Save &
+continue ("Saving…" while busy, disabled when busy or empty) and Continue without (→ skip); and an
+`ak-note` "Stored locally in your BYOK keys ({env_var}) — never sent anywhere but {provider}."
+
+## CapabilityCard({ req, onResolve })
+
+The agent hit a tool whose on-device pack isn't installed. Reuses the `apikey-card` shell: an
+`ak-header` "Install {req.label || req.pack}?"; an `ak-reason` "The agent needs this on-device
+capability {req.reason if set}. It downloads and installs locally, one time."; a
+`<CapabilityInstall pack={req.pack} label={req.label || req.pack} sizeMb={req.size_mb}
+onInstalled={() => onResolve(true)} />`; a Continue-without button → `onResolve(false)`; and an
+`ak-note` "Installed into your local runtime — nothing leaves your Mac."
+
+## Message({ m, toolResults, showCost })
+
+Dispatch by `m.role`: `user` → `msg user` (text); `error` → `msg error` "⚠ {text}"; `note` →
+`msg note` (text); `result` → `msg result` reading "⚠ Turn ended — your next message resumes this
+session with its context." when `is_error` else "Turn complete.", plus a `.cost` " ${…toFixed(3)}"
+when `showCost && total_cost_usd != null` and a muted " · {num_turns} steps" when num_turns is set.
+
+Otherwise (assistant / assistant_stream): render `m.items` in the ORDER they happened so text and
+tool calls stay interleaved (text → tool → text …), not tools hoisted above text. Buffer
+consecutive `text` items and flush them as ONE `md-body` markdown block (`marked.parse` of the
+joined text) so a paragraph split across stream chunks renders whole; each `tool_use`/`thinking`
+item flushes the buffer then emits an `<ActivityChip item result={toolResults?.[it.id]} />`. Wrap
+in a `msg assistant`.
+
+## ActivityChip({ item, result })
+
+A `thinking` item → an `activity-chip thinking` (IconBrain) "thinking…". Otherwise a collapsible
+`tool-block` (gets `open` when expanded): a clickable `activity-chip tool` button (add `tool-err`
+when `result?.is_error`) with a caret, the icon `TOOL_ICON[item.name] || IconTool`, the tool name,
+an optional `tc-detail` (`item.detail`), and an "error" badge on a failed result — toggling open.
+When open, a `tool-expand` showing the input via `formatToolInput(item)`, then the output (or
+error) — `result.content` as-is when a string, else `JSON.stringify(content, null, 2)`, labeled
+"output"/"error" by `result.is_error` — or "awaiting result…" when there's no result yet.

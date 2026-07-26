@@ -1,0 +1,53 @@
+% Generate `server/editor.py`: the write-layer for Mission Control's MANUAL, human-driven
+% editor. OpenNolan is agent-first (orchestration lives in skills, not Python); the manual
+% editor is a deliberate, documented exception — here the *human* is the orchestrator. But the
+% artifact contract holds end to end: every write goes through `validate_artifact`, and a schema
+% failure raises `EditDecisionsInvalid` WITHOUT touching the on-disk file. The module docstring
+% should sketch that read → mutate-in-memory → validate → atomic-write flow.
+%
+% `from __future__ import annotations`. Import json, shutil, subprocess; `Path`; typing
+% `Any, Optional`; `from lib.atomic_io import atomic_write_json`; `from schemas.artifacts import
+% validate_artifact`.
+
+`EditDecisionsInvalid(ValueError)`: a proposed edit_decisions doc failed schema validation.
+Carries the jsonschema message; raised BEFORE any write so the on-disk artifact is never corrupted.
+
+`_project_dir(projects_dir, project_id) -> Path`: `Path(projects_dir) / project_id`.
+`edit_decisions_path(...) -> Path`: `_project_dir(...) / "artifacts" / "edit_decisions.json"`.
+
+`read_edit_decisions(projects_dir, project_id) -> Optional[dict]`: the parsed doc, or None when the
+file doesn't exist. None is a NORMAL state for a fresh manual project (the UI scaffolds a minimal
+valid doc rather than erroring on absence).
+
+`write_edit_decisions(projects_dir, project_id, doc) -> None`: `validate_artifact("edit_decisions",
+doc)` — on ANY exception (jsonschema ValidationError or a loader error) `raise
+EditDecisionsInvalid(str(exc)) from exc`, leaving the file untouched — else `atomic_write_json` it to
+`edit_decisions_path`. This is the single gate keeping a human-edited timeline honest with the pipeline.
+
+`read_asset_manifest(projects_dir, project_id) -> dict`: load `artifacts/asset_manifest.json` for
+render asset_id→path resolution. Return `{"assets": []}` (NOT `{}`) when the file is absent,
+unparseable, or lacks an `assets` key — so `video_compose._render` doesn't bail on a missing manifest
+(an empty lookup just leaves literal paths unchanged). Swallow read/parse errors into that same default.
+
+`resolve_source_path(projects_dir, project_id, ref) -> Optional[Path]`: resolve a cut's `source` (or
+an overlay `asset_id`) to a real file ON DISK, mirroring `video_compose` so the scrub preview reads the
+same bytes the renderer will. An `asset_manifest` id whose entry has a `path` wins; otherwise `ref` is
+treated as a path. Empty `ref` → None. If the path is absolute, the only candidate is itself; if
+relative, try in order: repo-root-relative (`Path(projects_dir).parent / raw` — cut sources are stored
+like `projects/<id>/assets/video/x.mp4`, and video_compose resolves from the repo-root cwd), then
+project-relative (`proj / raw`), then projects-dir-relative. Return the first candidate that `.resolve()`s
+to an existing file AND is contained in an allowed root; skip a candidate whose resolve raises OSError.
+Allowed roots (path-traversal / absolute-containment guard): the resolved project dir, OR the repo's
+shared checked-in asset library at `<parent-of-projects_dir>/assets` (e.g. `assets/sfx/`, the greg kit) —
+the renderer reads those from repo-root cwd, so the preview must serve them too or SFX/kit audio is silent
+in the editor yet present in the export. Anything else resolves to None.
+
+`browser_preview_path(source_path, cache_dir) -> Optional[Path]`: return a browser-decodable VP9/WebM
+proxy for ProRes `.mov` files, else None. Chromium/Electron can't decode ProRes, and HyperFrames overlay
+renders are ProRes 4444 with alpha, so their preview `<video>` loads silently. Return None unless the
+suffix is `.mov`, both `ffprobe` and `ffmpeg` are on PATH, and ffprobe's `v:0 codec_name` starts with
+`prores`. Cache at `cache_dir/<stem>.webm`: on a cache hit (file exists and is non-empty) return it.
+Otherwise transcode with ffmpeg `libvpx-vp9`, `-pix_fmt yuva420p` (preserve alpha so the overlay composites
+correctly), `-b:v 0 -crf 30`, `-deadline realtime -cpu-used 8` (speed over quality for live preview), `-an`,
+writing to a `.tmp.webm` sibling then renaming into place. Return None (and clean up the temp) if the
+transcode fails or produces an empty file — the caller falls back to serving the original.

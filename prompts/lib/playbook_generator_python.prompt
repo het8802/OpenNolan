@@ -1,0 +1,69 @@
+% Generate `lib/playbook_generator.py`: OpenNolan's custom-playbook generator. When none
+% of the built-in preset playbooks match a production brief, the agent builds a custom,
+% schema-valid playbook dict (rather than forcing the brief through the closest preset)
+% and saves it as YAML.
+% Use `from __future__ import annotations`; import `json`, `yaml`, `jsonschema`,
+% `pathlib.Path`, and `typing.Any/Optional`.
+
+Module constants (all derived from the repo root = `Path(__file__).resolve().parent.parent`):
+- `PLAYBOOK_SCHEMA_PATH` → `schemas/styles/playbook.schema.json`
+- `STYLES_DIR` → `styles`
+- `CUSTOM_STYLES_DIR` → `styles/custom`
+
+`_load_playbook_schema()` loads and returns the schema JSON.
+
+`load_existing_playbook(name) -> dict` loads `{name}.yaml` from `STYLES_DIR`, falling back to
+`CUSTOM_STYLES_DIR`; raise `FileNotFoundError` if neither exists. Return `yaml.safe_load`.
+
+`list_playbooks(*, packaged: Optional[bool] = None) -> list[str]` returns the sorted, de-duped
+stems of every `*.yaml` under `STYLES_DIR` plus (if it exists) `CUSTOM_STYLES_DIR`. This must be
+a SINGLE SOURCE OF TRUTH with `styles.playbook_loader`: import `PACKAGED_PLAYBOOKS` from it and
+`lib.app_paths` locally (inside the function). When `packaged` is None, auto-detect via
+`app_paths.is_packaged()`; when packaged, filter the names down to `PACKAGED_PLAYBOOKS` so the
+agent cannot discover a hidden style through this enumerator. `packaged` overrides auto-detect
+(for tests).
+
+`generate_playbook(name, context, base_playbook: str | None = None) -> dict` builds a custom
+playbook. Start from `load_existing_playbook(base_playbook)` if given, else
+`_create_minimal_playbook(name, context)`. `context` is a dict of optional keys — `mood`, `tone`,
+`pace`, `audience`, `colors`, `fonts`. Then override in place, applying each only if present:
+- `identity.name` = `name` (always); `identity.mood` = `mood`; `identity.pace` = `pace`.
+- `identity.category` = map `tone` → category: cinematic→`cinematic`, educational→`minimalist`,
+  corporate→`motion-graphics`, playful→`motion-graphics`, raw→`cinematic`, else `custom`.
+- `colors` (dict) overrides `visual_language.color_palette`: `primary`/`accent` are wrapped in a
+  one-element list when given as a str (kept as-is if already a list); `background`/`text` set directly.
+- `fonts` (dict) sets `typography.headings.font` and `typography.body.font`.
+Return the mutated playbook.
+
+`_create_minimal_playbook(name, context) -> dict` builds a minimal but complete, schema-valid
+playbook from scratch. Default `mood`="professional", `tone`="corporate". Pick a palette by mood
+bucket (each `primary`/`accent` is a list):
+
+| mood bucket                    | background | text      | primary     | accent      |
+|--------------------------------|------------|-----------|-------------|-------------|
+| dark / cinematic / dramatic    | `#0F172A`  | `#F8FAFC` | `["#3B82F6"]` | `["#F59E0B"]` |
+| warm / intimate / organic      | `#FFFBEB`  | `#1C1917` | `["#D97706"]` | `["#059669"]` |
+| playful / energetic / bold     | `#FFFFFF`  | `#1F2937` | `["#7C3AED"]` | `["#EC4899"]` |
+| else (professional/clean/etc.) | `#FFFFFF`  | `#1F2937` | `["#2563EB"]` | `["#F59E0B"]` |
+
+Return this structure:
+- `identity`: name, `category`="custom", mood, `pace`=`context.get("pace","moderate")`,
+  `best_for`=`f"Custom playbook for {tone} {mood} content"`.
+- `visual_language`: `color_palette` (primary, accent, background, text from the table),
+  `composition`="balanced grid with breathing room", `texture`="clean digital".
+- `typography`: headings `{font: "Inter", weight: 700}`, body `{font: "Inter", weight: 400}`.
+- `motion`: `transitions`=["crossfade","cut"], `animation_style`="spring-based with moderate damping",
+  `pacing_rules` = min_scene_hold 2.0, max_scene_hold 6.0, text_card_hold 3.5, stat_card_hold 4.0,
+  transition_duration 0.4 (all `*_seconds`).
+- `audio`: `voice_style`="clear, conversational, authoritative", `music_mood`=mood, `music_volume`=0.15.
+- `asset_generation`: `image_prompt_prefix`=`f"{mood} {tone} style"`,
+  `consistency_anchors`=[`f"{mood} color palette"`, `f"{tone} visual language"`].
+- `quality_rules`: maintain color consistency across scenes; text legible on all backgrounds;
+  transitions purposeful not decorative.
+- `chart_palette`: `primary + accent + ["#10B981", "#EF4444", "#8B5CF6"]`.
+
+`save_playbook(playbook, project_name: str | None = None) -> Path` validates the playbook against
+the schema (`jsonschema.validate`), derives the filename from `project_name` or
+`identity.name` lowercased with spaces and underscores replaced by hyphens, creates
+`CUSTOM_STYLES_DIR`, writes `{filename}.yaml` (`yaml.dump`, `default_flow_style=False`,
+`allow_unicode=True`), and returns the path.

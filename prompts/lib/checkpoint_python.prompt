@@ -1,0 +1,126 @@
+% Generate `lib/checkpoint.py`: OpenNolan's checkpoint writer/reader for pipeline
+% state persistence. Each stage writes a checkpoint on completion; the orchestrator
+% reads them to resume pipelines and to present state at human checkpoints.
+% Use `from __future__ import annotations`. Import: json, functools.lru_cache,
+% datetime(datetime, timezone), pathlib.Path, typing(Any, Optional), jsonschema,
+% `atomic_write_json` from lib.atomic_io, and `ARTIFACT_NAMES` + `validate_artifact`
+% from schemas.artifacts.
+
+## Constants
+
+- `ALL_KNOWN_STAGES` — frozenset of every stage across all pipelines, used only for
+  artifact-name lookup / fallback validation: research, proposal, idea, script,
+  scene_plan, assets, edit, compose, publish.
+- `STAGES` — the same nine stages as a list, in that order. Backward-compatible alias
+  for existing importers; new code uses `get_pipeline_stages(pipeline_type)`.
+- `CANONICAL_STAGE_ARTIFACTS` — dict mapping each stage to its stage-defining artifact:
+  research→research_brief, proposal→proposal_packet, idea→brief, script→script,
+  scene_plan→scene_plan, assets→asset_manifest, edit→edit_decisions,
+  compose→render_report, qa→final_review, publish→publish_log. (Note `qa` appears here
+  though it is not in STAGES.)
+- `SUPPLEMENTARY_ARTIFACTS` — a documented set of non-stage-defining artifacts required by
+  governance contracts: source_media_review (before first planning stage when user media
+  exists), final_review (before compose presents to user), video_analysis_brief
+  (reference-video grounding). Descriptive only; not otherwise referenced.
+- `CHECKPOINT_SCHEMA_PATH` = repo-root `schemas/checkpoints/checkpoint.schema.json`, where
+  repo root is `Path(__file__).resolve().parent.parent`.
+- `VALID_STATUSES = ("completed", "failed", "awaiting_human", "in_progress")`.
+
+`CheckpointValidationError(ValueError)` — raised when a checkpoint or its canonical
+artifacts are invalid.
+
+## Stage resolution — `get_pipeline_stages(pipeline_type: str | None) -> list[str]`
+
+Return the ordered stage list for a pipeline. Must be DETERMINISTIC (a prior set-based
+version produced nondeterministic order — never use set intersection here).
+- `pipeline_type is None`: log a warning via `logging.getLogger(__name__)` that the
+  canonical fallback order is being used and pipeline_type should be passed, then return
+  `list(STAGES)`.
+- Otherwise lazily `from lib.pipeline_loader import load_pipeline, get_stage_order` and
+  return `get_stage_order(load_pipeline(pipeline_type))`. On any failure
+  (`(FileNotFoundError, Exception)`) fall back to `list(STAGES)`.
+
+## Validation
+
+`_load_checkpoint_schema()` — `@lru_cache(maxsize=1)`, loads and returns the JSON schema
+at CHECKPOINT_SCHEMA_PATH.
+
+`_validate_artifacts_for_stage(stage, status, artifacts)`:
+- If status is `completed` or `awaiting_human`, the stage's `CANONICAL_STAGE_ARTIFACTS`
+  artifact MUST be present in `artifacts`, else raise CheckpointValidationError.
+- For each artifact whose name is in `ARTIFACT_NAMES` (skip unknown names): it must be a
+  dict (else raise), then run `validate_artifact(name, data)`, wrapping any exception in
+  CheckpointValidationError that names the artifact and includes the underlying error.
+
+`validate_checkpoint(checkpoint: dict) -> None`:
+- Read stage/status/artifacts/pipeline_type from the dict.
+- `valid_stages` = `set(get_pipeline_stages(pipeline_type))` when pipeline_type is truthy,
+  else `ALL_KNOWN_STAGES`.
+- stage must be a str in valid_stages (error message names the stage, the pipeline, and the
+  sorted valid stages); status must be a str; artifacts must be a dict — else
+  CheckpointValidationError.
+- Call `_validate_artifacts_for_stage`, then `jsonschema.validate` against the loaded
+  schema, converting `jsonschema.ValidationError` into CheckpointValidationError carrying
+  `exc.message`.
+
+## Paths & decision log
+
+- `_checkpoint_path(pipeline_dir, project_id, stage)` → `<dir>/<id>/checkpoint_<stage>.json`.
+- `_decision_log_path(pipeline_dir, project_id)` → `<dir>/<id>/decision_log.json`.
+- `_merge_decision_log(pipeline_dir, project_id, new_log)`: load the existing log (or seed
+  `{"version": "1.0", "project_id": <id>, "decisions": []}`), append each decision from
+  `new_log["decisions"]` whose `decision_id` is not already present, and write it back with
+  `atomic_write_json` (a `/state` poll must never read a half-written file).
+
+## `write_checkpoint(...) -> Path`
+
+Positional: `pipeline_dir, project_id, stage, status, artifacts`. Keyword-only:
+`pipeline_type=None, style_playbook=None, checkpoint_policy="guided",
+human_approval_required=False, human_approved=False, review=None, cost_snapshot=None,
+error=None, metadata=None`.
+
+- Reject an invalid stage (same valid_stages rule as validate_checkpoint) with a plain
+  `ValueError` naming stage/pipeline/sorted valid stages.
+- Build the checkpoint dict: version "1.0", project_id, `pipeline_type or "unknown"`, stage,
+  status, `timestamp` = `datetime.now(timezone.utc).isoformat()`, checkpoint_policy,
+  human_approval_required, human_approved, artifacts. Add style_playbook / review /
+  cost_snapshot / error / metadata only when the argument is not None.
+- If `artifacts["decision_log"]` is a dict: merge it via `_merge_decision_log`, then write
+  the decision-log path string as `decision_log_ref` into related artifacts if present and
+  dict — under `production_plan` for `proposal_packet`, at top level for `render_report`.
+- `validate_checkpoint`, then `atomic_write_json` to the checkpoint path (UI polls these
+  files, so writes must be atomic). Return the path.
+
+## Readers
+
+- `read_checkpoint(pipeline_dir, project_id, stage) -> Optional[dict]` — None if the file is
+  missing, else load JSON, `validate_checkpoint`, return it.
+- `get_latest_checkpoint(pipeline_dir, project_id) -> Optional[dict]` — None if the project
+  dir is missing or has no `checkpoint_*.json`; otherwise load the newest by file mtime,
+  validate, return it.
+- `get_completed_stages(pipeline_dir, project_id, pipeline_type=None) -> list[str]` — for
+  each stage in `get_pipeline_stages(pipeline_type)`, include it when its checkpoint exists
+  with status `completed`. (Scoping to the pipeline avoids false positives from leftover
+  checkpoints of another pipeline type.)
+- `get_next_stage(pipeline_dir, project_id, pipeline_type=None) -> Optional[str]` — walk
+  the pipeline's stage order (`get_pipeline_stages(pipeline_type)` when given, else STAGES)
+  and return the first stage not in the completed set, or None.
+
+## CLI — `_cli(argv=None) -> int`, run under `if __name__ == "__main__": raise SystemExit(_cli())`
+
+An argparse entry point (`prog="python -m lib.checkpoint"`) so a headless agent can persist
+and read checkpoints without ad-hoc scripts. Required subcommand; every subcommand takes
+`--projects-dir` (required; the projects root — checkpoints live under `<root>/<id>/`) and
+`--project-id` (required).
+
+- `write` — `--stage`, `--status` (required, `choices=VALID_STATUSES`), `--pipeline-type`,
+  `--artifacts-file` (JSON `{artifact_name: payload}`; omit for in_progress),
+  `--style-playbook`, `--checkpoint-policy` (default "guided"), `--human-approval-required`
+  and `--human-approved` (both `store_true`). Loads artifacts from the file if given, calls
+  `write_checkpoint`, prints the path, returns 0.
+- `read` — `--stage`; prints the checkpoint as indent-2 JSON (or `null`); returns 0 if found
+  else 1.
+- `next` — `--pipeline-type`; prints the next stage (empty string if none); returns 0.
+- `completed` — `--pipeline-type`; prints the completed-stage list as JSON; returns 0.
+
+Include a header comment block documenting these four invocations for a human reader.

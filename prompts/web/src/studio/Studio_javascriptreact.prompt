@@ -1,0 +1,214 @@
+% Generate `web/src/studio/Studio.jsx`: the from-scratch editing-software UI for OpenNolan (M3).
+% It owns the single source-of-truth `doc` (edit_decisions), an undo/redo history, the selection +
+% playhead, and the save→render-once→poll loop. EVERY edit goes through a schema-safe mutator in
+% `../editor/interp.js` and flips `dirty`; Save PUTs the validated doc; Render runs the render-once
+% proxy loop (only changed scenes re-render) and the preview plays the exact bytes the export
+% produces (preview == export). Reuses ONLY pure, tested logic (interp.js) — no old-editor UI.
+%
+% Imports: `useCallback, useEffect, useMemo, useRef, useState` from 'react'; namespace `* as api`
+% from '../api.js'; namespace `* as interp` from '../editor/interp.js'; `{ isFfmpeg, newTextOverlay,
+% newImageOverlay, newVideoOverlay, summarizeDocChange }` from './model.js'; default `StudioToolbar`,
+% `StudioTimeline`, `StudioInspector`, `StudioPreview` from their sibling files; `ChatPanel` from
+% '../chat/ChatPanel.jsx'; `DebugReportModal` from './DebugReportModal.jsx'; default `dbg` from
+% '../debug/recorder.js'.
+%
+% No inline styles except the panel-size `style={{ width|height }}` nudges called out below. Class
+% names (`st-*`) are the contract with web/src/styles.css — preserve them exactly.
+
+Default-export `Studio({ projectId, state, onClose, chat, auth, onReconnect })`.
+
+Module constants: `POLL_MS = 500`, `POLL_MAX = 600` (~5-min ceiling); `PANELS_KEY = 'st.panels.v1'`,
+`HIDDEN_KEY = 'st.hidden.v1'` (localStorage keys); panel bounds `INSPECTOR_MIN 240` (also its collapse
+threshold) / `INSPECTOR_MAX 560`, `TIMELINE_MIN 150`, `TIMELINE_MAX_FRAC 0.6` (timeline ≤ 60% of the
+body so the preview stays visible), `AGENT_MIN 260` / `AGENT_MAX 520`.
+
+## State + refs
+`doc` (null) mirrored synchronously by ref `docRef`; `past`/`future` ([]) undo/redo stacks; `dirty`,
+`loading` (true), `loadErr` (''), `notice` (null — `{kind,msg}`). `selection` (null —
+`{kind:'cut',id}` | `{kind:'overlay',index}` | `{kind:'audio',audioKind:'music'|'narration'|'sfx',
+index}`); `playhead` (0, project seconds); `previewMode` ('source'|'render'); `playing` (false).
+`assets` (`{kinds:{images,video,audio,music}, renders, agent_renders}` all []); `sourceMetas` ({},
+ref→`{duration,width,height}`); `zoom` (80 px/s). `rendering`, `renderPath` (null), `renderVersion`
+(0). Refs: `savedRef` (JSON of last-saved doc, dirty compare), `dirtyRef`/`agentBusyRef`/
+`reconcilingRef` (false — closure mirrors + agent-edit guards), `jobRef` (0 — supersede in-flight poll
+loops), `panelDrag` (null — active splitter teardown). Derived: `chatBusy = !!(chat && chat.busy)`,
+`canvas = useMemo(interp.canvasOf(doc))`, `ffmpeg = isFfmpeg(doc)`.
+
+`hiddenTracks` — a Set of track keys (`main`, `ov:<track>`, `aud:music|narration|sfx`) the PREVIEW
+canvas skips; a per-track eye toggle, view-state only (never written to the doc, so preview==export
+holds). Lazy-init from `HIDDEN_KEY` localStorage; a useEffect persists it back; `onToggleHidden(key)`
+flips membership immutably. `panels` — `{inspectorW 320, timelineH 280, agentW 340, inspectorOpen,
+timelineOpen, agentOpen (all true)}`, lazy-init merged over `PANELS_KEY` localStorage, persisted by a
+useEffect; a cleanup useEffect runs `panelDrag.current?.()` on unmount so a splitter drag never leaks.
+
+`flash(kind, msg)`: set notice; when kind==='ok' auto-clear after 2600ms (guarding it's still the same
+msg). `dirtyRef` kept in sync with `dirty` by a useEffect.
+
+## Transport
+`togglePlay`: if starting play at/after `interp.timelineDuration(doc)` (within 1e-3) reset playhead to
+0 (restart from top), then flip `playing`. `seekFromUser(t)` and `changePreviewMode(m)` both pause
+(setPlaying false) then apply — a user scrub or mode switch never fights playback. All three emit a
+`dbg.event`. Preview's onScrub drives the playhead during playback.
+
+## Debug recorder
+`recording = dbg.useRecording()`; `debugReport` state (null). A useEffect calls `dbg.resumeIfActive({
+projectId })` (survives an accidental ⌘R). `onToggleRecord` = `dbg.toggle({ projectId, canvas:
+'{w}×{h}' })`: if now recording flash a "reproduce the bug, then stop" hint; else if a session
+returned, `Promise.resolve(dbg.flushed()).finally(() => setDebugReport({ session }))` so the final
+batch persists before offering to send it.
+
+## Load
+useEffect on [projectId] with an `alive` guard: set loading + clear loadErr; `api.getEditDecisions`
+→ use `content` or `interp.scaffoldEditDecisions({})`, write docRef+doc+savedRef, `setDirty(!content)`
+(a scaffold is unsaved), and select the first cut if any; catch → loadErr = message; finally clear
+loading. Also `api.listAssets` → setAssets (ignore errors). A second useEffect on [doc, projectId,
+sourceMetas] lazily probes `api.getSourceMeta` for each distinct non-empty `c.source` not yet in
+sourceMetas (storing null on error), for trim bounds + scrub.
+
+## History / mutation
+INVARIANT: never nest a setState inside another setState updater (StrictMode double-invokes updaters
+in dev → nested setters corrupt the stacks). `setDocBoth(nd)` writes docRef then setDoc. `snapshot()`
+pushes `docRef.current` onto `past` (slice to last 100) and clears `future` WITHOUT changing the doc —
+called once at a coalesced drag's start so the whole drag is one undo step. `live(next)` (accepts a
+value or updater of docRef.current): referential no-op returns early; else emit `dbg.event('edit.live',
+summarizeDocChange(prev,nd))`, setDocBoth, setDirty(true) — NO history (per-frame drag). `commit(next)`
+= discrete edit: same no-op guard, emit `edit.commit`, push prev onto past (cap 100) + clear future,
+setDocBoth, dirty. `undo`/`redo` move the top item between the stacks, setDocBoth, dirty, emit
+`edit.undo`/`edit.redo`; each reads the latest `past`/`future` from its closure deps.
+
+## Save / autosave / render
+`persist({silent})` (async, reads docRef so it always writes the LATEST doc): bail if no doc; if
+`agentBusyRef` or `reconcilingRef` is set, log a blocked event and (unless silent) warn "Agent is
+editing — your changes will save the moment its turn ends", return null — never clobber the agent's
+write. Else `api.saveEditDecisions`, update savedRef, clear dirty, flash 'Saved' unless silent, return
+the doc; on throw flash `Save rejected: {msg}` unless silent, return null. `save = persist({silent:
+false})`. `flushAutosave` = if dirtyRef, `persist({silent:true})`. Autosave useEffect on [dirty, doc,
+chatBusy]: when dirty and NOT (chatBusy || agentBusyRef || reconcilingRef), a 700ms debounced
+`persist({silent:true})` (cleared on change) — the on-disk edit_decisions.json is the source of truth
+shared with the agent, so keep it current; suspended during/around an agent turn.
+
+`chatForPanel = useMemo`: if chat, spread it and wrap only `send` so it `await flushAutosave()` before
+`chat.send(text)` (hand the agent our latest timeline, not a stale disk copy); else pass chat through.
+
+`render` (async): return if rendering; `await save()` first and abort if it returned falsy (always
+render the SAVED doc). Set rendering, flash "Rendering… (only changed scenes re-render)", claim
+`myJob = ++jobRef.current`. `api.startRender` → poll up to POLL_MAX times: bail if `jobRef.current !==
+myJob` (superseded); sleep POLL_MS; `api.getRenderStatus` — on 'done' set renderPath=output_path, bump
+renderVersion, switch previewMode to 'render', flash 'Rendered' (append ` — {warnings joined by ' · '}`
+when present); on 'failed' flash `Render failed: {error||'unknown'}`; each branch logs a `ui.render`
+phase and returns. After the loop flash 'Render timed out'. Catch → flash `Render error: {msg}`.
+Finally, only clear rendering if this is still the current job.
+
+## Agent reconcile (shared source of truth)
+The in-editor agent shares the project conversation, so it can rewrite edit_decisions.json on disk
+while the editor holds an open-time snapshot. useEffect on [chatBusy, projectId, flash]: read the
+previous busy from `agentBusyRef`, then set `agentBusyRef.current = chatBusy`; act only on a turn that
+JUST ended (was busy, now not) with a projectId. Open `reconcilingRef` (held across the async refetch
+so an autosave/Save can't race it). Refresh `api.listAssets` (the agent may have rendered new clips).
+`api.getEditDecisions` → if content and its JSON differs from savedRef: note `hadLocal =
+dirtyRef.current`, log `agent.adopt`, and if hadLocal push the user's mid-turn doc onto `past` (cap
+100) + clear future so ⌘Z restores it; then adopt the agent's doc LIVE (docRef+doc+savedRef, clear
+dirty) and flash "Timeline updated by the agent" (append " — ⌘Z to restore your version" when
+hadLocal). Finally clear `reconcilingRef`.
+
+## Selection-aware handlers
+Derive `selCut` (the selected cut), `selOverlayIndex` (-1 when none), `selAudio` (the audio selection
+or null), and `selAudioObj` — `interp.musicRegions(doc)[i]` for music, `doc.audio.narration.segments[i]`
+for narration, else `doc.audio.sfx[i]`. Trim uses the live/snapshot pattern: `onTrimBegin = snapshot`;
+`onTrim(cutId, patch)` looks up the cut's source meta and `live(interp.trimCut(d, cutId, patch, {
+sourceDuration }))`. `onSplit` acts on whatever is selected at the playhead — overlay
+(`splitOverlay`), music (`splitMusic`), narration (`splitNarration`), sfx (warn "a single cue —
+nothing to split"), else the main cut (`splitCutAtPlayhead`); the pure mutator returns the same ref
+when the playhead isn't strictly inside, which we surface as a per-kind "move the playhead inside…"
+warn; otherwise `commit`. `onDelete` removes the selected cut/overlay/audio via the matching interp
+remover and clears selection — but refuse (warn "Can't delete the last clip") when it's the only cut.
+`onDuplicate` = `interp.duplicateCut` on the selected cut. `onReorder(from,to)` = `interp.reorderCut`.
+
+## Add handlers (Assets click / drag-drop) + audio editing
+`onAddClip(path, atTime)`: default out = min(meta.duration, 8) or 5; when atTime is given, insert
+before/after the cut under the drop (`interp.cutAtTime`, split at its midpoint); `commit(interp.addCut(
+…, atIndex))`. `onSetMusic(path)` = `interp.setMusic` (flash 'Music set'). `onAddMusic(path, atTime)`:
+first bed (no music regions) → setMusic; else a bounded region at atTime-or-playhead spanning
+min(meta.duration, 30)|12s (flash 'Music region added'). `onAddSfx(path, atTime)` = `interp.addSfx` at
+atTime-or-playhead. `onUpdateAudio(patch)` / `onLiveUpdateAudio(patch)` edit the SELECTED audio item
+(music/narration/sfx via the matching interp updater) through commit / live respectively.
+
+Overlay adds auto-pick a track via `interp.placeOverlayTrack(d, start, end, preferredTrack)` (interval
+partitioning — a would-overlap overlay lands on its own new lane so both stay visible), then select
+the new overlay by index: `onAddText` (2.5s at the playhead, clamped), `onAddImage(assetId, atTime,
+track=0)` (3s), `onAddVideoOverlay(assetId, atTime, track=0)` (min(meta.duration,6)|4s). `onAutoArrange`
+= `interp.autoArrangeOverlays(docRef.current)`; commit unless it no-ops (then flash "already
+arranged"). `onAssetDrop(kind, path, t, target={})` routes by target: music→onAddMusic, audio→onAddSfx,
+`lane==='cuts'`→onAddClip (main clip), video→onAddVideoOverlay, else onAddImage — declared AFTER the
+add-handlers it calls so they aren't read in their temporal dead zone (a TDZ ReferenceError here
+crashes the whole editor on mount, which the build can't catch).
+
+Timeline drags use the snapshot-once/live pattern (`onOverlayDragBegin`/`onAudioDragBegin` =
+snapshot): `onOverlayMove`/`onOverlayTrim` (interp move/trimOverlay), `onOverlayResolve` (float off a
+new same-track overlap via `resolveOverlayOverlap` — `live` folds it into the drag's one undo step);
+audio `onMoveSfx`/`onMoveNarration`/`onTrimNarration` and music `onSetMusicLive`/`onTrimMusic`/
+`onMoveMusic`, each targeting an explicit index (unlike the selection-based onUpdateAudio). Canvas
+drags (also `live`): `onOverlayPosition(index, xy)` merges rounded `{x,y}` into the overlay's position
+object (converting a text-anchor string to an object on first drag); `onClipPosition(cutId, xy)` merges
+into `transform.position` preserving scale/crop; `onClipDragBegin = snapshot`. `onSelectOverlay(index)`
+selects the overlay. `onNormalizeOverlay(index, patch)` = `interp.updateOverlay` through `live` (NOT
+commit) so self-healing an agent-authored string-anchor image/video overlay on mere SELECTION never
+pushes a phantom undo step.
+
+## Remaining handlers
+`onSetBackground` (`interp.setBackground`), `onCanvas({width,height})` (`interp.setCanvas`),
+`onUpdateCut`/`onUpdateOverlay` (commit) with `onLiveUpdateCut`/`onLiveUpdateOverlay` (live, for
+scrub-field drags where `onScrubBegin = snapshot` opens one undo step), and keyframe
+`onSetKeyframes`/`onUpsertKeyframe`/`onRemoveKeyframe` (commit). `refreshAssets` re-lists;
+`onUploadAsset(kind, file)` = `api.uploadAsset` then refreshAssets + flash (log a `ui.uploadAsset`
+event either way).
+
+`beginPanelDrag(e, axis)`: preventDefault, capture start x/y + panel sizes + the `.st-body`
+clientHeight; one pointerdown→window pointermove/up/cancel model (same as the timeline), storing the
+teardown in `panelDrag.current`. axis `'agent'`: width = start + Δx (handle sits right of the panel),
+collapse below AGENT_MIN else clamp to AGENT_MAX. axis `'x'`: inspector width = start + (startX − x)
+(drag left = wider), collapse below INSPECTOR_MIN else clamp INSPECTOR_MAX. axis `'y'`: timeline
+height = start + (startY − y) (drag up = taller), collapse below TIMELINE_MIN else clamp to
+max(TIMELINE_MIN, bodyH × TIMELINE_MAX_FRAC).
+
+## Effects: selection cleanup, select logging, keyboard
+- On [doc, selection]: clear a selection whose overlay index or audio item no longer exists (so the
+  inspector never edits a phantom index).
+- On [selection]: emit a `dbg.event('ui.select', …)` for the trace.
+- On [undo, redo, save, onSplit, onDelete]: a window keydown. Ignore while a field is focused
+  (INPUT/TEXTAREA/SELECT/isContentEditable) OR a `role="slider"` scrub bar is focused (it owns those
+  keys). Space = play/pause (preventDefault, toggle `playing`); Escape = clear selection; ⌘/Ctrl+Z =
+  undo (Shift = redo); ⌘/Ctrl+S = save; bare `s`/`S` = onSplit; Delete/Backspace = onDelete — each
+  preventDefault.
+
+## Render
+While loading: `st` > `st-loading` "Loading timeline…". On loadErr: an `st` with an `st-bar` back
+button (`st-ghost` "← Back" → onClose) and an `st-loading st-err-text` "Couldn't load: {loadErr}".
+Otherwise compute `dur = interp.timelineDuration(doc)` and render `st`:
+- `st-bar`: an `st-bar-left` with a `st-ghost` "←" (title "Back to project" → onClose), an `st-title`
+  (`state?.name || projectId`), and an `st-dirty` "● unsaved" when dirty; then `<StudioToolbar>`
+  passed doc/canvas/ffmpeg, canUndo/canRedo (stack lengths), dirty/rendering/`hasRender`
+  (`!!renderPath`)/previewMode, and onUndo/onRedo/onSave/onRender/onPreviewMode(changePreviewMode)/
+  onAddText/onCanvas plus recording/onToggleRecord.
+- When NOT ffmpeg, an `st-banner` noting this timeline's runtime is `doc.render_runtime` and the studio
+  targets the FFmpeg render path. `notice` → an `st-notice {kind}` with its msg.
+- `st-body` > `st-body-top`: when `chat`, either (agentOpen) an `st-agent-wrap` (style width
+  panels.agentW) holding `<ChatPanel chat={chatForPanel} disabled={!projectId} className="st-agent"
+  auth onReconnect />` followed by an `st-vsplit` splitter (onPointerDown beginPanelDrag 'agent'), or
+  (collapsed) an `st-reopen st-reopen-v st-reopen-agent` "›" button that reopens the agent panel.
+  Then `<StudioPreview>` (projectId/doc/canvas/playhead/previewMode/renderPath/renderVersion/playing/
+  selection/sourceMetas, `hidden={hiddenTracks}`, onScrub=setPlayhead, onPlayingChange=setPlaying,
+  onSelectOverlay/onOverlayPosition/onOverlayDragBegin, onClipPosition, `onClipDragBegin={snapshot}`).
+  Then the inspector: when inspectorOpen, an `st-vsplit` (beginPanelDrag 'x') + an `st-inspector-wrap`
+  (style width panels.inspectorW) holding `<StudioInspector>` (projectId/doc/canvas/ffmpeg, selCut/
+  selOverlayIndex/playhead/selAudio/selAudioObj, assets/sourceMetas, and the update/live/keyframe/add/
+  background/upload handlers, `onScrubBegin={snapshot}`); else an `st-reopen st-reopen-v` "‹" reopen
+  button.
+- Below `st-body-top`, when timelineOpen: an `st-hsplit` (beginPanelDrag 'y') + an `st-timeline-wrap`
+  (style height panels.timelineH) holding `<StudioTimeline>` (projectId/doc/dur/zoom/playhead/
+  selection/sourceMetas/playing, onSeek=seekFromUser, onSelect=setSelection, and the trim/reorder/
+  zoom/assetDrop/overlay-drag/audio-drag/music handlers, hidden/onToggleHidden, plus onTogglePlay/
+  onSplit/onDuplicate/onDelete/onAutoArrange); else an `st-reopen st-reopen-h` "Timeline ▴" reopen
+  button. Each reopen button restores its panel to at least its MIN size.
+- Finally, when `debugReport`, a `<DebugReportModal session={debugReport.session} onClose={() =>
+  setDebugReport(null)} />`.

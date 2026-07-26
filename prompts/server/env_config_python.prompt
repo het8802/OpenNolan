@@ -1,0 +1,112 @@
+% Generate `server/env_config.py`: the BYOK env-file config — a curated variable menu plus safe
+% read/write of the app's `.env`. OpenNolan's desktop app is bring-your-own-key: keys live in a
+% plain `.env` (the SAME file `lib.env_loader` loads at startup) whose location `app_paths.env_path()`
+% decides — the repo `.env` in dev, `~/Library/Application Support/OpenNolan/.env` when packaged. The
+% BYOK panel reads this file, shows every known variable (plus any extra ones already present), and
+% writes the user's edits back, preserving comments/structure via python-dotenv's `set_key`. Values
+% are returned as-is (a local, single-user app; the UI masks secrets by default). Every write path
+% validates variable names and rejects newline injection so the file can't be corrupted. Put that
+% rationale in the module docstring.
+
+`from __future__ import annotations`. Import `re`; `Path`; `Optional`; `from dotenv import
+dotenv_values, load_dotenv, set_key`; `from lib import app_paths`.
+
+`ENV_PATH = app_paths.env_path()` — the module-level default path (app_paths owns the dev-vs-packaged
+decision). Every public function takes `path=ENV_PATH` so tests can inject a tmp `.env`.
+
+Two module regexes:
+- `_KEY_RE` matches a valid env-var name: `^[A-Za-z_][A-Za-z0-9_]*$`.
+- `_UNQUOTED_RE = ^[A-Za-z0-9_.:/+=~@-]*$` — values made ONLY of these chars are safe to write
+  UNQUOTED (matches the existing `.env` style; covers every API key/token/URL). Anything else (spaces,
+  `#`, quotes, `$`, …) must be quoted on write so it can't leak into a comment or break parsing on
+  read. The empty string matches too → written as `KEY=`.
+
+% --- the curated menu ---
+`KNOWN_ENV_VARS: list[dict]` — the variables the app knows how to use, in display order. Each entry
+has `key`, `label`, `group` (buckets the panel), `secret` (drives the masked password input), and a
+`description`. An optional `url` is the provider's create/copy-key page, which the panel renders as a
+"Get key ↗" link; omit it for keys with no self-serve portal and for non-secret config values.
+`secret` is True everywhere EXCEPT the explicitly-noted non-secret rows below. The list, grouped:
+
+Agent (Claude):
+- `CLAUDE_CODE_OAUTH_TOKEN` "Claude Code token" — "OAuth token from `claude setup-token` — powers the editing agent." (no url — comes from the CLI)
+- `ANTHROPIC_API_KEY` "Anthropic API key" — "Alternative to the Claude Code token for BYOK agent auth." — https://console.anthropic.com/settings/keys
+
+AI generation:
+- `OPENAI_API_KEY` "OpenAI" — "OpenAI API key." — https://platform.openai.com/api-keys
+- `GOOGLE_API_KEY` "Google (Gemini / Veo)" — "Google AI / Gemini key." — https://aistudio.google.com/app/apikey
+- `XAI_API_KEY` "xAI (Grok)" — "xAI API key." — https://console.x.ai
+- `FAL_KEY` "fal.ai" — "fal.ai key for image/video models." — https://fal.ai/dashboard/keys
+- `REPLICATE_API_TOKEN` "Replicate" — "Replicate API token (community models, Content Signal scorer)." — https://replicate.com/account/api-tokens
+- `RUNWAY_API_KEY` "Runway" — "Runway video generation." — https://dev.runwayml.com/
+- `HF_TOKEN` "Hugging Face" — "Hugging Face token (Spaces, hosted models)." — https://huggingface.co/settings/tokens
+
+Audio / voice:
+- `ELEVENLABS_API_KEY` "ElevenLabs" — "ElevenLabs TTS, sound effects, and music." — https://elevenlabs.io/app/settings/api-keys
+- `HEYGEN_API_KEY` "HeyGen" — "HeyGen avatar video + TTS." — https://app.heygen.com/settings?nav=API
+- `SUNO_API_KEY` "Suno" — "Suno music generation." (no url)
+- `DOUBAO_SPEECH_API_KEY` "Doubao speech" — "Doubao (Volcengine) speech key." — https://console.volcengine.com/speech/app
+- `DOUBAO_SPEECH_VOICE_TYPE` "Doubao voice type" — NOT secret — "Default Doubao voice id (not a secret)." (no url)
+
+Stock media:
+- `PEXELS_API_KEY` "Pexels" — "Pexels stock photos and video." — https://www.pexels.com/api/new/
+- `PIXABAY_API_KEY` "Pixabay" — "Pixabay stock media." — https://pixabay.com/api/docs/
+- `UNSPLASH_ACCESS_KEY` "Unsplash" — "Unsplash photos." — https://unsplash.com/oauth/applications
+- `YOUTUBE_API_KEY` "YouTube Data API" — "YouTube Data API key (reference clips)." — https://console.cloud.google.com/apis/credentials
+
+Web:
+- `FIRECRAWL_API_KEY` "Firecrawl" — "Firecrawl web scrape / screenshots." — https://www.firecrawl.dev/app/api-keys
+
+Feedback:
+- `RESEND_API_KEY` "Resend" — "Resend API key — delivers in-app feedback/bug reports by email." — https://resend.com/api-keys
+- `FEEDBACK_TO` "Feedback email" — NOT secret — "Where in-app feedback is emailed (needs RESEND_API_KEY). Not a secret." (no url)
+
+Local / advanced (all NOT secret, no url):
+- `VIDEO_GEN_LOCAL_ENABLED` "Local video gen" — "Enable local video generation (true / false)."
+- `VIDEO_GEN_LOCAL_MODEL` "Local video model" — "Local video model name."
+- `MODAL_LTX2_ENDPOINT_URL` "Modal LTX2 endpoint" — "Modal LTX2 endpoint URL."
+
+`_KNOWN_BY_KEY = {v["key"]: v for v in KNOWN_ENV_VARS}` — index for lookup.
+
+`_INTERNAL_KEYS = {"CLAUDE_CODE_REFRESH_TOKEN"}` — app-managed secrets the user edits through the
+"Sign in with Claude" flow, never by hand; hidden from BOTH the curated menu and the "Other" bucket.
+
+% --- helpers ---
+`_looks_secret(key) -> bool`: True if the uppercased key contains any of "KEY", "TOKEN", "SECRET",
+"PASSWORD" (name-based fallback for un-curated keys).
+
+`_strip_inline_comment(value) -> str`: drop everything from the first `#` onward, then rstrip.
+
+`_quoted_keys(path) -> set[str]`: the keys whose RAW `.env` value is quoted (starts with `'` or `"`),
+so a literal `#` inside the value is part of the value, not a comment. Read the file line by line,
+skipping blanks / full-line comments / lines without `=`; strip a leading `export ` off the key.
+
+% --- read ---
+`read_env_file(path=ENV_PATH) -> dict[str, str]`: `{}` if the file is absent. Parse with
+`dotenv_values` (it handles quotes/escapes), then for each key strip inline `# comment`s from
+UNQUOTED values only — dotenv strips those solely when preceded by TWO spaces, so a single-space
+` # comment` otherwise leaks into the value (and showed up in the panel). A quoted value keeps its
+literal `#`. Skip empty keys; treat a None value as `""`.
+
+`describe_var(key) -> dict`: display metadata for one variable — the curated spec if we know the key
+(`key`, `label`, `group`, `description`, `secret`), else a default (`label`=key, `group`="Other",
+`description`="", `secret`=`_looks_secret(key)`). Powers the agent's in-chat `request_api_key` prompt
+so a missing key shows a friendly label instead of a bare env-var name.
+
+`list_env_vars(path=ENV_PATH) -> list[dict]`: the curated menu, each spec merged with its current
+value from the file, followed by any extra key present in the file that isn't curated and isn't in
+`_INTERNAL_KEYS` — appended under group "Other" with `secret` by name and an empty description.
+
+% --- write ---
+`write_env_vars(updates: dict[str, Optional[str]], path=ENV_PATH) -> list[str]`: persist edits,
+preserving the rest of the file; return the keys that ACTUALLY changed. First validate every name
+(`_KEY_RE`, else `ValueError`) and reject any value containing `\n` or `\r` (`ValueError`) — done up
+front so a bad update touches nothing. Read current values, `mkdir` the parent, create the file if
+missing. For each update (None → `""`): skip a key that isn't already in the file and is being set
+blank (don't clutter the file with blanks for keys the user never had); skip a no-op (value already
+equals current); otherwise `set_key` with `quote_mode="never"` when `_UNQUOTED_RE` matches the value
+else `"always"`, and record the key as changed.
+
+`reload_env(path=ENV_PATH) -> None`: if the file exists, `load_dotenv(path, override=True)` so
+freshly-saved keys take effect this session (the next agent turn / tool subprocess inherits them)
+without a restart.

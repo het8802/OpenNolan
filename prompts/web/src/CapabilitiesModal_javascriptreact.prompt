@@ -1,0 +1,44 @@
+% Generate `web/src/CapabilitiesModal.jsx`: the "Capabilities" settings panel. It lists the
+% lazy capability packs (heavy on-device features kept out of the base install) with size +
+% installed state and installs one on demand, and shows base runtime health (video engine /
+% ffmpeg / motion-graphics) read-only. Mirrors EnvModal's structure and reuses its CSS
+% classes; each install streams via the shared `CapabilityInstall` (its own module).
+%
+% Default-export `CapabilitiesModal({ onClose })` plus a local `RuntimeRow`. Imports:
+% `useEffect, useState`; `* as api from './api.js'`; `IconX, IconCheck, IconAlert` from
+% './components/icons.jsx'; `CapabilityInstall` from './CapabilityInstall.jsx'. No inline
+% styles — the class names below are the contract with web/src/styles.css.
+%
+% Module constants: `PACK_ORDER = ['transcription','vision','bg-removal','beat-sync','tts']`
+% (display order) and `PACK_DESC`, a one-line reason per pack (label + size come from the
+% backend doctor): transcription 'Speech-to-text, captions & video understanding'; vision
+% 'Auto-reframe & face tracking'; bg-removal 'Remove backgrounds from footage & images';
+% beat-sync 'Detect music beats for beat-synced cuts'; tts 'On-device text-to-speech voiceover'.
+
+## CapabilitiesModal({ onClose })
+
+State: `doctor` (`api.getDoctor()` result | null) and `err`. `load = () => getDoctor →
+setDoctor/setErr` — reused as each pack's `onInstalled` to refresh installed state. On mount
+fetch the doctor once behind an `alive` guard. Derive `packs = doctor?.packs || {}`, `meta =
+doctor?.pack_meta || {}`, and `names` = meta keys in PACK_ORDER order then any meta keys not in
+PACK_ORDER (so the backend can add unknown packs).
+
+Layout: a `modal-overlay` (click closes) around a `modal env-modal` (click stops propagation).
+An `env-head` with `env-head-text` (h3 "Capabilities" + an `env-sub` noting these are optional
+on-device features downloaded only when needed so first launch stays small, installed locally
+with no account) and an `am-close` IconX button. An `env-body`: a `modal-err` line on `err`; a
+`<p className="empty">Loading…</p>` while there's no doctor and no err; and when `doctor`, two
+`env-group`s:
+1. head "Base runtime" — three `RuntimeRow`s: "Video engine (Python)" ok=`core_ok`; "FFmpeg"
+   ok=`ffmpeg_ok` with a hint when not ok ("Missing — video won’t render. Check your
+   network/VPN and reopen the app."); "Motion-graphics engines (Remotion · HyperFrames)"
+   ok=`composition_ok`.
+2. head "Optional capability packs" — one `<div className="cap-wrap">` per name wrapping a
+   `<CapabilityInstall pack={name} label={meta[name]?.label || name} sizeMb={meta[name]?.size_mb}
+   installed={!!packs[name]} reason={PACK_DESC[name]} onInstalled={load} />`.
+
+Footer `env-actions`: a `modal-cancel` "Close" button.
+
+`RuntimeRow({ label, ok, hint })`: a `rt-row` with a `rt-dot ok|bad`, a `rt-label`, and a
+`rt-status ok|bad` reading `<IconCheck /> ready` when ok else `<IconAlert size={13} /> not
+installed`; append a `rt-hint` span when `hint` is set.

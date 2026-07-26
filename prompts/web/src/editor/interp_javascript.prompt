@@ -1,0 +1,155 @@
+% Generate `web/src/editor/interp.js`: the pure timeline core for the manual NLE editor —
+% NO React, NO DOM, unit-tested in isolation (see web/src/editor/interp.test.js, which pins the
+% exact edge/clamp numbers; keep this prompt to signatures + contracts and let the tests define
+% the boundary values). Every function is a pure, immutable transform on an `edit_decisions` doc.
+%
+% Three cross-cutting invariants hold everywhere:
+%  1. Immutable — mutators return a NEW doc, never mutate in place; the original is untouched.
+%  2. Save-can-never-422 — every field a mutator emits flows through a sanitizer that keeps ONLY
+%     schema-known keys (edit_decisions.schema.json is additionalProperties:false) AND coerces/clamps
+%     values into their schema range. Keep the field whitelists below in sync with that schema.
+%  3. Same-ref no-op — an edit that changes nothing (out-of-range index, value-equal move/trim,
+%     split outside a clip's window) returns the SAME doc ref, so the editor's history/dirty guard
+%     suppresses a spurious entry. Value-compare (not just identity) before deciding it changed.
+%
+% `interpolateAt` mirrors the FFmpeg renderer's `_piecewise_linear_expr` (tools/video/video_compose.py):
+% LINEAR interpolation between keyframes, held constant before the first / after the last. The
+% `easing` field is stored but the FFmpeg path renders linearly, so preview draws linear too
+% (preview == export).
+
+Named exports only (no default). Module helpers `round3(x)` (round to 3 decimals) and
+`pick(obj, allowed)` (copy only defined `allowed` keys) back everything below.
+
+## Constants (exported)
+- `EASINGS = ['linear','ease-in','ease-out','ease-in-out','spring','step']`
+- `KEYFRAME_DIMS = ['x','y','scale','rotation','opacity']`
+- `MIN_SOURCE_SPAN = 0.1` (shortest clip/split fragment, SOURCE seconds)
+- `MIN_OVERLAY_SPAN = 0.1` (shortest overlay/music/narration span, PROJECT seconds)
+
+## Schema whitelists (module-scope arrays, must match edit_decisions.schema.json)
+- CUT: `id, source, in_seconds, out_seconds, speed, layer, transform, transition_in, transition_out, transition_duration, reason`
+- OVERLAY: `type, asset_id, text, font_path, font_size, color, box, start_seconds, end_seconds, position, animation, opacity, track, audio_mix, keyframes`
+- POSITION: `x, y, width, height` · BOX: `color, opacity, padding` · AUDIO_MIX: `enabled, volume` · CROP: `x, y, width, height`
+- KEYFRAME: `t, x, y, scale, rotation, opacity, easing`
+- MUSIC: `asset_id, volume, fade_in_seconds, fade_out_seconds, start_seconds, end_seconds, ducking`
+- NARRATION: `asset_id, start_seconds, end_seconds` · SFX: `asset_id, start_seconds, volume`
+
+## Sanitizers
+- `sanitizeScale(scale)` — mirrors the schema `oneOf`: a per-axis `{x,y}` OBJECT stays an object
+  (both axes required; non-finite/negative x or y clamp to 0; if EITHER axis is non-finite fall back
+  to the uniform default `1`; an already-clean two-key `{x,y}` returns the SAME ref). A NUMBER stays
+  a number (finite & >= 0, else `1`). Never coerce the object form to a float — that would corrupt a
+  split-screen box.
+- `sanitizeCut(cut)` (exported) — whitelist to CUT; if `transform` is an object, keep only
+  `scale/position/animation/crop`, whitelist nested `crop` to CROP, round an OBJECT `position` to
+  integer `{x,y}` (a STRING named-anchor is left as-is), and run `scale` through `sanitizeScale`.
+- `cleanKeyframe(k)` — whitelist to KEYFRAME; clamp `t >= 0`, `scale >= 0`, `opacity` into `[0,1]`
+  (x/y/rotation unbounded).
+- `sanitizeOverlay(ov)` (exported) — whitelist to OVERLAY; an OBJECT `position` → POSITION whitelist
+  (a STRING position is kept); `box` → BOX; `audio_mix` → AUDIO_MIX; round `font_size` and
+  `box.padding` to ints; `track` → non-negative int; map `keyframes` through `cleanKeyframe`.
+- `cleanMusic/cleanNarration/cleanSfx` — whitelist to MUSIC/NARRATION/SFX; clamp `volume` into
+  `[0,1]`, `fade_*_seconds >= 0`, and round3 the `start_seconds`/`end_seconds` times (>= 0).
+
+## interpolateAt(keyframes, dim, t) (exported)
+Linear value of `dim` at project time `t`, or `null` if no keyframe animates `dim`. Take keyframes
+with both `t` and `dim` present, sort by `t`; single point → its value; held constant before the
+first / after the last; linear between the bracketing pair.
+
+## Cut mutators + project-time math
+- `updateCut(doc, cutId, patch)` — replace the matching cut with `sanitizeCut({...cut, ...patch})`.
+- `cutDuration(cut)` — PROJECT duration `max(0, out-in) / speed` (speed <= 0 treated as 1).
+- `timelineDuration(doc)` — `max(sum of cutDurations, largest overlay end_seconds)`.
+- `cutStarts(doc)` — array parallel to `doc.cuts` of cumulative project start times (cuts concatenate).
+- `cutAtTime(doc, t)` — map project time to the playing cut: `{cut, index, start, localProject,
+  sourceTime}` where `sourceTime = in_seconds + localProject*speed`, or `null` if outside/empty.
+  Half-open intervals (a seam belongs to the LATER cut); the very end clamps to the last cut.
+- `trimCut(doc, cutId, patch, {sourceDuration}={})` — move the edge(s) in `patch`
+  (`in_seconds`/`out_seconds`); clamp `in >= 0`, `out <= sourceDuration` (when finite), the moved
+  edge never crosses the other within `MIN_SOURCE_SPAN`; round3 the result. Same-ref if id not found.
+- `splitCutAtPlayhead(doc, t)` — split the cut under `t` at its mapped source time; needs
+  `MIN_SOURCE_SPAN` on both halves (else same-ref no-op). First half keeps `in→split` and drops
+  `transition_out`; second keeps `split→out` with a fresh unique id and drops `transition_in`.
+- `removeCut(doc, cutId)` — drop by id (same-ref if absent). `duplicateCut(doc, cutId)` — insert a
+  fresh-unique-id copy right after the original. `reorderCut(doc, from, to)` — move one cut, `to`
+  clamped (same-ref if `from` out of range). `addCut(doc, cut, atIndex=end)` — insert a sanitized cut
+  at a clamped index, forcing a unique id (a supplied non-colliding `cut.id` is kept).
+- Unique ids derive from a base as `base-2`, `base-3`, … skipping any existing id.
+
+## Overlay mutators (overlays sit on ABSOLUTE project time; `track` is the z-layer)
+- `updateOverlay(doc, index, patch)` — replace overlay by index with `sanitizeOverlay(...)`;
+  out-of-range → same-ref no-op.
+- `addOverlay(doc, overlay)` / `removeOverlay(doc, index)` — append sanitized / drop by index
+  (same-ref if out of range).
+- `overlayTracks(doc)` — `{max, count: max+1}` over the overlays' `track` values (0 when none).
+- `moveOverlay(doc, index, {start, track})` — shift the window to `start` PRESERVING duration
+  (start clamped >= 0) and shift every keyframe `t` by the SAME clamped delta; set `track` (clamped
+  non-negative int); value-compare so a wiggle-and-return drag is a same-ref no-op.
+- `trimOverlay(doc, index, patch)` — move a `start_seconds`/`end_seconds` edge; clamp start >= 0 and
+  no cross within `MIN_OVERLAY_SPAN`; round3.
+- `splitOverlay(doc, index, t)` — split the window at `t` (needs `MIN_OVERLAY_SPAN` on both halves,
+  else same-ref); both halves keep the same asset/text/style. Split keyframes so motion is preserved
+  EXACTLY: insert an interpolated boundary keyframe at `t` (for every animated `KEYFRAME_DIMS`
+  dimension) into both halves — first keeps `t < ts` plus the boundary, second keeps the boundary
+  plus `t > ts`. Keyframe `t` is absolute, so no time-shift.
+- Track placement (touching edges do NOT count as overlap):
+  - `placeOverlayTrack(doc, start, end, fromTrack=0)` — the LOWEST track >= `fromTrack` with no time
+    overlap, else a fresh track on top (`maxTrack+1`). Existing overlays untouched.
+  - `autoArrangeOverlays(doc)` — re-pack ALL overlays into the fewest no-overlap lanes via greedy
+    interval partitioning in start order; lane index becomes `track`. Same-ref if already arranged or
+    fewer than 2 overlays.
+  - `resolveOverlayOverlap(doc, index)` — after a move/trim, if the edited overlay now overlaps a
+    neighbor on its OWN track, float ONLY it up to the lowest free track >= its current one (others
+    untouched). Same-ref when there's no same-track overlap or index out of range.
+
+## Canvas + background (metadata)
+- `setCanvas(doc, {width, height, fps})` — merge into `metadata.compose_target` (round w/h; keep
+  unspecified dims). `canvasOf(doc)` — `{width, height, fps}` with renderer fallback `1920x1080@30`.
+- `getBackground(doc)` — `metadata.background` or null. `setBackground(doc, bg)` — accept
+  `{type:'color', color}` or `{type:'image', asset_id}`; anything else clears it; value-equal → same
+  ref. `clearBackground(doc)` = `setBackground(doc, null)`.
+
+## Audio model (music beds / narration / sfx)
+Music storage is polymorphic and has a legacy shape:
+- `musicRegions(doc)` — normalize to a LIST of raw region objects: `audio.music` object → `[obj]`,
+  array → the array, else legacy top-level `doc.music` object → `[obj]`; `[]` when none.
+- `musicWindow(region, doc)` — `{start, end}`: start = `max(0, start_seconds||0)`, end =
+  `end_seconds` when set (>= start) else `timelineDuration(doc)` (unbounded bed = whole timeline).
+- Writes go through an internal `_writeMusicRegions` that cleans + drops asset-less regions, then
+  stores 0 → remove `audio.music`, 1 → a single OBJECT, 2+ → an ARRAY, and collapses the legacy
+  top-level `music` field (one source of truth).
+- `setMusic(doc, assetId)` — set region 0's asset (create a region if none), preserving region 0's
+  other fields. `addMusic(doc, assetId, {start=0, end})` — append a region; `end` bounds it
+  (>= start+`MIN_OVERLAY_SPAN`), else it spans to the timeline end.
+- `updateMusic(doc, index, patch)` — merge+clean region `index`; same-ref if out of range or the
+  cleaned region is value-identical. `trimMusic(doc, index, patch)` — trim an edge on the resolved
+  window (clamp like `trimOverlay`, write an explicit window). `moveMusic(doc, index, start)` —
+  move preserving length, forcing an explicit end (same-ref no-op). `splitMusic(doc, index, t)` —
+  split the region window at `t` (needs `MIN_OVERLAY_SPAN`); both halves keep the asset, dropping the
+  seam fades (first `fade_out_seconds`, second `fade_in_seconds`). `removeMusic(doc, index)` — drop
+  region `index`, or ALL music when `index` is null/undefined (same-ref no-op).
+- Narration lives at `audio.narration.segments[]`: `updateNarration(doc, index, patch)`,
+  `removeNarration(doc, index)`, `moveNarration(doc, index, start)` (preserve duration when
+  `end_seconds` is set, start >= 0), `splitNarration(doc, index, t)` (needs a BOUNDED segment — an
+  open-ended one is a no-op — and `MIN_OVERLAY_SPAN` on both halves).
+- SFX live at `audio.sfx[]`: `addSfx(doc, assetId, start=0)` appends a cleaned point;
+  `updateSfx(doc, index, patch)` merges by index; `removeSfx(doc, index)` drops by index.
+- All audio mutators: whitelist-clean, immutable, same-ref out-of-range no-op.
+
+## Keyframe mutators
+- `setOverlayKeyframes(doc, index, keyframes)` — replace with cleaned keyframes.
+- `upsertKeyframe(doc, index, kf)` — insert or replace by matching `t`, then sort by `t`.
+- `removeKeyframe(doc, index, kfIndex)` — drop the keyframe at `kfIndex`.
+
+## Read projections
+- `scaffoldEditDecisions({runtime='ffmpeg', source='clip.mp4', duration=5}={})` — a minimal
+  schema-valid doc: `version:'1.0'`, `render_runtime:runtime`, `renderer_family:'social-reel'`
+  (required by video_compose's pre-compose gate), one cut `{id:'c1', source, in_seconds:0,
+  out_seconds:duration}`.
+- `audioClips(doc)` — flat array, sorted by `start_seconds`, of drawable audio blocks (skip entries
+  with no `asset_id`): one per music region on its resolved window
+  `{kind:'music', index, asset_id, start_seconds, end_seconds, point:false, volume, fade_in_seconds,
+  fade_out_seconds}`; narration segments → `{kind:'narration', index, asset_id, start_seconds,
+  end_seconds (>= start, defaults to start), point:false}`; sfx → point markers
+  `{kind:'sfx', index, asset_id, start_seconds, end_seconds:start_seconds, point:true}`. This is a
+  DERIVED view for the timeline, not a render contract.

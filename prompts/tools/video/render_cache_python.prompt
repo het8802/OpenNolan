@@ -1,0 +1,39 @@
+% Generate `tools/video/render_cache.py`: a content-addressed disk cache for rendered
+% proxy clips (the M2 render-once / NLE model). A "proxy" is one scene rendered to its own
+% clip; rendering a scene (Remotion/HyperFrames) is expensive while editing the arrangement
+% (order, transitions, audio, trims) is cheap (FFmpeg concat) — so render each scene ONCE,
+% cache it keyed by its render-identity, and reuse across edits; only a scene whose content
+% changes misses and re-renders. Mirror the on-disk cache pattern of restyle_video/object_cutout:
+% one JSON record per sha256 key under OPENNOLAN_CACHE_DIR (or ~/.cache/opennolan), an flock for
+% concurrency. CRITICAL (state in the module docstring): the identity the caller hashes must fold
+% in the *content* (sha256) of each source file, not just its asset id/path — a regenerated
+% upstream asset keeps its id but changes pixels, and keying on id alone would serve a stale proxy.
+% Use `from __future__ import annotations`. Import: contextlib, hashlib, json, os, time,
+% pathlib.Path, typing(Any, Optional). Module constant `_CHUNK = 1 << 20` (1 MiB).
+
+`file_content_hash(path: Path | str) -> str`: sha256 of the file's bytes, streamed in `_CHUNK`
+chunks; return `""` if it can't be read (OSError).
+
+## `ProxyCache` — disk cache mapping a scene's render-identity → a rendered proxy clip
+
+`__init__(self, root: Optional[Path | str] = None)`: base = `root` or env `OPENNOLAN_CACHE_DIR`
+or `Path.home()/".cache"/"opennolan"`; `self.dir = Path(base)/"proxies"`.
+
+`key(identity: dict[str, Any]) -> str` (staticmethod): sha256 over
+`json.dumps(identity, sort_keys=True, default=str)`. Docstring: the caller owns `identity`
+(render_runtime, renderer_family, canvas, the solo-scene spec, source-file content-hashes) and
+MUST exclude descriptive fields (reason, labels) to avoid false cache misses.
+
+`_record_path(key) -> Path`: `self.dir / f"{key}.json"`.
+
+`get(key) -> Optional[dict]`: return the record iff its file exists AND its clip is still on disk.
+None if the record file is missing, if it won't parse (OSError/ValueError), or if `proxy_path` is
+absent/no-longer-a-file — so a stale record never points the assembler at a vanished clip.
+
+`put(key, record) -> None`: mkdir parents; copy the record, `setdefault("cached_at", time.time())`;
+write atomically to a `.json.tmp` sibling (indent=2) then `os.replace` into place.
+
+`lock(key)` (`@contextlib.contextmanager`): best-effort cross-process lock so two identical renders
+don't race. mkdir parents and `import fcntl` inside a try; on ANY exception yield (no-op) and return.
+Otherwise open `<dir>/{key}.lock`, `flock(LOCK_EX)`, yield, and in finally unlock (suppressing
+errors) and close the handle.

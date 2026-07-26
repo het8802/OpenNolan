@@ -1,0 +1,132 @@
+% Generate `web/src/studio/model.js`: the pure, dependency-free UI vocabulary + factories + small
+% math behind the Studio editor — NO React, NO DOM. The schema-level doc MUTATORS live in
+% `../editor/interp.js` (the tested contract core); this file only adds inspector/timeline/preview
+% helpers that emit schema-valid fragments. Unit-tested in model.test.js (which pins the exact
+% numbers) — keep this prompt to signatures + contracts and let the tests define boundary values.
+%
+% Two cross-cutting invariants:
+%  1. Render-faithful vocab — every offered TRANSITION / anchor / keyframe dim is one the FFmpeg
+%     path (tools/video/video_compose.py) actually renders; anything it would drop or degrade to
+%     'fade' is NOT offered. The placement helpers mirror the renderer's geometry so preview == export.
+%  2. Save-can-never-422 — every factory/preset emits ONLY schema-known keys, so a fragment
+%     round-trips through interp.js's `sanitizeOverlay` UNCHANGED (asserted by the tests).
+
+Named exports only (no default). `round3(x)` (round to 3 decimals) and `clamp(x, lo, hi)` are
+exported module helpers; `evenDim(n)` = `max(2, round(n/2)*2)` and `centeredAssetPosition` are internal.
+All canvas-taking helpers default a missing canvas to 1920×1080.
+
+## Vocabulary constants (exported)
+- `TRANSITIONS` — `{value, label}[]` of ONLY the FFmpeg xfade names (offering a non-xfade name would
+  silently degrade to fade): `'' Hard cut`, `fade`, `fadeblack` (…through black), `fadewhite`,
+  `dissolve`, `wipeleft/right/up/down` (labels `Wipe ←/→/↑/↓`), `slideleft/right` (`Slide ←/→`),
+  `circleopen`, `circleclose`, `zoom`.
+- `SPEED_PRESETS = [0.5, 1, 1.5, 2, 4]` — quick buttons (FFmpeg renders any positive factor).
+- `CANVAS_PRESETS` — `{label, width, height}[]` output canvases, EVEN dims (yuv420p): 9:16 1080×1920,
+  1:1 1080×1080, 16:9 1920×1080, 4:5 1080×1350.
+- `TEXT_ANCHORS` — the nine drawtext anchors `{top|center|bottom}-{left|center|right}` (center is bare
+  `center`), row-major.
+- `EASINGS = ['linear','ease-in','ease-out','ease-in-out','spring','step']` (schema enum).
+- `KF_DIMS_IMAGE = ['x','y','scale','opacity']`, `KF_DIMS_TEXT = ['x','y','opacity']` — keyframe dims
+  the FFmpeg path renders BY overlay kind (rotation is never rendered; text warns+ignores scale).
+- `IMAGE_EXTENSIONS = ['.png','.jpg','.jpeg','.bmp','.tiff','.tif','.webp']` — kept in sync with
+  video_compose.py `_IMAGE_EXTENSIONS`; `.gif` is intentionally ABSENT (gifs are video-like).
+- `AUDIO_LANE_ORDER = ['music','narration','sfx']` — fixed top→bottom timeline sub-lane order.
+
+## Type detection
+- `overlayKind(ov)` → `'text' | 'image'` (video counts as image, so `kfDimsFor` is a two-way split):
+  explicit `type==='text'` → text; `type` image/video → image; else text IFF it has `text` and no
+  `asset_id`, else image.
+- `overlayType(ov)` → `'text' | 'image' | 'video'` — the three-way split the inspector/preview need
+  (same fallback: text iff `text` and no `asset_id`, else image).
+- `kfDimsFor(ov)` → `KF_DIMS_TEXT` for a text overlay else `KF_DIMS_IMAGE`.
+- `isImageSource(path)` → true iff the lowercased path ends in an `IMAGE_EXTENSIONS` suffix.
+- `clipType(selection, doc)` → the inspector's declarative-schema key for the current selection, or
+  null (no selection / no match): a `cut` → `image_main`|`video_main` by `isImageSource(cut.source)`;
+  an `overlay` (by `selection.index`) → `text`|`video_overlay`|`image_overlay` via `overlayType`; an
+  `audio` selection → its `audioKind` (`music`|`sfx`|`narration`).
+
+## Overlay factories (each returns a complete, CENTERED, schema-valid overlay — feat 4: new overlays
+land mid-canvas, then the user drags them; emit only whitelisted keys so `sanitizeOverlay` is a no-op)
+- `newTextOverlay({start=0, end=3, track=0})` — `type:'text'`, `text:'Your text'`, `font_size:64`,
+  `color:'white'`, `box:{color:'black', opacity:0.5, padding:12}`, round3'd start/end, `position:'center'`
+  (a valid drawtext string anchor), `opacity:1`, `track`.
+- `newImageOverlay({assetId, start=0, end=3, canvas, track=0})` — `type:'image'`, `asset_id`, an OBJECT
+  `position` from `centeredAssetPosition(canvas, 0.3)` (named anchors are text-only), `opacity:1`.
+- `newVideoOverlay(...)` — same as image but `type:'video'` and `centeredAssetPosition(canvas, 0.4)`
+  (a little larger; PiP audio stays off until toggled via `audio_mix`).
+- `centeredAssetPosition(canvas, widthFrac)` (internal) → `{x, y, width}`: `width = round(canvasW*widthFrac)`
+  (height stays auto so the renderer keeps aspect); centered assuming a SQUARE box — `x=(W-width)/2`,
+  `y=max(0,(H-width)/2)`.
+
+## presetKeyframes(name, ov) → keyframes[] over the overlay's [start,end] window, or null when the
+preset doesn't apply. Opacity presets work for ANY kind; MOTION presets need an OBJECT position
+(image/video) and return null otherwise. `x`/`y` read from the object position (default 0).
+- `fade_in` — opacity 0→1 over the first 0.4s (ease-out).  `fade_out` — 1→0 over the last 0.4s (ease-in).
+- `slide_in_left` / `slide_in_right` — x from ±240 (& opacity 0) → resting x (& 1) over ~0.5s, ease-out.
+- `pop` — scale 0.6 & opacity 0 → 1 & 1 over ~0.35s, ease-out.
+- `ken_burns` — scale 1→1.2 across the whole window (linear).
+- unknown name → null. (round3 every keyframe `t`, clamped inside the window.)
+
+## Runtime + audio projections
+- `isFfmpeg(doc)` — true when `doc.render_runtime` is missing or `'ffmpeg'` (the studio default).
+- `previewAudioTracks(doc)` → the hidden `<audio>` elements for the SOURCE preview: like interp's
+  `audioClips` but carrying `volume` and OPEN-ENDED windows. One item per music region (`audio.music`
+  as object OR array, legacy top-level `doc.music` as fallback), then narration segments, then sfx;
+  skip any with no `asset_id`. Shapes: music `{key:'music'+i, kind:'music', src:asset_id,
+  start:max(0,start_seconds||0), end: end_seconds set ? Number : Infinity, volume: volume ?? 1}`;
+  narration `{key:'n'+i, kind:'narration', src, start, end: end_seconds set ? Number : Infinity,
+  volume:1}`; sfx `{key:'s'+i, kind:'sfx', src, start, end: Infinity, volume: volume ?? 1}`.
+- `groupAudioLanes(audioItems=[])` → `[{kind, items}]` grouping a flat audioClips list by kind in
+  `AUDIO_LANE_ORDER`, dropping empty kinds (so a full-width music bed and narration segment sit on
+  SEPARATE rows instead of occluding each other). `[]` when there's no audio.
+
+## Placement geometry (mirror video_compose.py so preview == export)
+- `anchorToXY(anchor, canvas)` → `{x,y,width}` converting a named anchor to an OBJECT for image/video
+  overlays (which reject a string anchor). Columns left/center/right at 0.05/0.4/0.7·W, rows
+  top/center/bottom at 0.05/0.45/0.85·H, `width = round(0.25·W)`; unknown parts fall back to center.
+- `clipFitSize(meta, canvas)` → the main clip's contain-fit box at scale=1: `r = min(cw/sw, ch/sh)`,
+  `{round(sw*r), round(sh*r)}`; unknown source dims fall back to the canvas.
+- `isScaleObject(scale)` — true iff `scale` is a non-null object (the per-axis box form).
+- `scaleAxes(scale=1)` → `{sx, sy}`: a uniform NUMBER → `sx===sy`; an `{x,y}` OBJECT → its axes (each
+  defaulting to 1). Any non-finite / non-positive member floors to 1 (a half-formed value can't
+  collapse a box to zero). Mirrors the renderer's `_pos_float` split.
+- `clipBox(meta, canvas, scale=1)` → `{width, height}`, even dims ≥ 2: a uniform NUMBER → `fit × scale`
+  (legacy centered-letterbox box); an `{x,y}` OBJECT → a CANVAS-fraction box `evenDim(cw·sx) ×
+  evenDim(ch·sy)` (e.g. `{x:1,y:0.5}` = full-width half-height split panel — the box is the PANEL, the
+  clip fits inside it aspect-preserved).
+- `clipDefaultPosition(meta, canvas, scale=1)` → the `clipBox` centered on the canvas (top-left `{x,y}`).
+- `clipAnchorXY(anchor, meta, canvas, scale=1)` → the `clipBox` flush to a named edge, margin 0 (left→0,
+  right→`cw-boxW`, else centered; top→0, bottom→`ch-boxH`, else centered) — flush, unlike the 0.05-margin
+  overlay `anchorToXY`.
+- `clipPositionXY(cut, meta, canvas)` → `{x,y}` for a cut: an OBJECT `transform.position` (with `x` set)
+  as-is; else `clipAnchorXY` on the string anchor (default `'center'`), passing `transform.scale`
+  THROUGH so the anchored box uses the right dims.
+
+## Small math
+- `round3(x)` — round to 3 decimals.  `clamp(x, lo, hi)`.
+- `fmtTime(sec)` → compact `m:ss.c` timecode (one decimal): `m=floor(s/60)`, `r=s-m*60`,
+  `` `${m}:${r.toFixed(1).padStart(4,'0')}` ``; clamp negatives/non-numbers to `0:00.0`. (The
+  toFixed(1) seam can read as `:60.0` at a tick boundary rather than carrying to the minute — pinned
+  by the tests, leave it.)
+
+## Drag-to-scrub number fields (pure math for After-Effects/CapCut-style draggable inputs)
+- `decimalsOf(step)` — decimal places implied by `step` (0.05→2, 1→0), 0 for non-finite/≤0, capped at 6.
+- `roundTo(x, step)` — round `x` to `decimalsOf(step)` places (kills 0.1+0.2 float noise).
+- `scrubValue({start, dx, step=1, min, max, fine=false})` — new value = `start + dx·per` where
+  `per = fine ? step/5 : step` (a bad/≤0 step is treated as 1); snap to the `per` grid, clamp to
+  `[min,max]` when finite, `roundTo` the result. Tolerant of junk (no NaN leaks).
+- `fmtScrub(v)` — compact display: '' for '' / null / non-numbers (= unset/auto), integers bare, else
+  trailing zeros dropped.
+
+## summarizeDocChange(prev, next) — the debug recorder's compact prev→next `edit_decisions` diff
+Every editor edit funnels through commit/live, so diffing there captures EVERY action as one semantic
+event. Returns ONLY what changed (a no-op — same ref or deep-equal — returns `{}`):
+`{ cuts?, overlays?, fields? }`. Cap every emitted list at `_MAX_CHANGED = 12`.
+- `cuts` — diff by stable `id` (internal `_diffById`): `added`/`removed` id lists, `changed`
+  `[{id, fields}]` (fields = keys whose JSON differs), and `reordered:true` when the same id-set is in
+  a new order.
+- `overlays` — diff by index (internal `_diffByIndex`, no stable id): `count {from,to}` on a length
+  change, `changed [{index, fields}]`.
+- `fields` — top-level keys other than cuts/overlays whose JSON differs (catches audio / metadata /
+  canvas / background / render_runtime).
+(Internal `_fieldsChanged(a,b)` returns the keys whose `JSON.stringify` differs across both objects.)

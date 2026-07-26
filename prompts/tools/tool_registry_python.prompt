@@ -1,0 +1,97 @@
+% Generate `tools/tool_registry.py`: the central `ToolRegistry` that discovers
+% every OpenNolan tool, reports availability, and lets the orchestrator/agents
+% query capabilities by tier, status, provider, capability, and stability.
+% Use `from __future__ import annotations`. Import: importlib, inspect, logging,
+% pkgutil, types(ModuleType), typing(Any, Optional), and
+% `from tools.base_tool import BaseTool, ToolStatus, ToolTier, ToolStability`.
+% End the module with a singleton `registry = ToolRegistry()`.
+
+## `_scrub_unicode_dashes(value)` + `_UNICODE_DASH_REPLACEMENTS`
+
+A private helper that recursively normalizes unicode punctuation in string leaves
+to ASCII so registry output prints cleanly on Windows cp1252 stdout. Walk
+str/list/tuple/dict; for a str, replace each key in `_UNICODE_DASH_REPLACEMENTS`
+with its value; recurse into list/tuple/dict (preserving container type); pass any
+other value through unchanged. The replacement map: em dash `—`→`--`, en dash
+`–`→`-`, minus `−`→`-`, left/right single quotes `‘`/`’`→`'`,
+left/right double quotes `“`/`”`→`"`, ellipsis `…`→`...`.
+
+## `ToolRegistry`
+
+`__init__`: `_tools: dict[str, BaseTool]` and `_discovered_packages: set[str]`.
+
+Registration:
+- `register(tool)`: raise `ValueError` if the tool has no `name`; else store by name.
+- `clear()`: clear `_tools` and `_discovered_packages`.
+- `register_module(module) -> list[str]`: instantiate and register every concrete
+  `BaseTool` subclass *defined in that module* (skip `BaseTool` itself, non-subclasses,
+  classes whose `__module__` differs from the module, and abstract classes); return the
+  registered names.
+
+`_load_dotenv()` (staticmethod): load a BYOK `.env` into `os.environ` so tools find API
+keys. Resolve the path via `app_paths.env_path()` (lazy `from lib import app_paths`); on
+any failure fall back to the repo-root `.env` (`Path(__file__).resolve().parent.parent /
+".env"`). Return early if missing. Read utf-8 (`errors="ignore"`); per line: strip; skip
+blanks, `#` comments, and lines without `=`; split on the first `=`; strip the key; strip
+whitespace then surrounding `'`/`"` from the value; set only when the key is truthy and not
+already in `os.environ`.
+
+Discovery:
+- `discover(package_name="tools") -> list[str]`: call `_load_dotenv()`, import the package.
+  If it has no `__path__`, just `register_module` it and return. Otherwise
+  `pkgutil.walk_packages` the tree, skipping any module whose name ends in `.base_tool` or
+  `.tool_registry`. Fault-isolate each import in try/except: a module that raises at import
+  time (e.g. a missing optional dep like numpy) must NOT abort discovery — log a warning and
+  `continue` so one bad tool doesn't blind the agent to all the others. Register each imported
+  module. Record the package in `_discovered_packages`; return all discovered names.
+- `ensure_discovered(package_name="tools")`: run `discover` once per package.
+
+Simple accessors/filters (all read `_tools.values()`):
+- `get(name)`, `list_all()`.
+- `get_by_tier(tier)`, `get_by_provider(provider)`, `get_by_stability(stability)` — match the
+  matching attribute.
+- `get_by_capability(capability)` matches `tool.capability`; `find_by_capability(capability)`
+  matches membership in `tool.capabilities`.
+- `get_by_status(status)` compares `tool.get_status()`; `get_available()`/`get_unavailable()`
+  wrap it with `AVAILABLE`/`UNAVAILABLE`.
+- `find_fallback(tool_name)`: look up the tool (None → None); candidate list = its
+  `fallback_tools` plus its `fallback` if not already included; return the first candidate that
+  is registered and currently `AVAILABLE`, else None.
+
+Reports (each calls `ensure_discovered()` first, builds from `tool.get_info()`):
+- `support_envelope()`: `{name: get_info()}` for every tool — the full firehose.
+- `capability_catalog()`: group `get_info()` by `tool.capability`; sort each list by
+  `(provider, name)`; return sorted by capability key.
+- `provider_catalog()`: same, grouped by `tool.provider`, each list sorted by
+  `(capability, name)`.
+- `tier_summary()`: per `ToolTier` with any tools, count `{available, unavailable, degraded}`
+  by `get_status().value`; keyed by `tier.value`.
+- `provider_menu()`: user-facing capability-grouped menu. Skip tools with
+  `provider == "selector"` (aggregators, not real providers). Per capability build
+  `{available, unavailable, total, configured}`. Each entry carries name, provider,
+  `runtime.value`, best_for, install_instructions, and `status.value`, plus any of these
+  passthrough keys present in `get_info()`: `source_provider_menu`, `source_provider_summary`,
+  `render_engines`, `remotion_note`, `provider_matrix`. `AVAILABLE` tools go in `available`
+  and bump `configured`; others go in `unavailable`; bump `total`. Sort both buckets by
+  `(provider, name)`; return sorted by capability.
+
+`provider_menu_summary()`: compact rollup of `provider_menu()` for onboarding/preflight —
+the source the agent uses for its "N of M configured" capability menu (per AGENT_GUIDE.md →
+"Provider Menu (Mandatory at Preflight)"), not the raw envelope. Build a dict with:
+- `composition_runtimes`: from `video_compose`'s `get_info()["render_engines"]` (if that tool
+  is registered), each value coerced to bool.
+- `runtime_warnings`: from `hyperframes_compose`'s `get_info()["hyperframes_runtime"]["reasons"]`
+  (if registered), each prefixed `"hyperframes: "` — these surface the "looks available but the
+  npm package isn't resolvable" failures.
+- `capabilities`: one row per capability with `capability`, `configured`, `total`,
+  `available_providers`, `unavailable_providers` (both sorted, `None` dropped). Dedupe so a
+  provider that has *any* available tool never also appears in the unavailable list.
+- `setup_offers`: unavailable entries that are likely 1-minute env-var fixes — keep those whose
+  `install_instructions` (lowercased) mention any of "api key", "env", "_key=", "_api"; each
+  offer has capability, tool, provider, install_instructions.
+Return the dict passed through `_scrub_unicode_dashes` so pasted preflight output stays clean
+on Windows cp1252.
+
+Resource queries:
+- `gpu_required_tools()`: names where `resource_profile.vram_mb > 0`.
+- `network_required_tools()`: names where `resource_profile.network_required`.

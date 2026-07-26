@@ -1,0 +1,104 @@
+% Generate `web/src/debug/recorder.js`: an in-app SESSION RECORDER for the Studio editor —
+% dev observability the coding agent can read after the fact. The renderer runs inside Electron
+% (no attachable console), so ONE toggle turns on a durable, ordered trace: while ON it captures,
+% each stamped with a monotonic `seq` and timestamps, every `console.*` call, uncaught errors +
+% unhandled rejections, user interactions (pointerdown / click / keydown / drag-moves), and domain
+% events the app emits via `event(type, data)` (scrub/seek/video-state). Events batch-flush to
+% `POST /api/debug/log`, whose backend (`server/debug_log.py`) appends NDJSON to
+% `<home>/.agents/tools/logs/ui-sessions/<session>.ndjson`. The module comment should explain that.
+%
+% Invariants (state them in a comment): safe when OFF (no console patching, no listeners, `event()` a
+% cheap no-op); never throws into the app (every capture path try/catch-wrapped); survives a reload —
+% the on/off flag + session id live in localStorage, so an accidental ⌘R (or error-triggered reload)
+% keeps appending to the SAME file (see `resumeIfActive`); pure helpers exported for unit tests.
+%
+% Only `useSyncExternalStore` (from 'react') is imported. No other deps.
+
+## Constants
+- `FLUSH_MS = 1000` — batch cadence.
+- `MAX_BUFFER = 8000` — hard cap; when full, `shift()` (drop oldest, keep most recent).
+- `MOVE_THROTTLE_MS = 40` — ~25 drag-move samples/sec.
+- `LS_KEY = 'st.debug.rec.v1'` — persists `{ on, session }`.
+- `ENDPOINT = '/api/debug/log'`.
+- `THROTTLE_MS = { 'ui.seek': 66, 'preview.seekReq': 66, 'edit.live': 66 }` — per-frame domain
+  events dominate file size; thin them to ~15 Hz. The low-volume `preview.video.*` lifecycle events
+  are NOT here, so the diagnostic seek-completion ratio (see `debug_log.py analyze_session`) is unhurt.
+- `MAX_SESSION_EVENTS = 200000` — safety net so a forgotten session can't grow unbounded.
+
+## Module state (single mutable object + a `Set` of UI listeners)
+`state`: `on` false, `session` null, `load` '' (short id for THIS page load — `seq` resets per load),
+`seq` 0, `total` 0 (events pushed this session across loads, for the cap), `capped` false, `buffer`
+[], `timer` null, `startPerf` 0, `patched` false, `origConsole` null, `lastMove` 0, `throttle` {}
+(type → last-emit perfNow), `flushing` null (promise for the in-flight flush).
+`listeners` Set + `notify()` calling each cb in its own try/catch.
+
+Helpers: `perfNow()` (performance.now if present else Date.now), `wallNow()` (`new Date().toISOString()`),
+`rid(n = 4)` (`Math.random().toString(36).slice(2, 2 + n)`).
+
+## Pure helpers (exported; behavior pinned by recorder.test.js)
+`describeTarget(el)` → compact DOM descriptor, or null unless `el.nodeType === 1`. `sel` =
+`${tag}${id}${cls}`: tag lowercased, `#id` when present, class = the first `st-*` class if any
+(they name the studio regions) else the first class. Plus `testid` (data-testid), `aria` (aria-label),
+`role`, `text` (textContent trimmed, whitespace collapsed, sliced to 40) — each `undefined` when absent.
+
+`serializeArg(v, depth = 0, seen = new WeakSet())` → bounded, circular-safe JSON-ish value.
+`undefined` → `'(undefined)'`; string truncated to 2000 + '…'; bigint → `` `${v}n` ``; symbol → `String(v)`;
+function → `` `[fn ${name||'anonymous'}]` ``; `Error` → `{ error: name, message, stack: first 6 lines }`;
+`Element` (guard `typeof Element`) → `describeTarget`; null / number / boolean pass through. Beyond
+`depth >= 4` → `'[…]'`. Objects: `'[circular]'` when already in `seen`; arrays recurse first 100 items;
+plain objects recurse own keys, capping at 60 with `{'…':'truncated'}`; try/catch the object branch → `String(v)`.
+
+## Recording core
+`push(type, rec)`: return unless `state.on`; whole body in try/catch (never break the app). Apply
+`THROTTLE_MS[type]` via `state.throttle`. If `state.total >= MAX_SESSION_EVENTS`, push ONE
+`session.capped` marker (`data = MAX_SESSION_EVENTS`) the first time, then silently drop. Else
+`total++`, `shift()` if buffer at `MAX_BUFFER`, and push
+`{ seq: state.seq++, load, t, wall: wallNow(), type, ...rec }` where `t` = `(perfNow() − startPerf)`
+rounded to 0.1 ms.
+
+Public: `event(type, data)` → `push(type, data !== undefined ? { data: serializeArg(data) } : {})`.
+`mark(label)` → `push('mark', { data: label })`.
+
+## Console + global listeners (installed only while ON)
+`patchConsole()`/`unpatchConsole()` over `['log','info','warn','error','debug']`: replace each with a
+wrapper that `push('console', { level, args: args.map(serializeArg) })` then calls the original
+(try/catch); restore on unpatch. Guarded by `state.patched`.
+
+Handlers, each `push`ing its record:
+- `error` → `{ message, source: filename, line: lineno, col: colno, stack: e.error?.stack first 8 lines }`.
+- `unhandledrejection` → `{ reason: serializeArg(e.reason) }`.
+- `pointerdown` → `{ target: describeTarget, x, y (rounded), button }`; `click` → same minus button.
+- `pointermove` → only while dragging (`e.buttons`), throttled by `MOVE_THROTTLE_MS` via `state.lastMove`;
+  `{ x, y (rounded), buttons }`.
+- `keydown` → `{ key, meta, ctrl, shift, alt, inField }` where `inField` is true for input/textarea/select
+  or a contentEditable target (so the reader can tell shortcuts from typing).
+`addGlobals`/`removeGlobals` (guard `typeof window`): register error/unhandledrejection, the four
+interaction listeners with `capture = true`, and `pagehide` → `flush(true)`.
+
+## Flush + persistence
+`flush(useBeacon = false)`: no-op (return `state.flushing || resolved`) when no session or empty buffer.
+Swap out the buffer, `body = JSON.stringify({ session, events })`. In an async IIFE stored to
+`state.flushing`: use `navigator.sendBeacon(ENDPOINT, Blob)` when `useBeacon` and available, else
+`fetch(ENDPOINT, POST, json header, body, keepalive: useBeacon)`; on ANY failure re-prepend the batch
+(`state.buffer = batch.concat(state.buffer)`) so a transient blip doesn't drop events. Never rejects.
+`flushed()` → `state.flushing || resolved` (await the last write, e.g. after `stop()`). `flushNow()` →
+`flush(false)` (re-drain a tail stranded by a failed stop-time flush before a report is submitted).
+`persist()` → localStorage `LS_KEY` = `{ on, session }`, try/catch.
+
+## Lifecycle + control API
+`begin(session, resumed, meta)`: set `on`, `session`, fresh `load = rid()`, reset seq/total/capped/
+throttle/buffer, `startPerf = perfNow()`, patchConsole, addGlobals, push `session.resume`/`session.start`
+with `{ ...meta, ua, url, viewport: { w, h, dpr } }` (all env-guarded), (re)start the `FLUSH_MS`
+interval calling `flush(false)`, persist, notify.
+- `start(meta = {})` — if already on return session; mint `session` = `wallNow().replace(/[:.]/g,'-') + '-' + rid()`;
+  `begin(session, false, meta)`; return it.
+- `stop()` — if off return null; push `session.stop`, clear timer, removeGlobals, unpatchConsole,
+  `flush(false)`, `on = false`, persist, notify; return the session.
+- `toggle(meta = {})` → stop if on else start. `isRecording()`, `currentSession()`.
+- `subscribe(cb)` → add to `listeners`, return an unsubscribe.
+- `resumeIfActive(meta = {})` — re-arm after a reload: if off, read `LS_KEY`; if `{ on, session }` was
+  saved, `begin(session, true, meta)`. Call once at app start.
+- `useRecording()` → `useSyncExternalStore(subscribe, isRecording, isRecording)` for the toolbar indicator.
+
+Default export `dbg`: `{ start, stop, toggle, event, mark, isRecording, currentSession, subscribe,
+useRecording, resumeIfActive, flushed, flushNow }`. Also named-export every function.

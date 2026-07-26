@@ -1,0 +1,28 @@
+{
+  "7785440fa5d934eb": {
+    "argv": [
+      "--local",
+      "--force",
+      "update",
+      "--all"
+    ],
+    "project_root": "/Users/htikawala/Documents/Het-personal/OpenMontage",
+    "fingerprint": "ce7ad9b833311f16ee19db7c18235d53850e2a6baef7bdc532f933e95013472b",
+    "git_head": "323a7d93f321efbb30c7df76c5dd4bda1672653c",
+    "subcommand": "update",
+    "timestamp": 1785031601.754962
+  },
+  "d95e19906e2871e7": {
+    "argv": [
+      "--local",
+      "--force",
+      "update",
+      "web/src/auth/ConnectClaudeModal.jsx"
+    ],
+    "project_root": "/Users/htikawala/Documents/Het-personal/OpenMontage",
+    "fingerprint": "ce7ad9b833311f16ee19db7c18235d53850e2a6baef7bdc532f933e95013472b",
+    "git_head": "323a7d93f321efbb30c7df76c5dd4bda1672653c",
+    "subcommand": "update",
+    "timestamp": 1785031739.90591
+  }
+}

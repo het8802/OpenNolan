@@ -1,0 +1,243 @@
+% Generate `server/app.py`: the FastAPI HTTP layer for the OpenNolan "Mission Control"
+% desktop app. It is a THIN wrapper that owns no orchestration — every route delegates to an
+% existing lib/server module and translates that module's return values / typed exceptions into
+% JSON + HTTP status codes. It exposes the read surface (pipelines, styles, projects, state,
+% artifacts, assets, capabilities), the write surface (create project, upload assets, edit the
+% timeline, render), the agent chat surface (an SSE turn + its confirm/answer/key/capability/stop
+% round-trips), account auth, settings, feedback/telemetry, first-run provisioning, and the
+% dev-observability debug sink; then it serves the built SPA. Factory pattern: `create_app(...)`
+% builds and returns the app; module-level `app = create_app()` is the uvicorn target.
+%
+% `from __future__ import annotations`. Import: asyncio, json, os, shutil, subprocess, tempfile;
+% pathlib.Path; typing(Any, Callable, Optional); fastapi(Body, FastAPI, File, Form, HTTPException,
+% Request, UploadFile); fastapi.responses(FileResponse, JSONResponse, StreamingResponse);
+% fastapi.staticfiles(StaticFiles); pydantic(BaseModel). Delegated modules (import at top):
+% lib.env_loader.load_env; lib.pipeline_loader(get_stage_order, list_pipelines, load_pipeline);
+% lib.project(ASSET_SUBDIRS, ProjectExistsError, create_project, get_project_record, list_projects,
+% sanitize_filename); styles.playbook_loader(list_playbooks, load_playbook); `from server import`
+% activity, analytics, artifacts, settings, auth, debug_log, editor, threads (aliased *_mod /
+% thread_store); server.agent_runner(AgentRunner, auth_configured); server.render_jobs.RenderJobStore;
+% server.state(FileStateSource, StateSource); lib.app_paths. Import a few heavy/optional deps lazily
+% INSIDE the handler that needs them (server.env_config, server.feedback, lib.provision, platform)
+% so the module imports cheaply.
+
+## Module constants + helpers
+
+- `IMAGE_EXTS`/`VIDEO_EXTS`/`AUDIO_EXTS`: lowercase file-extension sets (png/jpg/jpeg/gif/webp/svg/avif;
+  mp4/mov/webm/mkv/m4v; mp3/wav/aac/m4a/ogg/flac).
+- `_classify(rel_parts, ext) -> Optional[str]`: image ext→"images", video ext→"video", audio ext→
+  "music" if "music" in rel_parts else "audio", else None.
+- `REPO_ROOT = app_paths.code_root()` — read-only code root the agent runs against (repo checkout in
+  dev; app-bundle Resources in the packaged app).
+- `_default_projects_dir() -> Path` = `app_paths.projects_dir()` (writable projects tree).
+- `_default_capabilities() -> dict`: lazily `from tools.tool_registry import registry`, `registry.discover()`,
+  return `registry.provider_menu_summary()`. Expensive (imports every tool module) so it runs at most once
+  per app; returns counts + install instructions only, never raw key/env values.
+
+## Pydantic request bodies
+
+Define BaseModel classes for the JSON request bodies (fields, with Optional defaults where noted):
+- `CreateProjectRequest`: name:str; pipeline_type:Optional[str]=None (None/empty ⇒ agent picks);
+  style:Optional[str]=None (None/empty ⇒ agent picks).
+- `ChatRequest`: message:str; thread_id:Optional[str]=None; model:Optional[str]=None (UI-selected agent model).
+- `ThreadCreate`: title:Optional[str]=None. `ThreadSave`: messages:list[Any]=[]; session_id:Optional[str]=None;
+  title:Optional[str]=None.
+- `ConfirmRequest`: confirm_id:str; approved:bool. `AnswerRequest`: question_id:str; answer:str.
+- `ProvideKeyRequest`: key_request_id:str; env_var:str; value:Optional[str]=None; skipped:bool=False.
+- `ProvideCapabilityRequest`: cap_request_id:str; installed:bool=False.
+- `EnvUpdateRequest`: vars:dict[str,str]. `AnalyticsUpdateRequest`: disabled:bool (True = opt OUT).
+- `FeedbackRequest`: kind:str ("bug"|"feature"|"other"); message:str; email/diagnostics/debug_session all
+  Optional[str]=None.
+- `ClientErrorReport`: source:str; message:str; stack:Optional[str]=None; context:Optional[dict[str,Any]]=None.
+- `DebugLogBody`: session:str; events:list[dict[str,Any]]=[]. `OAuthFinishRequest`: code:str
+  (the `code#state` string pasted from the Claude sign-in page). `ApiKeyRequest`: api_key:str.
+
+## create_app
+
+`create_app(projects_dir: Path|str|None = None, *, state_source: Optional[StateSource] = None,
+capabilities_provider: Optional[Callable[[],dict]] = None, agent_runner: Optional[AgentRunner] = None)
+-> FastAPI`. The keyword args are injection seams the tests use to stub the capabilities provider and
+inject a fake runner. Steps:
+1. `load_env()` first — the backend must pick up agent auth (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY)
+   and provider keys the same way tools do, so a plain `uvicorn` restart doesn't silently drop auth.
+2. `app = FastAPI(title="OpenNolan Mission Control", version="0.1.0")`.
+3. Register a catch-all `@app.exception_handler(Exception)`: report the exc to analytics
+   (`analytics.capture_exception(exc, {"path", "method"})`) and return a clean 500 JSONResponse
+   `{"detail": "internal server error"}`. (HTTPException has its own handler; streaming routes handle their own.)
+4. `pdir` = the given projects_dir else `_default_projects_dir()`; `source` = given state_source else
+   `FileStateSource(pdir)`; `cap_provider` = given capabilities_provider else `_default_capabilities`.
+5. `app.state`: projects_dir=pdir, state_source=source, capabilities_cache=None (lazy), agent_runner=
+   agent_runner (injected or lazily built), render_store=None (lazy).
+6. Boot analytics: `capture("app_opened", {os, app_version})`; and ONCE per install — if
+   `settings.get("app_first_run_done", False)` is falsy, `capture("app_first_run", ...)` then
+   `settings.set_value("app_first_run_done", True)`.
+7. `_render_store()`: lazily build+cache `RenderJobStore(pdir)` on app.state.
+8. `_runner()`: if `app.state.agent_runner is None and auth_configured()`, build
+   `AgentRunner(repo_root=REPO_ROOT, projects_dir=pdir, render_store=_render_store())` (share ONE
+   RenderJobStore with the editor so the agent's in-process render is tracked/superseded). Return it (may be None).
+
+Register the routes below on `app`. Unless stated otherwise, a route that names a project first checks
+`get_project_record(pdir, project_id)` and raises 404 `f"project {project_id!r} not found"` when missing.
+Return plain dicts (FastAPI serializes to JSON).
+
+## Read routes
+
+- `GET /api/health` → `{"status":"ok","projects_dir":str(pdir)}`.
+- `GET /api/pipelines` → `{"pipelines":[…]}`: for each `list_pipelines()` name, load its manifest and emit
+  {name, description(stripped), stability, stages=`get_stage_order(manifest)`}; a manifest that raises must
+  NOT hide the others — emit {name, error:str(exc)[:200]} instead.
+- `GET /api/pipelines/{name}` → `load_pipeline(name)`; FileNotFoundError → 404.
+- `GET /api/styles` → `{"styles":[…]}`: built-in name set = `list_playbooks(packaged=False)`; for every
+  `list_playbooks()` name emit {name, user:(name not in builtins)} plus its identity block
+  (category/mood/pace/best_for and label=identity.name or name); a malformed style YAML → {…, error:[:200]}
+  rather than hiding the list.
+- `GET /api/projects` → `{"projects": list_projects(pdir)}`.
+- `GET /api/projects/{id}/state` → `source.project_state(id)`; None → 404.
+- `GET /api/projects/{id}/artifacts` → `artifacts.list_artifacts(pdir, id)`; None → 404.
+- `GET /api/projects/{id}/artifacts/{key}` → `artifacts.read_artifact(pdir, id, key)`; `artifacts.BadArtifactKey`
+  → 400; None → 404. (key is a safe slug; the router already blocks slashes.)
+- `GET /api/projects/{id}/activity?limit=&since=` → `activity.read_activity(pdir, id, limit=, since=)` (404 guard).
+- `GET /api/capabilities`: return `app.state.capabilities_cache`, populating it once from `cap_provider()`;
+  if the provider RAISES, report it (`analytics.capture_exception(exc, {"where":"capability_discovery"})`) and
+  cache `{"error": f"capability discovery failed: {exc}"}` — surface the failure, never 500.
+
+## Asset listing + file serving
+
+- `GET /api/projects/{id}/assets` → `{project_id, kinds, renders, agent_renders}` (404 if the project dir is
+  absent). Three deliberately distinct buckets, each entry {path(project-relative), name, size_bytes, mtime(int)};
+  skip non-files and dotfiles:
+  - `kinds` — dict images/video/audio/music; RECURSIVELY (rglob) walk `assets/`, bucket each file by `_classify`.
+  - `renders` — the editor's FINAL outputs: NON-recursive `renders/*.<video>` only (top-level deliverables like
+    final.mp4). Non-recursive on purpose — subdirs hold engine internals (`renders/proxies/` content-keyed proxy
+    cache, `renders/.final_review_frames/`) that must NOT surface as "Final render".
+  - `agent_renders` — the agent's intermediate HyperFrames clips: RECURSIVELY walk `hf/renders/` for video files.
+    Always present (empty list when the dir is absent).
+- `GET /api/projects/{id}/file?path=` → serve one file from inside the project dir as a `FileResponse`.
+  Path-traversal guard: resolve `pdir/id` and `pdir/id/path`; the resolved target must equal or live under the
+  project dir else 400 "path traversal detected"; not a file → 404.
+- `GET /api/projects/{id}/frame?path=&t=0.0` → extract ONE still at time `t` for cheap scrub preview. Same
+  traversal guard + 404 as /file; if `shutil.which("ffmpeg")` is None → 503; run ffmpeg (`-ss t -i target
+  -frames:v 1 -q:v 3` to a tempfile jpg); nonzero exit / missing / empty output → 500 "frame extraction failed";
+  else `FileResponse(out, media_type="image/jpeg")`.
+- `GET /api/projects/{id}/source?ref=` → serve a cut's SOURCE clip for pre-render scrub (404 project guard).
+  `target = editor.resolve_source_path(pdir, id, ref)`; None → 404 "source not found within project". ProRes .mov
+  overlays are transcoded once to VP9/WebM-with-alpha (the only alpha format Chromium decodes) via
+  `editor.browser_preview_path(target, <project>/.browser_cache)` — when it returns a preview serve it as
+  video/webm, else `FileResponse(target)` (FileResponse honors Range so the browser can seek).
+- `GET /api/projects/{id}/source_meta?ref=` → probe a source's duration+dimensions for trim bounds (404 guard).
+  Resolve like /source (404 if unresolved); base result {project_id, ref, path(project-relative, or absolute for a
+  shared in-repo asset resolved outside the project), duration:None, width:None, height:None}; if `shutil.which
+  ("ffprobe")`, run ffprobe (`-select_streams v:0 -show_entries stream=width,height -show_entries format=duration
+  -of json`) and fill duration(float)/width/height from its JSON, tolerating parse errors (duration stays null).
+
+## Write routes (projects, assets, editor, render)
+
+- `POST /api/projects` (201) from `CreateProjectRequest`: `pt = (pipeline_type or "").strip() or None`;
+  `available = list_pipelines()`; in the packaged app (`app_paths.is_packaged()`) with pt None, PIN pt to
+  available[0] (one pipeline — no "agent picks" path); a non-None pt not in available → 422 "unknown pipeline_type".
+  `st = (style or "").strip() or None`; a non-None st not in `set(list_playbooks())` → 422 "unknown style".
+  `create_project(pdir, name, pt, style=st)`; on success `capture("project_created", {pipeline_type, style})` and
+  return it. `ProjectExistsError` → 409; `ValueError` (un-sluggable name) → 422.
+- `POST /api/projects/{id}/assets` (201): Form `kind` + File `file` (404 project guard). `kind not in ASSET_SUBDIRS`
+  → 422; `sanitize_filename(file.filename or "")` ValueError → 400; resolve target under `pdir/id/assets/kind`, and
+  as defense-in-depth the resolved target must stay inside that kind dir else 400 "path traversal detected"; mkdir
+  parents; stream the upload to disk with `shutil.copyfileobj`. Return {project_id, kind, filename, path(relative to
+  `pdir.resolve()`), size_bytes}.
+- `GET /api/projects/{id}/edit_decisions` → {project_id, content: `editor.read_edit_decisions(pdir, id)`} (content is
+  null when none yet; 404 project guard).
+- `PUT /api/projects/{id}/edit_decisions` from Body(dict): `editor.write_edit_decisions(pdir, id, doc)` (validates
+  vs schema, atomic write); `editor.EditDecisionsInvalid` → 422 str(exc)[:1500]; else {project_id, saved:True}
+  (404 project guard).
+- `POST /api/projects/{id}/render` (202): `_render_store().start(id)` (supersedes any in-flight render) →
+  {project_id, job_id, status:"queued"} (404 project guard).
+- `GET /api/projects/{id}/render/{job_id}` → `_render_store().status(job_id)`; None or a status whose project_id
+  ≠ id → 404.
+
+## Auth, settings, feedback, telemetry (all delegate to server modules)
+
+- `GET /api/env` / `PUT /api/env`: lazy `from server import env_config`. GET → {path:str(ENV_PATH),
+  vars:`list_env_vars()`}. PUT(EnvUpdateRequest) → `write_env_vars(body.vars)` (ValueError → 400), then
+  `reload_env()`, return {changed, path, vars:`list_env_vars()`}.
+- `GET /api/auth/status` → `auth.status()`.
+- `POST /api/auth/oauth/start` → `auth.start_oauth()` (returns the claude.ai authorize URL).
+- `POST /api/auth/oauth/finish`(OAuthFinishRequest) → `auth.finish_oauth(code, app_state=app.state)`;
+  `auth.AuthError` → 400; on success `capture("auth_connected", {"method":"oauth"})`.
+- `POST /api/auth/api-key`(ApiKeyRequest) → `auth.set_api_key(api_key, app_state=app.state)` (verifies live before
+  saving); `auth.AuthError` → 400; on success `capture("auth_connected", {"method":"api_key"})`.
+- `POST /api/auth/disconnect` → `auth.disconnect(app_state=app.state)`.
+- `GET /api/settings/analytics` → {disabled:`settings.get("analytics_disabled",False)`, device_id:`settings.device_id()`}.
+- `PUT /api/settings/analytics`(AnalyticsUpdateRequest) → `settings.set_value("analytics_disabled", bool(disabled))`,
+  then `analytics.shutdown()` + `analytics.reset()` so the change takes effect immediately; return {disabled}.
+- `POST /api/feedback`(FeedbackRequest) → lazy `from server import feedback`; `feedback.submit(kind, message, email,
+  diagnostics, debug_session)`; `feedback.FeedbackError` → 400.
+- `POST /api/telemetry/error`(ClientErrorReport) → `analytics.capture_client_error(source, message, stack, context)`;
+  ALWAYS 200 `{"received":True}` (reporting must never error into the client).
+
+## First-run provisioning (streamed NDJSON)
+
+- `GET /api/doctor` → lazy `from lib import provision`; `provision.doctor()` (managed venv/core/ffmpeg present, which
+  packs installed).
+- `_stream_provision(work, done_extra=None) -> StreamingResponse`: run `work(progress)` on a daemon worker thread that
+  puts NDJSON frames onto a queue — `progress(line)` emits `{"type":"log","line":line}`; on success a `{"type":"done",
+  **done_extra}` frame; on exception a `{"type":"error","error":str(exc)}` frame; finally a None sentinel. Stream them
+  as `frame+"\n"` with media_type `application/x-ndjson`, so a multi-minute install doesn't hold the event loop.
+- `POST /api/provision/composition` → `_stream_provision(provision.provision_composition, {"tier":"composition"})`.
+  MUST be registered BEFORE the `{pack}` route so this static path wins over the param route.
+- `POST /api/provision/{pack}` → `pack not in provision.PACKS` → 404; else `_stream_provision(lambda progress:
+  provision.provision_pack(pack, progress), {"pack":pack})`.
+
+## Agent chat (SSE) + its round-trips
+
+- `POST /api/projects/{id}/chat`(ChatRequest), async, returns a `text/event-stream` StreamingResponse. Guards: 404 if
+  the project is missing; `not auth_configured()` → 503 with a long setup-guidance detail (install+login Claude Code,
+  or `claude setup-token` → CLAUDE_CODE_OAUTH_TOKEN in .env, unset ANTHROPIC_API_KEY); `_runner()` is None → 503
+  "agent runner unavailable". If `body.thread_id`, look up the stored thread and `await runner.switch_session(id,
+  thread.session_id or None)` so the agent resumes THAT conversation. If `body.model`, `await runner.set_model(id,
+  body.model)`. Then drive an `asyncio.Queue`:
+  - `emit(evt)`: a live turn is the truth about the credential. On the first `assistant` event clear any prior
+    reconnect flag (`auth.clear_auth_error()`, once). On a `result` event with `is_error`, join its text fields
+    (detail/text/error/message/result) and if `auth.classify_auth_error(text)` → `auth.mark_auth_error(text)` and put a
+    `{"type":"auth_error","detail":text[:400]}` event. Always put the original evt.
+  - `drive()`: `await runner.run_turn(id, body.message, on_event=emit)`; on exception take str(exc)[:500] — if it
+    classifies as an auth error mark it + put an `auth_error` event, else report it
+    (`analytics.capture_exception(exc, {"where":"agent_turn"})` — this is where most runtime crashes surface since the
+    SSE stream already started) + put `{"type":"error","detail":…}`. Finally put a None sentinel.
+  - `gen()`: create the drive task; yield `f"data: {json.dumps(evt)}\n\n"` per queued event until the None sentinel;
+    finally cancel the task if it's still running.
+- The next endpoints resolve a paused agent await; each fetches `app.state.agent_runner` and 409 "no active agent
+  runner" when it's None:
+  - `POST …/agent/confirm`(ConfirmRequest) → {resolved: `runner.resolve_confirm(confirm_id, approved)`}.
+  - `POST …/agent/answer`(AnswerRequest) → {resolved: `runner.resolve_answer(question_id, answer)`}.
+  - `POST …/agent/provide-key`(ProvideKeyRequest): lazy `from server import env_config`. If `skipped`, resolve as
+    declined without writing: {resolved: `runner.resolve_key_request(id, False)`, saved:False}. Else require a
+    non-empty `value` (400 otherwise), `env_config.write_env_vars({env_var: value})` (ValueError → 400),
+    `env_config.reload_env()`, THEN `runner.resolve_key_request(id, True)` to unblock the retry; return {resolved,
+    saved:True, changed}. The raw key is never returned to the agent.
+  - `POST …/agent/provide-capability`(ProvideCapabilityRequest) → the UI already installed the pack; this only unblocks
+    the wait: {resolved: `runner.resolve_capability_request(cap_request_id, bool(installed))`}.
+  - `POST …/agent/stop`, async → {stopped: `await runner.interrupt(id)`}.
+
+## Chat threads (delegate to server.threads)
+
+`_require_project(id)`: shared 404 guard. Routes: `GET …/threads` → {threads: `list_threads(pdir, id)`}; `POST …/threads`
+(201, ThreadCreate, `_require_project`) → `create_thread(pdir, id, title=body.title or "New chat")`; `GET …/threads/{tid}`
+→ `get_thread(pdir, id, tid)` (None → 404); `PUT …/threads/{tid}`(ThreadSave) → `save_thread(pdir, id, tid,
+messages=, session_id=, title=)`.
+
+## Dev-observability debug sink (delegate to server.debug_log)
+
+- `POST /api/debug/log`(DebugLogBody) → `debug_log.append_events(session, events)` (appends NDJSON per session);
+  ValueError (bad/traversal session id) → 400; return {ok:True, written}.
+- `GET /api/debug/sessions` → {sessions: `debug_log.list_sessions()`}.
+- `GET /api/debug/sessions/{session}/analyze` → a compact report (never load the raw NDJSON into context). If
+  session=="latest", resolve `debug_log.latest_session()` (404 "no sessions recorded" when none); `analyze_session`;
+  FileNotFoundError → 404; ValueError → 400.
+- `DELETE /api/debug/sessions/{session}` → `debug_log.delete_session(session)` (ValueError → 400); idempotent —
+  {ok:True, removed:bool} (removing an already-gone session is a 200 with removed=False).
+
+## Serve the SPA + module app
+
+After ALL routes, mount the built UI LAST so every `/api/*` route wins: `web_dist = REPO_ROOT/"web"/"dist"`; if it's a
+dir, `app.mount("/", StaticFiles(directory=str(web_dist), html=True), name="ui")` (same-origin with the API in the
+packaged app; no-op in dev where Vite serves the SPA and proxies /api here). Return `app`. Finally, module level:
+`app = create_app()` (the `uvicorn server.app:app` target).

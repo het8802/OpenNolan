@@ -1,0 +1,116 @@
+% Generate `server/render_jobs.py`: the in-process render-job runner for Mission Control's
+% MANUAL editor (single-user, local — no external queue). A render takes seconds to a minute+,
+% too long to hold an HTTP request open, so the editor POSTs to START a job (gets a job_id) and
+% POLLS for status. Jobs run on daemon threads; status lives in an in-memory dict. ONE active
+% job per project — a newer job supersedes the prior one, whose result is then discarded.
+% The module docstring should sketch that START/POLL flow and the status transitions
+% queued -> running -> done | failed.
+%
+% `from __future__ import annotations`. Import threading, uuid; `Path`; typing `Any, Optional`;
+% and `from server.editor import read_asset_manifest, read_edit_decisions, resolve_source_path`.
+
+## `RenderJobStore`
+Thread-safe, in-memory store of editor render jobs for one Mission Control app.
+`__init__(projects_dir: Path | str)`: `_projects_dir = Path(projects_dir)`; `_jobs: dict[str, dict]`
+job_id -> status dict; `_active_by_project: dict[str, str]` project_id -> newest job_id; a
+`threading.Lock`; `_tool = None` (lazily-built VideoCompose — see `_video_compose`). Every job_id is
+`uuid.uuid4().hex[:12]`. Every mutation of `_jobs`/`_active_by_project` and every read that copies a
+job dict holds the lock.
+
+### Public API — three ways to START a job (each records the job, marks it active, spawns a daemon thread, returns the job_id)
+`start(project_id) -> str` — EDITOR path: render the saved timeline from disk. Job dict
+`{job_id, project_id, status:"queued", origin:"editor"}`. Thread target `_run(job_id, project_id,
+out_name)` with `out_name = f"editor_preview_{job_id}.mp4"`.
+
+`start_with_inputs(project_id, inputs: dict) -> str` — AGENT render path: render CALLER-supplied
+inputs (`edit_decisions` required; optional `asset_manifest, output_path, proxies_dir, hdr_policy,
+proposal_packet`) rather than reading disk. Job dict adds `origin:"agent", consumed:False`. Thread
+target `_run_with_inputs(job_id, project_id, dict(inputs))`. The `consumed` flag lets the agent runner
+surface a finished job on the user's next turn once (see `AgentRunner._render_resume_note`).
+
+`start_op(project_id, tool_name, tool_input: dict) -> str` — AGENT heavy-media-op path: run an
+ARBITRARY registry tool in-process (same lifecycle/supersede/consumed tagging as a render). Lets the
+agent's `run_media_op` tool BLOCK its turn instead of detaching a long re-encode to a background Bash
+task (which broke turn attribution). Job dict adds `origin:"agent_op", tool_name, consumed:False`.
+Thread target `_run_op(job_id, project_id, tool_name, dict(tool_input))`.
+
+### Public API — read / lifecycle
+`status(job_id) -> Optional[dict]` — a COPY of the job's status dict, or None.
+`active_job_for(project_id) -> Optional[dict]` — copy of the newest job for the project, or None.
+`mark_consumed(job_id) -> None` — set `consumed=True` on the job (no-op if missing); flags a finished
+job as surfaced to the agent so the resume note fires only once.
+
+### Internals
+`_video_compose() -> Any` — lazily build+cache `VideoCompose` (import `from tools.video.video_compose
+import VideoCompose` inside the method — the top-level import is cheap, execution is not).
+`_is_superseded(project_id, job_id) -> bool` — `_active_by_project.get(project_id) != job_id`.
+`_set(job_id, project_id, **fields)` — under the lock, if superseded return silently (a newer render
+replaced this one — drop its result), else `_jobs[job_id].update(fields)`. Every worker-thread status
+write goes through `_set`, so a superseded job never advances past `running`.
+
+Each worker thread first `_set(..., status="running")`, does its work, and wraps the whole body in
+`except Exception` -> `_set(..., status="failed", error=f"{type(exc).__name__}: {exc}"[:2000])` so a
+thread never dies silently (all `error` strings are `[:2000]`-capped).
+- `_run` — read `read_edit_decisions`; if falsy, fail with a message telling the user to save the
+  timeline first. Else `read_asset_manifest`, mkdir `<project>/renders/`, and call `_execute_render`
+  writing `renders/out_name` with proxies in `renders/proxies`.
+- `_run_with_inputs` — `edit_decisions = inputs["edit_decisions"]`; if falsy fail with an error
+  mentioning `edit_decisions`. `asset_manifest` defaults to `{"assets": []}`. Resolve the output via
+  `_normalize_output_path(project_id, inputs.get("output_path"), f"agent_render_{job_id}.mp4")`;
+  `proxies_dir` defaults to `renders/proxies`. Call `_execute_render` forwarding
+  `proposal_packet=inputs.get("proposal_packet")`, `hdr_policy=inputs.get("hdr_policy")`.
+- `_run_op` — `from tools.tool_registry import registry`, `registry.ensure_discovered()`,
+  `registry.get(tool_name)`; unknown tool -> fail with an error naming the tool. Else
+  `tool.execute(dict(tool_input))`: on `result.success` set `status="done", result_data=data,
+  output_path=data.get("output") or data.get("output_path")` (tools name their file either way); on
+  failure set `status="failed", error=result.error or "tool failed"`.
+
+`_execute_render(job_id, project_id, edit_decisions, asset_manifest, out_path: Path, proxies_dir,
+*, proposal_packet=None, hdr_policy=None)` — shared render body for both paths:
+1. VideoCompose's pre-compose gate REQUIRES `renderer_family` (optional in the schema). If missing,
+   inject `"social-reel"` into a render-only copy (never persisted) and record a preview warning that
+   a default was used and should be set explicitly.
+2. `edit_decisions = _resolve_sources(project_id, edit_decisions)` (absolute paths — see below).
+3. Build `exec_inputs = {operation:"render_proxies", edit_decisions, asset_manifest,
+   output_path: str(out_path), proxies_dir: str(proxies_dir)}`; add `proposal_packet` / `hdr_policy`
+   ONLY when truthy/present (so VideoCompose keeps its own defaults). `result = _video_compose().execute(exec_inputs)`.
+4. On `result.success and out_path.exists()`: `status="done"`, `output_path` = out_path RELATIVE to
+   `<projects_dir>/<project_id>` (so the UI fetches it via `/file?path=`), `final_review_status`
+   from data, and `warnings` = preview warnings + `data["warnings"]` + (when `data` has `n_scenes`)
+   a `"{n_rendered} scene(s) re-rendered, {n_cached} reused from cache"` note; `warnings or None`.
+   Otherwise `status="failed", error=(result.error or "render failed")[:2000]`.
+
+`_normalize_output_path(project_id, raw: Optional[str], fallback_name) -> Path` — resolve an
+agent-supplied output_path to an ABSOLUTE path inside `<projects_dir>/<project_id>/renders/`.
+`proj = (projects_dir/project_id).resolve()`; fallback = `proj/"renders"/fallback_name`. Falsy `raw`
+-> fallback. Absolute `raw` -> itself; else by first path part: `"projects"` = repo-root-relative
+(drop that part, resolve under `projects_dir`), `project_id` = projects-dir-relative, otherwise
+project-relative (under `proj`). `.resolve()` the candidate (exception -> fallback). Path-traversal
+guard: return the candidate only if it IS `proj` or is contained in `proj`; anything escaping (`..`,
+absolute-outside, cross-project) -> fallback.
+
+### `_resolve_sources(project_id, edit_decisions) -> dict`
+Return a render-only COPY of `edit_decisions` with every asset ref rewritten to an ABSOLUTE on-disk
+path (never persisted). WHY: refs are stored PROJECT-relative (`"assets/video/x.mp4"`) or as
+asset-manifest ids, but VideoCompose resolves bare relative refs from the repo-root cwd, so they'd
+point at nonexistent `<repo>/assets/...` and the render fails; resolve them the SAME way the scrub
+preview does. Helper `absolute(ref)`: `str(resolve_source_path(projects_dir, project_id, ref))` if it
+resolves to a file, else the ref UNCHANGED (animated / not-yet-on-disk scenes stay untouched so the
+proxy path's unresolved-hash branch still applies; empty ref -> ref).
+
+Rewrite these ref sites (track a `changed` flag; if nothing changed, return the input unchanged; else
+copy `edit_decisions` and overwrite only the sections that changed):
+- Every `cuts[].source`.
+- Every `overlays[].asset_id` (only when overlays present).
+- Structured audio stems under `audio` (when it's a dict) — the render mixes these into a master but
+  the assemble pass gets an EMPTY manifest, so resolve them here or the editor's render silently drops
+  music/SFX: `audio.music` as a single `{asset_id}` region OR a list of regions (after a split);
+  `audio.narration.segments[].asset_id`; `audio.sfx[].asset_id`. (`audio.path`, a pre-mixed master,
+  already resolves from cwd — leave it.)
+- `metadata.background.asset_id` only when `background.type` (case/space-insensitive) == `"image"`
+  (color backgrounds carry no path; `transform.position/scale` stay intact).
+
+% BEHAVIORAL NOTES (verified by tests/contracts/test_render_jobs_inputs.py — keep them abstract here):
+% the agent path's happy/failure/supersede lifecycle, proposal_packet+hdr_policy forwarded only when
+% present, agent `output_path` returned relative under `renders/`, `_normalize_output_path` traversal
+% guard cases, `active_job_for`/`mark_consumed`, and `start_op`'s success/failure/unknown-tool paths.

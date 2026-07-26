@@ -1,0 +1,17 @@
+% Generate `desktop/setup-preload.js`: the context-bridge preload for the FIRST-RUN
+% SETUP window only — kept separate from `preload.js` so the main window's bridge stays
+% minimal. It exposes a one-way progress feed that the setup page (`setup.js`) renders
+% while `main.js` provisions dependencies.
+%
+% `'use strict'`, CommonJS `require('electron')` for `contextBridge`, `ipcRenderer`.
+% `contextBridge.exposeInMainWorld('openNolanSetup', { ... })` with four subscription
+% helpers. Each just registers an `ipcRenderer.on(channel, (_e, arg) => cb(arg))` listener
+% — this window is short-lived, so DON'T return unsubscribe functions.
+
+- `onProgress(cb)` — `'setup:progress'`; passes the log `line` to `cb`.
+- `onStep(cb)` — `'setup:step'`; passes a determinate-progress object `s` = `{pct, end, label}`
+  on the GLOBAL 0-100 setup scale (`main.js` maps each provision run's own scale into its
+  weighted slice). `end` is where this step finishes, so the page can creep the bar toward
+  it while a long install is silent.
+- `onDone(cb)` — `'setup:done'`; invokes `cb()` with no args.
+- `onError(cb)` — `'setup:error'`; passes the error `msg` to `cb`.

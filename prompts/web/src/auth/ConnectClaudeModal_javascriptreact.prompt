@@ -1,0 +1,59 @@
+% Generate `web/src/auth/ConnectClaudeModal.jsx`: the "Sign in with Claude"
+% modal (OAuth) with an API-key fallback. OAuth uses the manual paste-code
+% variant of the Claude Code flow (same as `claude setup-token`): ask the backend
+% for an authorize URL, open it in the system browser (Electron routes external
+% links out), the user approves and pastes back the code Claude shows, and the
+% backend exchanges it for a token. The API-key path verifies the key with a live
+% call before saving. On success the backend persists the credential to the local
+% .env; here we just hand the returned status to `onConnected`. No inline styles —
+% the class names below are the contract with web/src/styles.css.
+%
+% Default-export `ConnectClaudeModal({ onClose, onConnected, initialStatus })`.
+% Imports: `useState`; `* as api from '../api.js'`; `ClaudeLogo, IconX, IconKey`
+% from '../components/icons.jsx'. Module const `KEYS_URL =
+% 'https://console.anthropic.com/settings/keys'`.
+
+State: `mode` ('claude' | 'key', init 'claude'), `authorizeUrl` ('' — set once the
+OAuth flow has begun), `code`, `apiKey`, `busy` (false), `err` (null). Derive
+`reauth = !!initialStatus?.authenticated`. Helper `openExternal(url)` =
+`window.open(url, '_blank', 'noopener,noreferrer')`.
+
+Three async handlers, each wrapping `setBusy(true); setErr(null)` / try /
+`catch (e) { setErr(String(e.message || e)) }` / `finally { setBusy(false) }`:
+- `beginOAuth`: `{ authorize_url } = await api.startOAuth()`, `setAuthorizeUrl`,
+  `openExternal(authorize_url)`.
+- `finishOAuth`: no-op if `!code.trim()`; else `onConnected?.(await
+  api.finishOAuth(code.trim()))`.
+- `connectKey`: no-op if `!apiKey.trim()`; else `onConnected?.(await
+  api.connectApiKey(apiKey.trim()))`.
+
+Layout: a `modal-overlay` (click closes) around a `modal auth-modal` (click stops
+propagation).
+- `auth-head`: an `auth-head-text` with an h3 (`reauth` ? 'Re-authenticate with
+  Claude' : 'Connect your Anthropic account') and an `auth-sub` reading
+  "OpenNolan's AI agent uses your own Anthropic account to build and edit your
+  videos. Your credentials stay on this Mac." Then an `am-close` IconX button
+  (title/aria-label "Close") calling `onClose`.
+- `auth-body`, branching on `mode`:
+  - 'claude': when no `authorizeUrl`, a `claude-btn claude-btn-lg` calling
+    `beginOAuth` (disabled while `busy`) showing `<ClaudeLogo size={20} />` +
+    (busy ? 'Opening…' : 'Sign in with Claude'). Once `authorizeUrl` is set, an
+    `auth-step` with an `auth-steps` ol of two li — (1) "Approve access in the
+    browser tab that just opened" followed by a parenthetical `linkish` button
+    "reopen it" → `openExternal(authorizeUrl)`; (2) "Copy the code Claude shows
+    you and paste it below." — then an `auth-input` text input (placeholder "Paste
+    the code from Claude", value `code`, autoFocus, autoComplete off, spellCheck
+    off, Enter submits `finishOAuth`) and a `claude-btn` calling `finishOAuth`
+    (disabled while `busy` or empty code) showing `<ClaudeLogo size={16} />` +
+    (busy ? 'Connecting…' : 'Connect'). Below either state, a `linkish auth-alt`
+    button "Prefer to use an API key instead?" that clears `err` and switches to
+    'key' mode.
+  - 'key': an `auth-step` with an `auth-label` label ("Anthropic API key" + a
+    `linkish` anchor to `KEYS_URL`, new tab, "Get a key ↗"), an `auth-input`
+    password input (placeholder "sk-ant-…", value `apiKey`, autoFocus,
+    autoComplete off, spellCheck off, Enter submits `connectKey`), a button
+    calling `connectKey` (disabled while `busy` or empty key) showing `<IconKey
+    size={15} />` + (busy ? 'Verifying…' : 'Verify & connect'), and a `linkish
+    auth-alt` button "← Back to Sign in with Claude" that clears `err` and
+    switches to 'claude' mode.
+- After the branch, when `err` is set, an `auth-err` div "⚠ {err}".

@@ -1,0 +1,27 @@
+% Generate `scripts/provision.py`: the first-run provisioning CLI, run by the BUNDLED
+% python-build-standalone interpreter BEFORE the managed venv exists (Lane E). It only parses args
+% and streams progress — the real work lives in `lib.provision`, which is stdlib-only for exactly
+% this reason. desktop/main.js spawns this script and drives a setup window from the NDJSON it
+% streams to stdout. Module docstring: show the run modes and document the emitted NDJSON shapes.
+
+Before `from lib import provision`, insert the read-only code root at `sys.path[0]` so `lib.*`
+resolves under the bare interpreter (no venv/site-packages): env `OPENNOLAN_CODE_ROOT` (packaged:
+Contents/Resources/backend, set by main.js) else the repo root `Path(__file__).resolve().parent.parent`.
+
+Helpers, each printing ONE compact JSON object per line and flushing:
+- `emit(obj)`.
+- `progress(line)` → `{"type":"log","line":…}`.
+- `step(pct, end, label)` → `{"type":"step","pct":…,"end":…,"label":…}`, pct/end rounded to 1 decimal.
+`progress`/`step` are the callbacks handed to `lib.provision`.
+
+`main() -> int`: argparse with a REQUIRED mutually-exclusive group, then dispatch under one try/except:
+- `--doctor` → emit `{"type":"doctor","doctor": provision.doctor()}`, return 0.
+- `--print-ffmpeg-sha` → emit `{"type":"ffmpeg_sha","sha256": provision.print_ffmpeg_shas(progress)}`,
+  return 0 (downloads the configured ffmpeg/ffprobe and prints their sha256 to fill the pins).
+- `--core` → `provision.provision_core(progress, step)`.
+- `--composition` → `provision.provision_composition(progress, step)` (Node engines: Remotion + HyperFrames).
+- `--pack NAME` → `provision.provision_pack(NAME, progress)`.
+The three install modes then emit `{"type":"done"}`; all paths return 0. On ANY Exception, emit
+`{"type":"error","error": str(exc)}` and return 1 — one clean error line for the setup UI.
+
+Guard with `if __name__ == "__main__": sys.exit(main())`.

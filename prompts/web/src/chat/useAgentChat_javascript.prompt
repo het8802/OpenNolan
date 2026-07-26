@@ -1,0 +1,116 @@
+% Generate `web/src/chat/useAgentChat.js`: ALL agent-chat state + handlers for a single
+% project, in ONE hook. The pipeline window (App) and the editor (Studio) both render a
+% ChatPanel but must share ONE conversation, not two diverging copies — so App owns one
+% instance of this hook and passes the returned bundle down to Studio. Threads persist to
+% disk (debounced) and revive when the project changes, so disk stays the source of truth.
+%
+% Imports: `useCallback, useEffect, useRef, useState` from 'react'; `* as api` from
+% '../api.js'; `isRenderCommand, AGENT_MODELS, DEFAULT_MODEL` from './chatUtils.js'.
+
+## Module scope
+- `MODEL_KEY = 'st.agentModel.v1'` — remembered agent-model choice (a GLOBAL preference,
+  not per-project). `VALID_MODEL_IDS` = a Set of the AGENT_MODELS ids.
+- `loadModel()`: read MODEL_KEY from localStorage; return it iff it's in VALID_MODEL_IDS,
+  else DEFAULT_MODEL. Wrap in try/catch (localStorage may be unavailable).
+
+## Hook
+Export `useAgentChat(projectId, { onError, onAuthError } = {})`.
+
+State (`useState`): `messages` ([]), `input` (''), `busy` (false), `pendingConfirm`,
+`pendingQuestion`, `pendingKeyRequest` (agent asked for a missing API key),
+`pendingCapability` (agent asked to install a local pack), `renderingStage` (tool_use id of
+the in-flight render), `toolResults` ({}, tool_use_id → result for expansion), `threads`
+([]), `activeThread` (id | null), `model` (`loadModel` as lazy initializer).
+
+`setModel(id)` (useCallback): set state AND persist to localStorage under MODEL_KEY (best
+effort try/catch) so the choice survives reloads and project switches.
+
+Refs: `messagesRef` (latest messages, for persistence), `sessionIdRef` (latest agent
+session_id), `resolvingCapRef` (false; guards resolveCapability against a double-fire),
+`abortRef` (aborts the in-flight chat stream). `onErrorRef`/`onAuthErrorRef` mirror the
+props via bare effects (no deps) so handlers stay stable despite non-memoized callbacks; a
+third effect keeps `messagesRef.current = messages`. `showError(e)` = `onErrorRef.current?.(e)`.
+
+`clearChat`: reset messages/pendingConfirm/pendingQuestion/pendingKeyRequest/
+pendingCapability/renderingStage/toolResults/input to empty, `resolvingCapRef.current` and
+`sessionIdRef.current` too. `newChat`: clearChat then `setActiveThread(null)` (the fresh
+thread is created lazily on the first message).
+
+`refreshThreads()`: no-op (resolved Promise) without projectId, else `api.listThreads` →
+`setThreads(d.threads || [])`, swallow errors. `loadThread(tid)`: guard on projectId+tid;
+`api.getThread`, then clearChat, set messages (`rec.messages || []`), `sessionIdRef` from
+`rec.session_id`, and activeThread; showError on throw.
+
+`deriveTitle(msgs)`: first `role === 'user'` message's text, trimmed with whitespace
+collapsed, fallback 'New chat'; truncate to 48 chars + '…' when longer. `persistThread(tid)`:
+guard on projectId+tid; `api.saveThread(projectId, tid, { messages: messagesRef.current,
+session_id: sessionIdRef.current, title: deriveTitle(messagesRef.current) })` then
+refreshThreads, swallow errors.
+
+Effect — persist the active thread CONTINUOUSLY (700ms-debounced setTimeout), not just at
+turn end, so reloading mid-turn (a full pipeline can run for minutes) keeps the chat. Skip
+when no projectId/activeThread or messages is empty; clear the timer on cleanup.
+
+### send(text)
+`message = (text || input).trim()`; bail if empty, no projectId, or busy. Clear input, append
+`{ role:'user', text: message }`, set busy. Ensure a thread exists: if no activeThread, await
+`api.createThread(projectId, deriveTitle([the user msg]))`, take its `thread_id`, and set it
+active; swallow failure (persistence is best-effort — continue the chat regardless). Make an
+AbortController, store in abortRef, and `for await` over
+`api.chatStream(projectId, message, tid, controller.signal, model)`, dispatching by `evt.type`:
+- `assistant`: if the trailing message is `assistant_stream`, merge `evt.items` into its
+  `items`; else push a new `{ role:'assistant_stream', items: evt.items }`. Then for each item:
+  `isRenderCommand(it)` → `setRenderingStage(it.id)`; `it.kind === 'tool_result'` → store it in
+  toolResults under `it.tool_use_id`, and if that id equals `renderingStage` clear the stage.
+- `result`: clear renderingStage; if `evt.session_id`, save it to sessionIdRef; finalize a
+  trailing `assistant_stream` to `role:'assistant'` (KEEPING its text) then append
+  `{ role:'result', ...evt }` (append the result line even when there was no stream).
+- `background_update`: a background task finished BETWEEN turns (backend drained it so it
+  can't be mis-attributed as this answer) — push `{ role:'note', text: evt.text }`.
+- `confirm_request` / `question` / `api_key_request` / `capability_request` → set
+  pendingConfirm / pendingQuestion / pendingKeyRequest / pendingCapability to `evt`.
+- `auth_error`: push an error message (`evt.detail` or 'Claude authentication failed —
+  reconnect your account.') AND call `onAuthErrorRef.current?.()` so the reconnect box surfaces.
+- `error`: push `{ role:'error', text: evt.detail }`.
+
+catch: on AbortError (or `controller.signal.aborted`) clear renderingStage and push a note
+'■ Stopped. Your next message resumes this session with its context.'; otherwise push an
+error message of `String(e.message || e)`, and if that text matches
+`/auth|token|api key|unauthor|401|403|credit|billing/i` call onAuthError (a 503 at request
+start never reaches the SSE stream, so surface the reconnect box promptly).
+finally: null abortRef, clear busy, and `setTimeout(persistThread(tid), 0)` when tid so the
+thread is revivable.
+
+### Other handlers (all useCallback)
+- `stop`: guard on projectId; await `api.stopAgent(projectId)` (best-effort, interrupts the
+  agent server-side with context preserved) then `abortRef.current?.abort()`.
+- `resolveConfirm(approved)`: guard on pendingConfirm+projectId; `api.confirmTool(projectId,
+  pendingConfirm.confirm_id, approved)` (showError on throw); finally clear pendingConfirm.
+- `answerQuestion(answer)`: guard; push the answer as a `user` message (show the choice in
+  chat); `api.answerQuestion(projectId, pendingQuestion.question_id, answer)`; finally clear.
+- `provideKey(value)`: guard; await `api.provideKey(projectId, { key_request_id, env_var,
+  value })` from the pending request WITHOUT try/catch (so a save failure rethrows and the card
+  stays open to correct the value); on success push a note `Saved ${label || env_var} —
+  retrying.` and clear pendingKeyRequest.
+- `skipKeyRequest`: guard; `api.provideKey(projectId, { key_request_id, env_var, skipped:true })`
+  (showError on throw); finally push a note `Continuing without ${label || env_var}.` and clear.
+- `resolveCapability(installed)`: guard on pendingCapability+projectId AND bail if
+  `resolvingCapRef.current` is already set; set it synchronously (so a racing decline-click +
+  install-done resolve only once); `api.provideCapability(projectId, cap_request_id, installed)`
+  (showError on throw); finally push a note (`Installed ${label || pack} — retrying.` when
+  installed, else `Continuing without ${label || pack}.`), clear pendingCapability, and reset
+  resolvingCapRef.
+
+### Lifecycle effects
+- On projectId change, revive the project's most recent conversation (consolidates what App's
+  openProject used to do so both views land in the same chat): with no projectId, clear
+  threads/chat/activeThread and return. Otherwise clearChat + clear activeThread, then
+  `api.listThreads`, set threads, and loadThread the newest thread with `message_count > 0`
+  (threads come newest-updated first). Guard all sets behind an `alive` flag cleared on cleanup;
+  on error set threads to [] (still guarded).
+- On unmount, `abortRef.current?.abort()` so an in-flight stream never leaks.
+
+Return every piece of state and handler as one bundle object: messages, input, setInput, busy,
+pendingConfirm, pendingQuestion, pendingKeyRequest, pendingCapability, renderingStage,
+toolResults, threads, activeThread, model, setModel, send, stop, newChat, loadThread,
+resolveConfirm, answerQuestion, provideKey, skipKeyRequest, resolveCapability.

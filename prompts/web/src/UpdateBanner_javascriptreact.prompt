@@ -1,0 +1,32 @@
+% Generate `web/src/UpdateBanner.jsx`: the lower-left "update ready" card for the packaged
+% Electron shell. It appears only after electron-updater has downloaded a newer build (see
+% desktop/main.js `initAutoUpdate`); clicking "Restart & update" tells the main process to
+% `quitAndInstall()`. In a browser or in dev there is no preload bridge / no updater, so
+% `window.openNolan.update` is absent (or its handlers reject) and the banner stays hidden.
+% Imports `useEffect, useState` from 'react'. No inline styles — the `update-toast*` class
+% names below are the contract with web/src/styles.css.
+
+Default-export `UpdateBanner()` (no props).
+
+State: `version` — `undefined` means none/unknown so the banner is hidden, a string means an
+update is staged (may be `''` when the staged version is unknown); `installing` — boolean.
+
+Mount effect (runs once): read `const u = window.openNolan?.update`; if absent, do nothing.
+Otherwise (a) re-hydrate across renderer reloads by calling `u.getState?.()`, and on a truthy
+result `setVersion(s.version || '')` (swallow rejects); (b) subscribe to live download pushes
+via `u.onDownloaded?.(info => setVersion((info && info.version) || ''))` — `onDownloaded`
+returns its own unsubscribe, which is returned as this effect's cleanup.
+
+While `version === undefined`, render `null`.
+
+`install()` (async): set `installing` true, then `await window.openNolan.update.install()`; if
+it throws, reset `installing` to false (on success the app quits to install, so no reset).
+
+Render an `update-toast` div (`role="status"`) containing:
+- an `update-toast-body` with an `update-toast-title` "Update ready" and an `update-toast-sub`
+  reading `Version {version} will install on restart.` when `version` is truthy, else
+  `A new version will install on restart.`
+- an `update-toast-btn` button (onClick `install`, disabled while `installing`) labelled
+  "Restarting…" while installing, else "Restart & update".
+- an `update-toast-x` dismiss button (aria-label "Dismiss", glyph ×) that re-hides the banner
+  by setting `version` back to `undefined`.

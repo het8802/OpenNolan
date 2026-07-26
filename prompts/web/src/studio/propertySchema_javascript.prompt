@@ -1,0 +1,74 @@
+% Generate `web/src/studio/propertySchema.js`: the DECLARATIVE property schema (feat 2) — ONE
+% source of truth for which fields the Studio properties panel shows per clip type, so the inspector
+% (StudioInspector.jsx) renders from data instead of bespoke JSX per type. NO React, NO DOM — plain
+% data + two path helpers. Named exports only. Shape invariants + the helper behavior are pinned by
+% propertySchema.test.js; keep this prompt to the vocabulary and the per-type layout.
+%
+% Het's split = 7 clip types + narration: video_main / image_main (main-timeline cuts) · video_overlay
+% / image_overlay / text (overlays) · music / sfx / narration (audio).
+
+## Field & section model
+Each type maps to an ORDERED list of SECTIONS; each section is `{ title, fields, hint? }` and each
+field is a descriptor `{ key, label?, control, path?, …extras }`:
+- `control` — a PLAIN input `'number'|'text'|'textarea'|'color'|'select'`, OR a SPECIAL block the
+  inspector renders by hand: `'speedPresets'|'crop'|'audioMix'|'keyframes'|'textPosition'|'clipTransform'`.
+  Special controls carry a `path` but no `label` (except where noted).
+- `path` — dotted path into the selected doc object (e.g. `speed`, `transform.crop`, `position.x`,
+  `box.opacity`). `getAtPath`/`buildPatch` read+write it; every write still flows through the interp
+  sanitizer, so the schema can never emit a key that 422s a Save. Field VALUES are never stored here.
+- `select` fields carry static `options` OR (usual case) `optionsFrom`, a live-asset source key resolved
+  by the inspector: `'video' | 'images' | 'imagesAndVideo' | 'music' | 'audio' | 'transitions'`.
+- extras (all optional, passed through to the input): `min, max, step, default, suffix, hint,
+  required, meta` (`meta:true` on the source-replace selects). Plain-number defaults/mins/steps below.
+
+## Exports
+`PROPERTY_TITLES` — display name per type: video_main 'Video clip', image_main 'Image clip',
+video_overlay 'Video overlay', image_overlay 'Image overlay', text 'Text overlay', music 'Music bed',
+sfx 'Sound effect', narration 'Narration'.
+
+Shared section/field constants (defined once, reused across types):
+- `TIMING_OPACITY` — title 'Timing': Start→`start_seconds` (min0, 's'), End→`end_seconds` (min0, 's'),
+  Opacity→`opacity` (step0.05, 0–1, default1).
+- `TRACK_FIELD` — 'Track (z-layer)' number →`track` (step1, min0, default0).
+- `ASSET_POSITION` — title 'Position & size': X→`position.x`, Y→`position.y` (both step1);
+  Width→`position.width`, Height→`position.height` (step1, min1); Height carries hint
+  'leave height empty to keep aspect ratio'.
+- `TRANSITIONS_SECTION` — title 'Transitions': In→select `transition_in` (optionsFrom 'transitions'),
+  Out→select `transition_out` (optionsFrom 'transitions'), 'Transition length'→`transition_duration`
+  (step0.1, min0.1, max2, default0.5, 's').
+- `NOTE_SECTION` — empty title, one field 'Note (optional)' text →`reason`.
+
+`PROPERTY_SCHEMA` — ordered sections per type:
+- **video_main**: Source [ 'Clip' select →`source` optionsFrom 'video' meta ] · Trim & speed
+  [ In→`in_seconds` (min0,'s'), Out→`out_seconds` (min0,'s'), Speed→`speed` (step0.1, min0.1, default1,
+  suffix '×'), speedPresets →`speed` ] · Position & size [ clipTransform →`transform` ] · Crop
+  [ crop →`transform.crop` ] · TRANSITIONS_SECTION · NOTE_SECTION.
+- **image_main**: Source [ 'Image' select →`source` optionsFrom 'images' meta ] · Duration
+  [ 'Hold for'→`out_seconds` (min0.1, 's', hint 'a still holds for this long (starts at 0)') ] ·
+  Position & size [ clipTransform →`transform` ] · Crop [ crop →`transform.crop` ] · TRANSITIONS_SECTION
+  · NOTE_SECTION. (No speed — a still has no playback rate.)
+- **video_overlay**: Asset [ 'Video' select →`asset_id` optionsFrom 'imagesAndVideo', TRACK_FIELD ] ·
+  TIMING_OPACITY · ASSET_POSITION · Source audio [ audioMix →`audio_mix` ] · Motion [ keyframes →`keyframes` ].
+- **image_overlay**: same as video_overlay but 'Image' select, and NO Source-audio section (images are
+  silent): Asset · TIMING_OPACITY · ASSET_POSITION · Motion [ keyframes ].
+- **text**: TIMING_OPACITY · Text [ 'Content' textarea →`text` required, 'Font size'→`font_size`
+  (step1, min1, default48, 'px'), 'Color' color →`color` default 'white', textPosition →`position` ] ·
+  Background box [ 'Box opacity'→`box.opacity` (step0.05, 0–1, default0.5), 'Box padding'→`box.padding`
+  (step1, min0, default10, 'px') ] · Layer [ TRACK_FIELD ] · Motion [ keyframes ].
+- **music**: Asset [ 'File' select →`asset_id` optionsFrom 'music' ] · Timing (hint 'drag the region on
+  the timeline to move it, or its edges to trim; blank = spans the whole timeline') [ Start→`start_seconds`
+  (min0,'s'), End→`end_seconds` (min0,'s') ] · Levels (hint 'trimmed to the video length on render;
+  split a region with the ✂ Split button') [ Volume→`volume` (step0.05, 0–1, default1), 'Fade in'→
+  `fade_in_seconds` (step0.1, min0, default0, 's'), 'Fade out'→`fade_out_seconds` (step0.1, min0, default0, 's') ].
+- **sfx**: Asset [ 'File' select →`asset_id` optionsFrom 'audio' ] · Timing & level (hint 'plays once
+  from the start point') [ Start→`start_seconds` (min0,'s'), Volume→`volume` (step0.05, 0–1, default1) ].
+- **narration**: Asset [ 'File' select →`asset_id` optionsFrom 'audio' ] · Timing [ Start→`start_seconds`
+  (min0,'s'), End→`end_seconds` (min0,'s') ].
+
+## Path helpers (exported)
+- `getAtPath(obj, path)` — read a dotted path out of `obj`; return undefined if any hop is missing.
+- `buildPatch(obj, path, value)` — build a SHALLOW patch (top-level key only) that sets `value` at the
+  dotted `path`, rebuilding the nested objects from `obj` so a merge-then-sanitize mutator applies it
+  WITHOUT dropping sibling keys, and WITHOUT mutating `obj`. Single-key path → flat `{ [key]: value }`.
+  e.g. `buildPatch(cut, 'transform.crop.x', 4)` → `{ transform: { ...cut.transform, crop:
+  { ...cut.transform.crop, x: 4 } } }`.

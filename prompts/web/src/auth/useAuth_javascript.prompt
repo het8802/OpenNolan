@@ -1,0 +1,26 @@
+% Generate `web/src/auth/useAuth.js`: a React hook that is the app's single
+% source of Anthropic account auth status. `App` owns one instance and passes the
+% status down to the dashboard (sign-in CTA / top-right re-auth button) and the
+% chat panel (in-chat reconnect box). The backend `GET /api/auth/status` — reached
+% via `api.getAuthStatus()` from `../api.js` — is the source of truth: it reports
+% `authenticated` / `method` / `needs_reauth` and, for OAuth, attempts a silent
+% token refresh before answering. Poll it so an expiry noticed elsewhere surfaces,
+% and expose `refresh()` for an immediate re-check after a connect or a chat auth
+% failure.
+
+Export `useAuth()`. State: `status` (init `null`) and `loading` (init `true`).
+An `aliveRef` (`useRef(true)`) guards every state update so nothing sets state
+after unmount.
+
+`refresh` — a `useCallback` with empty deps that returns the promise of
+`api.getAuthStatus()`: on success, if still alive `setStatus(s)`, and return `s`;
+`.catch` swallows transient errors (keep the last known status); `.finally`
+clears `loading` if still alive.
+
+`useEffect` (deps `[refresh]`): set `aliveRef.current = true`, call `refresh()`
+once, then `setInterval(refresh, POLL_MS)` where `POLL_MS = 20000`. Also
+`refresh` on `window`'s `focus` event (re-check when the user returns to the app,
+e.g. after signing in via the browser). Cleanup sets `aliveRef.current = false`,
+clears the interval, and removes the focus listener.
+
+Return `{ status, loading, refresh }`.

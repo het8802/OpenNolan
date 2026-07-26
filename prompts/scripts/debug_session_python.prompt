@@ -1,0 +1,44 @@
+% Generate `scripts/debug_session.py`: a CLI that analyzes a recorded editor UI session by
+% delegating to `server.debug_log` — the "query, don't read" tool. A session's raw NDJSON
+% (written by `web/src/debug/recorder.js` to `.agents/tools/logs/ui-sessions/<session>.ndjson`)
+% can be tens of thousands of tokens; this script prints a compact report instead so an agent
+% never loads the raw log into context.
+%
+% Module docstring must explain that rationale and show the run modes:
+%   python scripts/debug_session.py                 # newest session
+%   python scripts/debug_session.py latest          # same
+%   python scripts/debug_session.py <session-id>    # a specific one
+%   python scripts/debug_session.py --list          # list sessions
+%   python scripts/debug_session.py latest --json   # raw report JSON
+% and close with the follow-up hint: to zoom into a slice after reading the report, use
+% `sed -n '600,640p' <file>` on the line numbers it implies.
+
+`from __future__ import annotations`. Since this runs as a standalone script, insert the repo root
+(`Path(__file__).resolve().parent.parent`) at the front of `sys.path` BEFORE `from server import debug_log`.
+
+`main(argv: list[str] | None = None) -> int` parses args with argparse:
+- positional `session` (nargs="?", default "latest")
+- `--list` (store_true): print each `debug_log.list_sessions()` entry as `{mtime}  {bytes:>9,}B  {session}`
+  (or "no sessions recorded" if none), then return 0.
+- `--json` (store_true): print the raw report as `json.dumps(rep, indent=2)` instead of the formatted view.
+
+Otherwise resolve the session — `debug_log.latest_session()` when the arg is "latest", else the arg itself.
+If it's falsy, print "no sessions recorded" to stderr and return 1. Call `debug_log.analyze_session(session)`;
+on `FileNotFoundError` print `session {session!r} not found` to stderr and return 1. Then dump JSON (`--json`)
+or call `_print_report(rep)`. Return 0. Guard with `if __name__ == "__main__": raise SystemExit(main())`.
+
+`_print_report(rep: dict)` renders the report dict returned by `debug_log.analyze_session` as aligned,
+skimmable text. The dict always has: session, file, events, bytes, first_wall/last_wall, optional started,
+histogram (type→count), errors; and optional edits, seeks, notes. Print in this order:
+- Header lines: session, file, an events line that also shows `bytes` (thousands-separated) and an estimate
+  `~{bytes // 4:,} tokens if read raw`, the `first_wall → last_wall` window, and — if present — a truncated
+  (~200 char) JSON dump of `started`.
+- "event histogram:" then each `type` (left-padded to a fixed width) and count.
+- If `edits` present: a header noting `edits['total']` and how many are shown, then one line per logged edit
+  showing seq, type, and a truncated (~150 char) JSON of its remaining fields (everything except seq/t/type).
+- If `seeks` present: a "source-video seek lifecycle (scrub → canvas):" block printing requests/fired/started/
+  finished/superseded counts, the completion_rate as a percentage when non-null, and — if any — a "stuck sample"
+  list of the superseded seeks (seq, t ms, target cur, readyState).
+- If `errors` present: a header with the count, then one line per error (seq, type, and a truncated ~160 char
+  JSON of its data/message).
+- Finally print each `notes` entry prefixed with "⚠ ".

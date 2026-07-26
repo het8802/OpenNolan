@@ -1,0 +1,202 @@
+% Generate `tools/audio/audio_mixer.py`: an `AudioMixer(BaseTool)` that wraps FFmpeg
+% (and optionally pydub) to mix speech/music/SFX with ducking, fades, normalization,
+% loudness auto-balancing, and audio extraction. FFmpeg-only mode works without pydub.
+% `from __future__ import annotations`. Import math, re, time, `pathlib.Path`,
+% typing `Any, Optional`, and from `tools.base_tool`: BaseTool, Determinism,
+% ExecutionMode, ResourceProfile, ToolResult, ToolStability, ToolStatus, ToolTier.
+%
+% Module docstring must record these documented limitations (they are load-bearing —
+% each fixes a live-verified bug):
+%   - Per-track fades apply to the SOURCE audio BEFORE any start_seconds delay, so
+%     fade_in ramps the real start and fade_out lands on the real end. fade_out emits
+%     an explicit afade st= from the probed duration (FFmpeg defaults st=0, which fades
+%     the FIRST N seconds to silence and keeps the track muted).
+%   - auto_balance measures integrated LUFS per track and gains toward a voice-anchored
+%     target. In apply mode amix scales each input by 1/n, so relative balance is
+%     preserved but absolute level may sit below target — run normalize=true for
+%     delivery loudness. Gains capped at +/-30 dB.
+%   - extract defaults are UNCHANGED (pcm_s16le 16kHz mono, transcription grade);
+%     pass codec for full-fidelity detach.
+%
+% BaseTool provides `run_command(cmd, *, timeout, cwd)` (subprocess.run, capture_output,
+% text, check=True — non-zero exit RAISES CalledProcessError) and the ToolResult dataclass
+% (success, data, artifacts, error, duration_seconds). Do NOT re-implement them.
+
+## Class metadata
+name "audio_mixer", version "0.2.0", tier CORE, capability "audio_processing",
+provider "ffmpeg", stability EXPERIMENTAL, execution_mode SYNC, determinism DETERMINISTIC.
+`dependencies = ["cmd:ffmpeg"]`; install_instructions notes FFmpeg required + optional
+`pip install pydub`; `agent_skills = ["ffmpeg", "video_toolkit"]`.
+`capabilities = ["mix","duck","fade","normalize","extract_audio","segmented_music","auto_balance"]`.
+`not_good_for`: HDR sources — output is 8-bit SDR; detect via is_hdr_source() and handle
+HDR per AGENT_GUIDE before use.
+`resource_profile = ResourceProfile(cpu_cores=2, ram_mb=1024, vram_mb=0, disk_mb=500)`;
+`idempotency_key_fields = ["operation","tracks","ducking"]`;
+`side_effects = ["writes mixed audio file to output_path"]`;
+`user_visible_verification` = listen and verify speech clarity + music ducking.
+
+Class constants:
+- `ROLE_ALIASES` maps voice/speech/primary→"voice", music/secondary→"music", sfx→"sfx".
+- `MAX_BALANCE_GAIN_DB = 30.0`.
+- `EXTRACT_CODECS` maps codec→(ffmpeg encoder, default ext): copy→(None,None),
+  aac→("aac",".m4a"), wav & pcm_s16le→("pcm_s16le",".wav"), mp3→("libmp3lame",".mp3").
+- `COPY_EXT_BY_CODEC` maps a probed source codec to a container ext:
+  aac→.m4a, mp3→.mp3, opus & vorbis→.ogg, flac→.flac, ac3→.ac3, eac3→.eac3.
+
+## input_schema
+JSON-schema object, required `["operation"]`. `operation` enum:
+mix, duck, extract, full_mix, segmented_music, auto_balance — with a description of each
+(mix = layer tracks; duck = lower music under speech; extract = pull audio from video;
+full_mix = narration+music ducked+normalized in one call, preferred for compose-director;
+segmented_music = music into a video only during given time windows; auto_balance =
+LUFS-match voice/music/sfx toward targets, dry-run or mix). Properties (all documented):
+- `tracks`: array of `{path, role, volume(0–1, default 1.0), start_seconds, fade_in_seconds,
+  fade_out_seconds}`, role enum speech/music/sfx/primary/secondary/voice.
+- Simple duck: `primary_audio`, `secondary_audio`, `duck_level` (dB, default -12).
+- extract: `input_path`, `codec` (enum copy/aac/wav/pcm_s16le/mp3), `sample_rate`(int≥1),
+  `channels`(int≥1), `stream_index`(int≥0).
+- auto_balance: `target_lufs_voice`(default -16), `music_offset_db`(default -12),
+  `sfx_offset_db`(default -8), `apply`(bool default True; false = dry run).
+- `ducking` object: enabled(default True), music_volume_during_speech(0–1 default 0.15),
+  attack_ms(default 200), release_ms(default 500).
+- `normalize`(bool default True), `output_path`.
+- segmented_music: `video_path`, `music_path`, `music_volume`(0–1 default 0.20),
+  `segments` array of `{start,end}`, `fade_duration`(default 0.5).
+
+## execute
+Read operation, start a timer, dispatch to `_mix/_duck/_extract/_full_mix/_segmented_music/
+_auto_balance`; unknown → failure ToolResult. Wrap the dispatch in try/except: catch
+`_MixInputError` and any Exception → `ToolResult(success=False, error=str(e))`. Set
+`result.duration_seconds = round(elapsed, 2)` and return.
+
+## Operations
+All operations `mkdir(parents=True, exist_ok=True)` the output parent, validate that every
+input path exists (failure ToolResult naming the missing file), and return
+`artifacts=[output_path]` on success with a `data` dict that includes `"operation"`.
+Default output names: mix→mixed_audio.wav, duck→ducked_audio.wav, full_mix→
+full_mix_output.wav, auto_balance→auto_balanced_audio.wav, segmented_music→
+segmented_music_output.mp4.
+
+### `_mix`
+Fail if no tracks. Build `-i path` per track and one `_per_track_chain(i, track)` filter per
+track, then amix all into `[mixed]`: `...amix=inputs=N:duration=longest:dropout_transition=2`.
+If normalize: append `[mixed]loudnorm=I=-16:LRA=11:TP=-1.5[out]` and map `[out]`, else map
+`[mixed]`. Run via `_run`; on error return `mix failed: {err}`. data has track_count,
+output, normalized.
+
+### `_duck`
+Resolve a speech path and a music path from EITHER format:
+- Simple: `primary_audio`/`secondary_audio`. If `duck_level` is given and no explicit
+  `ducking`, convert dB→linear (`10**(db/20)`, round 4) and set it as
+  `music_volume_during_speech` on a COPY of the ducking dict (don't mutate the caller).
+- Advanced `tracks`: first track with role in {speech,primary} = speech, first in
+  {music,secondary} = music (only when the simple keys were absent).
+Fail if either path is unresolved (message explaining both input formats). Then
+`music_vol = ducking.music_volume_during_speech (0.15)`, `attack = attack_ms(200)/1000`,
+`release = release_ms(500)/1000` — NOTE this op passes attack/release in SECONDS. Filter:
+`[1:a]sidechaincompress=threshold=0.02:ratio=9:attack={attack}:release={release}:level_sc=1:
+mix=0.9[ducked];[ducked]volume={music_vol*3}[music_out];[0:a][music_out]amix=inputs=2:
+duration=longest[out]`. Run with `run_command` (raises on failure → caught by execute).
+data has speech_track, music_track, output.
+
+### `_extract`
+Pull audio from a video; the no-codec default is UNCHANGED for back-compat. Validate first
+(all pure, no ffmpeg): unknown codec → error listing EXTRACT_CODECS; sample_rate/channels
+must be positive ints (reject bool); stream_index must be a non-negative int (reject bool);
+codec=="copy" with sample_rate/channels → error (copy can't resample). Fail if input missing.
+Resolve encoder/ext:
+- codec is None → legacy: acodec pcm_s16le, ext .wav, default sample_rate 16000, channels 1.
+- codec=="copy" → probe source codec (`_probe_audio_codec`); none found → fail; acodec "copy",
+  ext from COPY_EXT_BY_CODEC (fallback `.wav` if source starts with `pcm_`, else `.mka`).
+- else acodec,ext from EXTRACT_CODECS.
+output defaults to input with the resolved suffix. cmd: `ffmpeg -y -i input -vn`, add
+`-map 0:a:{stream_index}` when given, `-acodec {acodec}`, and when not copy add `-ar`/`-ac`
+if set. Run via `_run`; also fail if the output is missing or zero bytes. data: input,
+output, `codec` (source codec when copying else acodec), plus stream_copied=True when
+copying, and echo sample_rate/channels/stream_index when they were set.
+
+### `_auto_balance`
+Fail if no tracks. `target_voice = target_lufs_voice(-16)`; targets voice=target_voice,
+music=target_voice+music_offset_db(-12), sfx=target_voice+sfx_offset_db(-8). Normalize each
+track's role through ROLE_ALIASES (unknown role → error); missing path → error. For each,
+measure integrated LUFS (`_measure_lufs`; None → error), `gain_db = target - measured`, cap
+its magnitude at MAX_BALANCE_GAIN_DB (flag `gain_capped` when clamped), `volume =
+round(10**(gain_db/20), 6)`. Build a `report` entry (path, role, measured_lufs, target_lufs,
+gain_db, volume — all rounded) and a mix-track carrying volume + any start/fade fields.
+data: targets_lufs (rounded), tracks=report, applied. If `apply` is false, return data now
+(no file, no artifacts). Otherwise call `_mix` with the computed tracks and
+`normalize=inputs.get("normalize", False)` (default OFF — a post-mix loudnorm would
+re-target and obscure the balance); on mix failure return it; else copy output/normalized
+into data and return with mix artifacts.
+
+### `_full_mix`
+One-call mix preferred by compose-director. Fail if no tracks. Partition into speech
+({speech,primary}), music ({music,secondary}), sfx ({sfx}); order = speech+music+sfx; fail
+if empty. Validate files. Build `-i` + `_per_track_chain` per track (indices follow that
+order). Ducking enabled = `ducking.enabled` (default True) when ducking is a dict else its
+truthiness.
+- If duck-enabled AND both speech and music exist: mix the speech tracks to `[speech_all]`
+  (amix if >1 else `anull`), then `[speech_all]asplit=2[speech_key][speech_out]` — the speech
+  signal is needed BOTH as the sidechain key and in the final mix, and an ffmpeg pad is
+  consumable only once (consuming it multiple times left an orphan pad and errored). Mix the
+  music tracks to `[music_all]` the same way. attack/release come from
+  `attack_ms`(default 20)/`release_ms`(default 250) clamped to [0.01, 2000] and passed in
+  MILLISECONDS (do NOT divide — a prior /1000 fell below the 0.01 floor and broke the graph).
+  `[music_all][speech_key]sidechaincompress=threshold=0.02:ratio=9:attack=..:release=..:
+  level_sc=1:mix=0.9[ducked_music];[ducked_music]volume={music_vol*3}[music_out]`
+  (music_vol default 0.15). Final `amix` of `[speech_out][music_out]` + any sfx pads
+  (inputs=2+n_sfx) → `[premix]`.
+- Else: amix all tracks with `duration=longest:dropout_transition=2` → `[premix]`.
+Then normalize (loudnorm as in `_mix`) mapping `[out]` else `[premix]`. Join filter parts
+skipping empties. Run via `_run`. data: per-role counts, ducking_enabled, normalized, output.
+
+### `_segmented_music`
+Mix music into a video only inside given time windows, silent elsewhere. Fail on missing
+video/music/segments. ffprobe the video duration (`format=duration`, first line). For each
+segment sorted by start, build a piecewise volume expression over t: 0 before start,
+linear ramp up over `fade_duration`, hold at `music_volume`, linear ramp down over the last
+`fade_duration`, 0 after end. Sum the per-segment expressions (parenthesized) if more than
+one. Filter: loop/trim the music `[1:a]atrim=0:{dur},asetpts=PTS-STARTPTS,volume='{expr}':
+eval=frame[music_shaped]`, aformat both the video audio `[0:a]` and the shaped music to
+fltp/44100/stereo, then `amix=inputs=2:duration=first:dropout_transition=2[aout]`. cmd:
+`ffmpeg -y -i video -stream_loop -1 -i music -filter_complex .. -map 0:v -map [aout]
+-c:v copy -c:a aac -b:a 192k output`. Run with `run_command`; fail if no output produced.
+data echoes video, music, segments, music_volume, fade_duration, output.
+
+## Helpers
+`_per_track_chain(index, track) -> str` — build `[index:a]<filters>[a{index}]`, or
+`[index:a]acopy[a{index}]` when there are no filters. In order: if `duration_seconds`>0,
+`atrim=0:{dur},asetpts=PTS-STARTPTS` (truncate to a window LENGTH first); `volume={v}` when
+volume != 1.0; `afade=t=in:st=0:d={fade_in}` when fade_in>0; for fade_out>0 compute
+`base_dur` = the trim length if trimmed else `_audio_duration(path)` (None → raise
+`_MixInputError`), `st = max(0.0, round(base_dur - fade_out, 3))`, `afade=t=out:st={st}:
+d={fade_out}`; finally `adelay={ms}|{ms}` (ms = int(start_seconds*1000)) when >0 — adelay is
+ALWAYS last so fades act on the audio, not the silence pad.
+
+`_audio_duration(path) -> Optional[float]` — ffprobe `format=duration` (timeout 30); first
+line, None on "N/A"/empty or on CalledProcessError/TimeoutExpired/ValueError.
+
+`_measure_lufs(path) -> Optional[float]` — run `ffmpeg -hide_banner -nostats -i path -vn -af
+ebur128 -f null -` (timeout 600); from stderr take the text after the last `"Summary:"`,
+regex `I:\s*(-?(?:\d+(?:\.\d+)?|inf))\s+LUFS`; None if unmatched or "inf" (live per-frame
+lines also print `I:`, so only the final summary counts).
+
+`_probe_audio_codec(path, stream_index=None) -> Optional[str]` — ffprobe
+`stream=codec_name` for `a:{stream_index or 0}` (timeout 30); first line or None.
+
+`_run(cmd) -> Optional[str]` — run_command(timeout 900): None on success; catch
+CalledProcessError → the stderr tail `[-500:]` (or "ffmpeg failed"); TimeoutExpired →
+"ffmpeg timed out." (BaseTool.run_command uses check=True, so failures raise rather than
+returning a code.)
+
+Module-level `class _MixInputError(Exception)` — bad audio-op parameters, validated before
+any ffmpeg spend.
+
+% BEHAVIORAL NOTES — verified by tests/tools/test_audio_mixer_fixes.py; keep abstract here:
+% the fade_out fix (body stays loud, tail falls away; explicit st=duration-N, and with a
+% start_seconds delay the fade rides the shifted end); _per_track_chain ordering + acopy;
+% auto_balance dry/apply (measured-LUFS gap, gains land on role targets, volume matches dB,
+% no artifacts on dry); extract legacy default (pcm_s16le/16k/mono), copy preserves codec+
+% picks the container ext, sample_rate/mp3 honored, and every validation guard; and the
+% full_mix speech+music+sfx ducking path emitting a real audio stream (the asplit orphan-pad
+% regression).

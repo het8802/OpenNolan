@@ -1,0 +1,88 @@
+% Generate `server/analytics.py`: product analytics + error tracking via PostHog for the
+% packaged desktop app. Module-level singleton, no class. `from __future__ import annotations`.
+% Import os, re, sys, pathlib.Path, typing(Any, Optional), and `from server import settings`.
+% Lazy-import `lib.app_paths` and `posthog` inside functions so the module stays cheap and
+% dev/test paths don't drag in packaged-app machinery.
+
+% Design contract — five load-bearing invariants (state them in the module docstring):
+%   1. OPT-OUT HONORED AT INIT — when disabled we never CONSTRUCT a PostHog client, not
+%      "construct then drop events". No client => nothing can leak.
+%   2. GRACEFUL — a missing `posthog` package, missing key, or init error degrades to a silent
+%      no-op. Analytics must never raise into the backend.
+%   3. ANONYMOUS — distinct_id is the stable per-install `settings.device_id()`, never PII.
+%   4. SCRUBBED — absolute paths, secret-looking values, and free-text bodies are stripped from
+%      event properties before send.
+%   5. NEVER UNDER TEST — if pytest is loaded, analytics is hard-disabled regardless of settings.
+
+## Constants
+
+- `_DEFAULT_KEY = "phc_s9P9JiTbBgmzqYGwug8ciiLnWsCSJF62Vz5UGRJsPGBE"` — the project's PUBLIC
+  write-only ingestion key, safe to embed like any web SDK key. Overridable via env `POSTHOG_KEY`.
+- `_DEFAULT_HOST = "https://us.i.posthog.com"`, overridable via env `POSTHOG_HOST`.
+- `_PATH_RE`: compiled regex matching an absolute POSIX path — one of the prefixes `/Users/`,
+  `/home/`, `/var/`, `/private/`, `/tmp/` followed by non-whitespace. Redacted to `[path]`.
+- `_SECRET_HINT`: key-name substrings ("key","token","secret","password","authorization","cookie")
+  → value redacted to `[redacted]`.
+- `_FREETEXT_KEYS`: key-name substrings ("prompt","message","text","transcript","caption",
+  "content","body") → drop the body, keep only a length signal.
+- Module globals `_client: Optional[Any] = None`, `_initialized = False`.
+- `_INTERNAL_SENTINEL = ".opennolan-internal"`.
+
+## Gating
+
+- `_under_pytest() -> bool`: True if `"pytest" in sys.modules` or `PYTEST_CURRENT_TEST` in env.
+- `is_enabled() -> bool`: True only when analytics may run — NOT under pytest, NOT opted out
+  (`settings.get("analytics_disabled", False)`), a key is present (env `POSTHOG_KEY` or the default),
+  and `import posthog` succeeds. Any of these failing returns False.
+
+## Internal-machine marker + env props (so dev/own use filters out of dashboards via `internal != true`)
+
+- `_is_internal() -> bool`: True on the developer's own machines. Marked two ways, either wins:
+  env `OPENNOLAN_INTERNAL` set truthy (present and not one of "0"/"false"/"no", case-insensitive),
+  or a sentinel file `~/_INTERNAL_SENTINEL` exists. Reference `Path.home()` at call time (tests
+  monkeypatch it) and swallow any exception to False. The file is the escape hatch for a Finder-launched
+  packaged app that has no env to set.
+- `_env_props() -> dict`: base props on EVERY event — `env` = "packaged" if `app_paths.is_packaged()`
+  else "dev", and `internal` = `_is_internal()`.
+
+## Scrubbing
+
+- `_scrub(props) -> dict`: strip PII/secrets from event properties. None/empty → `{}`. For each key:
+  if the lowercased key contains any `_SECRET_HINT` → `[redacted]`; else if it contains any
+  `_FREETEXT_KEYS` → drop the value and instead emit `f"{k}_len"` = len(value) for str/bytes/list/dict
+  (else None); else if the value is a str → `_PATH_RE.sub("[path]", v)`; else pass through unchanged.
+- `_redact_paths(obj)`: recursively path-redact every string inside a nested str/list/dict; other
+  types pass through. Used by `_before_send` to reach SDK-built exception frames that `_scrub` never
+  sees (the SDK adds `$exception_list` AFTER our props are scrubbed).
+- `_before_send(event)`: last gate before an event leaves the machine — if `event` is a dict with a
+  dict `properties`, replace it with `_redact_paths(properties)`. Closes the PII leak in serialized
+  `$exception_list` frames whose `abs_path` embeds `/Users/<username>/…`. MUST NOT raise (the SDK
+  falls back to the UN-redacted event on failure, re-opening the leak) — wrap in try/except and always
+  return `event`.
+
+## Client lifecycle
+
+- `_get_client() -> Optional[Any]`: lazily construct the PostHog client the FIRST time it's needed and
+  ONLY if `is_enabled()`; memoize via `_initialized`. When disabled, set `_client = None` and return
+  None (opt-out honored at init — no client ever built). Otherwise construct
+  `Posthog(project_api_key=<env POSTHOG_KEY or _DEFAULT_KEY>, host=<env POSTHOG_HOST or _DEFAULT_HOST>,
+  enable_exception_autocapture=True, before_send=_before_send)`; any construction error → `_client = None`.
+- `reset()`: clear `_client`/`_initialized` so `is_enabled()` re-evaluates under new settings/env.
+  Called when the user flips opt-out (takes effect immediately) and by tests.
+- `shutdown()`: flush queued events — call `client.shutdown()` if a client exists; no-op + swallow errors otherwise.
+
+## Public capture API — every one is a no-op when `_get_client()` is None, and never raises into the caller
+
+- `capture(event, properties=None)`: `_scrub(properties)`, merge `_env_props()`, then
+  `client.capture(distinct_id=settings.device_id(), event=event, properties=props)`.
+- `capture_exception(exc, properties=None)`: same scrub+env props, then
+  `client.capture_exception(exc, distinct_id=settings.device_id(), properties=props)`.
+- `class _ClientError(Exception)`: a JS(React)/Electron error re-homed into PostHog Error Tracking next
+  to backend exceptions, so there's ONE crash inbox. Its Python traceback is a one-frame shim; the real
+  client stack rides in the `client_stack` property.
+- `capture_client_error(source, message, stack=None, context=None)`: report a frontend/Electron error.
+  Scrub `context` like any props and merge `_env_props()`, then set `source` (str, truncated to 80) and
+  `platform = "client"`; if `stack`, set `client_stack` = path-redacted stack truncated to 8000. Build a
+  path-redacted `message` truncated to 300. RAISE `_ClientError(f"[{source}] {safe}")` and catch it
+  immediately so the exception carries a valid (shim-only) traceback, then
+  `client.capture_exception(exc, distinct_id=settings.device_id(), properties=props)` (swallow send errors).

@@ -1,0 +1,92 @@
+% Generate `tools/base_tool.py`: the abstract `BaseTool` every OpenNolan tool
+% inherits, plus the enums/dataclasses of its expanded ToolContract. It enforces a
+% uniform interface for discovery, execution, cost estimation, and health reporting.
+% Use `from __future__ import annotations`. Import: hashlib, inspect, json, os,
+% platform, subprocess, shutil, abc(ABC, abstractmethod), dataclasses(dataclass, field),
+% enum(Enum), pathlib(Path), typing(Any, Callable, Optional).
+
+## `_load_dotenv()` — run once at import (call it at module top level after defining it)
+
+Load a BYOK `.env` into `os.environ` so API keys are present before any tool is
+instantiated, even when a tool is imported directly (not via the registry). Resolve the
+env file via `app_paths.env_path()` (lazy `from lib import app_paths` — the SAME file the
+BYOK panel writes); on ANY failure fall back to the repo-root `.env`
+(`Path(__file__).resolve().parent.parent / ".env"`). Return early if it is missing.
+Read it (utf-8, `errors="ignore"`), and per line: strip; skip blanks, `#` comments, and
+lines without `=`; split on the first `=`; strip the key; strip whitespace then surrounding
+`'`/`"` from the value. Strip an INLINE comment only when the `#` is preceded by whitespace
+— `"  #"` (two spaces) or a tab — so a `#` inside a value (e.g. a hex color) survives.
+Set the var only when the key is truthy and NOT already in `os.environ` (so a mid-session
+key reaches a freshly-spawned subprocess without clobbering the live environment).
+
+## Enums (all `class X(str, Enum)`; values are the lowercased member names unless noted)
+
+- `ToolTier`: CORE, VOICE, ENHANCE, GENERATE, SOURCE, ANALYZE, PUBLISH.
+- `ToolStability`: EXPERIMENTAL, BETA, PRODUCTION.
+- `ToolStatus`: AVAILABLE, UNAVAILABLE, DEGRADED.
+- `ToolRuntime` — where/how a tool executes: LOCAL (on-device, free, no network),
+  LOCAL_GPU (`"local_gpu"`, needs GPU VRAM), API (external API, needs key, costs money),
+  HYBRID (local OR API, e.g. image_selector).
+- `ExecutionMode`: SYNC, ASYNC.
+- `Determinism`: DETERMINISTIC, SEEDED, STOCHASTIC.
+- `ResumeSupport`: NONE, FROM_START (`"from_start"`), FROM_CHECKPOINT (`"from_checkpoint"`).
+
+## Dataclasses
+
+- `ResourceProfile` — hardware envelope: cpu_cores=1, ram_mb=512, vram_mb=0, disk_mb=100,
+  network_required=False.
+- `RetryPolicy` — safe retry behavior: max_retries=0, backoff_seconds=1.0,
+  retryable_errors=[] (`field(default_factory=list)`).
+- `ToolResult` — standard execution result: success (bool, required), data={} and
+  artifacts=[] (default_factory), error=None, cost_usd=0.0, duration_seconds=0.0,
+  seed: Optional[int]=None, model: Optional[str]=None.
+
+## `BaseTool(ABC)` — class attributes (overridden in subclasses), with these defaults
+
+- Identity: name="", version="0.1.0", tier=CORE, stability=EXPERIMENTAL,
+  execution_mode=SYNC, determinism=DETERMINISTIC, runtime=LOCAL.
+- Dependencies: dependencies=[] (for API tools add `"env:ENVVAR"` to signal required keys),
+  install_instructions="".
+- Capabilities: capability="generic", provider="opennolan", capabilities=[], input_schema={},
+  output_schema={}, artifact_schema={}, progress_schema: Optional[dict]=None, supports={},
+  best_for=[], not_good_for=[], provider_matrix={}.
+- Resource & retry: resource_profile=ResourceProfile(), retry_policy=RetryPolicy().
+- Resume & idempotency: resume_support=NONE, idempotency_key_fields=[].
+- Side effects & fallback: side_effects=[], fallback: Optional[str]=None, fallback_tools=[].
+- `agent_skills=[]` — names of installed `.agents/skills/` skills teaching the underlying
+  tech; the orchestrator loads these when planning tool usage.
+- `user_visible_verification=[]`.
+- Optional scoring hints (leave None unless a real measured value exists — `lib/scoring.py`
+  uses them directly instead of stability heuristics): quality_score,
+  historical_success_rate, latency_p50_seconds, all `Optional[float]=None`.
+
+## `BaseTool` methods
+
+- `get_status() -> ToolStatus`: call `check_dependencies`; AVAILABLE on success,
+  UNAVAILABLE on DependencyError.
+- `check_dependencies() -> None`: for each dep, dispatch by prefix and raise
+  `DependencyError` (message + `install_instructions`) if unsatisfied — `cmd:<name>` →
+  missing when `shutil.which(name) is None`; `env:<name>` → missing when
+  `os.environ.get(name)` is falsy; `python:<module>` → missing when `__import__(module)`
+  raises ImportError. Ignore deps with any other prefix.
+- `get_info() -> dict[str, Any]`: full tool contract for registry/discovery. Include every
+  identity/capability/resource field, with enums as their `.value`. Notable computed keys:
+  `status` = `get_status().value`; `module_path` = `self.__class__.__module__`;
+  `usage_location` = `inspect.getfile(self.__class__)`; `resource_profile` expanded to a
+  dict of its five fields; `fallback_tools` = `self.fallback_tools or ([self.fallback] if
+  self.fallback else [])`; `related_skills` = `agent_skills` (duplicate key). Also emit
+  quality_score / historical_success_rate / latency_p50_seconds.
+- `estimate_cost(inputs) -> float` = 0.0; `estimate_runtime(inputs) -> float` = 0.0
+  (override in paid / long-running tools).
+- `idempotency_key(inputs) -> str`: sha256 of `json.dumps({k: inputs.get(k) for k in
+  idempotency_key_fields}, sort_keys=True)`, hex, first 16 chars.
+- `execute(inputs) -> ToolResult`: `@abstractmethod` — subclasses implement.
+- `dry_run(inputs) -> dict`: preflight with no side effects (override for paid/publishing) —
+  `{tool: name, estimated_cost_usd, estimated_runtime_seconds, status: get_status().value,
+  would_execute: True}`.
+- `run_command(cmd, *, timeout=None, cwd=None) -> subprocess.CompletedProcess`: subprocess
+  helper. On Windows resolve `cmd[0]` via `shutil.which` (so `.cmd`/`.bat` wrappers like
+  npx/npm are found without `shell=True`), otherwise run cmd as given. `subprocess.run` with
+  `capture_output=True, text=True, timeout, cwd, check=True`.
+
+## `DependencyError(Exception)` — raised when a tool's dependency is not satisfied.

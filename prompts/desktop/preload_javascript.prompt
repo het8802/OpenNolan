@@ -1,0 +1,20 @@
+% Generate `desktop/preload.js`: the locked-down Electron context-bridge preload
+% for the OpenNolan window.
+%
+% The UI reaches the backend over HTTP on the same origin (see `main.js`), so the
+% renderer needs nothing from Node — expose ONLY diagnostics + the auto-update
+% channel. Keep it minimal: anything added here widens the renderer's privileges.
+%
+% `'use strict'`, CommonJS `require('electron')` for `contextBridge`, `ipcRenderer`.
+% `contextBridge.exposeInMainWorld('openNolan', { ... })` with:
+
+- `desktop: true` — lets the renderer detect it's running in the app.
+- `versions: { electron, chrome, node }` from `process.versions`.
+- `update` — the auto-update bridge the in-app "update ready" banner consumes
+  (`web/src/UpdateBanner.jsx`). Channels must match `main.js`'s IPC handlers, which
+  only exist in a packaged build; in dev/browser `getState()` rejects harmlessly and
+  the banner stays hidden.
+  - `getState()` — `ipcRenderer.invoke('update:get-state')`; resolves `{version}` or null.
+  - `install()` — `ipcRenderer.invoke('update:install')`; restart + install the staged build.
+  - `onDownloaded(cb)` — subscribe to `'update:downloaded'` via an `(_e, info) => cb(info)`
+    listener; RETURN an unsubscribe fn that `removeListener`s it.

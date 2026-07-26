@@ -1,0 +1,93 @@
+% Generate `web/src/editor/Editor.jsx`: the full-screen manual NLE editor. It loads a
+% project's `edit_decisions`, lets a human edit cuts / overlays / keyframes, saves through the
+% schema-validated PUT, and renders previews through the SAME video_compose path the agent uses
+% (preview == export, on the FFmpeg path). It is the orchestrator — all doc mutation lives in
+% `./interp.js`, all I/O in `../api.js`, and the three panes are child components.
+%
+% Imports: `useCallback, useEffect, useRef, useState` from 'react'; namespace `* as api` from
+% '../api.js'; default `Timeline` './Timeline.jsx', `Inspector` './Inspector.jsx', `Preview`
+% './Preview.jsx'; `{ updateCut, updateOverlay, setOverlayKeyframes, scaffoldEditDecisions,
+% timelineDuration, trimCut, splitCutAtPlayhead }` from './interp.js'; `{ IconMovie }` from
+% '../components/icons.jsx'.
+%
+% No inline styles except the few small spacing nudges called out on the error screen. Class
+% names are the contract with web/src/styles.css — preserve them exactly.
+
+Default-export `Editor({ projectId, state, onClose })`.
+
+State: `doc` (null), `loading` (true), `dirty` (false), `selection` (null), `playhead` (0),
+`renderPath` (null), `rendering` (false), `notice` (null — `{kind:'ok'|'err', text}`),
+`previewMode` ('source' | 'render', start 'source'), `sourceMeta` ({} — source ref →
+{duration,width,height}), `loadError` (null). Refs: `fetchedMeta` (a Set of already-probed
+refs), `pollRef` (`{cancelled:false}` — lets an unmounting editor stop an in-flight render poll).
+
+`runtime = doc?.render_runtime || state?.runtime`; `ffmpegPath` = runtime lowercased === 'ffmpeg'.
+Keyframe / overlay-motion preview only applies on the ffmpeg path.
+
+`load` = useCallback keyed on [projectId, runtime]: an `alive` guard; set loading true + clear
+loadError; `api.getEditDecisions(projectId)` → on success set `doc` to `d.content` OR a fresh
+`scaffoldEditDecisions({ runtime: runtime || 'ffmpeg' })`, and set `dirty = !d.content` (a
+scaffolded doc is unsaved); catch → set loadError to the message string; finally clear loading.
+Return a cleanup that flips `alive` false. A useEffect on [load] runs it and, on cleanup, calls
+the returned canceller AND sets `pollRef.current.cancelled = true`.
+
+`flash(kind, text, ms = 4000)`: set notice, and unless ms is falsy clear it after ms.
+`mutate(next)`: setDoc + setDirty(true) — the single path every edit goes through.
+
+`save` = useCallback [doc, projectId]: no-op returning false if no doc; else await
+`api.saveEditDecisions(projectId, doc)`, clear dirty, flash ok 'Saved', return true; on throw
+flash err `Save rejected: {msg}` (8000ms) and return false.
+
+`render` = useCallback [rendering, save, projectId]: return if already rendering. Always render
+the SAVED doc — `await save()` first and bail if it returned false. Set rendering true, reset
+`pollRef.current = { cancelled:false }`. `api.startRender(projectId)` → `{ job_id }`, then poll
+up to 600 times while not cancelled: `api.getRenderStatus(projectId, job_id)` — on 'done' set
+renderPath to `output_path`, switch previewMode to 'render' (show the fresh result), flash ok
+(`Rendered (review: {final_review_status})` when that field is set, else 'Rendered'), break; on
+'failed' flash err `Render failed: {error||'unknown'}` (8000ms) and break; otherwise `await
+sleep(500)`. Catch → flash err `Render error: {msg}` (8000ms). Finally clear rendering.
+
+`seek` = useCallback [] `(t) => setPlayhead(Number.isFinite(t) ? t : 0)`.
+`onTrimCut` = useCallback [doc] `(id, patch, opts) => mutate(trimCut(doc, id, patch, opts))`.
+`splitAtPlayhead` = useCallback [doc, playhead]: bail if no doc; `next = splitCutAtPlayhead(doc,
+playhead)`; if `next === doc` (playhead not strictly inside a clip — splitCutAtPlayhead returns
+the same ref) flash err 'Move the playhead inside a clip (not at its edge) to split.' and return;
+else mutate(next) + flash ok 'Clip split at playhead'.
+
+Effects:
+- [doc, projectId] — lazily probe each unique non-empty `c.source` in `doc.cuts` for its
+  duration (trim bounds), once per ref: skip refs already in `fetchedMeta`, add the ref, then
+  `api.getSourceMeta(projectId, ref)` merges into sourceMeta; on error delete the ref from
+  fetchedMeta so it can retry.
+- [splitAtPlayhead] — a window keydown: ignore while typing (target tag INPUT/SELECT/TEXTAREA);
+  on 's'/'S' without meta/ctrl, preventDefault and splitAtPlayhead(). Cleanup removes it.
+
+Render:
+- While loading: `editor` > `editor-loading` "Loading editor…".
+- If still no doc (failed/empty load must not blank-crash): an `editor` with an `editor-bar`
+  (a `back-btn` "← Close editor" → onClose, and an `editor-title` strong `state?.name ||
+  projectId`) and an `editor-noprev` explaining the load failed, the `loadError` in an
+  `editor-notice err` (small top margin) when present, a hint that a **404 / Not Found** means
+  the backend is on older code — restart it (`uvicorn server.app:app --reload`, shown in a
+  `<code>`) so the editor API routes load — and an `editor-render` "Retry" button → load.
+- Otherwise compute `duration = timelineDuration(doc)` and render `editor`:
+  - `editor-bar` header: `back-btn` "← Close editor" → onClose; `editor-title` with a strong
+    `state?.name || projectId`, a runtime `chip` (`on` when ffmpegPath else `off`, IconMovie
+    size 12 + the runtime text) shown only when runtime is set, and an `editor-dirty` "● unsaved"
+    when dirty; `editor-actions` with `editor-split` "✂ Split" (title "Split the clip under the
+    playhead (S)" → splitAtPlayhead), `editor-save` "Save" (→ save, disabled unless dirty), and
+    `editor-render` (→ render, disabled while rendering, label "Rendering…"/"Render preview").
+  - When NOT ffmpegPath, an `editor-banner` noting this project renders via the current runtime
+    (or "an unset runtime"), that cuts/timing/audio are editable but keyframe / overlay-motion
+    preview only applies on the **ffmpeg** path.
+  - `notice` → an `editor-notice {kind}` with its text.
+  - `editor-main` holding: an `editor-preview` section — `<Preview projectId doc playhead
+    renderPath mode={previewMode} onModeChange={setPreviewMode} onScrub={setPlayhead} />` and an
+    `editor-timecode` "{playhead}s / {duration}s" (both toFixed(2)); an `editor-inspector` aside
+    — `<Inspector doc selection duration playhead onUpdateCut={(id,patch)=>mutate(updateCut(doc,
+    id,patch))} onUpdateOverlay={(idx,patch)=>mutate(updateOverlay(doc,idx,patch))}
+    onSetKeyframes={(idx,kfs)=>mutate(setOverlayKeyframes(doc,idx,kfs))} />`; and an
+    `editor-timeline` footer — `<Timeline doc duration playhead selection sourceMeta
+    onSelect={setSelection} onSeek={seek} onTrimCut={onTrimCut} />`.
+
+Module-scope helper `sleep(ms)` returning a Promise resolving after a setTimeout.
