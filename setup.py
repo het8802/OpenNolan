@@ -12,6 +12,7 @@ setup(
         "jsonschema>=4.20",
         "python-dotenv>=1.0",
         "Pillow>=10.0",
+        "numpy>=1.26",
         "requests>=2.31",
     ],
 )
