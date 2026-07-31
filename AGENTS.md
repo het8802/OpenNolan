@@ -25,3 +25,8 @@ is available, use it for durable product and engineering context:
 GBrain is local to the developer machine. Its MCP configuration contains no
 credentials and is safe to keep in this public repository; the actual memory data
 stays outside this repository in the local GBrain store.
+
+
+<!-- gbrain:retrieval-reflex:resolver-rows -->
+- retrieval-reflex | a named person/company/project/place becomes the subject; a brain-page pointer appears in context; "who is", "what do we know about", "tell me about"; about to assert a non-trivial detail about a named entity
+<!-- /gbrain:retrieval-reflex:resolver-rows -->
