@@ -198,6 +198,9 @@ projects/<project-name>/
 │   ├── audio/          # Narration segments + final mix (MP3/WAV)
 │   ├── music/          # Background music track (MP3)
 │   └── subtitles.srt   # Generated subtitles
+├── hf/                 # HyperFrames workspace: composition source (HTML/CSS/fonts/img)
+│   └── renders/        # Agent-rendered HyperFrames clips — the intermediate building blocks
+│                       #   (per-scene animations, alpha overlays) the editor drops onto the timeline
 └── renders/
     └── final.mp4       # Final rendered video (the deliverable)
 ```
@@ -205,6 +208,16 @@ projects/<project-name>/
 **Naming convention**: Use kebab-case derived from the video title (e.g., `hidden-math-of-nature`, `how-music-rewires-brain`).
 
 Create the project directory at pipeline initialization, before any stage runs. All tools and agents should write outputs to these paths — never to the repo root or ad-hoc locations.
+
+**Do not hand-pick these folders — call `store_asset`.** For any file you produce (image / video / audio / music / an intermediate scene `render` / the `final_render`), call the `store_asset` tool with its `kind` and `src`; it files the asset in the correct folder above and returns the path to reference in `edit_decisions` / `asset_manifest`. Have generators write to a scratch path, then hand the result to `store_asset`. Declaring the wrong folder yourself is how intermediate clips end up under `renders/` and get shown as the editor's **Final render**. `store_asset` is the single writer into a project's asset tree (impl: `lib/project.py::place_asset`, `kind`→folder map in `KIND_DIRS`).
+
+**Agent renders live in `hf/renders/`, the final video in `renders/`.** Any HyperFrames-rendering
+pipeline should run `hf render` from the `hf/` workspace so per-scene clips land in `hf/renders/`
+(this is the HyperFrames CLI default, `renders/<name>_<timestamp>`, resolved relative to that
+workspace) — the **only** assembled deliverable belongs in `renders/final.mp4`. Keeping the two
+apart is what lets the desktop editor's **Assets → Renders** tab show the agent's building-block
+clips without dredging up the final export or its render proxies. This convention is documented
+here, the single place every pipeline inherits, rather than repeated in each pipeline's skills.
 
 ## Music Library
 
@@ -240,6 +253,7 @@ To extend the library, append entries to `scripts/generate_educational_sfx.py` a
 |----------|----------|-----------|
 | `animated-explainer` | Topic to fully generated explainer | production |
 | `talking-head` | Footage-led speaker videos | beta |
+| `instagram-fast-reel` | Your talking-head clips → fast-paced vertical reel: tight jump cuts (dead air/filler removed), keyframe-animated overlays, meme GIFs, and word-by-word motion-graphic captions. Lean flow (idea→script→assets→edit→compose→qa) with a final QA gate that inspects the hook at 5 fps, the whole reel at 2 fps, and all technicals. Reuses the Edits-parity toolset; ffmpeg runtime default. | beta |
 | `animation-talking-head-50-50` | Split-screen animated explainer: talking head bottom 45%, Greg-style animated panels top 55%, with full-frame modes per cut. HyperFrames + FFmpeg two-pass. Talking head video untouched (no color conversion). | beta |
 | `anthropic-style-animated-talking-head` | Creator talking-head explainers intercut with Anthropic-editorial motion graphics. Smart per-beat shot selection (full face / overlay / 50-50 split / full animation), claim-triggered research (finds a credible article + highlights the claim), VO copied through untouched. HyperFrames assets + FFmpeg segment-rebuild. | beta |
 | `screen-demo` | Screen recordings and walkthroughs | production |
@@ -260,6 +274,8 @@ To extend the library, append entries to `scripts/generate_educational_sfx.py` a
 ## Mandatory Preflight
 
 Do this before any creative work. **Use `provider_menu_summary()` first — it's the human-ready rollup.** The raw `support_envelope()` dump is a firehose (megabytes of JSON on a well-configured machine); pasting it into chat will bury the user.
+
+> **`python` means the project's Python.** Run the `python …` commands below as-is: your PATH is set so a bare `python` resolves to the interpreter that has OpenNolan's dependencies (the repo venv in dev; the app's managed runtime venv in the packaged desktop app). Do NOT substitute a system Python or a hardcoded interpreter path — a system Python lacks the deps and is the classic "bundled agent can't find its tools" failure.
 
 ```bash
 python -c "
@@ -551,6 +567,36 @@ Check music availability in this order and present the options:
 **If no music source is available:** Tell the user explicitly. Do NOT let this surface as a surprise at the asset stage.
 
 Record the music decision in the proposal/brief artifact so the asset director knows what to do.
+
+### Audio in `edit_decisions`: EMIT STEMS, not a pre-mixed master
+
+`edit_decisions.audio` can carry audio in two shapes. **Default to structured STEMS** so the
+audio stays editable (in the manual editor and by a later agent turn) and so the render owns the mix:
+
+- **Structured stems (preferred):** `audio.music`, `audio.narration.segments[]` (each `asset_id` +
+  `start_seconds` [+ `end_seconds`]), and `audio.sfx[]` (each `asset_id` + `start_seconds` + `volume`).
+  The FFmpeg render (`video_compose`) now **mixes these stems into the output automatically** — music
+  ducked/faded under narration, SFX placed at their `start_seconds` — reusing `audio_mixer.full_mix`.
+  You do **not** need a manual `audio_mixer.full_mix` step at compose anymore; just emit the stems and
+  keep the individual stem files on disk (referenced by `asset_id` in `asset_manifest`). This is what
+  the manual editor edits and re-mixes on every render.
+  - **`audio.music` is a MUSIC BED or a LIST of beds.** Emit a single bed as an OBJECT
+    (`asset_id` + `volume`/`fade_in_seconds`/`fade_out_seconds`/`ducking`) — the common case. Each bed
+    also accepts an optional `[start_seconds, end_seconds]` window (defaults to the whole timeline);
+    the render delays the bed to `start_seconds` and truncates it at `end_seconds`. When a user splits
+    or adds a second song in the editor, `audio.music` becomes an ARRAY of these region objects — all
+    beds mix together (each ducks under narration). Readers normalize both shapes, so keep emitting a
+    single object unless you deliberately want multiple beds.
+- **Pre-mixed master (`audio.path`) — reserve for the continuous-VO case:** a single already-mixed
+  file muxed verbatim over the assembled video (it OVERRIDES per-cut/stem audio). Use ONLY when the
+  audio is inherently one continuous track — e.g. the `anthropic-style-animated-talking-head`
+  pipeline's original talking-head VO that must stay in sync across the cuts that tile it. A master
+  cannot be edited per-stem in the editor (music/SFX are already flattened), so don't use it for
+  reels that a human may want to re-score.
+
+Precedence: an explicit `audio.path` always wins; structured stems are mixed only when no master is
+set. Footage whose OWN clip audio must survive should be captured as a narration stem (an `asset_id`
+referencing the source clip) — the stem mix replaces base-clip audio, matching `audio.path` semantics.
 
 ## Pipeline Asset Expectations
 

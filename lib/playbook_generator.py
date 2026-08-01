@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import yaml
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import jsonschema
 
@@ -41,12 +41,25 @@ def load_existing_playbook(name: str) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def list_playbooks() -> list[str]:
-    """List all available playbook names (preset + custom)."""
+def list_playbooks(*, packaged: Optional[bool] = None) -> list[str]:
+    """List all available playbook names (preset + custom).
+
+    In the packaged Mac app the list is restricted to the same two playbooks as
+    ``styles.playbook_loader`` (single source of truth); a dev checkout returns
+    every playbook. ``packaged`` overrides the auto-detect for tests.
+    """
     names = [p.stem for p in STYLES_DIR.glob("*.yaml")]
     if CUSTOM_STYLES_DIR.exists():
         names.extend(p.stem for p in CUSTOM_STYLES_DIR.glob("*.yaml"))
-    return sorted(set(names))
+    names = sorted(set(names))
+    from lib import app_paths
+    from styles.playbook_loader import PACKAGED_PLAYBOOKS
+    if packaged is None:
+        packaged = app_paths.is_packaged()
+    if packaged:
+        allow = set(PACKAGED_PLAYBOOKS)
+        names = [n for n in names if n in allow]
+    return names
 
 
 def generate_playbook(

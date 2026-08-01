@@ -166,3 +166,81 @@ def test_capabilities_discovery_failure_is_surfaced_not_500(tmp_path):
     r = _client(tmp_path, capabilities_provider=boom).get("/api/capabilities")
     assert r.status_code == 200
     assert "error" in r.json()
+
+
+# ── assets listing: kinds / renders / agent_renders ────────────────────────
+
+
+def test_list_assets_groups_kinds(tmp_path):
+    projects = tmp_path / "projects"
+    create_project(projects, "Asset Proj", PIPELINE)
+    proj = projects / "asset-proj"
+    (proj / "assets" / "images" / "a.png").write_bytes(b"img")
+    (proj / "assets" / "video" / "clip.mp4").write_bytes(b"vid")
+    (proj / "assets" / "music" / "bed.mp3").write_bytes(b"mus")
+    (proj / "assets" / "audio" / "whoosh.wav").write_bytes(b"sfx")
+
+    body = _client(tmp_path).get("/api/projects/asset-proj/assets").json()
+    names = {k: [f["name"] for f in v] for k, v in body["kinds"].items()}
+    assert names["images"] == ["a.png"]
+    assert names["video"] == ["clip.mp4"]
+    assert names["music"] == ["bed.mp3"]
+    assert names["audio"] == ["whoosh.wav"]
+    # agent_renders is always present (empty when there's no hf/renders).
+    assert body["agent_renders"] == []
+
+
+def test_list_assets_agent_renders_from_hf_renders(tmp_path):
+    """The agent's HyperFrames clips under hf/renders/ surface as `agent_renders`,
+    kept distinct from the editor's final output in renders/."""
+    projects = tmp_path / "projects"
+    create_project(projects, "HF Proj", PIPELINE)
+    proj = projects / "hf-proj"
+
+    hf_renders = proj / "hf" / "renders"
+    hf_renders.mkdir(parents=True)
+    (hf_renders / "anim_intro.mp4").write_bytes(b"clip")
+    (hf_renders / "ov_caption.mov").write_bytes(b"overlay")   # .mov alpha overlay counts too
+    (hf_renders / "notes.txt").write_text("not a video")      # non-video is ignored
+    (hf_renders / ".hidden.mp4").write_bytes(b"dotfile")      # dotfiles ignored
+
+    # The editor's final output lives in renders/ — must NOT leak into agent_renders.
+    # (create_project already made renders/, so don't re-create it.)
+    (proj / "renders" / "final.mp4").write_bytes(b"final")
+    # Render-engine internals under renders/ MUST NOT surface as "Final render":
+    # the content-keyed proxy cache and the review-frame scratch dir are not
+    # deliverables. (Regression guard: the renders bucket used to rglob these in.)
+    proxies = proj / "renders" / "proxies"
+    proxies.mkdir(parents=True)
+    (proxies / "b1.deadbeef.mp4").write_bytes(b"proxy")
+    (proxies / "b2.cafef00d.mp4").write_bytes(b"proxy")
+    (proj / "renders" / ".final_review_frames").mkdir(parents=True)
+    (proj / "renders" / ".final_review_frames" / "f0.png").write_bytes(b"png")
+
+    body = _client(tmp_path).get("/api/projects/hf-proj/assets").json()
+
+    ar_names = sorted(f["name"] for f in body["agent_renders"])
+    assert ar_names == ["anim_intro.mp4", "ov_caption.mov"]
+    # Paths are project-relative and point under hf/renders/ (so /file can serve them).
+    assert all(f["path"].startswith("hf/renders/") for f in body["agent_renders"])
+    assert all("mtime" in f and "size_bytes" in f for f in body["agent_renders"])
+
+    # The final output stays in the separate `renders` bucket, not agent_renders.
+    # Only the top-level deliverable — NOT the proxy cache — appears here.
+    assert [f["name"] for f in body["renders"]] == ["final.mp4"]
+    assert "final.mp4" not in ar_names
+
+
+def test_get_file_serves_hf_renders_clip(tmp_path):
+    """get_file already serves anything inside the project dir, including hf/renders/."""
+    projects = tmp_path / "projects"
+    create_project(projects, "Serve Proj", PIPELINE)
+    clip = projects / "serve-proj" / "hf" / "renders" / "anim.mp4"
+    clip.parent.mkdir(parents=True)
+    clip.write_bytes(b"\x00\x01bytes")
+
+    r = _client(tmp_path).get(
+        "/api/projects/serve-proj/file", params={"path": "hf/renders/anim.mp4"}
+    )
+    assert r.status_code == 200
+    assert r.content == b"\x00\x01bytes"

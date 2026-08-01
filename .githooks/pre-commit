@@ -1,0 +1,42 @@
+#!/bin/sh
+# Identity guard — this is a PUBLIC personal repo.
+#
+# The global git default on this machine is a work address, so a fresh clone or a
+# dropped local config silently bakes it into a public commit. That has happened
+# before and cost a filter-repo + force-push to undo. Cheaper to block here.
+#
+# The structural fix lives in ~/.gitconfig:
+#     [includeIf "gitdir:~/Documents/Het-personal/"]
+#         path = ~/.gitconfig-personal
+# This hook is the assertion that the fix is actually in effect.
+#
+# Enabled by:  git config core.hooksPath .githooks
+
+EXPECTED='70150247+het8802@users.noreply.github.com'
+ACTUAL="$(git config user.email)"
+
+if [ "$ACTUAL" != "$EXPECTED" ]; then
+	cat >&2 <<EOF
+
+  ✗ COMMIT BLOCKED — wrong git identity
+
+      committing as : ${ACTUAL:-<unset>}
+      expected      : $EXPECTED
+
+  This is a public repo. Fix it for this repo only:
+
+      git config --local user.email '$EXPECTED'
+
+  Or permanently, for every repo under ~/Documents/Het-personal/, add to
+  ~/.gitconfig:
+
+      [includeIf "gitdir:~/Documents/Het-personal/"]
+          path = ~/.gitconfig-personal
+
+EOF
+	exit 1
+fi
+
+# ponytail: identity only for now. The fast test gate (scripts/dev test fast)
+# joins this hook in Phase 2 — see docs/plans/wiring-repo-for-agent/merged/.
+exit 0

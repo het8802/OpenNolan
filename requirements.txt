@@ -4,6 +4,9 @@ pydantic>=2.0
 jsonschema>=4.20
 python-dotenv>=1.0
 Pillow>=10.0
+numpy>=1.26                # imported at load time by core video tools (e.g. green_screen_composite),
+                           # so it must live in the BASE env — otherwise tool discovery fails on a
+                           # missing numpy. Heavier numeric/ML stacks (torch/opencv/…) stay lazy (packs).
 requests>=2.31
 ddgs>=9.0                  # DuckDuckGo image/web search (free, no API key)
 firecrawl-py>=4.0          # Web scraping, image search, webpage screenshots

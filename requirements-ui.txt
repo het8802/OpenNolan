@@ -5,3 +5,4 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 python-multipart>=0.0.9   # asset uploads
 claude-agent-sdk>=0.2     # headless agent runner; auth via `claude setup-token`
+posthog>=3.0              # product analytics + error tracking (opt-out honored; see server/analytics.py)

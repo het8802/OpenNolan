@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+resources/
+
+# The root .gitignore ignores `build/`, but desktop/build/ is electron-builder's
+# buildResources dir and holds COMMITTED build inputs: entitlements + the app icon
+# (icon.icns/icon.png compiled from the committed vector master icon.svg). These are
+# required to package the app, so re-include the whole dir.
+!build/

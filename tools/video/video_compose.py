@@ -72,11 +72,13 @@ class VideoCompose(BaseTool):
         "properties": {
             "operation": {
                 "type": "string",
-                "enum": ["compose", "render", "remotion_render", "burn_subtitles", "overlay", "encode"],
+                "enum": ["compose", "render", "render_proxies", "remotion_render", "burn_subtitles", "overlay", "encode"],
                 "description": (
                     "compose: low-level concat cuts + audio + subtitles. "
                     "render: high-level — resolves asset IDs, auto-routes to Remotion "
                     "for images/animations or FFmpeg for video-only. Preferred for compose-director. "
+                    "render_proxies: render each scene SOLO to a content-cached proxy clip, then "
+                    "return an ffmpeg-runtime assemble EDL (render-once / NLE model — re-edits are cheap concats). "
                     "remotion_render: render via Remotion (Node.js). "
                     "burn_subtitles: burn subtitle file into existing video. "
                     "overlay: composite overlays onto base video. "
@@ -257,6 +259,21 @@ class VideoCompose(BaseTool):
             "codec": {"type": "string", "default": "libx264"},
             "crf": {"type": "integer", "default": 23},
             "preset": {"type": "string", "default": "medium"},
+            "hdr_policy": {
+                "type": "string",
+                "enum": ["auto", "preserve", "tonemap", "sdr"],
+                "default": "auto",
+                "description": (
+                    "How render_proxies handles HDR (HLG/PQ) source footage. "
+                    "auto (default): if ANY video source is HDR, PRESERVE it (10-bit "
+                    "HEVC main10 + color tags) and lift SDR graphics/stills into the "
+                    "HDR container so the whole timeline shares one color space; pure-SDR "
+                    "timelines are unchanged. preserve: force HDR (blocker if no 10-bit "
+                    "HEVC encoder). tonemap (alias sdr): convert HDR sources down to SDR. "
+                    "Never tonemaps silently — the decision is reported in "
+                    "data.hdr_handling and warnings[]."
+                ),
+            },
         },
     }
 
@@ -289,13 +306,26 @@ class VideoCompose(BaseTool):
         "Play the composed output and verify cuts, subtitles, and overlays",
     ]
 
+    def _composer_dir(self) -> Path:
+        """The Remotion project to render from. Prefer the PROVISIONED writable copy (packaged app, OPN-3:
+        runtime/composition/remotion, npm ci'd at first run); fall back to the in-repo composer (dev / the
+        `make setup` path). This is what makes 'engines always available' true in a packaged .app."""
+        try:
+            from lib import provision
+            prov = provision.remotion_root()
+            if (prov / "package.json").exists() and (prov / "node_modules").exists():
+                return prov
+        except Exception:
+            pass
+        return Path(__file__).resolve().parent.parent.parent / "remotion-composer"
+
     def _remotion_available(self) -> bool:
         """Check if Remotion rendering is available (requires npx + composer project + node_modules)."""
         import shutil as _shutil
 
         if not _shutil.which("npx"):
             return False
-        composer_dir = Path(__file__).resolve().parent.parent.parent / "remotion-composer"
+        composer_dir = self._composer_dir()
         if not composer_dir.exists() or not (composer_dir / "package.json").exists():
             return False
         # Check that node_modules are actually installed — without this,
@@ -344,7 +374,7 @@ class VideoCompose(BaseTool):
                 "and motion-graphics pipelines that already use the scene-component stack."
             )
         else:
-            composer_dir = Path(__file__).resolve().parent.parent.parent / "remotion-composer"
+            composer_dir = self._composer_dir()
             if composer_dir.exists() and (composer_dir / "package.json").exists() and not (composer_dir / "node_modules").exists():
                 info["remotion_note"] = (
                     "Remotion project exists but node_modules are NOT installed. "
@@ -427,6 +457,174 @@ class VideoCompose(BaseTool):
                 found.append(enc)
         return found
 
+    # ──────────────────────────────────────────────────────────────────────
+    # HDR preservation (render_proxies / _compose / assemble)
+    #
+    # Goal: render_proxies edits HDR footage exactly like SDR — the HDR is
+    # PRESERVED end-to-end (10-bit HEVC main10 + HLG/PQ color tags), never
+    # silently tonemapped. When a timeline MIXES HDR footage with SDR graphics
+    # (text/HyperFrames cards/stills), the chosen policy is "lift graphics UP"
+    # into the HDR (BT.2020) container so everything composites in one color
+    # space (Het's decision 2026-06-22). The whole timeline shares ONE target
+    # color (taken from the first HDR source) so proxies concat with -c copy.
+    #
+    # NOTE (needs visual review): the SDR→HDR promotion of graphics and the
+    # drawtext/overlay-in-HDR compositing are color-management chains that are
+    # plausibly-correct but only a human eye on real HDR footage can confirm the
+    # ivory cards / white text don't shift. The machine-checkable part (10-bit,
+    # HLG/PQ tags on the output) is asserted in tests.
+    # ──────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _is_valid_color_token(v: Any) -> bool:
+        """ffprobe sometimes reports 'unknown'/'reserved'/'' for color fields."""
+        s = (str(v) if v is not None else "").strip().lower()
+        return bool(s) and s not in ("unknown", "reserved", "unspecified", "n/a")
+
+    def _resolve_hdr_target(self, src_info: dict[str, Any]) -> dict[str, Any]:
+        """Resolve the canonical HDR target color from an is_hdr_source() dict.
+
+        Fills sensible BT.2020 fallbacks when ffprobe left a field 'unknown'.
+        `trc` defaults from `kind` (HLG → arib-std-b67, PQ → smpte2084).
+        """
+        kind = src_info.get("kind")
+        trc = src_info.get("transfer")
+        if not self._is_valid_color_token(trc):
+            trc = "smpte2084" if kind == "pq" else "arib-std-b67"
+        prim = src_info.get("primaries")
+        if not self._is_valid_color_token(prim):
+            prim = "bt2020"
+        cspace = src_info.get("color_space")
+        if not self._is_valid_color_token(cspace):
+            cspace = "bt2020nc"
+        return {"kind": kind, "primaries": prim, "trc": trc, "colorspace": cspace}
+
+    @classmethod
+    def _zscale_available(cls) -> bool:
+        """True iff this ffmpeg has the zscale filter (libzimg) for color convert."""
+        import shutil
+        cached = getattr(cls, "_ZSCALE_CACHE", None)
+        if cached is not None:
+            return cached
+        ok = False
+        if shutil.which("ffmpeg"):
+            try:
+                out = subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-filters"],
+                    capture_output=True, text=True, timeout=15, check=False,
+                ).stdout
+                ok = " zscale " in out or out.strip().endswith("zscale") or "zscale" in out
+            except Exception:
+                ok = False
+        cls._ZSCALE_CACHE = ok
+        return ok
+
+    def _promote_sdr_to_hdr_vf(self, target: dict[str, Any]) -> str:
+        """Filter chain that lifts an SDR (BT.709) source INTO the HDR container.
+
+        ONE zscale node, fully specifying BOTH input and output: SDR graphics/
+        stills are usually UNTAGGED, and zimg refuses a partial / transfer-only
+        conversion ("code 3074: no path between colorspaces") — so we declare the
+        input as full-range-limited BT.709 and convert straight to BT.2020 + the
+        timeline's HLG/PQ transfer in a single step (verified on this ffmpeg).
+        HLG is backward-compatible so SDR mapped into it stays close to the
+        original; PQ is absolute so its mapping is approximate (visual-review item).
+        Returns "" if zscale is unavailable (caller then keeps the source SDR).
+        """
+        if not self._zscale_available():
+            return ""
+        out_trc = "smpte2084" if target.get("kind") == "pq" else "arib-std-b67"
+        return (
+            "zscale=tin=bt709:min=bt709:pin=bt709:rin=tv:"
+            f"t={out_trc}:m=bt2020nc:p=bt2020:r=tv,format=yuv420p10le"
+        )
+
+    def _tonemap_hdr_to_sdr_vf(self, src_kind: str = "hlg") -> str:
+        """Filter chain that tonemaps an HDR source DOWN to SDR (BT.709 8-bit).
+
+        Used only when hdr_policy='tonemap' (or 'auto' with no HDR encoder). The
+        HDR source is always tagged (that's how is_hdr_source detects it), so the
+        input spec here matches its kind; linearize → Hable tonemap → BT.709 SDR.
+        """
+        if not self._zscale_available():
+            # Best-effort without zscale; will look flat but won't fail the render.
+            return "format=yuv420p"
+        in_trc = "smpte2084" if src_kind == "pq" else "arib-std-b67"
+        return (
+            f"zscale=tin={in_trc}:min=bt2020nc:pin=bt2020:t=linear:npl=100,"
+            "tonemap=hable,"
+            "zscale=t=bt709:m=bt709:p=bt709:r=tv,format=yuv420p"
+        )
+
+    def _video_output_args(
+        self,
+        hdr_encode: Optional[dict[str, Any]],
+        codec: str,
+        crf: Any,
+        preset: str,
+        fps_str: Optional[str] = None,
+    ) -> list[str]:
+        """Build the `-c:v …` output tail for one segment.
+
+        hdr_encode is None  → legacy 8-bit SDR (yuv420p, libx264), byte-identical
+                              to before.
+        hdr_encode present  → 10-bit HEVC main10 with HLG/PQ color tags when its
+                              `encoder` is set (preserve/promote); when `encoder`
+                              is None the output is SDR (the tonemap case, whose
+                              vf already converts the pixels).
+
+        fps_str: append `-r <fps>` when given; omit it (e.g. the overlay pass,
+        which keeps the base's fps) when falsy.
+        """
+        rtail = ["-r", fps_str] if fps_str else []
+        if not hdr_encode:
+            return ["-c:v", codec, "-crf", str(crf), "-preset", preset,
+                    "-pix_fmt", "yuv420p"] + rtail
+
+        enc = hdr_encode.get("encoder")
+        pix = hdr_encode.get("pix_fmt") or "yuv420p10le"
+        prim = hdr_encode.get("primaries")
+        trc = hdr_encode.get("trc")
+        cspace = hdr_encode.get("colorspace")
+
+        if enc == "hevc_videotoolbox":
+            # videotoolbox ignores -crf; use a generous bitrate target for ≤1080p
+            # vertical reels. main10 + 10-bit pixfmt = HDR-capable HEVC.
+            args = ["-c:v", "hevc_videotoolbox", "-profile:v", "main10",
+                    "-pix_fmt", pix, "-b:v", "16M", "-maxrate", "20M", "-bufsize", "32M"]
+        elif enc == "libx265":
+            args = ["-c:v", "libx265", "-crf", str(crf), "-preset", preset, "-pix_fmt", pix]
+            x265p = []
+            if self._is_valid_color_token(prim):
+                x265p.append(f"colorprim={prim}")
+            if self._is_valid_color_token(trc):
+                x265p.append(f"transfer={trc}")
+            if self._is_valid_color_token(cspace):
+                x265p.append(f"colormatrix={cspace}")
+            if x265p:
+                args += ["-x265-params", ":".join(x265p)]
+        else:
+            # No HDR encoder requested (tonemap path) → SDR via libx264. Emit EXPLICIT
+            # BT.709 tags: the source carries HDR (BT.2020/PQ) metadata and ffmpeg would
+            # otherwise copy those tags onto the 8-bit SDR output, mislabeling it as HDR.
+            return ["-c:v", codec, "-crf", str(crf), "-preset", preset,
+                    "-pix_fmt", pix,
+                    "-color_primaries", "bt709", "-color_trc", "bt709",
+                    "-colorspace", "bt709"] + rtail
+
+        # Container/stream color signaling for BOTH HDR encoders. Without these
+        # tags a 10-bit file is silently treated as SDR by players.
+        if self._is_valid_color_token(prim):
+            args += ["-color_primaries", prim]
+        if self._is_valid_color_token(trc):
+            args += ["-color_trc", trc]
+        if self._is_valid_color_token(cspace):
+            args += ["-colorspace", cspace]
+        if hdr_encode.get("tag"):
+            args += ["-tag:v", hdr_encode["tag"]]
+        args += rtail
+        return args
+
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
         operation = inputs["operation"]
         start = time.time()
@@ -436,6 +634,8 @@ class VideoCompose(BaseTool):
                 result = self._compose(inputs)
             elif operation == "render":
                 result = self._render(inputs)
+            elif operation == "render_proxies":
+                result = self._render_proxies(inputs)
             elif operation == "remotion_render":
                 result = self._remotion_render(inputs)
             elif operation == "burn_subtitles":
@@ -458,6 +658,228 @@ class VideoCompose(BaseTool):
     def _is_image(path: Path) -> bool:
         """Check if a file is a still image (routes to Remotion, not FFmpeg)."""
         return path.suffix.lower() in VideoCompose._IMAGE_EXTENSIONS
+
+    @staticmethod
+    def _has_alpha(path: Path) -> bool:
+        """True iff the asset's pixel format carries an alpha channel.
+
+        Used by the HDR overlay path: an alpha asset (transparent .mov/.png) can't
+        be zscale-converted into the HDR color space without dropping the alpha
+        plane, so it composites as-is (color approximate, warned) instead.
+        """
+        try:
+            from tools.video._shared import probe_output
+            pf = (probe_output(Path(path)).get("pix_fmt") or "").lower()
+        except Exception:
+            return False
+        if not pf:
+            return False
+        return (
+            pf.startswith("yuva")
+            or pf.startswith("ya")
+            or any(t in pf for t in ("rgba", "argb", "abgr", "bgra", "rgba64", "pal8"))
+        )
+
+    @staticmethod
+    def _normalize_ffmpeg_color(value: Any, fallback: str = "black") -> str:
+        """Coerce a user/agent-supplied color into something ffmpeg accepts.
+
+        - '#RRGGBB' (CSS hex)        → '0xRRGGBB' (ffmpeg's hex form)
+        - '0x...' / '0X...'          → passed through (lowercased prefix)
+        - a bare color NAME / token  → passed through (ffmpeg resolves names)
+        - anything non-string/empty  → `fallback` (black by default)
+
+        Defensive against junk so a malformed background can never wedge the
+        whole render — a bad color silently degrades to black."""
+        if not isinstance(value, str):
+            return fallback
+        v = value.strip()
+        if not v:
+            return fallback
+        if v.startswith("#"):
+            hex_part = v[1:]
+            if len(hex_part) in (6, 8) and all(
+                c in "0123456789abcdefABCDEF" for c in hex_part
+            ):
+                return "0x" + hex_part
+            return fallback
+        if v[:2] in ("0x", "0X"):
+            return "0x" + v[2:]
+        # A plain name/token: allow word chars + '@' (ffmpeg "name@alpha") only.
+        if all(c.isalnum() or c in "_@." for c in v):
+            return v
+        return fallback
+
+    @staticmethod
+    def _segment_base_vf(
+        cut: dict[str, Any], idx: int, target_w: int, target_h: int, fps_str: str,
+        *,
+        bg_color: str = "black",
+        bg_image: Optional[str] = None,
+        apply_transform: bool = False,
+        seg_seconds: Optional[float] = None,
+        hdr_vf_prefix: str = "",
+    ) -> tuple[Optional[str], list[str], Optional[dict[str, Any]]]:
+        """Shared per-segment video filter chain (crop → scale → pad → setsar → fps)
+        used by BOTH video and still-image cuts so they normalize to the canvas the
+        same way. Crop (if present) runs first, in SOURCE pixels (matches the schema).
+
+        Returns (error_message_or_None, vf_parts, complex_spec).
+
+        - `complex_spec is None` (the DEFAULT, and ALWAYS when apply_transform is
+          False): single-input case. `_compose` splices `-filter:v <vf_parts>` +
+          `-map 0:v:0`, exactly as before. With apply_transform=False and the
+          default bg_color='black', the emitted tail is byte-identical to the
+          legacy chain (scale…decrease, pad…color=black, setsar=1, fps=…), so
+          cached proxies + legacy docs stay valid.
+        - `complex_spec` is a dict {"inputs": [...extra ffmpeg -i args...],
+          "filtergraph": "...[v]", "vlabel": "[v]"} for the multi-input cases
+          (off-canvas color, or an image background) — `_compose` adds the extra
+          `-i` inputs AFTER source(+anullsrc) and uses `-filter_complex` + `-map [v]`.
+
+        Speed/setpts is NOT added here — the video branch appends setpts and the
+        image branch folds speed into its looped length, so each owns its timing.
+
+        apply_transform is set ONLY on the proxy-ASSEMBLE pass (via the
+        composite_background gate in `_compose`); the solo-proxy render always
+        passes apply_transform=False so proxy content (and its cache key) is
+        unchanged."""
+        # --- crop block: unchanged, always FIRST, source-pixel coordinates ---
+        crop_parts: list[str] = []
+        crop = (cut.get("transform") or {}).get("crop") or {}
+        if crop:
+            crop_w, crop_h = crop.get("width"), crop.get("height")
+            if (
+                not isinstance(crop_w, (int, float))
+                or not isinstance(crop_h, (int, float))
+                or crop_w <= 0 or crop_h <= 0
+            ):
+                return (
+                    f"cuts[{idx}].transform.crop requires positive numeric "
+                    f"width and height; got {crop!r}",
+                    [],
+                    None,
+                )
+            crop_x = int(round(crop.get("x", 0) or 0))
+            crop_y = int(round(crop.get("y", 0) or 0))
+            crop_parts.append(
+                f"crop={int(round(crop_w))}:{int(round(crop_h))}:{crop_x}:{crop_y}"
+            )
+
+        # --- HDR color conversion runs AFTER crop (source pixels) and BEFORE
+        #     scale, at the source's native resolution. Empty for SDR and for the
+        #     proxy-assemble pass (proxies are already in the target color space).
+        hdr_parts = [hdr_vf_prefix] if hdr_vf_prefix else []
+
+        # --- legacy single-input path (no transform): identical tail to before,
+        #     only the pad color is parameterized (defaults to black) ---
+        if not apply_transform:
+            vf_parts = list(crop_parts) + hdr_parts + [
+                f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease",
+                f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color={bg_color}",
+                "setsar=1",
+                f"fps={fps_str}",
+            ]
+            return (None, vf_parts, None)
+
+        # --- transform path: resolve scale + position into an even box on canvas ---
+        # `scale` is either a uniform number OR a per-axis {x, y} object (e.g. a
+        # split-screen panel = {x:1.0, y:0.5} → a full-width half-height box). The
+        # clip fits INSIDE the box aspect-preserved (never stretched); a panel that
+        # should FILL its box pre-shapes its aspect with transform.crop.
+        transform = cut.get("transform") or {}
+        scale = transform.get("scale", 1.0)
+
+        def _pos_float(v: Any, default: float = 1.0) -> float:
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return default
+            return f if f > 0 else default
+
+        if isinstance(scale, dict):
+            sx = _pos_float(scale.get("x", 1.0))
+            sy = _pos_float(scale.get("y", 1.0))
+        else:
+            sx = sy = _pos_float(scale)
+        # Even box dims (yuv420p), >= 2.
+        boxw = max(2, int(target_w * sx / 2) * 2)
+        boxh = max(2, int(target_h * sy / 2) * 2)
+
+        position = transform.get("position", "center")
+        if isinstance(position, dict):
+            px = int(round(position.get("x", 0) or 0))
+            py = int(round(position.get("y", 0) or 0))
+        else:
+            # Named anchor (margin=0 → flush to the canvas edges). Default 'center'.
+            parts = VideoCompose._split_anchor(position) or ("center", "center")
+            px, py = VideoCompose._anchor_xy(parts, target_w, target_h, boxw, boxh, 0)
+
+        # The clip box, scaled-to-fit inside boxw×boxh and centered within it (so a
+        # mismatched source aspect ratio letterboxes inside its own box, not the canvas).
+        fg_chain = list(crop_parts) + hdr_parts + [
+            f"scale={boxw}:{boxh}:force_original_aspect_ratio=decrease",
+            "setsar=1",
+        ]
+
+        fully_inside = (0 <= px <= target_w - boxw) and (0 <= py <= target_h - boxh)
+
+        if bg_image is None and fully_inside:
+            # Simplest case: one input, pad the scaled clip into place over a solid
+            # color. `pad` x/y must be within [0, W-iw]/[0, H-ih] — guaranteed here.
+            vf_parts = fg_chain + [
+                f"pad={target_w}:{target_h}:{px}:{py}:color={bg_color}",
+                f"fps={fps_str}",
+            ]
+            return (None, vf_parts, None)
+
+        # Multi-input compositing: build a background layer, overlay the clip on it.
+        # `seg_seconds` bounds any synthesized/looped bg input (mandatory — an
+        # unbounded lavfi/-loop input is an infinite encode).
+        try:
+            seg_t = float(seg_seconds) if seg_seconds and seg_seconds > 0 else 0.0
+        except (TypeError, ValueError):
+            seg_t = 0.0
+        if seg_t <= 0:
+            return (
+                f"cuts[{idx}]: a positive segment duration is required to "
+                f"composite an off-canvas/image background (got {seg_seconds!r})",
+                [],
+                None,
+            )
+        # Trim the float to a stable string ffmpeg parses.
+        seg_t_str = f"{seg_t:.6f}".rstrip("0").rstrip(".") or "0"
+
+        fg_graph = "[0:v]" + ",".join(fg_chain) + "[fg]"
+
+        if bg_image is not None:
+            # IMAGE background: object-fit:cover (scale to fill, crop overflow),
+            # then overlay the clip box. The bg is a looped still bounded by -t.
+            inputs = ["-loop", "1", "-t", seg_t_str, "-i", str(bg_image)]
+            bg_idx = "{bg}"  # _compose substitutes the resolved input index
+            bg_graph = (
+                f"[{bg_idx}:v]"
+                f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+                f"crop={target_w}:{target_h},setsar=1,fps={fps_str}[bg]"
+            )
+        else:
+            # COLOR background, box off-canvas: a lavfi color source as the bg,
+            # overlay the (possibly clipped) box at PX,PY.
+            inputs = [
+                "-f", "lavfi", "-t", seg_t_str,
+                "-i", f"color=c={bg_color}:s={target_w}x{target_h}:r={fps_str}",
+            ]
+            bg_idx = "{bg}"
+            bg_graph = f"[{bg_idx}:v]setsar=1[bg]"
+
+        filtergraph = (
+            f"{bg_graph};{fg_graph};[bg][fg]overlay={px}:{py}[v]"
+        )
+        return (
+            None,
+            [],
+            {"inputs": inputs, "filtergraph": filtergraph, "vlabel": "[v]"},
+        )
 
     @staticmethod
     def _has_audio_stream(path: Path) -> bool:
@@ -600,6 +1022,7 @@ class VideoCompose(BaseTool):
         crf: int,
         preset: str,
         concat_out: Path,
+        hdr_encode: Optional[dict[str, Any]] = None,
     ) -> tuple[Optional[str], str]:
         """Join normalized segments with xfade/acrossfade, encoding `concat_out`.
 
@@ -668,8 +1091,7 @@ class VideoCompose(BaseTool):
         cmd.extend([
             "-filter_complex", filtergraph,
             "-map", f"[{cur_v}]", "-map", f"[{cur_a}]",
-            "-c:v", codec, "-crf", str(crf), "-preset", preset,
-            "-pix_fmt", "yuv420p", "-r", fps_str,
+            *self._video_output_args(hdr_encode, codec, crf, preset, fps_str),
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
             str(concat_out),
         ])
@@ -725,6 +1147,555 @@ class VideoCompose(BaseTool):
                 )
             target_w, target_h, target_fps = ct_w, ct_h, ct_fps
         return None, target_w, target_h, target_fps
+
+    def _render_proxies(self, inputs: dict[str, Any]) -> ToolResult:
+        """Render each scene to its OWN cached clip, then emit an FFmpeg assemble EDL.
+
+        The render-once / NLE model (M2): rendering a scene (Remotion/HyperFrames)
+        is expensive, so we render each scene SOLO to a proxy clip ONCE, cache it
+        by content, and hand back an `ffmpeg`-runtime edit_decisions whose cuts
+        point at those proxies. From then on, editing the ARRANGEMENT (order,
+        transitions, audio, subtitles) is a cheap FFmpeg concat — proxies are
+        reused from cache. Only a scene whose content changes misses and re-renders.
+
+        Boundary (v1): a proxy bakes the scene's CONTENT rendered solo at native
+        speed (no transform/transitions). The assemble EDL applies ordering,
+        cross-scene transitions, per-scene speed + transform/crop, audio,
+        subtitles and overlays — all cheap FFmpeg. So reordering, retiming,
+        cropping, re-transitioning and re-scoring are FREE; only a change to a
+        scene's own content (source / trim window / animation / playbook)
+        re-renders that one scene.
+
+        The returned `assemble_edit_decisions` MUST be rendered via
+        operation="render" (render_runtime=ffmpeg) — NOT operation="compose",
+        which drops overlays[] and layer routing.
+
+        Inputs: edit_decisions (with the locked render_runtime), asset_manifest,
+        proxies_dir (where clips are written), optional profile/output_profile,
+        optional assemble_edl_path (also persist the assemble EDL there).
+        """
+        import hashlib
+        from tools.video.render_cache import ProxyCache, file_content_hash
+
+        edit_decisions = inputs.get("edit_decisions")
+        if not edit_decisions:
+            return ToolResult(success=False, error="edit_decisions required for render_proxies")
+        asset_manifest = inputs.get("asset_manifest") or {"assets": []}
+        cuts = edit_decisions.get("cuts", [])
+        if not cuts:
+            return ToolResult(success=False, error="No cuts in edit_decisions")
+
+        render_runtime = (edit_decisions.get("render_runtime") or "").strip().lower()
+        if render_runtime not in ("remotion", "hyperframes", "ffmpeg"):
+            return ToolResult(
+                success=False,
+                error=(
+                    f"render_proxies needs a valid render_runtime locked in "
+                    f"edit_decisions (got {render_runtime!r}). Valid: remotion, "
+                    f"hyperframes, ffmpeg."
+                ),
+            )
+
+        renderer_family = edit_decisions.get("renderer_family")
+        profile = inputs.get("profile") or inputs.get("output_profile")
+        canvas_err, cw, ch, cfps = self._resolve_canvas(edit_decisions, profile)
+        if canvas_err:
+            return ToolResult(success=False, error=canvas_err)
+        canvas = {"width": cw, "height": ch, "fps": cfps}
+
+        # Playbook materially changes Remotion/HyperFrames pixels (palette, fonts,
+        # motion), so fold its identity into the key for animated runtimes — else a
+        # playbook edit is a stale cache HIT. ffmpeg ignores the playbook.
+        playbook_identity = None
+        if render_runtime in ("remotion", "hyperframes"):
+            playbook_ref = (
+                (edit_decisions.get("metadata") or {}).get("playbook")
+                or inputs.get("playbook") or inputs.get("playbook_name")
+            )
+            if playbook_ref:
+                _pb = Path(str(playbook_ref))
+                playbook_identity = {
+                    "ref": str(playbook_ref),
+                    "hash": file_content_hash(_pb) if _pb.exists() else "",
+                }
+
+        proxies_dir = Path(inputs.get("proxies_dir") or "renders/proxies")
+        proxies_dir.mkdir(parents=True, exist_ok=True)
+
+        asset_lookup = {a["id"]: a for a in asset_manifest.get("assets", []) if a.get("id")}
+        cache = ProxyCache()
+
+        # ── HDR decision (resolved ONCE for the whole timeline) ──────────────
+        # render_proxies edits HDR exactly like SDR: detect HDR among the on-disk
+        # VIDEO sources, then PRESERVE it (10-bit HEVC main10 + HLG/PQ color tags)
+        # — lifting any SDR graphics/stills UP into the SAME HDR (BT.2020)
+        # container so every proxy concats in one color space (Het's choice
+        # 2026-06-22). One target color (from the first HDR source) is shared by
+        # the whole timeline. Policy: auto (preserve when HDR present, else SDR),
+        # preserve (force; blocker if no encoder), tonemap / sdr (force SDR).
+        # HDR preservation only applies to render_runtime='ffmpeg' (the only path
+        # that re-encodes from a source file); remotion/hyperframes proxies are
+        # SDR by construction.
+        from tools.video._shared import is_hdr_source
+
+        hdr_policy = str(inputs.get("hdr_policy") or "auto").strip().lower()
+        if hdr_policy not in ("auto", "preserve", "tonemap", "sdr"):
+            hdr_policy = "auto"
+
+        def _resolve_src_path(c: dict[str, Any]) -> str:
+            ref = c.get("source", "")
+            return asset_lookup.get(ref, {}).get("path", ref)
+
+        src_hdr_map: dict[str, dict[str, Any]] = {}
+        first_hdr: Optional[dict[str, Any]] = None
+        if render_runtime == "ffmpeg":
+            for c in cuts:
+                sp = _resolve_src_path(c)
+                if sp and sp not in src_hdr_map and Path(sp).exists() and not self._is_image(Path(sp)):
+                    info = is_hdr_source(Path(sp))
+                    src_hdr_map[sp] = info
+                    if info.get("hdr") and first_hdr is None:
+                        first_hdr = info
+        any_hdr = first_hdr is not None
+        # A timeline that mixes HDR with anything non-HDR needs SDR→HDR PROMOTION
+        # (zscale) to preserve. A timeline where EVERY cut is already an HDR video
+        # needs no promotion, so preserve works even without zscale.
+        all_cuts_hdr = bool(cuts) and all(
+            src_hdr_map.get(_resolve_src_path(c), {}).get("hdr") for c in cuts
+        )
+        zscale_ok = self._zscale_available()
+
+        hdr_warnings: list[str] = []
+        hdr_target: Optional[dict[str, Any]] = None   # timeline target color (preserve)
+        hdr_encoder: Optional[str] = None             # chosen 10-bit HEVC encoder
+        hdr_mode_timeline = "sdr"                      # 'preserve' | 'tonemap' | 'sdr'
+        if render_runtime == "ffmpeg" and any_hdr:
+            encs = self._hdr_encoders()
+            hdr_encoder = (
+                "hevc_videotoolbox" if "hevc_videotoolbox" in encs
+                else ("libx265" if "libx265" in encs else None)
+            )
+            if hdr_policy in ("tonemap", "sdr"):
+                hdr_mode_timeline = "tonemap"
+                if not zscale_ok:
+                    hdr_warnings.append(
+                        "hdr_policy='tonemap' but ffmpeg lacks the zscale filter (libzimg) "
+                        "— the HDR→SDR tone curve can't be applied properly; output is "
+                        "tagged SDR but may look flat. Install an ffmpeg with libzimg."
+                    )
+            elif hdr_encoder is None:
+                if hdr_policy == "preserve":
+                    return ToolResult(
+                        success=False,
+                        error=(
+                            "hdr_policy='preserve' but no 10-bit HEVC encoder "
+                            "(hevc_videotoolbox or libx265) is available on this machine "
+                            "— cannot preserve HDR. Install one, or re-run with "
+                            "hdr_policy='tonemap' to convert the HDR source to SDR."
+                        ),
+                    )
+                hdr_mode_timeline = "tonemap"
+                hdr_warnings.append(
+                    "HDR source detected but no 10-bit HEVC encoder available — "
+                    "tonemapping to SDR (hdr_policy='auto'). Install hevc_videotoolbox "
+                    "or libx265, or pass hdr_policy explicitly to silence this."
+                )
+            elif not all_cuts_hdr and not zscale_ok:
+                # Mixed HDR+SDR timeline but no zscale → SDR sources CANNOT be lifted
+                # into the HDR container. Preserving here would encode SDR pixels with
+                # HDR tags (a silent color mislabel). Block (preserve) or tonemap (auto).
+                if hdr_policy == "preserve":
+                    return ToolResult(
+                        success=False,
+                        error=(
+                            "hdr_policy='preserve' on a mixed HDR+SDR timeline, but ffmpeg "
+                            "lacks the zscale filter (libzimg) needed to lift the SDR "
+                            "graphics/stills into the HDR (BT.2020) container — preserving "
+                            "would mislabel SDR pixels as HDR. Install an ffmpeg with libzimg, "
+                            "or re-run with hdr_policy='tonemap'."
+                        ),
+                    )
+                hdr_mode_timeline = "tonemap"
+                hdr_warnings.append(
+                    "Mixed HDR+SDR timeline but ffmpeg lacks zscale (libzimg) to promote the "
+                    "SDR parts into HDR — tonemapping the HDR source to SDR instead "
+                    "(hdr_policy='auto'). Install an ffmpeg with libzimg to preserve HDR."
+                )
+            else:
+                hdr_mode_timeline = "preserve"
+                hdr_target = self._resolve_hdr_target(first_hdr)
+                if all_cuts_hdr:
+                    hdr_warnings.append(
+                        f"HDR timeline: preserving HDR (10-bit {hdr_encoder}, "
+                        f"{hdr_target.get('kind')})."
+                    )
+                else:
+                    hdr_warnings.append(
+                        f"HDR timeline: preserving HDR (10-bit {hdr_encoder}, "
+                        f"{hdr_target.get('kind')}) and lifting SDR graphics/stills into the "
+                        "HDR container — confirm graphics color on real HDR footage."
+                    )
+
+        proxies: list[dict[str, Any]] = []
+        for i, cut in enumerate(cuts):
+            scene_id = str(cut.get("id") or f"scene_{i:03d}")
+
+            if str(cut.get("layer") or "").lower() == "overlay":
+                return ToolResult(
+                    success=False,
+                    error=(
+                        f"scene {scene_id!r}: layer='overlay' (PiP) cuts aren't "
+                        "supported by the proxy path yet — a solo render flattens "
+                        "PiP. Render PiP via the direct ffmpeg path, or split those "
+                        "cuts out before render_proxies."
+                    ),
+                )
+
+            source_ref = cut.get("source", "")
+            source_path = asset_lookup.get(source_ref, {}).get("path", source_ref)
+            if source_path and Path(source_path).exists():
+                src_hash = file_content_hash(source_path)
+            else:
+                # No on-disk source (animated scene): key on the asset record (or the
+                # bare ref) so distinct unresolved sources don't share one bucket.
+                _blob = json.dumps(asset_lookup.get(source_ref, source_ref), sort_keys=True, default=str)
+                src_hash = "unresolved:" + hashlib.sha256(_blob.encode()).hexdigest()
+
+            try:
+                orig_in = float(cut.get("in_seconds", 0))
+                orig_out = float(cut.get("out_seconds", 0))
+            except (TypeError, ValueError):
+                orig_in, orig_out = 0.0, 0.0
+            dur = round(orig_out - orig_in, 4)
+            if dur <= 0:
+                return ToolResult(
+                    success=False,
+                    error=f"scene {scene_id!r}: out_seconds must be > in_seconds (duration {dur})",
+                )
+
+            # Solo scene spec. Transitions, speed and transform are applied at the
+            # cheap ASSEMBLE layer, so they're stripped from the proxy render.
+            solo_cut = {
+                k: v for k, v in cut.items()
+                if k not in ("transition_in", "transition_out", "transition_duration",
+                             "speed", "transform", "reason")
+            }
+            solo_cut["id"] = scene_id
+            solo_cut["source"] = source_path
+            if render_runtime == "ffmpeg":
+                # _compose reads in/out as the SOURCE trim — keep the real window so
+                # the proxy bakes the requested seconds, not always 0..dur.
+                solo_cut["in_seconds"] = orig_in
+                solo_cut["out_seconds"] = orig_out
+            else:
+                # Remotion/HyperFrames: in/out are the TIMELINE position; source trim
+                # rides on source_in_seconds (preserved). Re-zero to render from t=0.
+                solo_cut["in_seconds"] = 0.0
+                solo_cut["out_seconds"] = dur
+
+            # Bake CROP into the proxy (ffmpeg path). Crop is in SOURCE pixels, so it can only be
+            # applied at the native source resolution — re-applying it at the assemble layer runs it
+            # against the canvas-sized proxy and goes out of bounds (crop W/H can exceed the proxy's
+            # W/H), which is the `crop=1440:2560 on a 1080x1920 proxy → exit 234` failure. Baking it
+            # here makes crop part of the proxy's content identity (a crop edit re-renders just this
+            # scene); _build_assemble_edl drops crop from the assemble so it isn't applied twice.
+            # Other transform fields (scale/position) are PiP-only and never reach this path
+            # (layer='overlay' is rejected above), so crop is the only transform the proxy carries.
+            if render_runtime == "ffmpeg":
+                _crop = (cut.get("transform") or {}).get("crop")
+                if _crop:
+                    solo_cut["transform"] = {"crop": _crop}
+
+            # Per-scene HDR encode (from the timeline decision). preserve: an HDR
+            # source keeps its color (vf_prefix=""), an SDR source/still is PROMOTED
+            # into the HDR container. tonemap: an HDR source is converted to SDR,
+            # SDR sources are untouched (None). The HDR decision is part of the
+            # cache identity — but only when it actually affects the proxy, so plain
+            # SDR proxies keep their existing keys (no cache-wide invalidation).
+            scene_hdr_encode: Optional[dict[str, Any]] = None
+            scene_hdr_identity: Optional[dict[str, Any]] = None
+            if hdr_mode_timeline == "preserve" and hdr_target:
+                base_enc = {
+                    "encoder": hdr_encoder,
+                    "pix_fmt": "yuv420p10le",
+                    "primaries": hdr_target["primaries"],
+                    "trc": hdr_target["trc"],
+                    "colorspace": hdr_target["colorspace"],
+                    "tag": "hvc1",
+                }
+                src_info = src_hdr_map.get(source_path)
+                if src_info and src_info.get("hdr"):
+                    scene_hdr_encode = dict(base_enc, vf_prefix="")
+                    _mode = "preserve"
+                else:
+                    scene_hdr_encode = dict(
+                        base_enc, vf_prefix=self._promote_sdr_to_hdr_vf(hdr_target)
+                    )
+                    _mode = "promote"
+                scene_hdr_identity = {
+                    "mode": _mode, "encoder": hdr_encoder, "pix_fmt": "yuv420p10le",
+                    "primaries": hdr_target["primaries"], "trc": hdr_target["trc"],
+                    "colorspace": hdr_target["colorspace"],
+                }
+            elif hdr_mode_timeline == "tonemap":
+                src_info = src_hdr_map.get(source_path)
+                if src_info and src_info.get("hdr"):
+                    scene_hdr_encode = {
+                        "encoder": None, "pix_fmt": "yuv420p",
+                        "vf_prefix": self._tonemap_hdr_to_sdr_vf(src_info.get("kind") or "hlg"),
+                    }
+                    scene_hdr_identity = {"mode": "tonemap", "pix_fmt": "yuv420p"}
+
+            identity = {
+                "v": 2,
+                "render_runtime": render_runtime,
+                "renderer_family": renderer_family,
+                "canvas": canvas,
+                "playbook": playbook_identity,
+                "trim": {"in": orig_in, "out": orig_out},
+                "scene": {k: v for k, v in solo_cut.items() if k != "source"},
+                "source_hash": src_hash,
+            }
+            if scene_hdr_identity:
+                identity["hdr"] = scene_hdr_identity
+            key = cache.key(identity)
+            # Content-addressed filename: each distinct identity owns a distinct file,
+            # so a re-render with new content can never clobber an older proxy that a
+            # cached record still points at (the stale-pixel-HIT bug).
+            proxy_path = proxies_dir / f"{scene_id}.{key[:16]}.mp4"
+
+            with cache.lock(key):
+                rec = cache.get(key)
+                if rec:
+                    proxies.append({
+                        "scene_id": scene_id,
+                        "proxy_path": rec["proxy_path"],
+                        "duration_seconds": rec.get("duration_seconds", dur),
+                        "cache_hit": True,
+                        "render_runtime": render_runtime,
+                    })
+                    continue
+
+                solo_ed: dict[str, Any] = {
+                    "version": edit_decisions.get("version", "1.0"),
+                    "render_runtime": render_runtime,
+                    "cuts": [solo_cut],
+                }
+                if renderer_family:
+                    solo_ed["renderer_family"] = renderer_family
+                if edit_decisions.get("metadata"):
+                    solo_ed["metadata"] = edit_decisions["metadata"]
+
+                render_res = self._render_scene_proxy(
+                    render_runtime, solo_ed, asset_manifest, proxy_path, profile,
+                    hdr_encode=scene_hdr_encode,
+                )
+                if not render_res.success:
+                    return ToolResult(
+                        success=False,
+                        error=f"proxy render failed for scene {scene_id!r}: {render_res.error}",
+                    )
+                cache.put(key, {
+                    "proxy_path": str(proxy_path),
+                    "scene_id": scene_id,
+                    "render_runtime": render_runtime,
+                    "duration_seconds": dur,
+                    "source_hash": src_hash,
+                })
+                proxies.append({
+                    "scene_id": scene_id,
+                    "proxy_path": str(proxy_path),
+                    "duration_seconds": dur,
+                    "cache_hit": False,
+                    "render_runtime": render_runtime,
+                })
+
+        hdr_meta: Optional[dict[str, Any]] = None
+        if hdr_mode_timeline == "preserve" and hdr_target:
+            hdr_meta = {
+                "enabled": True,
+                "kind": hdr_target.get("kind"),
+                "encoder": hdr_encoder,
+                "pix_fmt": "yuv420p10le",
+                "primaries": hdr_target["primaries"],
+                "trc": hdr_target["trc"],
+                "colorspace": hdr_target["colorspace"],
+            }
+        assemble_ed = self._build_assemble_edl(edit_decisions, proxies, hdr_meta=hdr_meta)
+
+        assemble_edl_path = inputs.get("assemble_edl_path")
+        if assemble_edl_path:
+            try:
+                from lib.atomic_io import atomic_write_json
+                atomic_write_json(Path(assemble_edl_path), assemble_ed)
+            except Exception:
+                Path(assemble_edl_path).write_text(json.dumps(assemble_ed, indent=2))
+
+        n_cached = sum(1 for p in proxies if p["cache_hit"])
+        proxy_summary = {
+            "operation": "render_proxies",
+            "proxies": proxies,
+            "assemble_edit_decisions": assemble_ed,
+            "n_scenes": len(proxies),
+            "n_cached": n_cached,
+            "n_rendered": len(proxies) - n_cached,
+            "canvas": canvas,
+            "render_runtime": render_runtime,
+            "hdr_handling": {
+                "policy": hdr_policy,
+                "source_hdr": any_hdr,
+                "decision": hdr_mode_timeline,
+                "encoder": hdr_encoder,
+                "target": hdr_target,
+            },
+        }
+        if hdr_warnings:
+            proxy_summary["warnings"] = list(hdr_warnings)
+
+        # One-call mode: with an output_path, also assemble + render the proxies to
+        # a final video — the cached drop-in for operation="render" the editor uses
+        # (only changed scenes re-rendered above; this pass is a cheap ffmpeg concat
+        # that also applies overlays/audio and runs the final review once). Without
+        # output_path, return just the proxies + the assemble EDL.
+        output_path = inputs.get("output_path")
+        if not output_path:
+            return ToolResult(success=True, data=proxy_summary, artifacts=[p["proxy_path"] for p in proxies])
+
+        final_res = self._render({
+            "edit_decisions": assemble_ed,
+            "asset_manifest": {"assets": []},  # proxy sources are absolute file paths
+            "output_path": str(output_path),
+            "profile": profile,
+        })
+        data = dict(final_res.data or {})
+        # Union the assemble pass's warnings with the proxy/HDR warnings (the
+        # proxy_summary.update below would otherwise clobber one with the other).
+        merged_warnings = list(data.get("warnings") or []) + list(hdr_warnings or [])
+        data.update(proxy_summary)
+        if merged_warnings:
+            data["warnings"] = merged_warnings
+        return ToolResult(
+            success=final_res.success,
+            data=data,
+            artifacts=final_res.artifacts or [p["proxy_path"] for p in proxies],
+            error=final_res.error,
+        )
+
+    def _render_scene_proxy(
+        self,
+        render_runtime: str,
+        solo_ed: dict[str, Any],
+        asset_manifest: dict[str, Any],
+        proxy_path: Path,
+        profile: Optional[str],
+        hdr_encode: Optional[dict[str, Any]] = None,
+    ) -> ToolResult:
+        """Render ONE solo scene to proxy_path via the locked runtime (lean path).
+
+        `hdr_encode` (ffmpeg path only) carries the per-scene HDR preserve/promote/
+        tonemap decision into `_compose`. remotion/hyperframes emit SDR proxies, so
+        an HDR-preserve request there is silently SDR — render_proxies only sets
+        hdr_encode when render_runtime='ffmpeg', so this can't happen in practice.
+        """
+        proxy_path = Path(proxy_path)
+        proxy_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if render_runtime == "ffmpeg":
+            # _compose wants cut sources as real file paths (already resolved here).
+            return self._compose({
+                "edit_decisions": solo_ed,
+                "output_path": str(proxy_path),
+                "profile": profile,
+                "hdr_encode": hdr_encode,
+            })
+        if render_runtime == "remotion":
+            inp: dict[str, Any] = {"edit_decisions": solo_ed, "output_path": str(proxy_path)}
+            if profile:
+                inp["profile"] = profile
+            return self._remotion_render(inp)
+        if render_runtime == "hyperframes":
+            return self._render_via_hyperframes(
+                inputs={"output_path": str(proxy_path)},
+                edit_decisions=solo_ed,
+                asset_manifest=asset_manifest,
+                resolved_cuts=solo_ed["cuts"],
+                output_path=proxy_path,
+                profile=profile,
+            )
+        return ToolResult(success=False, error=f"unknown render_runtime {render_runtime!r}")
+
+    def _build_assemble_edl(
+        self,
+        original: dict[str, Any],
+        proxies: list[dict[str, Any]],
+        hdr_meta: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Build an ffmpeg-runtime edit_decisions that concatenates the proxies.
+
+        Each assemble cut references its proxy 1:1 (in=0..duration) and re-applies
+        the scene's per-cut speed / transform / cross-scene transitions at the
+        cheap FFmpeg layer (matched to the original cut by scene id). overlays /
+        audio / music / subtitles / renderer_family pass through.
+
+        The result MUST be rendered via operation="render" (render_runtime=ffmpeg),
+        NOT operation="compose" — compose drops overlays[] and layer routing.
+        """
+        orig_by_id = {
+            str(c.get("id") or f"scene_{i:03d}"): c
+            for i, c in enumerate(original.get("cuts", []))
+        }
+        assemble_cuts: list[dict[str, Any]] = []
+        for p in proxies:
+            sid = p["scene_id"]
+            oc = orig_by_id.get(sid, {})
+            try:
+                out_s = round(float(p["duration_seconds"]), 4)
+            except (TypeError, ValueError):
+                out_s = 0.0
+            cut: dict[str, Any] = {
+                "id": sid,
+                "source": p["proxy_path"],
+                "in_seconds": 0.0,
+                "out_seconds": out_s,
+            }
+            for k in ("speed", "transform", "transition_in", "transition_out", "transition_duration"):
+                if k in oc:
+                    if k == "transform":
+                        # CROP is already baked into the proxy (it's source-px and can't run on the
+                        # canvas-sized proxy) — carry only any NON-crop transform so it isn't applied
+                        # twice. On the ffmpeg proxy path nothing else lives in transform today.
+                        t = {tk: tv for tk, tv in (oc["transform"] or {}).items() if tk != "crop"}
+                        if t:
+                            cut[k] = t
+                    else:
+                        cut[k] = oc[k]
+            assemble_cuts.append(cut)
+
+        assembled: dict[str, Any] = {
+            "version": original.get("version", "1.0"),
+            "render_runtime": "ffmpeg",
+            "cuts": assemble_cuts,
+        }
+        for k in ("renderer_family", "overlays", "audio", "music", "subtitles", "transitions"):
+            if original.get(k) is not None:
+                assembled[k] = original[k]
+
+        # Make the two-phase render legible to governance: this ffmpeg pass
+        # ASSEMBLES proxies that were rendered in the locked runtime — it is NOT a
+        # runtime swap. Drop the carried proposal_render_runtime (which would read
+        # as a remotion->ffmpeg swap in the final-review check) and record the real
+        # proxy runtime for the audit trail.
+        meta = dict(original.get("metadata") or {})
+        meta.pop("proposal_render_runtime", None)
+        meta["assemble_of_proxies"] = True
+        meta["proxy_render_runtime"] = original.get("render_runtime")
+        # The proxies were rendered HDR (10-bit + tags); record the target color so
+        # _render_via_ffmpeg keeps the assemble re-encode (concat/overlays/subtitle
+        # burn) 10-bit + tagged rather than auto-negotiating back down to SDR.
+        if hdr_meta:
+            meta["hdr"] = hdr_meta
+        assembled["metadata"] = meta
+        return assembled
 
     def _compose(self, inputs: dict[str, Any]) -> ToolResult:
         """FFmpeg composition: cut segments, transitions, audio, subtitles.
@@ -782,6 +1753,32 @@ class VideoCompose(BaseTool):
             return ToolResult(success=False, error=canvas_err)
         fps_str = f"{target_fps:g}"
 
+        # Per-clip position/scale + project background — applied ONLY when the
+        # ASSEMBLE pass (_render_via_ffmpeg) sets this gate. NEVER derived from
+        # metadata.background here, so a solo-proxy render (which carries the full
+        # metadata) leaves proxy content + cache key untouched. None ⇒ legacy
+        # black-letterbox/fit/center, byte-identical to before.
+        composite_background = inputs.get("composite_background")
+        if isinstance(composite_background, dict):
+            bg_color = self._normalize_ffmpeg_color(
+                composite_background.get("color"), "black"
+            )
+            bg_image = composite_background.get("image") or None
+        else:
+            bg_color = "black"
+            bg_image = None
+
+        # HDR preservation: when render_proxies resolves the timeline as HDR it
+        # passes a per-scene `hdr_encode` dict here (encoder + 10-bit pixfmt +
+        # HLG/PQ color tags, and a `vf_prefix` color-conversion chain for
+        # promote/tonemap). None (the default) ⇒ legacy 8-bit SDR, byte-identical
+        # to before. `_video_output_args` owns the encode tail; `vf_prefix` is
+        # spliced into each segment's filterchain by `_segment_base_vf`.
+        hdr_encode = inputs.get("hdr_encode") or None
+        hdr_vf_prefix = (
+            hdr_encode.get("vf_prefix") if isinstance(hdr_encode, dict) else ""
+        ) or ""
+
         # Per-join transition resolution (B.transition_in wins over A.transition_out).
         joins, transition_warnings = self._resolve_joins(cuts, edit_decisions.get("metadata"))
         has_transitions = any(j is not None for j in joins)
@@ -828,16 +1825,84 @@ class VideoCompose(BaseTool):
                 duration = out_s - in_s
                 speed = cut.get("speed", 1.0)
 
+                # Per-clip position/scale + project background compositing is applied
+                # ONLY on the proxy-assemble pass, which sets inputs['composite_background']
+                # (a {color, image} dict). It is NEVER read from metadata here, so the
+                # solo-proxy render (which carries metadata.background) does NOT bake a
+                # background and its content/cache key is unchanged. See _render_via_ffmpeg.
+                cut_bg_color = bg_color
+                cut_bg_image = bg_image
+                # Only deviate from the legacy (black, fit, centered) path when there's
+                # a real reason to: a configured background, or a non-default transform.
+                t = cut.get("transform") or {}
+                pos = t.get("position", "center")
+                sc = t.get("scale", 1.0)
+                non_default_transform = (
+                    (composite_background is not None)
+                    and ((pos != "center") or (sc not in (1.0, 1)))
+                )
+                cut_apply_transform = bool(
+                    composite_background is not None
+                    and (cut_bg_image is not None or non_default_transform)
+                )
+
                 if self._is_image(source):
-                    return ToolResult(
-                        success=False,
-                        error=(
-                            f"Still image '{source.name}' in cuts. "
-                            "Use operation='render' (auto-routes to Remotion) "
-                            "or operation='remotion_render' for compositions "
-                            "with images, animations, or component scenes."
-                        ),
+                    # Reject a zero/negative-duration image cut up front: `-loop 1` with a
+                    # non-positive `-t` makes ffmpeg loop the still FOREVER (infinite encode →
+                    # hang + disk fill). The video branch fails fast on this implicitly; mirror it.
+                    if duration <= 0:
+                        return ToolResult(
+                            success=False,
+                            error=(
+                                f"cuts[{i}]: image source requires out_seconds > in_seconds "
+                                f"(got duration {duration})"
+                            ),
+                        )
+                    # Still image as a MAIN-timeline clip: loop it into a video
+                    # segment of the cut's PROJECT duration. Speed has no real meaning
+                    # for a still, so fold it into the looped length (duration / speed)
+                    # to match the timeline's cutDuration without a setpts pass. Stills
+                    # carry no audio — synthesize a silent stereo track (mirrors the
+                    # silent-video path) so every concat segment has the same layout.
+                    seg_seconds = duration / speed if speed and speed > 0 else duration
+                    # A still cannot carry SOURCE HDR (it's generated/looped); in an
+                    # HDR timeline it is PROMOTED into the HDR container via the same
+                    # vf_prefix as any SDR source, so it concats uniformly.
+                    vf_err, vf_parts, complex_spec = self._segment_base_vf(
+                        cut, i, target_w, target_h, fps_str,
+                        bg_color=cut_bg_color, bg_image=cut_bg_image,
+                        apply_transform=cut_apply_transform, seg_seconds=seg_seconds,
+                        hdr_vf_prefix=hdr_vf_prefix,
                     )
+                    if vf_err:
+                        return ToolResult(success=False, error=vf_err)
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-loop", "1",
+                        "-t", str(seg_seconds),
+                        "-i", str(source),
+                        "-f", "lavfi",
+                        "-t", str(seg_seconds),
+                        "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                    ]
+                    # Source=0, anullsrc=1; any bg input lands at index 2. Video
+                    # always maps from input 0, silent audio from input 1.
+                    if complex_spec is None:
+                        cmd += ["-filter:v", ",".join(vf_parts), "-map", "0:v:0"]
+                    else:
+                        graph = complex_spec["filtergraph"].replace("{bg}", "2")
+                        cmd += complex_spec["inputs"]
+                        cmd += ["-filter_complex", graph, "-map", complex_spec["vlabel"]]
+                    cmd += ["-map", "1:a:0"]
+                    cmd += self._video_output_args(hdr_encode, codec, crf, preset, fps_str)
+                    cmd += [
+                        "-c:a", "aac",
+                        "-b:a", "192k",
+                        "-ar", "48000",
+                        "-ac", "2",
+                        str(seg_path),
+                    ]
+                    self.run_command(cmd)
                 else:
                     # Video source: trim to segment.
                     #
@@ -853,13 +1918,6 @@ class VideoCompose(BaseTool):
                     # target timeline. Re-encoding with libx264/AAC is slower but
                     # gives exact cut boundaries. Same resolution in → same
                     # resolution out, so same-res inputs concat cleanly.
-                    cmd = [
-                        "ffmpeg", "-y",
-                        "-ss", str(in_s),
-                        "-t", str(duration),
-                        "-i", str(source),
-                    ]
-
                     # Normalize every segment to a consistent container so the
                     # concat-copy step is always safe (and xfade inputs match).
                     # The concat demuxer with `-c copy` requires identical codec /
@@ -871,49 +1929,29 @@ class VideoCompose(BaseTool):
                     # Target canvas comes from compose_target > profile >
                     # 1920x1080@30 (resolved above). Smaller sources letterbox;
                     # larger ones downscale.
-                    vf_parts: list[str] = []
-                    crop = (cut.get("transform") or {}).get("crop") or {}
-                    if crop:
-                        crop_w, crop_h = crop.get("width"), crop.get("height")
-                        if (
-                            not isinstance(crop_w, (int, float))
-                            or not isinstance(crop_h, (int, float))
-                            or crop_w <= 0 or crop_h <= 0
-                        ):
-                            return ToolResult(
-                                success=False,
-                                error=f"cuts[{i}].transform.crop requires positive "
-                                      f"numeric width and height; got {crop!r}",
-                            )
-                        crop_x = int(round(crop.get("x", 0) or 0))
-                        crop_y = int(round(crop.get("y", 0) or 0))
-                        # Crop runs BEFORE scale/pad so coordinates are in
-                        # source pixels, matching the schema's intent.
-                        vf_parts.append(
-                            f"crop={int(round(crop_w))}:{int(round(crop_h))}:{crop_x}:{crop_y}"
-                        )
-                    vf_parts += [
-                        f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease",
-                        f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black",
-                        "setsar=1",
-                        f"fps={fps_str}",
-                    ]
+                    seg_seconds = duration / speed if speed and speed > 0 else duration
+                    vf_err, vf_parts, complex_spec = self._segment_base_vf(
+                        cut, i, target_w, target_h, fps_str,
+                        bg_color=cut_bg_color, bg_image=cut_bg_image,
+                        apply_transform=cut_apply_transform, seg_seconds=seg_seconds,
+                        hdr_vf_prefix=hdr_vf_prefix,
+                    )
+                    if vf_err:
+                        return ToolResult(success=False, error=vf_err)
                     af_parts: list[str] = []
                     if speed != 1.0:
-                        vf_parts.append(f"setpts={1.0/speed}*PTS")
                         af_parts.append(self._build_atempo(speed))
-
-                    cmd.extend(["-filter:v", ",".join(vf_parts)])
-                    if af_parts:
-                        cmd.extend(["-filter:a", ",".join(af_parts)])
-
-                    cmd.extend([
-                        "-c:v", codec,
-                        "-crf", str(crf),
-                        "-preset", preset,
-                        "-pix_fmt", "yuv420p",
-                        "-r", fps_str,
-                    ])
+                        if complex_spec is None:
+                            # Single-input path: setpts rides on the -filter:v chain.
+                            vf_parts.append(f"setpts={1.0/speed}*PTS")
+                        else:
+                            # Complex path: fold setpts into the foreground clip chain
+                            # (right after the [0:v] label) so retiming applies to the
+                            # composited clip, not the bg.
+                            complex_spec = dict(complex_spec)
+                            complex_spec["filtergraph"] = complex_spec["filtergraph"].replace(
+                                "[0:v]", f"[0:v]setpts={1.0/speed}*PTS,", 1
+                            )
 
                     # Audio handling: some source clips have no audio stream
                     # (Pexels stock often ships silent). If we unconditionally
@@ -922,37 +1960,54 @@ class VideoCompose(BaseTool):
                     # to AAC; if absent, synthesize a silent stereo track so
                     # concat segments have a consistent stream layout.
                     has_audio = self._has_audio_stream(source)
-                    if has_audio:
-                        cmd.extend(["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"])
-                    else:
-                        # Inject silent audio via lavfi before the output.
-                        # We have to rebuild cmd to add the lavfi input
-                        # before the output path and map streams explicitly.
-                        cmd = [
-                            "ffmpeg", "-y",
-                            "-ss", str(in_s),
-                            "-t", str(duration),
-                            "-i", str(source),
-                            "-f", "lavfi",
-                            "-t", str(duration),
+
+                    # Source is input 0. A synthesized silent track (when the
+                    # source has no audio) is input 1. Any background input
+                    # (complex path only) lands AFTER those — index 1 (real
+                    # audio) or 2 (silent audio injected).
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", str(in_s),
+                        "-t", str(duration),
+                        "-i", str(source),
+                    ]
+                    if not has_audio:
+                        cmd += [
+                            "-f", "lavfi", "-t", str(duration),
                             "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-                            "-filter:v", ",".join(vf_parts),
                         ]
+                    bg_input_idx = "2" if not has_audio else "1"
+
+                    if complex_spec is None:
+                        cmd += ["-filter:v", ",".join(vf_parts)]
                         if af_parts:
-                            cmd.extend(["-filter:a", ",".join(af_parts)])
-                        cmd.extend([
-                            "-map", "0:v:0",
-                            "-map", "1:a:0",
-                            "-c:v", codec,
-                            "-crf", str(crf),
-                            "-preset", preset,
-                            "-pix_fmt", "yuv420p",
-                            "-r", fps_str,
-                            "-c:a", "aac",
-                            "-b:a", "192k",
-                            "-ar", "48000",
-                            "-ac", "2",
-                        ])
+                            cmd += ["-filter:a", ",".join(af_parts)]
+                        if not has_audio:
+                            cmd += ["-map", "0:v:0", "-map", "1:a:0"]
+                        # has_audio + simple: leave ffmpeg's default stream selection
+                        # (matches the legacy path that emitted no -map here).
+                    else:
+                        # Complex (filter_complex) path: -filter:a / -af cannot
+                        # coexist with -filter_complex, so any atempo (speed) is
+                        # folded INTO the complex graph as a labeled audio chain.
+                        graph = complex_spec["filtergraph"].replace("{bg}", bg_input_idx)
+                        audio_in = "0:a" if has_audio else "1:a"
+                        if af_parts:
+                            graph += f";[{audio_in}]{','.join(af_parts)}[aout]"
+                            audio_map = "[aout]"
+                        else:
+                            audio_map = audio_in
+                        cmd += complex_spec["inputs"]
+                        cmd += [
+                            "-filter_complex", graph,
+                            "-map", complex_spec["vlabel"],
+                            "-map", audio_map,
+                        ]
+
+                    cmd += self._video_output_args(hdr_encode, codec, crf, preset, fps_str)
+                    cmd += [
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                    ]
 
                     cmd.append(str(seg_path))
                     self.run_command(cmd)
@@ -969,6 +2024,7 @@ class VideoCompose(BaseTool):
             if used_xfade:
                 err, xfade_filtergraph = self._transitions_concat(
                     temp_segments, joins, fps_str, codec, crf, preset, concat_out,
+                    hdr_encode=hdr_encode,
                 )
                 if err:
                     return ToolResult(success=False, error=f"transition render failed: {err}")
@@ -1010,7 +2066,12 @@ class VideoCompose(BaseTool):
 
             if needs_reencode:
                 cmd.extend(["-vf", ",".join(vfilters)])
-                cmd.extend(["-c:v", codec, "-crf", str(crf), "-preset", preset])
+                if hdr_encode:
+                    # Keep the subtitle-burn re-encode 10-bit + HLG/PQ tags so HDR
+                    # isn't dropped at the last pass. (-r here is harmless.)
+                    cmd.extend(self._video_output_args(hdr_encode, codec, crf, preset, fps_str))
+                else:
+                    cmd.extend(["-c:v", codec, "-crf", str(crf), "-preset", preset])
             else:
                 cmd.extend(["-c:v", "copy"])
 
@@ -1045,6 +2106,17 @@ class VideoCompose(BaseTool):
                 success=True,
                 data=data,
                 artifacts=[str(output_path)],
+            )
+        except subprocess.CalledProcessError as e:
+            # Surface the ffmpeg stderr (the segment/mux calls in this block are
+            # otherwise bare run_command — a raw CalledProcessError drops the reason,
+            # e.g. an HDR encoder rejecting a profile/pixfmt). Mirrors the pattern in
+            # _transitions_concat / _overlay so encoder failures self-diagnose.
+            stderr = ((getattr(e, "stderr", "") or "") or "ffmpeg compose failed").strip()[-800:]
+            enc = (hdr_encode or {}).get("encoder") or codec
+            return ToolResult(
+                success=False,
+                error=f"ffmpeg compose failed (video codec={enc}): {stderr}",
             )
         finally:
             # Cleanup temp files
@@ -1652,6 +2724,290 @@ class VideoCompose(BaseTool):
 
         return render_result
 
+    def _assemble_hdr_encode(
+        self,
+        edit_decisions: dict[str, Any],
+        base_cuts: list[dict[str, Any]],
+        inputs: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Resolve the HDR encode for the assemble / direct-ffmpeg render.
+
+        Two sources, in priority order:
+          1. metadata.hdr — stamped by _build_assemble_edl when render_proxies
+             resolved the timeline as HDR. The proxies are ALREADY in the target
+             color space, so this is a pure PRESERVE pass (vf_prefix="").
+          2. Direct render of raw footage (no proxies): preserve only when EVERY
+             non-image base cut is HDR (one color decision applies to all segments
+             in _compose, so a mixed direct render can't per-cut promote — route
+             that through render_proxies). Returns None ⇒ legacy SDR.
+        """
+        meta_hdr = (edit_decisions.get("metadata") or {}).get("hdr")
+        if isinstance(meta_hdr, dict) and meta_hdr.get("enabled"):
+            return {
+                "encoder": meta_hdr.get("encoder"),
+                "pix_fmt": meta_hdr.get("pix_fmt") or "yuv420p10le",
+                "primaries": meta_hdr.get("primaries"),
+                "trc": meta_hdr.get("trc"),
+                "colorspace": meta_hdr.get("colorspace"),
+                "tag": "hvc1",
+                "vf_prefix": "",
+            }
+
+        policy = str(inputs.get("hdr_policy") or "auto").strip().lower()
+        if policy in ("tonemap", "sdr"):
+            return None
+        from tools.video._shared import is_hdr_source
+        vids = [
+            c for c in base_cuts
+            if c.get("source") and Path(str(c["source"])).exists()
+            and not self._is_image(Path(str(c["source"])))
+        ]
+        if not vids:
+            return None
+        infos = [is_hdr_source(Path(str(c["source"]))) for c in vids]
+        if not all(x.get("hdr") for x in infos):
+            return None  # mixed HDR/SDR direct render → SDR here; use render_proxies
+        encs = self._hdr_encoders()
+        enc = (
+            "hevc_videotoolbox" if "hevc_videotoolbox" in encs
+            else ("libx265" if "libx265" in encs else None)
+        )
+        if enc is None:
+            return None  # can't preserve; don't block the direct path
+        target = self._resolve_hdr_target(infos[0])
+        return {
+            "encoder": enc, "pix_fmt": "yuv420p10le",
+            "primaries": target["primaries"], "trc": target["trc"],
+            "colorspace": target["colorspace"], "tag": "hvc1", "vf_prefix": "",
+        }
+
+    # ── Structured-audio stem mixing (music bed + narration + sfx → one master) ──
+    # When edit_decisions.audio carries STRUCTURED stems instead of a pre-mixed
+    # `path`, the render mixes them here into a single master via the audio_mixer
+    # full_mix engine and muxes that. This is what lets a timeline edited in the
+    # MANUAL EDITOR (which has no agent to run audio_mixer.full_mix by hand)
+    # produce music/SFX in the rendered output — and lets pipeline directors just
+    # emit stems and rely on the render to mix. An explicit audio.path always wins
+    # (see the caller); this only fires when no pre-mixed master is present. The
+    # master REPLACES the base-clip audio, matching audio.path semantics — footage
+    # whose own audio must survive should carry it as a narration stem (e.g.
+    # asset_id referencing the source clip), which is the existing convention.
+    @staticmethod
+    def _music_regions(audio: dict[str, Any]) -> list[dict[str, Any]]:
+        """Normalize `audio.music` to a LIST of region dicts. The schema allows a single OBJECT
+        (one bed — legacy/agent shape) OR an ARRAY of region objects (multiple beds, e.g. after a
+        timeline split). Each region may carry a [start_seconds, end_seconds] window. Returns []
+        when there's no music."""
+        m = (audio or {}).get("music")
+        if m is None:
+            return []
+        seq = m if isinstance(m, list) else [m]
+        return [r for r in seq if isinstance(r, dict)]
+
+    @staticmethod
+    def _has_structured_audio(audio: dict[str, Any]) -> bool:
+        """True if `audio` carries any resolvable stem (music / narration / sfx)."""
+        if not isinstance(audio, dict):
+            return False
+        if any(r.get("asset_id") for r in VideoCompose._music_regions(audio)):
+            return True
+        if any((s or {}).get("asset_id") for s in (audio.get("narration") or {}).get("segments") or []):
+            return True
+        if any((s or {}).get("asset_id") for s in audio.get("sfx") or []):
+            return True
+        return False
+
+    @staticmethod
+    def _structured_audio_tracks(
+        audio: dict[str, Any], resolve
+    ) -> Optional[dict[str, Any]]:
+        """Map a structured `edit_decisions.audio` block → {tracks, ducking} for the
+        audio_mixer `full_mix` operation. `resolve(asset_id) -> path | None` turns a
+        stem ref into an on-disk file (returns None for missing/unresolvable stems,
+        which are skipped). Narration segments become speech tracks anchored at their
+        `start_seconds`; the music bed a single music track (volume + fades); each SFX
+        an sfx track at its `start_seconds`. Ducking is derived from `music.ducking`
+        (bool | object). Returns None when nothing resolves. Pure (no I/O)."""
+        tracks: list[dict[str, Any]] = []
+
+        for seg in (audio.get("narration") or {}).get("segments") or []:
+            p = resolve((seg or {}).get("asset_id"))
+            if not p:
+                continue
+            tracks.append({
+                "path": p, "role": "speech",
+                "start_seconds": max(0.0, float(seg.get("start_seconds") or 0)),
+            })
+
+        # Music: one track PER REGION. Each region can carry a [start_seconds, end_seconds] window
+        # (delay to start + truncate to the window length) plus its own volume/fades. Ducking is
+        # taken from the first region that specifies it (music ducks under speech, all beds together).
+        music_regions = VideoCompose._music_regions(audio)
+        has_music = False
+        duck_raw: Any = None
+        for region in music_regions:
+            mp = resolve(region.get("asset_id"))
+            if not mp:
+                continue
+            has_music = True
+            mt: dict[str, Any] = {"path": mp, "role": "music"}
+            if region.get("volume") is not None:
+                mt["volume"] = float(region["volume"])
+            if region.get("fade_in_seconds"):
+                mt["fade_in_seconds"] = float(region["fade_in_seconds"])
+            if region.get("fade_out_seconds"):
+                mt["fade_out_seconds"] = float(region["fade_out_seconds"])
+            start = max(0.0, float(region.get("start_seconds") or 0))
+            if start > 0:
+                mt["start_seconds"] = start
+            if region.get("end_seconds") is not None:
+                dur = float(region["end_seconds"]) - start
+                if dur > 0:
+                    mt["duration_seconds"] = dur
+            tracks.append(mt)
+            if duck_raw is None and region.get("ducking") is not None:
+                duck_raw = region.get("ducking")
+
+        for fx in audio.get("sfx") or []:
+            p = resolve((fx or {}).get("asset_id"))
+            if not p:
+                continue
+            st: dict[str, Any] = {
+                "path": p, "role": "sfx",
+                "start_seconds": max(0.0, float((fx or {}).get("start_seconds") or 0)),
+            }
+            if (fx or {}).get("volume") is not None:
+                st["volume"] = float(fx["volume"])
+            tracks.append(st)
+
+        if not tracks:
+            return None
+
+        # Duck the music under speech only when there's both a bed AND a ducking
+        # request. `duck_raw` (a region's `ducking`) is a bool or an object (attack_ms / release_ms).
+        ducking: dict[str, Any] = {"enabled": False}
+        if has_music and duck_raw:
+            if isinstance(duck_raw, dict):
+                ducking = {"enabled": bool(duck_raw.get("enabled", True))}
+                for k in ("attack_ms", "release_ms"):
+                    if duck_raw.get(k) is not None:
+                        ducking[k] = duck_raw[k]
+            else:
+                ducking = {"enabled": bool(duck_raw)}
+        return {"tracks": tracks, "ducking": ducking}
+
+    def _mix_structured_audio(
+        self, audio: dict[str, Any], asset_lookup: dict[str, Any], workdir: Path,
+        base_audio_path: Optional[str] = None,
+    ) -> Optional[str]:
+        """Mix the structured stems into a single master file and return its path
+        (or None if nothing resolved / the mix failed). `asset_lookup` maps asset_id →
+        manifest entry; a ref that isn't a manifest id is treated as a literal path (so
+        the editor path, which pre-resolves stems to absolute paths, also works).
+        `base_audio_path`, when given, is layered in as a speech track (the footage VO
+        the render already assembled) so music ducks under it and it isn't lost — used
+        when there's no narration stem to act as the voice. Reuses AudioMixer.full_mix."""
+        def resolve(asset_id: Any) -> Optional[str]:
+            if not asset_id:
+                return None
+            info = asset_lookup.get(asset_id)
+            cand = info.get("path") if isinstance(info, dict) and info.get("path") else asset_id
+            try:
+                return str(cand) if cand and Path(cand).exists() else None
+            except OSError:
+                return None
+
+        spec = self._structured_audio_tracks(audio, resolve)
+        tracks = list(spec["tracks"]) if spec else []
+        ducking = spec["ducking"] if spec else {"enabled": False}
+        if base_audio_path:
+            # Base VO first so full_mix treats it as the speech anchor (music ducks under it).
+            tracks = [{"path": str(base_audio_path), "role": "speech"}] + tracks
+            if any(r.get("asset_id") for r in VideoCompose._music_regions(audio)):
+                ducking = ducking if ducking.get("enabled") else {"enabled": True}
+        if not tracks:
+            return None
+        out = Path(workdir) / "structured_mix.m4a"
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            from tools.audio.audio_mixer import AudioMixer
+            res = AudioMixer().execute({
+                "operation": "full_mix",
+                "tracks": tracks,
+                "ducking": ducking,
+                "normalize": True,
+                "output_path": str(out),
+            })
+        except Exception:
+            return None
+        if not getattr(res, "success", False) or not out.exists():
+            return None
+        return str(out)
+
+    def _apply_structured_audio_mix(
+        self, output_path: Path, edit_decisions: dict[str, Any],
+        asset_manifest: Optional[dict[str, Any]], inputs: dict[str, Any],
+    ) -> Optional[str]:
+        """POST-assemble audio pass: when edit_decisions.audio carries structured stems
+        (and no pre-mixed audio.path was muxed), mix music/narration/sfx and remux over
+        the finished video. Two behaviors, chosen automatically:
+          • narration stem present → that IS the voice: master = narration+music+sfx,
+            REPLACING the base-clip audio (matches audio.path semantics).
+          • no narration stem → the voice lives in the base clips (footage): extract the
+            assembled audio and LAYER music+sfx over it (music ducks under the VO), so
+            the footage audio survives.
+        Returns a warning string on a non-fatal failure (mix skipped), else None. The
+        video stream is copied (no re-encode → HDR-safe)."""
+        audio = edit_decisions.get("audio") or {}
+        if not isinstance(audio, dict) or inputs.get("audio_path") or audio.get("path"):
+            return None  # a pre-mixed master already owns the output audio
+        if not self._has_structured_audio(audio):
+            return None
+        asset_lookup = {a["id"]: a for a in (asset_manifest or {}).get("assets", [])}
+        narration_present = any(
+            (s or {}).get("asset_id") for s in (audio.get("narration") or {}).get("segments") or []
+        )
+        workdir = output_path.parent
+        base_audio: Optional[str] = None
+        if not narration_present and self._has_audio_stream(output_path):
+            base_audio = str(workdir / "base_audio.m4a")
+            try:
+                self.run_command(["ffmpeg", "-y", "-v", "error", "-i", str(output_path),
+                                  "-vn", "-c:a", "aac", "-b:a", "192k", base_audio])
+            except Exception:
+                base_audio = None
+        master = self._mix_structured_audio(audio, asset_lookup, workdir, base_audio_path=base_audio)
+        if not master:
+            return "structured audio present but no stems resolved — output kept base-clip audio only"
+        muxed = workdir / f"{output_path.stem}_amix{output_path.suffix}"
+        try:
+            self.run_command(["ffmpeg", "-y", "-v", "error", "-i", str(output_path), "-i", master,
+                              "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac",
+                              "-shortest", str(muxed)])
+            muxed.replace(output_path)
+        except Exception as exc:
+            return f"structured audio mix failed to remux ({exc}); output kept base-clip audio"
+        finally:
+            for tmp in (base_audio, master):
+                try:
+                    if tmp:
+                        Path(tmp).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        return None
+
+    def _has_audio_stream(self, path: Path) -> bool:
+        """True if `path` has at least one audio stream (ffprobe). Best-effort."""
+        try:
+            out = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+                 "stream=index", "-of", "csv=p=0", str(path)],
+                capture_output=True, text=True,
+            )
+            return bool(out.stdout.strip())
+        except Exception:
+            return False
+
     def _render_via_ffmpeg(
         self,
         *,
@@ -1706,6 +3062,20 @@ class VideoCompose(BaseTool):
         """
         options = inputs.get("options", {})
         subtitle_burn = options.get("subtitle_burn", True)
+
+        # Bridge the timeline's audio track into compose's audio_path the same way
+        # subtitles are bridged below — _compose only muxes inputs["audio_path"], so
+        # without this an edit_decisions.audio (e.g. the VO carried onto a
+        # proxy-assemble EDL) is silently dropped. An explicit audio_path wins.
+        if not inputs.get("audio_path"):
+            _ed_audio = edit_decisions.get("audio") or {}
+            _ed_audio_path = _ed_audio.get("path") if isinstance(_ed_audio, dict) else None
+            if _ed_audio_path and Path(_ed_audio_path).exists():
+                inputs = dict(inputs, audio_path=_ed_audio_path)
+            # Structured stems (music/narration/sfx, no pre-mixed master) are mixed AFTER
+            # the assemble, in _apply_structured_audio_mix — so it can LAYER music/SFX over
+            # the base-clip audio (footage VO) or REPLACE it (when a narration stem is the
+            # voice). Doing it pre-compose could only replace, which would drop a footage VO.
 
         subtitle_path = inputs.get("subtitle_path")
         if subtitle_burn and not subtitle_path:
@@ -1778,16 +3148,87 @@ class VideoCompose(BaseTool):
             else output_path
         )
 
+        # --- project background (metadata.background) → _compose gate ---
+        # This is the ONLY place metadata.background is read. Setting
+        # compose_inputs['composite_background'] here (and never reading
+        # metadata.background inside _compose) is what keeps the solo-proxy
+        # render — which ALSO carries metadata.background — from baking the bg
+        # into a proxy (proxy content + cache key stay unchanged). A malformed
+        # background degrades to black rather than failing the render.
+        composite_background: Optional[dict[str, Any]] = None
+        bg = (edit_decisions.get("metadata") or {}).get("background")
+        if isinstance(bg, dict):
+            bg_type = (bg.get("type") or "").strip().lower()
+            if bg_type == "color":
+                composite_background = {
+                    "color": self._normalize_ffmpeg_color(bg.get("color"), "black"),
+                    "image": None,
+                }
+            elif bg_type == "image":
+                bg_lookup = {a["id"]: a for a in (asset_manifest or {}).get("assets", []) if a.get("id")}
+                aid = bg.get("asset_id") or ""
+                bg_path = bg_lookup[aid]["path"] if aid in bg_lookup else aid
+                if bg_path and Path(str(bg_path)).exists():
+                    composite_background = {"color": "black", "image": str(bg_path)}
+                else:
+                    # Missing image → degrade to a BLACK color background (not a hard
+                    # fail, and not silently dropping the transform): a declared bg still
+                    # means "honor the per-clip transform", just over black.
+                    composite_background = {"color": "black", "image": None}
+
+        # HDR: keep the assemble re-encode (concat / subtitle burn / overlays)
+        # 10-bit + HLG/PQ tagged. metadata.hdr is the proxy-assemble signal
+        # (stamped by _build_assemble_edl); a DIRECT ffmpeg render of raw footage
+        # is preserved only when EVERY base cut is HDR (a single color decision is
+        # applied to all segments here, so a mixed direct render can't per-cut
+        # promote — route mixed HDR/SDR through render_proxies). vf_prefix="" means
+        # the inputs are already in the target color space (no conversion).
+        assemble_hdr_encode = self._assemble_hdr_encode(edit_decisions, base_cuts, inputs)
+
+        # Surface a silent HDR drop: a DIRECT render (no proxy metadata.hdr) of a
+        # mixed HDR/SDR timeline (or with no HDR encoder) can't preserve HDR here —
+        # _assemble_hdr_encode returns None and the HDR footage is left SDR. The
+        # "never tonemap silently" contract means we must say so (the proxy path
+        # already warns; this brings the direct path in line).
+        direct_hdr_drop_warning: Optional[str] = None
+        if not (assemble_hdr_encode and assemble_hdr_encode.get("encoder")) \
+                and not (edit_decisions.get("metadata") or {}).get("hdr"):
+            _pol = str(inputs.get("hdr_policy") or "auto").strip().lower()
+            if _pol not in ("tonemap", "sdr"):
+                from tools.video._shared import is_hdr_source
+                _has_hdr = any(
+                    c.get("source") and Path(str(c["source"])).exists()
+                    and not self._is_image(Path(str(c["source"])))
+                    and is_hdr_source(Path(str(c["source"]))).get("hdr")
+                    for c in base_cuts
+                )
+                if _has_hdr:
+                    direct_hdr_drop_warning = (
+                        "HDR source(s) in this direct ffmpeg render were left SDR — one "
+                        "color decision applies to all cuts here, so a mixed HDR/SDR "
+                        "timeline (or one with no 10-bit HEVC encoder) can't preserve HDR. "
+                        "Render via render_proxies to preserve HDR, or pass hdr_policy."
+                    )
+
         compose_inputs = dict(inputs)
         compose_inputs["edit_decisions"] = dict(edit_decisions, cuts=base_cuts)
         compose_inputs["output_path"] = str(compose_target)
+        if composite_background is not None:
+            compose_inputs["composite_background"] = composite_background
         if subtitle_path:
             compose_inputs["subtitle_path"] = subtitle_path
         if profile:
             compose_inputs["profile"] = profile
+        if assemble_hdr_encode:
+            compose_inputs["hdr_encode"] = assemble_hdr_encode
 
         try:
             render_result = self._compose(compose_inputs)
+
+            if render_result.success and direct_hdr_drop_warning:
+                if render_result.data is None:
+                    render_result.data = {}
+                render_result.data.setdefault("warnings", []).append(direct_hdr_drop_warning)
 
             # Second pass: composite overlays (incl. keyframed motion) onto the base.
             if render_result.success and resolved_overlays:
@@ -1801,6 +3242,7 @@ class VideoCompose(BaseTool):
                     "input_path": str(compose_target),
                     "overlays": resolved_overlays,
                     "output_path": str(output_path),
+                    "hdr_encode": assemble_hdr_encode,
                 })
                 try:
                     compose_target.unlink()  # drop the intermediate base
@@ -1824,6 +3266,16 @@ class VideoCompose(BaseTool):
         finally:
             if pip_temp_dir is not None:
                 self._cleanup_dir(pip_temp_dir)
+
+        # Structured-audio stems (no pre-mixed audio.path): mix music/narration/sfx and
+        # remux over the finished video (layer over the footage VO, or replace it when a
+        # narration stem is the voice). Runs before the review so it sees the final audio.
+        if render_result.success and output_path.exists():
+            _audio_warn = self._apply_structured_audio_mix(output_path, edit_decisions, asset_manifest, inputs)
+            if _audio_warn:
+                if render_result.data is None:
+                    render_result.data = {}
+                render_result.data.setdefault("warnings", []).append(_audio_warn)
 
         if render_result.success and output_path.exists():
             final_review = self._run_final_review(
@@ -1994,6 +3446,12 @@ class VideoCompose(BaseTool):
                     [],
                 )
             anchor = transform.get("position") or "top-right"
+            if isinstance(anchor, dict):
+                return (
+                    f"cuts[{idx}].transform.position for layer='overlay' (PiP) must "
+                    f"be a named anchor string, not an {{x,y}} object — got {anchor!r}",
+                    [],
+                )
             anchor_parts = self._split_anchor(anchor)
             if anchor_parts is None:
                 return (
@@ -2113,15 +3571,67 @@ class VideoCompose(BaseTool):
         # Deep-copy props so we don't mutate the original
         props = json.loads(json.dumps(composition_data))
 
-        # Convert absolute file paths to file:// URIs for Remotion's
-        # Img and OffthreadVideo components
+        # Stage local assets into the composer's public/ dir and reference them
+        # relatively. Remotion v4's OffthreadVideo/Img compositor can ONLY fetch
+        # http(s) or staticFile() (public/) URLs — a raw file:// URI is rejected
+        # ("Can only download URLs starting with http:// or https://"). store_asset
+        # places our media under projects/.../assets/, which is OUTSIDE public/, so
+        # every local source must be copied in and rewritten to a public-relative
+        # path (which resolveAsset() turns into staticFile()).
+        import hashlib as _hashlib
+        import shutil as _shutil
+        _stage_root = self._composer_dir() / "public" / "_staged"
+        _stage_cache: dict[str, str] = {}
+
+        def _stage_local(ref: str) -> str:
+            """Copy an absolute/file:// local asset into public/_staged and return
+            its public-relative path. Non-local refs (http, public-relative, or
+            missing) are returned unchanged."""
+            if not ref or ref.startswith(("http://", "https://", "data:")):
+                return ref
+            raw = ref
+            if raw.startswith("file://"):
+                raw = raw[7:]
+                # file:///C:/x -> /C:/x -> C:/x
+                import re as _re
+                if _re.match(r"^/[A-Za-z]:[\\/]", raw):
+                    raw = raw[1:]
+            p = Path(raw)
+            if not p.is_absolute():
+                # public-relative or cwd-relative — only stage if it truly exists on
+                # disk (an absolute-resolved existing file); otherwise leave it for
+                # staticFile() to serve from public/.
+                resolved = Path(raw).resolve()
+                if not resolved.exists():
+                    return ref
+                p = resolved
+            if not p.exists():
+                return ref
+            key = str(p.resolve())
+            if key in _stage_cache:
+                return _stage_cache[key]
+            _stage_root.mkdir(parents=True, exist_ok=True)
+            digest = _hashlib.sha1(key.encode()).hexdigest()[:12]
+            dest = _stage_root / f"{digest}_{p.name}"
+            if not dest.exists():
+                _shutil.copy2(p, dest)
+            rel = f"_staged/{dest.name}"
+            _stage_cache[key] = rel
+            return rel
+
         for cut in props.get("cuts", []):
-            source = cut.get("source", "")
-            if source and not source.startswith(("http://", "https://", "file://")):
-                resolved = Path(source).resolve()
-                if resolved.exists():
-                    posix = resolved.as_posix()
-                    cut["source"] = f"file:///{posix}" if not posix.startswith("/") else f"file://{posix}"
+            if cut.get("source"):
+                cut["source"] = _stage_local(cut["source"])
+            for _bg in ("backgroundVideo", "backgroundImage"):
+                if cut.get(_bg):
+                    cut[_bg] = _stage_local(cut[_bg])
+            if isinstance(cut.get("images"), list):
+                cut["images"] = [_stage_local(im) for im in cut["images"]]
+
+        _audio = props.get("audio") or {}
+        for _layer in ("music", "narration"):
+            if isinstance(_audio.get(_layer), dict) and _audio[_layer].get("src"):
+                _audio[_layer]["src"] = _stage_local(_audio[_layer]["src"])
 
         # Build a custom themeConfig from the playbook's actual colors.
         # This ensures every video gets a unique visual identity derived
@@ -2141,8 +3651,8 @@ class VideoCompose(BaseTool):
         with open(props_path, "w", encoding="utf-8") as f:
             json.dump(props, f)
 
-        # remotion-composer lives at project root
-        composer_dir = Path(__file__).resolve().parent.parent.parent / "remotion-composer"
+        # Prefer the provisioned writable composer (packaged app, OPN-3), else the in-repo one (dev).
+        composer_dir = self._composer_dir()
         if not composer_dir.exists():
             return ToolResult(
                 success=False,
@@ -2583,45 +4093,62 @@ class VideoCompose(BaseTool):
             if render_runtime_edit:
                 promise_preservation["render_runtime_used"] = render_runtime_edit
 
-                proposal_runtime: str | None = None
-                runtime_source: str | None = None
-                if proposal_packet:
-                    pp_runtime = (
-                        (proposal_packet.get("production_plan") or {}).get("render_runtime")
-                        or ""
-                    ).strip().lower()
-                    if pp_runtime:
-                        proposal_runtime = pp_runtime
-                        runtime_source = "proposal_packet.production_plan.render_runtime"
-                if proposal_runtime is None:
-                    md_runtime = (
-                        (edit_decisions.get("metadata") or {}).get("proposal_render_runtime")
-                        or ""
-                    ).strip().lower()
-                    if md_runtime:
-                        proposal_runtime = md_runtime
-                        runtime_source = "edit_decisions.metadata.proposal_render_runtime"
-
-                if proposal_runtime is None:
+                _meta = edit_decisions.get("metadata") or {}
+                if _meta.get("assemble_of_proxies"):
+                    # Render-once / NLE two-phase render: each scene's proxy was
+                    # rendered in the LOCKED runtime (meta.proxy_render_runtime),
+                    # then the proxies are ASSEMBLED with ffmpeg. The assemble EDL
+                    # is always render_runtime='ffmpeg' by construction, so the
+                    # naive proposal!=edit check would mis-flag a legitimate
+                    # remotion/hyperframes → ffmpeg proxy assemble as a runtime
+                    # swap. It is NOT one — skip the swap detection here. (The
+                    # editor path already avoids this by carrying no proposal_packet;
+                    # this guard covers the pipeline path that DOES pass one.)
                     promise_preservation["runtime_swap_check"] = (
-                        "skipped — no proposal_packet or proposal_render_runtime "
-                        "metadata provided. Reviewer skill does cross-artifact "
-                        "comparison separately."
-                    )
-                elif proposal_runtime != render_runtime_edit:
-                    promise_preservation["runtime_swap_detected"] = True
-                    promise_preservation["runtime_swap_check"] = (
-                        f"detected — source: {runtime_source}"
-                    )
-                    promise_preservation["issues"].append(
-                        f"render_runtime changed between proposal ({proposal_runtime}) "
-                        f"and compose ({render_runtime_edit}) — this is a contract "
-                        f"violation unless a render_runtime_selection decision was logged."
+                        "skipped — two-phase proxy assemble "
+                        f"(proxy_render_runtime={_meta.get('proxy_render_runtime')}); "
+                        "an ffmpeg assemble of proxies is not a runtime swap"
                     )
                 else:
-                    promise_preservation["runtime_swap_check"] = (
-                        f"ok — proposal and edit agree ({runtime_source})"
-                    )
+                    proposal_runtime: str | None = None
+                    runtime_source: str | None = None
+                    if proposal_packet:
+                        pp_runtime = (
+                            (proposal_packet.get("production_plan") or {}).get("render_runtime")
+                            or ""
+                        ).strip().lower()
+                        if pp_runtime:
+                            proposal_runtime = pp_runtime
+                            runtime_source = "proposal_packet.production_plan.render_runtime"
+                    if proposal_runtime is None:
+                        md_runtime = (
+                            (edit_decisions.get("metadata") or {}).get("proposal_render_runtime")
+                            or ""
+                        ).strip().lower()
+                        if md_runtime:
+                            proposal_runtime = md_runtime
+                            runtime_source = "edit_decisions.metadata.proposal_render_runtime"
+
+                    if proposal_runtime is None:
+                        promise_preservation["runtime_swap_check"] = (
+                            "skipped — no proposal_packet or proposal_render_runtime "
+                            "metadata provided. Reviewer skill does cross-artifact "
+                            "comparison separately."
+                        )
+                    elif proposal_runtime != render_runtime_edit:
+                        promise_preservation["runtime_swap_detected"] = True
+                        promise_preservation["runtime_swap_check"] = (
+                            f"detected — source: {runtime_source}"
+                        )
+                        promise_preservation["issues"].append(
+                            f"render_runtime changed between proposal ({proposal_runtime}) "
+                            f"and compose ({render_runtime_edit}) — this is a contract "
+                            f"violation unless a render_runtime_selection decision was logged."
+                        )
+                    else:
+                        promise_preservation["runtime_swap_check"] = (
+                            f"ok — proposal and edit agree ({runtime_source})"
+                        )
 
             delivery_data = (
                 edit_decisions.get("metadata", {}).get("delivery_promise")
@@ -2861,10 +4388,38 @@ class VideoCompose(BaseTool):
         codec = inputs.get("codec", "libx264")
         crf = inputs.get("crf", 23)
 
+        # HDR base: keep the OUTPUT 10-bit + HLG/PQ tagged so the overlay pass
+        # doesn't silently drop the base's HDR. OPAQUE graphic overlays are lifted
+        # into the HDR color space before compositing; ALPHA overlays (transparent
+        # .mov/.png) and drawtext can't be safely zscale-converted without dropping
+        # alpha, so they're composited as-is with a warning (their color is
+        # approximate over HDR — the documented visual-review boundary).
+        hdr_encode = inputs.get("hdr_encode") or None
+        hdr_promote_vf = ""
+        # The `overlay` filter defaults to 8-bit (format=yuv420), which would crush
+        # the 10-bit HDR base at every composite. Tell it to composite in 10-bit so
+        # the HDR base keeps its bit depth. Empty for SDR (unchanged).
+        ov_hdr_fmt = ":format=yuv420p10" if (hdr_encode and hdr_encode.get("encoder")) else ""
+        if hdr_encode and hdr_encode.get("encoder"):
+            hdr_promote_vf = self._promote_sdr_to_hdr_vf({
+                "kind": "pq" if (hdr_encode.get("trc") == "smpte2084") else "hlg",
+                "primaries": hdr_encode.get("primaries"),
+                "trc": hdr_encode.get("trc"),
+                "colorspace": hdr_encode.get("colorspace"),
+            })
+
         if not input_path.exists():
             return ToolResult(success=False, error=f"Input not found: {input_path}")
         if not overlays:
             return ToolResult(success=False, error="No overlays provided")
+
+        # Z-order: composite in ASCENDING `track` so a higher track lands on top
+        # (rendered later in the filter chain). Python's sort is stable, so overlays
+        # sharing a track keep their array order, and the default track=0 makes this a
+        # no-op for legacy docs (array-order z-stacking preserved). PiP entries lifted
+        # from cuts[].layer='overlay' have no track → 0, so they stay under track-0
+        # overlays[], unchanged from before.
+        overlays = sorted(overlays, key=lambda o: int((o or {}).get("track") or 0))
 
         # Build complex filter for each overlay
         input_args = ["-i", str(input_path)]
@@ -2885,6 +4440,12 @@ class VideoCompose(BaseTool):
                     return ToolResult(success=False, error=dt_err)
                 filter_parts.append(dt_filter)
                 warnings.extend(dt_warnings)
+                if hdr_promote_vf:
+                    warnings.append(
+                        f"overlays[{i}]: drawtext rendered onto an HDR base — text "
+                        "color is interpreted in BT.2020 and may shift slightly "
+                        "(white/black are fine). Review on real HDR footage."
+                    )
                 prev_label = out_label
                 continue
 
@@ -3001,6 +4562,19 @@ class VideoCompose(BaseTool):
 
             # --- static sizing (aspect-preserving when one dimension is omitted) ---
             pre_chain: list[str] = []
+            if hdr_promote_vf:
+                # Lift an OPAQUE graphic into the HDR color space before it's
+                # composited on the 10-bit base. zscale can't carry an alpha plane,
+                # so transparent assets composite as-is (color approximate, warned).
+                if self._has_alpha(asset_path):
+                    warnings.append(
+                        f"overlays[{i}]: transparent overlay '{asset_path.name}' "
+                        "composited onto an HDR base without BT.2020 color conversion "
+                        "(alpha can't be zscale'd) — review its color, or set "
+                        "hdr_policy='tonemap' if it looks wrong."
+                    )
+                else:
+                    pre_chain.append(hdr_promote_vf)
             if pts_offset:
                 # Shift the overlay stream so its first frame lands at
                 # pts_offset_seconds on the project timeline (delayed video
@@ -3040,7 +4614,7 @@ class VideoCompose(BaseTool):
                     keyframes, base_x, base_y, start, i, overlay_input, prev_label,
                     out_label, enable,
                     pre_chain=pre_chain, nat_w=nat_w, nat_h=nat_h,
-                    static_opacity=static_opacity,
+                    static_opacity=static_opacity, ov_format=ov_hdr_fmt,
                 )
                 filter_parts.extend(kfw["filters"])
                 warnings.extend(kfw["warnings"])
@@ -3053,7 +4627,7 @@ class VideoCompose(BaseTool):
                     filter_parts.append(f"[{overlay_input}]{','.join(pre_chain)}[{lbl}]")
                     overlay_input = lbl
                 filter_parts.append(
-                    f"[{prev_label}][{overlay_input}]overlay={base_x}:{base_y}:enable='{enable}'[{out_label}]"
+                    f"[{prev_label}][{overlay_input}]overlay={base_x}:{base_y}:enable='{enable}'{ov_hdr_fmt}[{out_label}]"
                 )
             prev_label = out_label
 
@@ -3096,15 +4670,22 @@ class VideoCompose(BaseTool):
 
         filter_complex = ";".join(filter_parts)
 
+        # Video tail: HDR keeps 10-bit + HLG/PQ tags (no -r — base fps is kept);
+        # SDR is the exact legacy ["-c:v", codec, "-crf", crf] tail.
+        video_tail = (
+            self._video_output_args(hdr_encode, codec, crf, "medium", None)
+            if hdr_encode else ["-c:v", codec, "-crf", str(crf)]
+        )
+
         cmd = ["ffmpeg", "-y"]
         cmd.extend(input_args)
         cmd.extend(["-filter_complex", filter_complex])
         if audio_out_label:
             cmd.extend(["-map", f"[{prev_label}]", "-map", f"[{audio_out_label}]"])
-            cmd.extend(["-c:v", codec, "-crf", str(crf), "-c:a", "aac", "-b:a", "192k"])
+            cmd.extend([*video_tail, "-c:a", "aac", "-b:a", "192k"])
         else:
             cmd.extend(["-map", f"[{prev_label}]", "-map", "0:a?"])
-            cmd.extend(["-c:v", codec, "-crf", str(crf), "-c:a", "copy"])
+            cmd.extend([*video_tail, "-c:a", "copy"])
         cmd.append(str(output_path))
 
         try:
@@ -3565,6 +5146,7 @@ class VideoCompose(BaseTool):
         nat_w: Optional[int] = None,
         nat_h: Optional[int] = None,
         static_opacity: Optional[float] = None,
+        ov_format: str = "",
     ) -> dict:
         """Build the filtergraph parts for one keyframed overlay.
 
@@ -3655,7 +5237,7 @@ class VideoCompose(BaseTool):
             filters.append(f"[{src}]{','.join(chain)}[{pre}]")
             src = pre
         filters.append(
-            f"[{prev_label}][{src}]overlay=x='{x_expr}':y='{y_expr}':enable='{enable}'[{out_label}]"
+            f"[{prev_label}][{src}]overlay=x='{x_expr}':y='{y_expr}':enable='{enable}'{ov_format}[{out_label}]"
         )
         return {"filters": filters, "warnings": warnings}
 

@@ -17,14 +17,25 @@ export const KEYFRAME_DIMS = ['x', 'y', 'scale', 'rotation', 'opacity']
 // producing zero/negative-length cuts that the schema (out > in) or renderer would reject.
 export const MIN_SOURCE_SPAN = 0.1
 
+// Shortest allowed overlay span, in PROJECT seconds. Keeps an overlay drag/trim from
+// collapsing to zero/negative length (which the schema would still accept but is useless).
+export const MIN_OVERLAY_SPAN = 0.1
+
 const round3 = (x) => Math.round(Number(x) * 1000) / 1000
 
 // Schema field whitelists (keep in sync with schemas/artifacts/edit_decisions.schema.json).
 const CUT_FIELDS = ['id', 'source', 'in_seconds', 'out_seconds', 'speed', 'layer',
   'transform', 'transition_in', 'transition_out', 'transition_duration', 'reason']
-const OVERLAY_FIELDS = ['asset_id', 'start_seconds', 'end_seconds', 'position',
-  'animation', 'opacity', 'keyframes']
+// Overlays carry BOTH the asset-backed fields (image/video) and the text-overlay fields
+// (type=text → text/font/color/box) plus per-overlay audio_mix. The old editor whitelisted
+// only the asset fields, which silently dropped text/box/audio_mix on save; the studio editor
+// edits those, so they must survive sanitization.
+const OVERLAY_FIELDS = ['type', 'asset_id', 'text', 'font_path', 'font_size', 'color', 'box',
+  'start_seconds', 'end_seconds', 'position', 'animation', 'opacity', 'track', 'audio_mix', 'keyframes']
 const POSITION_FIELDS = ['x', 'y', 'width', 'height']
+const BOX_FIELDS = ['color', 'opacity', 'padding']
+const AUDIO_MIX_FIELDS = ['enabled', 'volume']
+const CROP_FIELDS = ['x', 'y', 'width', 'height']
 const KEYFRAME_FIELDS = ['t', 'x', 'y', 'scale', 'rotation', 'opacity', 'easing']
 
 function pick(obj, allowed) {
@@ -33,20 +44,86 @@ function pick(obj, allowed) {
   return out
 }
 
+/**
+ * Coerce `transform.scale` to a schema-valid value, mirroring the `oneOf` contract in
+ * edit_decisions.schema.json: either a UNIFORM number (>= 0) OR a per-axis {x,y} OBJECT
+ * (x,y both numbers >= 0; `additionalProperties:false`, so x/y are the only allowed keys).
+ *
+ * An OBJECT input (the non-uniform / split-screen box, e.g. {x:1, y:0.5}) MUST stay an object —
+ * coercing it to a float (the old behavior) would corrupt it into `1` and either 422 on Save or
+ * render the wrong box. A NUMBER input stays a number (the uniform path is untouched).
+ *
+ * Bad members are dropped/clamped: a non-finite uniform number falls back to 1; for an object,
+ * non-finite or negative x/y are clamped to 0, and if NEITHER axis is usable the whole object is
+ * invalid → fall back to the uniform default 1 (the schema requires BOTH x and y).
+ *
+ * Referential equality: when the input is already a clean object whose x/y are unchanged, returns
+ * the SAME object ref so a no-op sanitize keeps the no-op-returns-same-ref contract (history/dirty).
+ */
+function sanitizeScale(scale) {
+  if (scale != null && typeof scale === 'object') {
+    const x = Number(scale.x)
+    const y = Number(scale.y)
+    // The schema requires BOTH axes; an object missing/garbage on either axis can't be a valid
+    // {x,y} box, so fall back to the uniform default rather than emit half a box.
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return 1
+    const cx = Math.max(0, x)
+    const cy = Math.max(0, y)
+    // No-op fast path: an already-clean two-key {x,y} object is returned unchanged (same ref).
+    const keys = Object.keys(scale)
+    if (cx === scale.x && cy === scale.y && keys.length === 2 && keys.includes('x') && keys.includes('y')) {
+      return scale
+    }
+    return { x: cx, y: cy }
+  }
+  const n = Number(scale)
+  return Number.isFinite(n) && n >= 0 ? n : 1
+}
+
 /** Sanitize a cut to only schema-known fields (position-style nesting handled for transform). */
 export function sanitizeCut(cut) {
   const c = pick(cut, CUT_FIELDS)
   if (c.transform && typeof c.transform === 'object') {
     c.transform = pick(c.transform, ['scale', 'position', 'animation', 'crop'])
+    if (c.transform.crop && typeof c.transform.crop === 'object') {
+      c.transform.crop = pick(c.transform.crop, CROP_FIELDS)
+    }
+    // position is polymorphic: a named-anchor string OR an {x,y} object (clip top-left in canvas px).
+    if (c.transform.position && typeof c.transform.position === 'object') {
+      const p = c.transform.position
+      c.transform.position = { x: Math.round(Number(p.x) || 0), y: Math.round(Number(p.y) || 0) }
+    }
+    // scale is polymorphic (schema oneOf): a uniform number OR a per-axis {x,y} box. Keep an
+    // object an object (the non-uniform path) — DON'T coerce it to a float, which would corrupt it.
+    if (c.transform.scale != null) c.transform.scale = sanitizeScale(c.transform.scale)
   }
   return c
 }
 
-/** Sanitize an overlay (incl. nested position + keyframes) to schema-known fields. */
+/** Pick + value-coerce a single keyframe so no UI path can emit a schema-invalid value
+ * (t>=0, scale>=0, opacity in [0,1]; x/y/rotation unbounded). The schema is strict, so
+ * clamping HERE — at the one chokepoint every keyframe flows through — keeps the
+ * "a Save can never be rejected" invariant honest for VALUES, not just keys. */
+function cleanKeyframe(k) {
+  const o = pick(k, KEYFRAME_FIELDS)
+  if (o.t != null) o.t = Math.max(0, Number(o.t))
+  if (o.scale != null) o.scale = Math.max(0, Number(o.scale))
+  if (o.opacity != null) o.opacity = Math.max(0, Math.min(1, Number(o.opacity)))
+  return o
+}
+
+/** Sanitize an overlay (incl. nested position/box/audio_mix/keyframes) to schema-known
+ * fields AND schema-valid values. `position` may be a STRING (named anchor, text overlays)
+ * or an OBJECT ({x,y,width,height}). font_size/box.padding are schema integers, so we round. */
 export function sanitizeOverlay(ov) {
   const o = pick(ov, OVERLAY_FIELDS)
   if (o.position && typeof o.position === 'object') o.position = pick(o.position, POSITION_FIELDS)
-  if (Array.isArray(o.keyframes)) o.keyframes = o.keyframes.map(k => pick(k, KEYFRAME_FIELDS))
+  if (o.box && typeof o.box === 'object') o.box = pick(o.box, BOX_FIELDS)
+  if (o.audio_mix && typeof o.audio_mix === 'object') o.audio_mix = pick(o.audio_mix, AUDIO_MIX_FIELDS)
+  if (o.font_size != null) o.font_size = Math.round(Number(o.font_size))
+  if (o.box && o.box.padding != null) o.box.padding = Math.round(Number(o.box.padding))
+  if (o.track != null) o.track = Math.max(0, Math.round(Number(o.track) || 0)) // z-layer (non-negative int)
+  if (Array.isArray(o.keyframes)) o.keyframes = o.keyframes.map(cleanKeyframe)
   return o
 }
 
@@ -83,21 +160,24 @@ export function updateCut(doc, cutId, patch) {
 }
 
 export function updateOverlay(doc, index, patch) {
+  // Out-of-range index (e.g. a selection gone stale after undo/redo) is a no-op — return
+  // the SAME doc so commit()'s referential guard suppresses a spurious history/dirty entry.
+  if (index < 0 || index >= (doc.overlays || []).length) return doc
   const overlays = (doc.overlays || []).map((o, i) =>
     (i === index ? sanitizeOverlay({ ...o, ...patch }) : o))
   return { ...doc, overlays }
 }
 
 export function setOverlayKeyframes(doc, index, keyframes) {
-  return updateOverlay(doc, index, { keyframes: keyframes.map(k => pick(k, KEYFRAME_FIELDS)) })
+  return updateOverlay(doc, index, { keyframes: keyframes.map(cleanKeyframe) })
 }
 
 export function upsertKeyframe(doc, index, kf) {
   const ov = (doc.overlays || [])[index]
   if (!ov) return doc
   const kfs = [...(ov.keyframes || [])]
-  const at = kfs.findIndex(k => Number(k.t) === Number(kf.t))
-  const clean = pick(kf, KEYFRAME_FIELDS)
+  const clean = cleanKeyframe(kf)
+  const at = kfs.findIndex(k => Number(k.t) === Number(clean.t))
   if (at >= 0) kfs[at] = { ...kfs[at], ...clean }
   else kfs.push(clean)
   kfs.sort((a, b) => Number(a.t) - Number(b.t))
@@ -233,4 +313,569 @@ export function splitCutAtPlayhead(doc, t) {
   const cuts = [...(doc.cuts || [])]
   cuts.splice(index, 1, first, second)
   return { ...doc, cuts }
+}
+
+// ── clip-level structural mutators (studio editor) ──────────────────────────
+
+/** Remove a cut by id. Returns the doc unchanged if not found. Callers guard the last cut. */
+export function removeCut(doc, cutId) {
+  const cuts = (doc?.cuts || []).filter(c => c.id !== cutId)
+  if (cuts.length === (doc?.cuts || []).length) return doc
+  return { ...doc, cuts }
+}
+
+/** Duplicate a cut (fresh unique id), inserting the copy directly after the original. */
+export function duplicateCut(doc, cutId) {
+  const cuts = doc?.cuts || []
+  const i = cuts.findIndex(c => c.id === cutId)
+  if (i < 0) return doc
+  const clone = sanitizeCut({ ...cuts[i], id: uniqueCutId(doc, cuts[i].id || `c${i + 1}`) })
+  const next = [...cuts]
+  next.splice(i + 1, 0, clone)
+  return { ...doc, cuts: next }
+}
+
+/** Move the cut at `fromIndex` to `toIndex` (drag-reorder). Clamped; no-op if out of range. */
+export function reorderCut(doc, fromIndex, toIndex) {
+  const cuts = [...(doc?.cuts || [])]
+  if (fromIndex < 0 || fromIndex >= cuts.length) return doc
+  const [moved] = cuts.splice(fromIndex, 1)
+  const dest = Math.max(0, Math.min(cuts.length, toIndex))
+  cuts.splice(dest, 0, moved)
+  return { ...doc, cuts }
+}
+
+/** Append a cut (id forced unique against existing cuts) at `atIndex` (default end). */
+export function addCut(doc, cut, atIndex) {
+  const cuts = [...(doc?.cuts || [])]
+  const keepId = cut.id && !cuts.some(x => x.id === cut.id)
+  const c = sanitizeCut({ ...cut, id: keepId ? cut.id : uniqueCutId(doc, cut.id || 'c') })
+  const at = atIndex == null ? cuts.length : Math.max(0, Math.min(cuts.length, atIndex))
+  cuts.splice(at, 0, c)
+  return { ...doc, cuts }
+}
+
+/** Append a sanitized overlay. Returns the new doc; index of the new overlay = overlays.length-1. */
+export function addOverlay(doc, overlay) {
+  const overlays = [...(doc?.overlays || []), sanitizeOverlay(overlay)]
+  return { ...doc, overlays }
+}
+
+/** Remove the overlay at `index`. No-op (same doc) if out of range. */
+export function removeOverlay(doc, index) {
+  if (index < 0 || index >= (doc?.overlays || []).length) return doc
+  const overlays = (doc.overlays || []).filter((_, i) => i !== index)
+  return { ...doc, overlays }
+}
+
+/**
+ * Overlay track usage — the z-layers in play. `max` is the highest track index any overlay
+ * sits on (0 when there are none); `count` = max+1 lanes to draw. The UI renders one lane per
+ * track (highest on top, matching the renderer's ascending-track = on-top z-order) plus an
+ * empty lane above for adding. Track is the ONLY stored field; lane pixel rows are derived.
+ */
+export function overlayTracks(doc) {
+  let max = 0
+  for (const o of (doc?.overlays || [])) max = Math.max(max, Math.max(0, Math.round(Number(o?.track) || 0)))
+  return { max, count: max + 1 }
+}
+
+/**
+ * Move an overlay in ABSOLUTE project time and/or change its track (z-layer). `start` sets the
+ * new start (end follows, preserving duration; start clamped >= 0). `track` sets the z-layer
+ * (clamped to a non-negative int). Pass either or both. No-op (same doc ref) if out of range or
+ * nothing changes — so a coalesced drag that lands where it began adds no history/dirty entry.
+ * Overlays sit on absolute time (unlike cuts, which concatenate), so there's no cutStarts math.
+ */
+export function moveOverlay(doc, index, { start, track } = {}) {
+  const overlays = doc?.overlays || []
+  if (index < 0 || index >= overlays.length) return doc
+  const ov = overlays[index]
+  const patch = {}
+  if (start != null) {
+    const s = Number(ov.start_seconds) || 0
+    const e = Number(ov.end_seconds) || s
+    const dur = Math.max(0, e - s)
+    const ns = Math.max(0, round3(Number(start)))
+    if (ns !== round3(s)) { // value-compare so a wiggle-and-return drag is a true no-op (same ref)
+      patch.start_seconds = ns
+      patch.end_seconds = round3(ns + dur)
+      // Keyframe `t` is ABSOLUTE project time (same axis as start_seconds), so authored
+      // motion/fades must travel WITH the clip — shift every keyframe by the SAME (clamped)
+      // delta, else a time-move silently desyncs the animation from its new window.
+      const delta = ns - s
+      if (Array.isArray(ov.keyframes) && ov.keyframes.length) {
+        patch.keyframes = ov.keyframes.map(k =>
+          (k && k.t != null ? { ...k, t: Math.max(0, round3(Number(k.t) + delta)) } : k))
+      }
+    }
+  }
+  if (track != null) {
+    const nt = Math.max(0, Math.round(Number(track)))
+    if (nt !== Math.max(0, Math.round(Number(ov.track) || 0))) patch.track = nt
+  }
+  if (patch.start_seconds == null && patch.track == null) return doc
+  return updateOverlay(doc, index, patch)
+}
+
+/**
+ * Trim an overlay's start/end edge (drag-a-handle), on absolute project time. The moved edge is
+ * clamped so start >= 0 and the two edges never cross within MIN_OVERLAY_SPAN. No-op if out of
+ * range. (Unlike `trimCut`, there's no source window — an overlay can run as long as you like.)
+ */
+export function trimOverlay(doc, index, patch) {
+  const overlays = doc?.overlays || []
+  if (index < 0 || index >= overlays.length) return doc
+  const ov = overlays[index]
+  let s = patch.start_seconds != null ? Number(patch.start_seconds) : (Number(ov.start_seconds) || 0)
+  let e = patch.end_seconds != null ? Number(patch.end_seconds) : (Number(ov.end_seconds) || 0)
+  s = Math.max(0, s)
+  if (patch.start_seconds != null) s = Math.min(s, e - MIN_OVERLAY_SPAN)
+  if (patch.end_seconds != null) e = Math.max(e, s + MIN_OVERLAY_SPAN)
+  s = Math.max(0, s)
+  return updateOverlay(doc, index, { start_seconds: round3(s), end_seconds: round3(e) })
+}
+
+/**
+ * Partition an overlay's keyframes at project time `ts` into [first, second] so a split preserves
+ * the motion EXACTLY: an interpolated boundary keyframe is inserted at `ts` in both halves for every
+ * animated dimension, so the first half keeps interpolating to the seam value and the second half
+ * resumes from it (rather than each half freezing on its nearest kept keyframe). Returns [null,null]
+ * when there are no keyframes. Keyframe `t` is absolute project time and both halves keep their
+ * absolute positions, so no time-shift is needed.
+ */
+function splitKeyframesAt(keyframes, ts) {
+  const kfs = (Array.isArray(keyframes) ? keyframes : []).filter(k => k && k.t != null)
+  if (!kfs.length) return [null, null]
+  const boundary = { t: round3(ts) }
+  for (const d of KEYFRAME_DIMS) {
+    const v = interpolateAt(kfs, d, ts)
+    if (v != null) boundary[d] = v
+  }
+  const first = kfs.filter(k => Number(k.t) < ts).concat([{ ...boundary }])
+  const second = [{ ...boundary }].concat(kfs.filter(k => Number(k.t) > ts))
+  return [first, second]
+}
+
+/**
+ * Split the overlay at `index` into two overlays at project time `t`. The first keeps
+ * [start,ts], the second [ts,end]; both keep the same asset/text/style. Keyframed motion is split
+ * at the seam (see `splitKeyframesAt`). Returns the original doc unchanged when `t` isn't strictly
+ * inside the overlay window (needs MIN_OVERLAY_SPAN on both halves) — callers use referential
+ * equality to detect the no-op. NOTE: a video overlay's second half replays from its own first
+ * frame (overlays carry no source in-point), matching the editor's existing overlay model.
+ */
+export function splitOverlay(doc, index, t) {
+  const overlays = doc?.overlays || []
+  if (index < 0 || index >= overlays.length) return doc
+  const ov = overlays[index]
+  const s = Number(ov.start_seconds) || 0
+  const e = Number(ov.end_seconds) || s
+  const ts = round3(Number(t))
+  if (ts <= s + MIN_OVERLAY_SPAN || ts >= e - MIN_OVERLAY_SPAN) return doc
+  const [firstKfs, secondKfs] = splitKeyframesAt(ov.keyframes, ts)
+  const first = sanitizeOverlay({ ...ov, end_seconds: ts, ...(firstKfs ? { keyframes: firstKfs } : {}) })
+  const second = sanitizeOverlay({ ...ov, start_seconds: ts, ...(secondKfs ? { keyframes: secondKfs } : {}) })
+  const next = overlays.slice()
+  next.splice(index, 1, first, second)
+  return { ...doc, overlays: next }
+}
+
+/** Two time windows overlap iff they intersect (touching edges — aEnd === bStart — do NOT count). */
+function overlapsInTime(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd - 1e-9 && bStart < aEnd - 1e-9
+}
+
+const ovStart = (o) => Number(o?.start_seconds) || 0
+const ovEnd = (o) => { const s = ovStart(o); const e = Number(o?.end_seconds); return Number.isFinite(e) ? Math.max(s, e) : s }
+const ovTrack = (o) => Math.max(0, Math.round(Number(o?.track) || 0))
+
+/**
+ * Pick a track for a NEW overlay spanning [start,end]: the LOWEST track >= `fromTrack` on which it
+ * doesn't overlap any existing overlay in time — else a brand-new track on top (maxTrack+1). This is
+ * the NLE "auto-create a track when a clip would overlap" behavior: a new overlapping overlay lands
+ * on its own lane so both stay visible. Existing overlays are untouched.
+ */
+export function placeOverlayTrack(doc, start, end, fromTrack = 0) {
+  const overlays = doc?.overlays || []
+  const s = Number(start) || 0
+  const e = Number.isFinite(Number(end)) ? Math.max(s, Number(end)) : s
+  let max = 0
+  for (const o of overlays) max = Math.max(max, ovTrack(o))
+  for (let t = Math.max(0, Math.round(Number(fromTrack) || 0)); t <= max; t++) {
+    const clash = overlays.some(o => ovTrack(o) === t && overlapsInTime(s, e, ovStart(o), ovEnd(o)))
+    if (!clash) return t
+  }
+  return max + 1 // every track is busy at this time → open a fresh lane on top
+}
+
+/**
+ * Re-pack ALL overlays into the FEWEST tracks with no time-overlap — greedy interval partitioning
+ * (the calendar/Gantt "lane assignment" / "meeting rooms II" algorithm): walk overlays in start
+ * order, drop each onto the first lane whose last item has already ended, else open a new lane. The
+ * lane index becomes `track` (= z-order; earlier-starting overlays sit lower). Returns the SAME doc
+ * ref when every track already matches (no overlaps to fix), honoring the dirty/history contract.
+ */
+export function autoArrangeOverlays(doc) {
+  const overlays = doc?.overlays || []
+  if (overlays.length < 2) return doc
+  const order = overlays.map((_, i) => i).sort((a, b) => (ovStart(overlays[a]) - ovStart(overlays[b])) || (a - b))
+  const laneEnds = [] // laneEnds[t] = end of the last overlay placed on lane t
+  const assigned = new Array(overlays.length)
+  for (const i of order) {
+    const s = ovStart(overlays[i])
+    const e = ovEnd(overlays[i])
+    let lane = laneEnds.findIndex(end => end <= s + 1e-9)
+    if (lane === -1) { lane = laneEnds.length; laneEnds.push(e) } else { laneEnds[lane] = e }
+    assigned[i] = lane
+  }
+  let changed = false
+  const next = overlays.map((o, i) => {
+    if (ovTrack(o) === assigned[i]) return o
+    changed = true
+    return sanitizeOverlay({ ...o, track: assigned[i] })
+  })
+  return changed ? { ...doc, overlays: next } : doc
+}
+
+/**
+ * After a MOVE/TRIM, keep the just-edited overlay from silently overlapping another on its OWN
+ * track: if it now time-overlaps any other overlay sharing its track, float it UP to the lowest
+ * free track >= its current one (a new track if needed). ONLY the edited overlay relocates — every
+ * other overlay (and the user's manual track layout) is left exactly as-is, so this never fights a
+ * deliberate placement. Same-ref no-op when there's no same-track overlap. Cheap (O(n)), so it can
+ * run on every drag-end instead of a full re-pack.
+ */
+export function resolveOverlayOverlap(doc, index) {
+  const overlays = doc?.overlays || []
+  if (index < 0 || index >= overlays.length) return doc
+  const ov = overlays[index]
+  const s = ovStart(ov), e = ovEnd(ov), tr = ovTrack(ov)
+  const clash = overlays.some((o, i) => i !== index && ovTrack(o) === tr && overlapsInTime(s, e, ovStart(o), ovEnd(o)))
+  if (!clash) return doc
+  // float up from the current track (stays near where the user dropped it) to the first free lane.
+  const target = placeOverlayTrack({ overlays: overlays.filter((_, i) => i !== index) }, s, e, tr)
+  if (target === tr) return doc
+  return updateOverlay(doc, index, { track: target })
+}
+
+/** Set the output canvas (metadata.compose_target). Merges so unspecified dims are kept. */
+export function setCanvas(doc, { width, height, fps } = {}) {
+  const meta = { ...(doc.metadata || {}) }
+  const ct = { ...(meta.compose_target || {}) }
+  if (width != null) ct.width = Math.round(width)
+  if (height != null) ct.height = Math.round(height)
+  if (fps != null) ct.fps = fps
+  meta.compose_target = ct
+  return { ...doc, metadata: meta }
+}
+
+/** Read the effective output canvas. Mirrors the renderer's fallback (1920x1080@30). */
+export function canvasOf(doc) {
+  const ct = doc?.metadata?.compose_target || {}
+  return {
+    width: Number(ct.width) || 1920,
+    height: Number(ct.height) || 1080,
+    fps: Number(ct.fps) || 30,
+  }
+}
+
+/** Project background (metadata.background) behind all primary cuts. null = default black. */
+export function getBackground(doc) {
+  return doc?.metadata?.background || null
+}
+
+/**
+ * Set/clear the project background (metadata.background). `bg` is {type:'color', color} or
+ * {type:'image', asset_id}; null/invalid clears it (back to default black). Immutable; a no-op
+ * (value-equal) returns the SAME doc ref so history/dirty stay correct.
+ */
+export function setBackground(doc, bg) {
+  const cur = doc?.metadata?.background || null
+  let next = null
+  if (bg && bg.type === 'color' && bg.color) next = { type: 'color', color: String(bg.color) }
+  else if (bg && bg.type === 'image' && bg.asset_id) next = { type: 'image', asset_id: String(bg.asset_id) }
+  if (JSON.stringify(cur) === JSON.stringify(next)) return doc
+  const meta = { ...(doc.metadata || {}) }
+  if (next) meta.background = next
+  else delete meta.background
+  return { ...doc, metadata: meta }
+}
+
+export function clearBackground(doc) {
+  return setBackground(doc, null)
+}
+
+/**
+ * Read-only projection of the schema's audio model into items the timeline can DRAW on an
+ * audio lane (music / narration / sfx). This is NOT a render contract — the FFmpeg path owns
+ * mixing; this only places blocks so the user can SEE what audio sits where. Placement is
+ * absolute project time (same axis as overlays), and — like overlay/cut placement — it is
+ * DERIVED, never stored. Returns a flat array sorted by start, each:
+ *   { kind:'music'|'narration'|'sfx', asset_id, start_seconds, end_seconds, point }
+ *  - music: a single bed spanning [0, timelineDuration]. The FFmpeg amix uses duration=first,
+ *    so the bed is cut to the base (video) length — we draw it that way too (preview==export).
+ *    Reads doc.audio.music first, then legacy top-level doc.music. Skipped without an asset_id.
+ *  - narration: doc.audio.narration.segments[] → start→end blocks (end defaults to start).
+ *  - sfx: doc.audio.sfx[] → point markers (point:true, end_seconds === start_seconds).
+ * Items with no asset_id are skipped — there's nothing to show.
+ */
+// Audio field whitelists + value coercion (keep in sync with edit_decisions.schema.json audio.*).
+// Music regions carry an OPTIONAL [start_seconds, end_seconds] window (schema $defs.musicRegion)
+// so a bed can be trimmed/moved/split like an overlay. Absent window = the whole timeline.
+const MUSIC_FIELDS = ['asset_id', 'volume', 'fade_in_seconds', 'fade_out_seconds', 'start_seconds', 'end_seconds', 'ducking']
+const NARRATION_FIELDS = ['asset_id', 'start_seconds', 'end_seconds']
+const SFX_FIELDS = ['asset_id', 'start_seconds', 'volume']
+
+function cleanMusic(m) {
+  const o = pick(m, MUSIC_FIELDS)
+  if (o.volume != null) o.volume = Math.max(0, Math.min(1, Number(o.volume)))
+  if (o.fade_in_seconds != null) o.fade_in_seconds = Math.max(0, Number(o.fade_in_seconds))
+  if (o.fade_out_seconds != null) o.fade_out_seconds = Math.max(0, Number(o.fade_out_seconds))
+  if (o.start_seconds != null) o.start_seconds = round3(Math.max(0, Number(o.start_seconds)))
+  if (o.end_seconds != null) o.end_seconds = round3(Math.max(0, Number(o.end_seconds)))
+  return o
+}
+function cleanNarration(s) {
+  const o = pick(s, NARRATION_FIELDS)
+  if (o.start_seconds != null) o.start_seconds = round3(Math.max(0, Number(o.start_seconds)))
+  if (o.end_seconds != null) o.end_seconds = round3(Math.max(0, Number(o.end_seconds)))
+  return o
+}
+function cleanSfx(s) {
+  const o = pick(s, SFX_FIELDS)
+  if (o.start_seconds != null) o.start_seconds = round3(Math.max(0, Number(o.start_seconds)))
+  if (o.volume != null) o.volume = Math.max(0, Math.min(1, Number(o.volume)))
+  return o
+}
+
+/**
+ * Music beds, normalized to a LIST of region objects regardless of storage shape:
+ *   - audio.music as a single OBJECT (legacy / one bed) → [that object]
+ *   - audio.music as an ARRAY (multiple beds, e.g. after a split) → the array
+ *   - legacy top-level doc.music (object) → [that object] when audio.music is absent
+ * Returns the raw stored regions (NOT window-defaulted) so writers can round-trip. Empty when
+ * there's no music. Each region may carry an optional [start_seconds, end_seconds] window; use
+ * `musicWindow` to resolve the effective window (unset end ⇒ the timeline end).
+ */
+export function musicRegions(doc) {
+  const m = doc?.audio?.music != null ? doc.audio.music : doc?.music
+  if (m == null) return []
+  const list = Array.isArray(m) ? m : [m]
+  return list.filter(r => r && typeof r === 'object')
+}
+
+/** Effective [start,end] window (project seconds) for a music region: start defaults to 0, end
+ * defaults to the timeline end (a bed with no explicit end plays under the whole timeline). */
+export function musicWindow(region, doc) {
+  const s = Math.max(0, Number(region?.start_seconds) || 0)
+  const e = region?.end_seconds != null ? Math.max(s, Number(region.end_seconds)) : timelineDuration(doc)
+  return { start: s, end: e }
+}
+
+// Write a region list back in the shape the schema expects: 0 → remove music, 1 → a single OBJECT
+// (keeps the legacy/agent shape for the common case), 2+ → an ARRAY. Collapses the legacy top-level
+// `music` field so there's one source of truth. Empty (asset-less) regions are dropped.
+function _writeMusicRegions(doc, regions) {
+  const clean = regions.map(cleanMusic).filter(r => r && r.asset_id)
+  const audio = { ...(doc?.audio || {}) }
+  if (clean.length === 0) delete audio.music
+  else if (clean.length === 1) audio.music = clean[0]
+  else audio.music = clean
+  const next = { ...doc, audio }
+  if (next.music !== undefined) delete next.music
+  return next
+}
+
+/** Set the PRIMARY music bed's asset (region 0), creating one if there's no music yet. Preserves any
+ * other valid fields (window/levels) on region 0. Used by the Assets "Set music" action. */
+export function setMusic(doc, assetId) {
+  const regions = musicRegions(doc)
+  if (regions.length === 0) return _writeMusicRegions(doc, [{ asset_id: assetId }])
+  return _writeMusicRegions(doc, regions.map((r, i) => (i === 0 ? { ...r, asset_id: assetId } : r)))
+}
+
+/** Append a NEW music region (used when a music asset is dropped onto the timeline). `start`
+ * defaults to 0; an explicit `end` bounds the region (else it spans to the timeline end). */
+export function addMusic(doc, assetId, { start = 0, end } = {}) {
+  const s = Math.max(0, round3(Number(start) || 0))
+  const region = { asset_id: assetId, start_seconds: s }
+  if (end != null) region.end_seconds = round3(Math.max(s + MIN_OVERLAY_SPAN, Number(end)))
+  return _writeMusicRegions(doc, [...musicRegions(doc), region])
+}
+
+/** Merge a patch into the music region at `index`. No-op (same doc ref) if out of range or the
+ * cleaned region is value-identical (so a wiggle-and-return drag adds no history/dirty entry). */
+export function updateMusic(doc, index, patch) {
+  const regions = musicRegions(doc)
+  if (index < 0 || index >= regions.length) return doc
+  const cleanedOld = cleanMusic(regions[index])
+  const cleanedNew = cleanMusic({ ...regions[index], ...patch })
+  if (JSON.stringify(cleanedOld) === JSON.stringify(cleanedNew)) return doc
+  return _writeMusicRegions(doc, regions.map((r, i) => (i === index ? cleanedNew : r)))
+}
+
+/** Trim a music region's start/end edge (drag-a-handle), on absolute project time. Clamps like
+ * `trimOverlay`: start ≥ 0 and the edges never cross within MIN_OVERLAY_SPAN. Writes an explicit
+ * window. No-op if out of range. */
+export function trimMusic(doc, index, patch) {
+  const regions = musicRegions(doc)
+  if (index < 0 || index >= regions.length) return doc
+  const { start: curStart, end: curEnd } = musicWindow(regions[index], doc)
+  let s = patch.start_seconds != null ? Number(patch.start_seconds) : curStart
+  let e = patch.end_seconds != null ? Number(patch.end_seconds) : curEnd
+  s = Math.max(0, s)
+  if (patch.start_seconds != null) s = Math.min(s, e - MIN_OVERLAY_SPAN)
+  if (patch.end_seconds != null) e = Math.max(e, s + MIN_OVERLAY_SPAN)
+  s = Math.max(0, s)
+  return updateMusic(doc, index, { start_seconds: round3(s), end_seconds: round3(e) })
+}
+
+/** Move a music region to a new start, PRESERVING its window length. Forces an explicit end.
+ * No-op (same doc) if out of range or unchanged. */
+export function moveMusic(doc, index, start) {
+  const regions = musicRegions(doc)
+  if (index < 0 || index >= regions.length) return doc
+  const { start: curStart, end: curEnd } = musicWindow(regions[index], doc)
+  const len = Math.max(0, curEnd - curStart)
+  const ns = Math.max(0, round3(Number(start) || 0))
+  if (ns === round3(curStart)) return doc
+  return updateMusic(doc, index, { start_seconds: ns, end_seconds: round3(ns + len) })
+}
+
+/**
+ * Split the music region at `index` into two regions at project time `t`. Both keep the same asset
+ * (each plays from the song's start — music regions carry no source in-point, matching the
+ * narration/overlay model). Seam fades are dropped so they don't double up. Returns the original doc
+ * unchanged when `t` isn't strictly inside the region window (needs MIN_OVERLAY_SPAN on both halves).
+ */
+export function splitMusic(doc, index, t) {
+  const regions = musicRegions(doc)
+  if (index < 0 || index >= regions.length) return doc
+  const { start: s, end: e } = musicWindow(regions[index], doc)
+  const ts = round3(Number(t))
+  if (ts <= s + MIN_OVERLAY_SPAN || ts >= e - MIN_OVERLAY_SPAN) return doc
+  const first = cleanMusic({ ...regions[index], start_seconds: s, end_seconds: ts })
+  const second = cleanMusic({ ...regions[index], start_seconds: ts, end_seconds: e })
+  delete first.fade_out_seconds
+  delete second.fade_in_seconds
+  const next = regions.slice()
+  next.splice(index, 1, first, second)
+  return _writeMusicRegions(doc, next)
+}
+
+/** Remove the music region at `index` (or ALL music when `index` is null/undefined). No-op if absent
+ * or out of range. */
+export function removeMusic(doc, index) {
+  const regions = musicRegions(doc)
+  if (regions.length === 0) return doc
+  const next = index == null ? [] : regions.filter((_, i) => i !== index)
+  if (next.length === regions.length) return doc
+  return _writeMusicRegions(doc, next)
+}
+
+/** Append a point SFX (audio.sfx[]) at project time `start`. */
+export function addSfx(doc, assetId, start = 0) {
+  const audio = { ...(doc?.audio || {}) }
+  audio.sfx = [...(audio.sfx || []), cleanSfx({ asset_id: assetId, start_seconds: start })]
+  return { ...doc, audio }
+}
+
+/** Merge a patch into a narration segment by index. No-op (same doc) if out of range. */
+export function updateNarration(doc, index, patch) {
+  const segs = doc?.audio?.narration?.segments || []
+  if (index < 0 || index >= segs.length) return doc
+  const segments = segs.map((s, i) => (i === index ? cleanNarration({ ...s, ...patch }) : s))
+  return { ...doc, audio: { ...(doc.audio || {}), narration: { ...(doc.audio?.narration || {}), segments } } }
+}
+
+/** Move a narration segment to a new start time, PRESERVING its duration (shifts
+ * end_seconds by the same delta when present). Start clamps to ≥ 0. No-op (same doc)
+ * if out of range. Used by the timeline drag; trimming a single edge goes through
+ * updateNarration directly. */
+export function moveNarration(doc, index, start) {
+  const segs = doc?.audio?.narration?.segments || []
+  if (index < 0 || index >= segs.length) return doc
+  const seg = segs[index]
+  const ns = Math.max(0, round3(Number(start) || 0))
+  const patch = { start_seconds: ns }
+  if (seg.end_seconds != null) {
+    const dur = Math.max(0, (Number(seg.end_seconds) || 0) - (Number(seg.start_seconds) || 0))
+    patch.end_seconds = round3(ns + dur)
+  }
+  return updateNarration(doc, index, patch)
+}
+
+/**
+ * Split a narration segment at `index` into two at project time `t`. Needs a BOUNDED segment (an
+ * explicit end_seconds) — an open-ended segment has no seam to split, so it's a no-op. Both halves
+ * keep the same asset (each plays from the asset's start; narration segments carry no source
+ * in-point). No-op when `t` isn't strictly inside the segment (MIN_OVERLAY_SPAN on both halves).
+ */
+export function splitNarration(doc, index, t) {
+  const segs = doc?.audio?.narration?.segments || []
+  if (index < 0 || index >= segs.length) return doc
+  const seg = segs[index]
+  const s = Math.max(0, Number(seg.start_seconds) || 0)
+  if (seg.end_seconds == null) return doc
+  const e = Math.max(s, Number(seg.end_seconds))
+  const ts = round3(Number(t))
+  if (ts <= s + MIN_OVERLAY_SPAN || ts >= e - MIN_OVERLAY_SPAN) return doc
+  const first = cleanNarration({ ...seg, start_seconds: s, end_seconds: ts })
+  const second = cleanNarration({ ...seg, start_seconds: ts, end_seconds: e })
+  const segments = segs.slice()
+  segments.splice(index, 1, first, second)
+  return { ...doc, audio: { ...(doc.audio || {}), narration: { ...(doc.audio?.narration || {}), segments } } }
+}
+
+/** Remove a narration segment by index. No-op (same doc) if out of range. */
+export function removeNarration(doc, index) {
+  const segs = doc?.audio?.narration?.segments || []
+  if (index < 0 || index >= segs.length) return doc
+  const segments = segs.filter((_, i) => i !== index)
+  return { ...doc, audio: { ...(doc.audio || {}), narration: { ...(doc.audio?.narration || {}), segments } } }
+}
+
+/** Merge a patch into an SFX by index. No-op (same doc) if out of range. */
+export function updateSfx(doc, index, patch) {
+  const sfx = doc?.audio?.sfx || []
+  if (index < 0 || index >= sfx.length) return doc
+  const next = sfx.map((s, i) => (i === index ? cleanSfx({ ...s, ...patch }) : s))
+  return { ...doc, audio: { ...(doc.audio || {}), sfx: next } }
+}
+
+/** Remove an SFX by index. No-op (same doc) if out of range. */
+export function removeSfx(doc, index) {
+  const sfx = doc?.audio?.sfx || []
+  if (index < 0 || index >= sfx.length) return doc
+  const next = sfx.filter((_, i) => i !== index)
+  return { ...doc, audio: { ...(doc.audio || {}), sfx: next } }
+}
+
+export function audioClips(doc) {
+  const out = []
+  const a = doc?.audio || {}
+  // Music: one block PER REGION, on its resolved [start,end] window. Carries the region levels
+  // (volume/fades) so the timeline can draw the gain line + fade handles without re-reading the doc.
+  musicRegions(doc).forEach((r, i) => {
+    if (!r.asset_id) return
+    const { start, end } = musicWindow(r, doc)
+    out.push({
+      kind: 'music', index: i, asset_id: r.asset_id,
+      start_seconds: round3(start), end_seconds: round3(end), point: false,
+      volume: r.volume, fade_in_seconds: r.fade_in_seconds, fade_out_seconds: r.fade_out_seconds,
+    })
+  })
+  ;(a.narration?.segments || []).forEach((seg, i) => {
+    if (!seg || !seg.asset_id) return
+    const s = Math.max(0, Number(seg.start_seconds) || 0)
+    const e = seg.end_seconds != null ? Math.max(s, Number(seg.end_seconds)) : s
+    out.push({ kind: 'narration', index: i, asset_id: seg.asset_id, start_seconds: round3(s), end_seconds: round3(e), point: false })
+  })
+  ;(a.sfx || []).forEach((fx, i) => {
+    if (!fx || !fx.asset_id) return
+    const s = round3(Math.max(0, Number(fx.start_seconds) || 0))
+    out.push({ kind: 'sfx', index: i, asset_id: fx.asset_id, start_seconds: s, end_seconds: s, point: true })
+  })
+  return out.sort((x, y) => x.start_seconds - y.start_seconds)
 }

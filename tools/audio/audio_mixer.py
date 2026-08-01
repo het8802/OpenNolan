@@ -712,79 +712,59 @@ class AudioMixer(BaseTool):
         duck_enabled = ducking.get("enabled", True) if isinstance(ducking, dict) else bool(ducking)
 
         if duck_enabled and speech_tracks and music_tracks:
-            # Mix speech tracks together first
+            # Sidechain-duck the music under the speech. The speech signal is needed
+            # BOTH as the sidechain KEY and in the final output mix — and an ffmpeg
+            # filter pad can be consumed only ONCE — so mix the speech to a single
+            # label and asplit it into a key copy + an output copy. (The previous
+            # implementation consumed the speech pad 2–3× and left an orphan
+            # [speech_dup], which errored with "output ... unconnected".)
             speech_indices = list(range(len(speech_tracks)))
             speech_labels = "".join(f"[a{i}]" for i in speech_indices)
-
             if len(speech_tracks) > 1:
                 filter_parts.append(
-                    f"{speech_labels}amix=inputs={len(speech_tracks)}:duration=longest[speech_mix]"
+                    f"{speech_labels}amix=inputs={len(speech_tracks)}:duration=longest[speech_all]"
                 )
-                speech_out = "[speech_mix]"
             else:
-                speech_out = f"[a{speech_indices[0]}]"
+                filter_parts.append(f"[a{speech_indices[0]}]anull[speech_all]")
+            filter_parts.append("[speech_all]asplit=2[speech_key][speech_out]")
 
-            # Mix music tracks together
+            # Mix music tracks to a single label.
             music_start = len(speech_tracks)
             music_indices = list(range(music_start, music_start + len(music_tracks)))
             music_labels = "".join(f"[a{i}]" for i in music_indices)
-
             if len(music_tracks) > 1:
                 filter_parts.append(
-                    f"{music_labels}amix=inputs={len(music_tracks)}:duration=longest[music_mix]"
+                    f"{music_labels}amix=inputs={len(music_tracks)}:duration=longest[music_all]"
                 )
-                music_in = "[music_mix]"
             else:
-                music_in = f"[a{music_indices[0]}]"
+                filter_parts.append(f"[a{music_indices[0]}]anull[music_all]")
 
-            # Apply sidechain ducking
+            # Sidechain compress: input 0 = music (compressed), input 1 = speech key.
+            # attack/release are in MILLISECONDS (ffmpeg range 0.01–2000) — pass the
+            # *_ms values through, clamped (a previous /1000 made the attack ~1000× too
+            # fast and could fall below the 0.01 floor, erroring the whole filtergraph).
             duck_params = ducking if isinstance(ducking, dict) else {}
-            attack = duck_params.get("attack_ms", 200) / 1000
-            release = duck_params.get("release_ms", 500) / 1000
+            _clamp_ms = lambda v: max(0.01, min(2000.0, float(v)))
+            attack = _clamp_ms(duck_params.get("attack_ms", 20))
+            release = _clamp_ms(duck_params.get("release_ms", 250))
             music_vol = duck_params.get("music_volume_during_speech", 0.15)
-
             filter_parts.append(
-                f"{music_in}{speech_out}sidechaincompress="
+                f"[music_all][speech_key]sidechaincompress="
                 f"threshold=0.02:ratio=9:attack={attack}:release={release}:"
                 f"level_sc=1:mix=0.9[ducked_music];"
                 f"[ducked_music]volume={music_vol * 3}[music_out]"
             )
 
-            # Duplicate speech for final mix (sidechain consumes it as key)
-            filter_parts.append(
-                f"{speech_out}acopy[speech_dup]" if speech_out.startswith("[a") else ""
-            )
-            # Re-mix speech path: we need speech audio in the output too
-            # Simpler approach: use amix on original speech and ducked music
-            # Reset: use a cleaner approach — amerge the speech mix and ducked music
-            # Actually, let's rebuild. The sidechain approach above uses speech as
-            # the key signal but doesn't consume it from the output chain.
-            # FFmpeg sidechaincompress: input 0 = audio to compress, input 1 = key signal
-            # So music is compressed, speech signal is the key. We need to mix them.
-            # Remove the last filter_part (the acopy that may be empty)
-            if filter_parts and filter_parts[-1] == "":
-                filter_parts.pop()
-
-            # Build speech mix for output separately
-            if len(speech_tracks) > 1:
-                # speech_mix already exists, make a copy for output
-                filter_parts.append(f"{speech_labels}amix=inputs={len(speech_tracks)}:duration=longest[speech_out]")
-            else:
-                filter_parts.append(f"[a{speech_indices[0]}]acopy[speech_out]")
-
-            # Final mix: speech_out + music_out
-            mix_label = "[speech_out][music_out]amix=inputs=2:duration=longest[premix]"
-
-            # Add SFX if present
+            # Final mix: speech + ducked music + any SFX, in one amix.
             sfx_start = len(speech_tracks) + len(music_tracks)
             if sfx_tracks:
                 sfx_labels = "".join(f"[a{i}]" for i in range(sfx_start, sfx_start + len(sfx_tracks)))
-                filter_parts.append(mix_label.replace("[premix]", "[pressfx]"))
                 filter_parts.append(
-                    f"[pressfx]{sfx_labels}amix=inputs={1 + len(sfx_tracks)}:duration=longest[premix]"
+                    f"[speech_out][music_out]{sfx_labels}"
+                    f"amix=inputs={2 + len(sfx_tracks)}:duration=longest[premix]"
                 )
             else:
-                filter_parts.append(mix_label)
+                filter_parts.append("[speech_out][music_out]amix=inputs=2:duration=longest[premix]")
 
         else:
             # No ducking: simple amix of all tracks
@@ -932,29 +912,37 @@ class AudioMixer(BaseTool):
     def _per_track_chain(self, index: int, track: dict[str, Any]) -> str:
         """Build the per-track filter chain '[i:a]...[ai]' for mix/full_mix.
 
+        `duration_seconds` (optional) truncates the source to a window LENGTH first
+        (a trimmed music region) via atrim; fades then act on the trimmed audio.
         Fades are applied BEFORE adelay so they act on the actual audio (not
         the silence pad), and afade t=out gets an explicit st= computed from
-        the probed track duration — FFmpeg defaults st=0, which fades the
-        track to silence over its FIRST N seconds and keeps it muted.
+        the truncated length (or the probed track duration) — FFmpeg defaults
+        st=0, which fades the track to silence over its FIRST N seconds and keeps
+        it muted.
         """
         volume = track.get("volume", 1.0)
         delay_ms = int(track.get("start_seconds", 0) * 1000)
         fade_in = track.get("fade_in_seconds", 0)
         fade_out = track.get("fade_out_seconds", 0)
+        trim_dur = track.get("duration_seconds")
+        trimmed = trim_dur is not None and float(trim_dur) > 0
 
         filters = []
+        if trimmed:
+            # Truncate to the region length, then reset PTS so downstream fades/adelay start at 0.
+            filters.append(f"atrim=0:{float(trim_dur)},asetpts=PTS-STARTPTS")
         if volume != 1.0:
             filters.append(f"volume={volume}")
         if fade_in > 0:
             filters.append(f"afade=t=in:st=0:d={fade_in}")
         if fade_out > 0:
-            duration = self._audio_duration(Path(track["path"]))
-            if duration is None:
+            base_dur = float(trim_dur) if trimmed else self._audio_duration(Path(track["path"]))
+            if base_dur is None:
                 raise _MixInputError(
                     f"fade_out_seconds requires a probeable duration; "
                     f"could not probe {track['path']}"
                 )
-            st = max(0.0, round(duration - fade_out, 3))
+            st = max(0.0, round(base_dur - fade_out, 3))
             filters.append(f"afade=t=out:st={st}:d={fade_out}")
         if delay_ms > 0:
             filters.append(f"adelay={delay_ms}|{delay_ms}")

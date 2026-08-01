@@ -16,7 +16,17 @@ from typing import Any, Optional
 import yaml
 import jsonschema
 
+from lib import app_paths
+
 STYLES_DIR = Path(__file__).resolve().parent
+
+# The packaged Mac app offers exactly TWO styles; a dev checkout keeps them all.
+# These are the two playbooks the instagram-fast-reel pipeline is built around
+# (Anthropic editorial surface + Greg Isenberg motion grammar).
+PACKAGED_PLAYBOOKS: tuple[str, ...] = (
+    "anthropic-editorial-animated",
+    "greg-isenberg-product-explainer",
+)
 SCHEMA_PATH = (
     Path(__file__).resolve().parent.parent
     / "schemas"
@@ -33,9 +43,15 @@ def _load_playbook_schema() -> dict:
 def load_playbook(name: str, styles_dir: Optional[Path] = None) -> dict[str, Any]:
     """Load and validate a style playbook by name.
 
+    Resolves a built-in playbook first, then falls back to the writable
+    user-styles dir (styles created by the Style Studio / create-style-from-video
+    skill), so a user's custom style is usable everywhere a shipped one is —
+    including the render path (tools/video/video_compose.py loads via this
+    function). This is the single lookup the whole app funnels style names through.
+
     Args:
         name: Playbook name (without .yaml extension).
-        styles_dir: Override directory for playbook files.
+        styles_dir: Override directory for the BUILT-IN lookup (tests).
 
     Returns:
         Validated playbook dict.
@@ -43,7 +59,11 @@ def load_playbook(name: str, styles_dir: Optional[Path] = None) -> dict[str, Any
     styles_dir = styles_dir or STYLES_DIR
     path = styles_dir / f"{name}.yaml"
     if not path.exists():
-        raise FileNotFoundError(f"Playbook not found: {path}")
+        user_path = app_paths.user_styles_dir() / f"{name}.yaml"
+        if user_path.exists():
+            path = user_path
+        else:
+            raise FileNotFoundError(f"Playbook not found: {path}")
 
     with open(path) as f:
         playbook = yaml.safe_load(f)
@@ -58,14 +78,36 @@ def validate_playbook(playbook: dict) -> None:
     jsonschema.validate(instance=playbook, schema=schema)
 
 
-def list_playbooks(styles_dir: Optional[Path] = None) -> list[str]:
-    """List all available playbook names."""
+def list_playbooks(
+    styles_dir: Optional[Path] = None,
+    *,
+    packaged: Optional[bool] = None,
+) -> list[str]:
+    """List available playbook names.
+
+    In the packaged Mac app the list is restricted to ``PACKAGED_PLAYBOOKS``; a
+    dev checkout returns every playbook. ``packaged`` overrides the auto-detect
+    (``app_paths.is_packaged()``) — pass it explicitly in tests.
+    """
     styles_dir = styles_dir or STYLES_DIR
-    return [
+    names = [
         p.stem
         for p in styles_dir.glob("*.yaml")
         if p.stem != "__pycache__"
     ]
+    if packaged is None:
+        packaged = app_paths.is_packaged()
+    if packaged:
+        allow = set(PACKAGED_PLAYBOOKS)
+        names = [n for n in names if n in allow]
+    # User-created styles are ALWAYS available (the packaged allowlist only trims the
+    # shipped catalogue). Appended after built-ins; a built-in of the same name wins.
+    user_dir = app_paths.user_styles_dir()
+    if user_dir.exists():
+        for p in sorted(user_dir.glob("*.yaml")):
+            if p.stem not in names:
+                names.append(p.stem)
+    return names
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <!-- Strict, but allows an EXTERNAL same-origin script (setup.js) + inline styles. No network.
+       The session-level CSP in main.js passes file:// through untouched, so this is the only
+       policy governing this page. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:" />
+  <title>Setting up OpenNolan</title>
+  <style>
+    :root { color-scheme: light; }
+    * { margin: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, 'Inter', system-ui, sans-serif;
+      background: #FBF7F0; color: #2b2b2b;
+      height: 100vh; display: flex; flex-direction: column;
+      padding: 30px 34px 28px;
+    }
+    h1 { font-size: 19px; font-weight: 650; letter-spacing: -.01em; }
+    p.sub { margin-top: 6px; color: #7a7266; font-size: 13px; line-height: 1.5; }
+
+    /* The prominent, human-readable current step — this is what the eye reads, so the box below
+       is never "just a blank rectangle". Always shows something, from the first frame. */
+    .stage { margin: 22px 0 10px; font-size: 14.5px; font-weight: 600; color: #2b2b2b;
+             letter-spacing: -.005em; min-height: 20px; }
+
+    .bar { height: 6px; border-radius: 6px; background: #ece3d6; overflow: hidden; }
+    .bar > i { display: block; height: 100%; border-radius: 6px; background: #d97757;
+               width: 0%; transition: width .35s ease; position: relative; overflow: hidden; }
+    /* A moving sheen says "still working" even when the width is barely moving (uv / npm ci are
+       silent for minutes; real progress boundaries are sparse). */
+    .bar > i::after { content: ''; position: absolute; inset: 0;
+                      background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent);
+                      animation: sheen 1.6s ease-in-out infinite; }
+    @keyframes sheen { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+    /* Until the first real step frame arrives, show the indeterminate slide. */
+    .bar > i.indet { width: 40%; transition: none; animation: slide 1.3s ease-in-out infinite; }
+    .bar > i.indet::after { content: none; }
+    @keyframes slide { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+    .bar > i.err { background: #c0392b; }
+    .bar > i.err::after { content: none; }
+
+    .meta { margin: 9px 0 14px; font-size: 11.5px; color: #9a9184;
+            display: flex; justify-content: space-between; gap: 12px; }
+    #pct { font-variant-numeric: tabular-nums; color: #7a7266; font-weight: 600; }
+
+    .logcap { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+              color: #b3ab9d; margin-bottom: 6px; }
+    #log {
+      flex: 1; overflow-y: auto; background: #fff; border: 1px solid #ece3d6; border-radius: 8px;
+      padding: 12px 14px; font-family: 'SF Mono', 'JetBrains Mono', monospace; font-size: 11px;
+      line-height: 1.65; color: #6b6357; white-space: pre-wrap; word-break: break-word;
+    }
+    #log .err { color: #c0392b; }
+    #log:empty::before { content: 'Waiting for the installer…'; color: #c3bcae; }
+  </style>
+</head>
+<body>
+  <h1>Setting up OpenNolan</h1>
+  <p class="sub">First launch only — installing the local video engine and its dependencies into
+    your Application&nbsp;Support folder. This can take a few minutes.</p>
+
+  <div class="stage" id="stage">Preparing…</div>
+  <div class="bar"><i id="fill" class="indet"></i></div>
+  <div class="meta"><span id="detail">Starting the installer…</span><span id="pct"></span></div>
+
+  <div class="logcap">Installation log</div>
+  <div id="log"></div>
+
+  <script src="setup.js"></script>
+</body>
+</html>

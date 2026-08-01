@@ -1,0 +1,203 @@
+"""BYOK env-file config — the curated variable menu + safe read/write of the repo `.env`.
+
+The desktop app is bring-your-own-key: keys live in a plain `.env` at the repo root (the same
+file `lib.env_loader` loads). The BYOK panel reads this file, shows every known variable (plus any
+extra ones already present), and writes the user's edits back — preserving comments/structure via
+python-dotenv's `set_key`. Values are returned as-is (this is a local, single-user app); the UI
+masks secrets by default. All write paths validate variable names and reject newline injection.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Optional
+
+from dotenv import dotenv_values, load_dotenv, set_key
+
+from lib import app_paths
+
+# The BYOK .env — the exact file lib.env_loader.load_env() reads at startup. Repo `.env` in dev;
+# ~/Library/Application Support/OpenNolan/.env in the packaged app (app_paths owns the decision).
+ENV_PATH = app_paths.env_path()
+
+_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Values made only of these chars are safe to write UNQUOTED (matches the existing .env style and
+# covers every API key/token/URL). Anything else (spaces, #, quotes, $, …) gets quoted so it can't
+# leak into a comment or break parsing on read. Empty matches too → written as `KEY=`.
+_UNQUOTED_RE = re.compile(r"^[A-Za-z0-9_.:/+=~@-]*$")
+
+# Curated BYOK menu — the variables the app knows how to use. Display order = list order;
+# `group` buckets them in the panel and `secret` drives the masked (password) input. Anything in
+# the user's .env that isn't listed here is still shown (appended under "Other").
+# `url` (optional) = the provider's page to create/copy the key; the BYOK panel renders it as a
+# "Get key ↗" link. Omitted for keys with no self-serve portal (Claude Code token comes from the
+# `claude setup-token` CLI; Suno has no official public key page) and for non-secret config values.
+KNOWN_ENV_VARS: list[dict] = [
+    {"key": "CLAUDE_CODE_OAUTH_TOKEN", "label": "Claude Code token", "group": "Agent (Claude)", "secret": True,
+     "description": "OAuth token from `claude setup-token` — powers the editing agent."},
+    {"key": "ANTHROPIC_API_KEY", "label": "Anthropic API key", "group": "Agent (Claude)", "secret": True,
+     "description": "Alternative to the Claude Code token for BYOK agent auth.",
+     "url": "https://console.anthropic.com/settings/keys"},
+    {"key": "OPENAI_API_KEY", "label": "OpenAI", "group": "AI generation", "secret": True,
+     "description": "OpenAI API key.", "url": "https://platform.openai.com/api-keys"},
+    {"key": "GOOGLE_API_KEY", "label": "Google (Gemini / Veo)", "group": "AI generation", "secret": True,
+     "description": "Google AI / Gemini key.", "url": "https://aistudio.google.com/app/apikey"},
+    {"key": "XAI_API_KEY", "label": "xAI (Grok)", "group": "AI generation", "secret": True,
+     "description": "xAI API key.", "url": "https://console.x.ai"},
+    {"key": "FAL_KEY", "label": "fal.ai", "group": "AI generation", "secret": True,
+     "description": "fal.ai key for image/video models.", "url": "https://fal.ai/dashboard/keys"},
+    {"key": "REPLICATE_API_TOKEN", "label": "Replicate", "group": "AI generation", "secret": True,
+     "description": "Replicate API token (community models, Content Signal scorer).",
+     "url": "https://replicate.com/account/api-tokens"},
+    {"key": "RUNWAY_API_KEY", "label": "Runway", "group": "AI generation", "secret": True,
+     "description": "Runway video generation.", "url": "https://dev.runwayml.com/"},
+    {"key": "HF_TOKEN", "label": "Hugging Face", "group": "AI generation", "secret": True,
+     "description": "Hugging Face token (Spaces, hosted models).", "url": "https://huggingface.co/settings/tokens"},
+    {"key": "ELEVENLABS_API_KEY", "label": "ElevenLabs", "group": "Audio / voice", "secret": True,
+     "description": "ElevenLabs TTS, sound effects, and music.",
+     "url": "https://elevenlabs.io/app/settings/api-keys"},
+    {"key": "HEYGEN_API_KEY", "label": "HeyGen", "group": "Audio / voice", "secret": True,
+     "description": "HeyGen avatar video + TTS.", "url": "https://app.heygen.com/settings?nav=API"},
+    {"key": "SUNO_API_KEY", "label": "Suno", "group": "Audio / voice", "secret": True,
+     "description": "Suno music generation."},
+    {"key": "DOUBAO_SPEECH_API_KEY", "label": "Doubao speech", "group": "Audio / voice", "secret": True,
+     "description": "Doubao (Volcengine) speech key.", "url": "https://console.volcengine.com/speech/app"},
+    {"key": "DOUBAO_SPEECH_VOICE_TYPE", "label": "Doubao voice type", "group": "Audio / voice", "secret": False,
+     "description": "Default Doubao voice id (not a secret)."},
+    {"key": "PEXELS_API_KEY", "label": "Pexels", "group": "Stock media", "secret": True,
+     "description": "Pexels stock photos and video.", "url": "https://www.pexels.com/api/new/"},
+    {"key": "PIXABAY_API_KEY", "label": "Pixabay", "group": "Stock media", "secret": True,
+     "description": "Pixabay stock media.", "url": "https://pixabay.com/api/docs/"},
+    {"key": "UNSPLASH_ACCESS_KEY", "label": "Unsplash", "group": "Stock media", "secret": True,
+     "description": "Unsplash photos.", "url": "https://unsplash.com/oauth/applications"},
+    {"key": "YOUTUBE_API_KEY", "label": "YouTube Data API", "group": "Stock media", "secret": True,
+     "description": "YouTube Data API key (reference clips).",
+     "url": "https://console.cloud.google.com/apis/credentials"},
+    {"key": "FIRECRAWL_API_KEY", "label": "Firecrawl", "group": "Web", "secret": True,
+     "description": "Firecrawl web scrape / screenshots.", "url": "https://www.firecrawl.dev/app/api-keys"},
+    {"key": "RESEND_API_KEY", "label": "Resend", "group": "Feedback", "secret": True,
+     "description": "Resend API key — delivers in-app feedback/bug reports by email.",
+     "url": "https://resend.com/api-keys"},
+    {"key": "FEEDBACK_TO", "label": "Feedback email", "group": "Feedback", "secret": False,
+     "description": "Where in-app feedback is emailed (needs RESEND_API_KEY). Not a secret."},
+    {"key": "VIDEO_GEN_LOCAL_ENABLED", "label": "Local video gen", "group": "Local / advanced", "secret": False,
+     "description": "Enable local video generation (true / false)."},
+    {"key": "VIDEO_GEN_LOCAL_MODEL", "label": "Local video model", "group": "Local / advanced", "secret": False,
+     "description": "Local video model name."},
+    {"key": "MODAL_LTX2_ENDPOINT_URL", "label": "Modal LTX2 endpoint", "group": "Local / advanced", "secret": False,
+     "description": "Modal LTX2 endpoint URL."},
+]
+
+_KNOWN_BY_KEY = {v["key"]: v for v in KNOWN_ENV_VARS}
+
+# App-managed secrets that must NOT appear in the BYOK panel (the user edits them through the
+# "Sign in with Claude" flow, not by hand). Hidden from both the curated menu and the "Other" bucket.
+_INTERNAL_KEYS = {"CLAUDE_CODE_REFRESH_TOKEN"}
+
+
+def _looks_secret(key: str) -> bool:
+    k = key.upper()
+    return any(tok in k for tok in ("KEY", "TOKEN", "SECRET", "PASSWORD"))
+
+
+def _strip_inline_comment(value: str) -> str:
+    """Drop an inline comment: everything from the first '#' onward, then trailing whitespace."""
+    i = value.find("#")
+    return value[:i].rstrip() if i != -1 else value
+
+
+def _quoted_keys(path: Path) -> set[str]:
+    """Keys whose raw .env value is quoted (so a literal '#' inside is part of the value, NOT a
+    comment, and must be preserved)."""
+    keys: set[str] = set()
+    for line in path.read_text().splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        k, _, rest = s.partition("=")
+        k = k.strip()
+        if k.startswith("export "):
+            k = k[len("export "):].strip()
+        if rest.lstrip()[:1] in ("'", '"'):
+            keys.add(k)
+    return keys
+
+
+def read_env_file(path: Path = ENV_PATH) -> dict[str, str]:
+    """Parsed {KEY: value} from the .env. python-dotenv handles quotes/escapes; we then strip inline
+    `# comment`s from UNQUOTED values — dotenv only strips those when preceded by TWO spaces, so a
+    single-space ` # comment` otherwise leaks into the value (and the BYOK panel showed it). A quoted
+    value keeps a literal '#'. {} if absent."""
+    if not path.exists():
+        return {}
+    quoted = _quoted_keys(path)
+    out: dict[str, str] = {}
+    for k, v in dotenv_values(path).items():
+        if not k:
+            continue
+        val = v or ""
+        out[k] = val if k in quoted else _strip_inline_comment(val)
+    return out
+
+
+def describe_var(key: str) -> dict:
+    """Display metadata for a single variable — the curated spec if we know the key, else a
+    sensible default. Powers the agent's in-chat `request_api_key` prompt so the user sees a
+    friendly label ("Google (Gemini / Veo)") and hint instead of a bare env-var name."""
+    spec = _KNOWN_BY_KEY.get(key)
+    if spec:
+        return {"key": key, "label": spec["label"], "group": spec["group"],
+                "description": spec.get("description", ""), "secret": spec.get("secret", True)}
+    return {"key": key, "label": key, "group": "Other", "description": "",
+            "secret": _looks_secret(key)}
+
+
+def list_env_vars(path: Path = ENV_PATH) -> list[dict]:
+    """The curated menu with each var's current value, plus any extra keys present in the file."""
+    current = read_env_file(path)
+    out: list[dict] = [{**spec, "value": current.get(spec["key"], "")} for spec in KNOWN_ENV_VARS]
+    for key, val in current.items():
+        if key in _KNOWN_BY_KEY or key in _INTERNAL_KEYS:
+            continue
+        out.append({"key": key, "label": key, "group": "Other", "secret": _looks_secret(key),
+                    "description": "", "value": val})
+    return out
+
+
+def write_env_vars(updates: dict[str, Optional[str]], path: Path = ENV_PATH) -> list[str]:
+    """Persist edits to the .env (preserving the rest). Returns the keys that actually changed.
+
+    Skips no-ops and never adds a blank line for a key the user left empty + never had. Validates
+    names and rejects newline injection so the file can't be corrupted.
+    """
+    for key, val in updates.items():
+        if not _KEY_RE.match(key):
+            raise ValueError(f"Invalid variable name: {key!r}")
+        if val is not None and ("\n" in val or "\r" in val):
+            raise ValueError(f"Value for {key} may not contain newlines")
+
+    current = read_env_file(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.touch()
+
+    changed: list[str] = []
+    for key, raw in updates.items():
+        val = "" if raw is None else raw
+        if key not in current and val == "":
+            continue  # don't clutter the file with blanks for keys the user never set
+        if current.get(key, None) == val:
+            continue  # unchanged
+        # Keep simple values unquoted (clean, matches the file); quote only when needed.
+        quote_mode = "never" if _UNQUOTED_RE.match(val) else "always"
+        set_key(str(path), key, val, quote_mode=quote_mode)
+        changed.append(key)
+    return changed
+
+
+def reload_env(path: Path = ENV_PATH) -> None:
+    """Re-load the .env into os.environ WITH override, so saved keys take effect this session
+    (the next agent turn / tool subprocess inherits them) without a restart."""
+    if path.exists():
+        load_dotenv(path, override=True)

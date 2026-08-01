@@ -128,9 +128,13 @@ class BgRemove(BaseTool):
 
         input_image = Image.open(input_path)
 
+        # rembg's remove() takes a session, not a model name: passing model_name
+        # as a kwarg collides inside remove() ("new_session() got multiple values
+        # for argument 'model_name'") and crashed EVERY call on current rembg.
+        # Found by scripts/verify_containment.sh on its first run.
         result_image = rembg.remove(
             input_image,
-            model_name=model_name,
+            session=rembg.new_session(model_name),
             alpha_matting=alpha_matting,
         )
 

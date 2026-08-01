@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenNolan — Desktop App MVP Plan</title>
+<style>
+  :root{
+    --bg:#FBF7F0; --card:#FFFFFF; --border:#ECE3D6; --border-strong:#DCCFBC;
+    --ink:#2B2622; --muted:#6B6258; --faint:#8C8276;
+    --clay:#B85C38; --clay-soft:#F6E9DF; --coral:#E08A6B;
+    --green:#3F6B4E; --green-soft:#E4EFE6;
+    --amber:#9A6B16; --amber-soft:#F7ECCE;
+    --slate:#5C6470; --slate-soft:#ECEEF1;
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+    --shadow:0 1px 2px rgba(43,38,34,.04),0 8px 24px rgba(43,38,34,.06);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    line-height:1.6;font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--clay)}
+  .wrap{max-width:960px;margin:0 auto;padding:0 24px 120px}
+
+  /* ── Sticky toolbar ── */
+  .bar{position:sticky;top:0;z-index:50;background:rgba(251,247,240,.88);
+    backdrop-filter:saturate(140%) blur(10px);border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:10px;padding:10px 24px;flex-wrap:wrap}
+  .bar .brand{font-family:var(--serif);font-weight:600;font-size:15px;margin-right:auto;letter-spacing:.2px}
+  .bar .brand small{color:var(--faint);font-weight:400;font-family:var(--sans);font-size:12px;display:block}
+  .btn{font:inherit;font-size:13px;border:1px solid var(--border-strong);background:var(--card);
+    color:var(--ink);padding:7px 12px;border-radius:9px;cursor:pointer;display:inline-flex;
+    align-items:center;gap:6px;transition:.15s;white-space:nowrap}
+  .btn:hover{border-color:var(--clay);color:var(--clay)}
+  .btn.on{background:var(--clay);border-color:var(--clay);color:#fff}
+  .btn.on:hover{color:#fff;filter:brightness(1.05)}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+  .btn .dot{width:7px;height:7px;border-radius:50%;background:var(--coral)}
+  .count{background:var(--clay-soft);color:var(--clay);border-radius:20px;
+    padding:1px 8px;font-size:12px;font-weight:600;min-width:20px;text-align:center}
+
+  /* ── Hero ── */
+  header.hero{padding:46px 0 8px}
+  .eyebrow{font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--clay);font-weight:700}
+  h1{font-family:var(--serif);font-weight:600;font-size:40px;line-height:1.12;margin:12px 0 8px;letter-spacing:-.5px}
+  .sub{font-size:18px;color:var(--muted);max-width:680px}
+  .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
+  .chip{font-size:12.5px;padding:4px 11px;border-radius:20px;background:var(--card);
+    border:1px solid var(--border);color:var(--muted);font-weight:500}
+  .chip b{color:var(--ink);font-weight:600}
+
+  /* ── Cards / callouts ── */
+  .tldr{background:linear-gradient(180deg,#FFFCF7,#FBF4EA);border:1px solid var(--border-strong);
+    border-radius:16px;padding:22px 24px;margin:26px 0;box-shadow:var(--shadow)}
+  .tldr h3{margin:0 0 8px;font-family:var(--serif);font-size:19px;font-weight:600}
+  .tldr p{margin:0;color:#4a4038}
+  .plain{background:var(--clay-soft);border-left:3px solid var(--clay);border-radius:0 10px 10px 0;
+    padding:12px 16px;margin:14px 0;font-size:15px;color:#5b4636}
+  .plain b{color:var(--clay)}
+
+  .help{display:flex;gap:18px;flex-wrap:wrap;font-size:13.5px;color:var(--muted);
+    background:var(--card);border:1px dashed var(--border-strong);border-radius:12px;padding:12px 16px;margin:18px 0}
+  .help span{display:inline-flex;align-items:center;gap:7px}
+  .kbd{font-family:var(--serif);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:1px 7px;font-size:12px}
+
+  .legend{display:flex;gap:10px;flex-wrap:wrap;margin:22px 0 8px}
+  .tag{font-size:12px;font-weight:600;padding:3px 10px;border-radius:7px;display:inline-flex;align-items:center;gap:6px}
+  .tag.built{background:var(--green-soft);color:var(--green)}
+  .tag.new{background:var(--amber-soft);color:var(--amber)}
+  .tag.defer{background:var(--slate-soft);color:var(--slate)}
+
+  /* ── Sections ── */
+  section.blk{background:var(--card);border:1px solid var(--border);border-radius:16px;
+    margin:18px 0;box-shadow:var(--shadow);overflow:hidden}
+  .blk > .head{display:flex;align-items:center;gap:12px;padding:18px 22px;cursor:pointer;user-select:none}
+  .blk > .head:hover{background:#FFFCF6}
+  .blk .num{font-family:var(--serif);font-size:14px;color:#fff;background:var(--clay);
+    width:26px;height:26px;border-radius:8px;display:grid;place-items:center;flex:0 0 auto;font-weight:600}
+  .blk h2{font-family:var(--serif);font-size:22px;font-weight:600;margin:0;flex:1;letter-spacing:-.2px}
+  .blk .caret{color:var(--faint);transition:.2s;font-size:13px}
+  .blk.collapsed .caret{transform:rotate(-90deg)}
+  .blk .body{padding:2px 22px 22px}
+  .blk.collapsed .body{display:none}
+  .cmtbtn{opacity:.55;font-size:12px}
+  .blk .head:hover .cmtbtn{opacity:1}
+
+  .blk h4{font-family:var(--sans);font-size:14.5px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--faint);margin:22px 0 8px;font-weight:700}
+  .blk p,.blk li{font-size:15.5px}
+  .blk ul{padding-left:22px;margin:8px 0}
+  .blk li{margin:5px 0}
+  code{font-family:'SF Mono',ui-monospace,Menlo,monospace;font-size:13px;
+    background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:1px 6px;color:#7a4a30}
+  pre{background:#2B2622;color:#F3E9DC;border-radius:12px;padding:16px 18px;overflow:auto;
+    font-family:'SF Mono',ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.55}
+  pre code{background:none;border:none;color:#EFE6D8;padding:0}
+
+  /* editable */
+  [data-eid]{border-radius:8px;transition:.15s;position:relative}
+  body.editing [data-eid]{outline:1.5px dashed var(--border-strong);outline-offset:4px;cursor:text}
+  body.editing [data-eid]:hover{outline-color:var(--clay)}
+  [data-eid].edited::after{content:'edited';position:absolute;right:-6px;top:-16px;font-size:10px;
+    background:var(--amber-soft);color:var(--amber);padding:1px 6px;border-radius:5px;font-weight:600}
+
+  /* workstream cards */
+  .ws{border:1px solid var(--border);border-radius:13px;padding:16px 18px;margin:12px 0;background:#FFFDFA}
+  .ws .top{display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap}
+  .ws .top h3{font-family:var(--serif);font-size:18px;margin:0;flex:1}
+  .pill{font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:20px;background:var(--slate-soft);color:var(--slate)}
+  .pill.eff{background:var(--clay-soft);color:var(--clay)}
+
+  /* milestones */
+  .timeline{border-left:2px solid var(--border-strong);margin:14px 0 4px;padding-left:22px}
+  .ms{position:relative;margin:0 0 18px}
+  .ms::before{content:'';position:absolute;left:-29px;top:3px;width:13px;height:13px;border-radius:50%;
+    background:var(--card);border:3px solid var(--clay)}
+  .ms.win::before{background:var(--clay)}
+  .ms b{font-family:var(--serif);font-size:16px}
+  .ms .when{font-size:12px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+  .ms p{margin:3px 0 0;font-size:14.5px;color:var(--muted)}
+
+  /* decisions */
+  .decision{border:1px solid var(--border-strong);border-radius:13px;padding:16px 18px;margin:14px 0;background:#FFFCF6}
+  .decision .q{font-weight:600;font-size:15.5px;margin-bottom:10px}
+  .opts{display:flex;flex-direction:column;gap:8px}
+  .opt{display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border:1px solid var(--border);
+    border-radius:10px;cursor:pointer;background:#fff;transition:.12s}
+  .opt:hover{border-color:var(--clay)}
+  .opt.sel{border-color:var(--clay);background:var(--clay-soft)}
+  .opt input{margin-top:4px}
+  .opt .ot b{font-size:14.5px}
+  .opt .ot span{display:block;font-size:13px;color:var(--muted)}
+  .rec{font-size:11px;background:var(--green-soft);color:var(--green);padding:1px 7px;border-radius:5px;font-weight:700;margin-left:6px}
+  .note{margin-top:10px;width:100%;border:1px solid var(--border);border-radius:9px;padding:9px 11px;
+    font:inherit;font-size:14px;resize:vertical;min-height:38px;background:#fff}
+
+  /* comments */
+  .comments{margin-top:18px;border-top:1px dashed var(--border-strong);padding-top:14px}
+  .comments.hidden{display:none}
+  .comments h5{margin:0 0 10px;font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);
+    display:flex;align-items:center;gap:8px}
+  .cmt{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:8px 0;font-size:14px;position:relative}
+  .cmt .meta2{font-size:11.5px;color:var(--faint);margin-bottom:3px}
+  .cmt .meta2 b{color:var(--clay)}
+  .cmt .x{position:absolute;top:8px;right:10px;color:var(--faint);cursor:pointer;font-size:15px;line-height:1}
+  .cmt .x:hover{color:var(--clay)}
+  .composer{display:flex;gap:8px;margin-top:8px;align-items:flex-end}
+  .composer textarea{flex:1;border:1px solid var(--border-strong);border-radius:10px;padding:9px 11px;
+    font:inherit;font-size:14px;resize:vertical;min-height:40px;background:#fff}
+  .composer textarea:focus{outline:none;border-color:var(--clay)}
+
+  footer{margin-top:34px;padding:24px;background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow)}
+  footer h3{font-family:var(--serif);margin:0 0 6px}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:14px;opacity:0;
+    transition:.25s;pointer-events:none;z-index:99}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media print{.bar,.composer,.cmtbtn,.help{display:none}.blk.collapsed .body{display:block}}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand">OpenNolan · Plan Review<small>Desktop App MVP</small></div>
+  <button class="btn" id="editBtn">✏️ Edit mode</button>
+  <button class="btn on" id="cmtBtn">💬 Comments <span class="count" id="cmtCount">0</span></button>
+  <button class="btn" id="expBtn">⬇️ Export feedback</button>
+  <button class="btn ghost" id="resetBtn" title="Clear all your local edits & comments">↺ Reset</button>
+</div>
+
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">Plan · Draft for your review</div>
+    <h1 data-eid="title">A native-feeling Mac app for OpenNolan — without a rewrite</h1>
+    <p class="sub" data-eid="subtitle">Wrap the local Mission Control stack you already have in an Electron desktop app, and add a “render once, edit cheaply” editing model so edits stop triggering full re-renders.</p>
+    <div class="meta">
+      <span class="chip">📅 <b>Drafted 17 Jun 2026</b></span>
+      <span class="chip">👤 Owner: <b>Het</b></span>
+      <span class="chip">🎯 Goal: <b>validate if it's worth building</b></span>
+      <span class="chip">🔑 <b>BYOK</b>, local render, no cloud</span>
+    </div>
+  </header>
+
+  <div class="tldr">
+    <h3>The one-paragraph version</h3>
+    <p data-eid="tldr">The hard <b>engine</b> already exists and runs on your machine — local rendering, a timeline file format, and an FFmpeg “assemble the clips” step. This app adds <b>two things</b>: (1) an Electron window so it's a real Mac app, and (2) a <b>brand-new editing UI, built from scratch</b>, that feels like real editing software — the current web editor isn't good enough to keep. Underneath: the AI renders each piece of a video <b>once</b> into clips, drops them on a timeline, and from then on every edit (trim, 2×, crop, transitions, keyframes) is instant through FFmpeg — <b>no re-rendering the animations each time</b>. Think “export your clips, then edit them in a real editor,” not “re-export the whole project on every tiny change.”</p>
+  </div>
+
+  <div class="help">
+    <span>✏️ <b>Edit mode</b>: click it, then type directly into any text to revise it.</span>
+    <span>💬 <b>Comment</b>: hit “+ comment” on any section to leave a note.</span>
+    <span>⬇️ <b>Export</b>: download your edits + comments as a file to hand back to me.</span>
+    <span>💾 Everything saves automatically in this browser.</span>
+  </div>
+
+  <div class="legend">
+    <span class="tag built">✅ Already built</span>
+    <span class="tag new">🆕 New work</span>
+    <span class="tag defer">⏸ Deferred (post-MVP)</span>
+  </div>
+
+  <!-- 1. GOAL -->
+  <section class="blk" data-sid="goal">
+    <div class="head"><span class="num">1</span><h2>Goal &amp; what we're NOT doing</h2><span class="btn ghost cmtbtn" data-cmt>+ comment</span><span class="caret">▼</span></div>
+    <div class="body">
+      <p data-eid="goal-1"><b>Goal:</b> a double-clickable Mac app, running entirely on your machine, that does everything the web Mission Control does <i>plus</i> a real manual editing experience — built fast, so you can feel whether this is worth turning into a product.</p>
+      <h4>Explicitly out of scope for the MVP</h4>
+      <ul data-eid="goal-2">
+        <li><span class="tag defer">⏸</span> Code signing &amp; Apple notarization (needed only to share the app with <i>other</i> people)</li>
+        <li><span class="tag defer">⏸</span> Auto-update mechanism</li>
+        <li><span class="tag defer">⏸</span> Windows / Linux builds</li>
+        <li><span class="tag defer">⏸</span> Hosted/cloud version, accounts, billing</li>
+        <li><span class="tag defer">⏸</span> Native Swift rewrite (that's a “if this wins” reward, see §8)</li>
+      </ul>
+      <div class="plain">💡 <b>Why this matters:</b> cutting these is what turns a multi-month project into a multi-day one. They're all about <i>distribution</i> — and you're not distributing yet, you're validating.</div>
+      <div class="comments" data-comments></div>
+    </div>
+  </section>
+
+  <!-- 2. ARCHITECTURE -->
+  <section class="blk" data-sid="arch">
+    <div class="head"><span class="num">2</span><h2>How the app is wired</h2><span class="btn ghost cmtbtn" data-cmt>+ comment</span><span class="caret">▼</span></div>
+    <div class="body">
+      <p data-eid="arch-1">The Electron app is a thin shell. On launch it starts your existing Python server in the background, then opens a window showing your existing React UI. Nothing about your editor or pipeline gets rewritten — they get <i>wrapped</i>.</p>
+
+      <svg viewBox="0 0 860 430" width="100%" style="margin:14px 0;font-family:var(--sans)">
+        <defs>
+          <style>
+            .lbl{fill:#2B2622;font-size:14px;font-weight:600}.sub2{fill:#6B6258;font-size:11.5px}
+            .box{fill:#fff;stroke:#DCCFBC;stroke-width:1.5;rx:12}.flow{stroke:#B85C38;stroke-width:2;fill:none}
+            .mono{font-family:'SF Mono',monospace;font-size:10.5px;fill:#7a4a30}
+          </style>
+          <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 z" fill="#B85C38"/></marker>
+        </defs>
+        <rect x="18" y="14" width="824" height="250" rx="16" fill="#F6E9DF" stroke="#DCCFBC"/>
+        <text x="38" y="40" class="lbl" fill="#B85C38">⬢ Electron app  (the .app you double-click)</text>
+
+        <rect class="box" x="40" y="58" width="360" height="86" rx="12"/>
+        <text x="58" y="84" class="lbl">Main process (JS)</text>
+        <text x="58" y="104" class="sub2">1. spawns the Python server</text>
+        <text x="58" y="121" class="sub2">2. waits for health, opens the window</text>
+        <text x="58" y="138" class="sub2">3. kills the server on quit</text>
+
+        <rect class="box" x="430" y="58" width="380" height="86" rx="12"/>
+        <text x="448" y="84" class="lbl">Window → your React UI (unchanged)</text>
+        <text x="448" y="106" class="mono">web/src/editor/  Timeline · Keyframes · Inspector</text>
+        <text x="448" y="124" class="sub2">talks to the local server over HTTP</text>
+
+        <rect class="box" x="40" y="166" width="770" height="78" rx="12" fill="#FFFDFA"/>
+        <text x="58" y="192" class="lbl">Python backend — FastAPI  (already exists)</text>
+        <text x="58" y="212" class="mono">uvicorn server.app:app  →  localhost:8000</text>
+        <text x="58" y="230" class="sub2">read/write the timeline · start render jobs · run the agent</text>
+
+        <line class="flow" x1="220" y1="144" x2="220" y2="166" marker-end="url(#ar)"/>
+        <line class="flow" x1="620" y1="144" x2="620" y2="166" marker-end="url(#ar)"/>
+
+        <text x="38" y="296" class="lbl" fill="#6B6258">child processes (spawned by Python at render time)</text>
+        <rect class="box" x="40" y="312" width="250" height="74" rx="12"/>
+        <text x="58" y="338" class="lbl">FFmpeg</text>
+        <text x="58" y="358" class="sub2">the FAST loop: cut, 2×,</text>
+        <text x="58" y="374" class="sub2">crop, transitions, overlays</text>
+
+        <rect class="box" x="306" y="312" width="270" height="74" rx="12"/>
+        <text x="324" y="338" class="lbl">Node — Remotion / HyperFrames</text>
+        <text x="324" y="358" class="sub2">the HEAVY loop: render each</text>
+        <text x="324" y="374" class="sub2">animation/composition (once)</text>
+
+        <rect class="box" x="592" y="312" width="218" height="74" rx="12"/>
+        <text x="610" y="338" class="lbl">Cloud APIs (BYOK)</text>
+        <text x="610" y="358" class="sub2">Anthropic (the agent) +</text>
+        <text x="610" y="374" class="sub2">image/video/voice gen</text>
+
+        <line class="flow" x1="165" y1="244" x2="165" y2="312" marker-end="url(#ar)"/>
+        <line class="flow" x1="430" y1="244" x2="430" y2="312" marker-end="url(#ar)"/>
+        <line class="flow" x1="700" y1="244" x2="700" y2="312" marker-end="url(#ar)"/>
+      </svg>
+
+      <div class="plain">💡 <b>In plain terms:</b> the app is a frame around your existing software. The frame's only jobs are “turn the engine on when you open it” and “show your screen.” That's why it's days of work, not months.</div>
+      <div class="comments" data-comments></div>
+    </div>
+  </section>
+
+  <!-- 3. EDITING MODEL -->
+  <section class="blk" data-sid="model">
+    <div class="head"><span class="num">3</span><h2>The editing model — “render once, edit cheaply” <span class="tag new" style="vertical-align:middle">🆕 the real value</span></h2><span class="btn ghost cmtbtn" data-cmt>+ comment</span><span class="caret">▼</span></div>
+    <div class="body">
+      <p data-eid="model-1">This is the part that fixes your complaint about the web app, where every edit forces a full re-render. We split production into two phases:</p>
+
+      <h4>Phase A — build the pieces (heavy, happens once)</h4>
+      <p data-eid="model-2">When you prompt for a video, the agent renders <b>each composition</b> (a Remotion scene, a HyperFrames animation, or an AI-generated clip) into its <b>own clip file</b>, saved in <code>assets/video/</code>. Each clip is tagged with a fingerprint of its content so it's only ever rendered once.</p>
+
+      <h4>Phase B — assemble &amp; edit (cheap, happens constantly)</h4>
+      <p data-eid="model-3">All those clips get placed on the timeline (<code>edit_decisions.json</code>) as a sequence of cuts. The final video is assembled with FFmpeg. From here on, <b>every edit you or the agent make — trim, 2× speed, crop, transition, overlay — only re-runs FFmpeg</b>, which is fast. The expensive animations are never re-rendered.</p>
+
+      <div class="plain">⚖️ <b>The one rule that makes it work:</b> FFmpeg edits the <i>arrangement</i> of clips. If you want to change what's <i>inside</i> a composition (different text, different animation), that one clip gets re-rendered — but only that one, and only when its content actually changes.</div>
+
+      <h4>Same tools for you and the agent</h4>
+      <p data-eid="model-4">The agent and the manual editor both read and write the exact same timeline file. So whatever the AI can do (speed, cut, crop, keyframe-animate, overlay), <b>you can do by hand</b> on the same timeline — and vice versa.</p>
+      <div class="comments" data-comments></div>
+    </div>
+  </section>
+
+  <!-- 4. WHAT EXISTS -->
+  <section class="blk" data-sid="exists">
+    <div class="head"><span class="num">4</span><h2>What we keep vs. what we rebuild</h2><span class="btn ghost cmtbtn" data-cmt>+ comment</span><span class="caret">▼</span></div>
+    <div class="body">
+      <p data-eid="exists-1">The <b>engine</b> already shipped on <code>main</code> — but the editor <b>UI doesn't meet the bar</b>. So the rule is: <b>keep the engine, rebuild the front-end.</b></p>
+      <h4>Keep — the engine (reuse as-is)</h4>
+      <ul data-eid="exists-2">
+        <li><span class="tag built">✅</span> <b>Timeline file format</b> — <code>edit_decisions.json</code> already supports cuts (source, in/out, <b>speed</b>, <b>crop</b>, layer/picture-in-picture), overlays, transitions, keyframes, subtitles. This is the shared contract.</li>
+        <li><span class="tag built">✅</span> <b>Server endpoints</b> — read/write the timeline + start a background render (replaces any in-progress one), with safe atomic saves</li>
+        <li><span class="tag built">✅</span> <b>FFmpeg assembler</b> — joins all clips on a timeline; <b>preview = export</b> (what you see is what renders)</li>
+        <li><span class="tag built">✅</span> <b>Shared with the agent</b> — the agent reads/writes that same timeline file, so a new UI stays in sync with it automatically</li>
+      </ul>
+      <h4>Rebuild — the editor UI (from scratch)</h4>
+      <ul data-eid="exists-3">
+        <li><span class="tag new">🆕</span> The current web editor (<code>web/src/editor/</code>) is <b>not reused</b> — its UX isn't good enough. Reference only.</li>
+        <li><span class="tag new">🆕</span> A new editing-software-grade UI is built fresh for the app (see WS3). It talks to the same <code>edit_decisions.json</code> + render endpoint, so we rebuild only the surface, not the engine.</li>
+      </ul>
+      <div class="plain">💡 <b>Key point:</b> rebuilding the UI is <i>not</i> rebuilding the editor. The data model, save logic, render path, and agent-sharing all stay. The new UI is just a far better front-end on the same proven engine.</div>
+      <div class="comments" data-comments></div>
+    </div>
+  </section>
+
+  <!-- 5. WORKSTREAMS -->
+  <section class="blk" data-sid="ws">
+    <div class="head"><span class="num">5</span><h2>The build, in four workstreams</h2><span class="btn ghost cmtbtn" data-cmt>+ comment</span><span class="caret">▼</span></div>
+    <div class="body">
+      <div class="ws" data-eid="ws1">
+        <div class="top"><h3>WS1 · Electron shell</h3><span class="pill">the container</span><span class="pill eff">effort: small–medium</span></div>
+        <ul>
+          <li>New <code>desktop/</code> folder: Electron main process + build config</li>
+          <li>On launch: start Python server, wait for it to be healthy, then open the window; shut it down on quit</li>
+          <li>Dev mode points at the live Vite server; packaged mode loads the built UI</li>
+          <li>First-run <b>key screen</b>: paste your Anthropic + provider keys → saved locally</li>
+          <li>Switch the agent's login from <code>claude setup-token</code> to a plain <code>ANTHROPIC_API_KEY</code> (so a normal download works)</li>
+        </ul>
+      </div>
+      <div class="ws" data-eid="ws2">
+        <div class="top"><h3>WS2 · Compositions → timeline clips</h3><span class="pill" style="background:var(--amber-soft);color:var(--amber)">the real engineering</span><span class="pill eff">effort: medium</span></div>
+        <ul>
+          <li>Change the compose step to render each composition to its <b>own clip</b> (not one final video)</li>
+          <li>Add a <b>content fingerprint + cache</b> so a clip is rendered once and reused</li>
+          <li>Auto-write a timeline whose cuts point at those clips, set to the FFmpeg assembler</li>
+          <li>“Re-render only what changed” logic</li>
+        </ul>
+      </div>
+      <div class="ws" data-eid="ws3">
+        <div class="top"><h3>WS3 · Editing-software UI — built from scratch</h3><span class="pill" style="background:var(--amber-soft);color:var(--amber)">the other big build</span><span class="pill eff">effort: medium–large</span></div>
+        <p style="margin:2px 0 8px;color:var(--muted);font-size:14.5px">The current web editor isn't good enough, so we build a new one that <b>feels like real editing software</b> (CapCut / Premiere / iMovie). It reads &amp; writes the same timeline file, so you and the agent stay in sync.</p>
+        <ul>
+          <li><b>Timeline</b>: multi-track, drag to reorder, trim handles, playhead/scrubber, zoom, snapping, split</li>
+          <li><b>Click a clip → its tools appear</b> as buttons — only the ones valid for that clip: <b>Speed (2×/4×…)</b>, <b>Crop</b>, <b>Transform</b> (scale/position), <b>Opacity</b>, <b>Transitions</b> (in/out), <b>Volume</b>, <b>Text / overlay</b>, <b>Motion</b> (pan/zoom)</li>
+          <li><b>Keyframe</b> any animatable property with easing — a real keyframe lane</li>
+          <li><b>Regenerate clip</b>: re-prompt a single composition (re-renders just that one clip)</li>
+          <li><b>Preview</b> that matches the export, plus <b>undo / redo</b></li>
+          <li>Every button maps to a tool the engine actually renders — <b>no dead controls</b> (e.g. rotation isn't rendered, so it won't be a button)</li>
+        </ul>
+        <div class="plain" style="margin-top:10px">🎯 <b>MVP cut:</b> nail timeline + click-clip tools + Speed / Crop / Trim / Split / Transitions + keyframes + preview first. Defer the long tail (every transition type, advanced snapping/ripple) so it <i>feels</i> like an NLE without becoming a 3-month build.</div>
+      </div>
+      <div class="ws" data-eid="ws4">
+        <div class="top"><h3>WS4 · Bundle the runtimes</h3><span class="pill">the packaging hurdle</span><span class="pill eff">effort: medium</span></div>
+        <ul>
+          <li><b>Python</b>: package the server so it runs without a dev setup (the main time-sink)</li>
+          <li><b>FFmpeg</b>: ship the binary, point the tools at it</li>
+          <li><b>Node (Remotion/HyperFrames)</b>: see the open decision in §7 — bundle vs. install on first use</li>
+        </ul>
+      </div>
+      <div class="comments" data-comments></div>
+    </div>
+  </section>
+
+  <!-- 6. MILESTONES -->
+  <section class="blk" data-sid="ms">
+    <div class="head"><span class="num">6</span><h2>Order we'd build it</h2><span class="btn ghost cmtbtn" data-cmt>+ comment</span><span class="caret">▼</span></div>
+    <div class="body">
+      <p data-eid="ms-intro">Sequenced so you get something real to click as early as possible, and so packaging never blocks the actual feature.</p>
+      <div class="timeline" data-eid="ms-list">
+        <div class="ms"><span class="when">M0 · setup</span><br><b>Decisions locked + scaffold</b><p>Confirm Electron / BYOK / Node approach, create the <code>desktop/</code> folder.</p></div>
+        <div class="ms win"><span class="when">M1 · first win</span><br><b>“I have an app”</b><p>Electron window boots the Python server and shows your current UI — no editing changes yet. You can double-click an app.</p></div>
+        <div class="ms"><span class="when">M2 · the engine</span><br><b>Render-once pipeline works</b><p>Prompt → each composition renders to a clip (cached) → they assemble into the timeline file via FFmpeg. The data loop is proven, even before the new UI.</p></div>
+        <div class="ms win"><span class="when">M3 · the point</span><br><b>New editing-software UI (from scratch)</b><p>Timeline, click-a-clip tool buttons (speed/crop/transitions…), keyframes, preview — built fresh, replacing the current web editor. This is the validation moment.</p></div>
+        <div class="ms"><span class="when">M4 · standalone</span><br><b>Runs on a clean Mac</b><p>Bundled so it works without your dev environment.</p></div>
+      </div>
+      <div class="comments" data-comments></div>
+    </div>
+  </section>
+
+  <!-- 7. OPEN DECISIONS -->
+  <section class="blk" data-sid="dec">
+    <div class="head"><span class="num">7</span><h2>Open decisions — your call <span class="count" style="background:var(--amber-soft);color:var(--amber)">pick</span></h2><span class="btn ghost cmtbtn" data-cmt>+ comment</span><span class="caret">▼</span></div>
+    <div class="body">
+      <p data-eid="dec-intro">These genuinely change the build. Pick an option (saved &amp; exported with your feedback).</p>
+
+      <div class="decision" data-did="start">
+        <div class="q">A. Where do we start building?</div>
+        <div class="opts">
+          <label class="opt"><input type="radio" name="start"><span class="ot"><b>Editor + loop first <span class="rec">recommended</span></b><span>Build the new editor UI + render-once model in the browser dev environment, prove the UX, then wrap in Electron. Fastest path to the “is this worth it” answer.</span></span></label>
+          <label class="opt"><input type="radio" name="start"><span class="ot"><b>Desktop shell first</b><span>Get a clickable .app now (no editing changes), add the feature inside it after.</span></span></label>
+          <label class="opt"><input type="radio" name="start"><span class="ot"><b>Both in parallel</b><span>Shell + pipeline at the same time. More moving parts at once.</span></span></label>
+        </div>
+        <textarea class="note" placeholder="Optional note on this decision…"></textarea>
+      </div>
+
+      <div class="decision" data-did="node">
+        <div class="q">B. How do we handle the Node runtimes (Remotion/HyperFrames)?</div>
+        <div class="opts">
+          <label class="opt"><input type="radio" name="node"><span class="ot"><b>Install on first render <span class="rec">recommended for MVP</span></b><span>Tiny app; the first time you render an animation it fetches Node. Needs internet that once.</span></span></label>
+          <label class="opt"><input type="radio" name="node"><span class="ot"><b>Bundle everything</b><span>Big app (~hundreds of MB) but fully offline from the first launch.</span></span></label>
+          <label class="opt"><input type="radio" name="node"><span class="ot"><b>Assume Node is installed</b><span>Smallest effort — fine since it's your machine, but breaks on a clean Mac.</span></span></label>
+        </div>
+        <textarea class="note" placeholder="Optional note on this decision…"></textarea>
+      </div>
+
+      <div class="decision" data-did="keys">
+        <div class="q">C. Where do API keys get stored?</div>
+        <div class="opts">
+          <label class="opt"><input type="radio" name="keys"><span class="ot"><b>Local <code>.env</code> file <span class="rec">simplest</span></b><span>Easy, matches how the repo works today. Plain text on your disk.</span></span></label>
+          <label class="opt"><input type="radio" name="keys"><span class="ot"><b>macOS Keychain</b><span>Safer, encrypted, but more wiring. Better if you ever share the app.</span></span></label>
+        </div>
+        <textarea class="note" placeholder="Optional note on this decision…"></textarea>
+      </div>
+      <div class="comments" data-comments></div>
+    </div>
+  </section>
+
+  <!-- 8. RISKS / LATER -->
+  <section class="blk" data-sid="risk">
+    <div class="head"><span class="num">8</span><h2>Risks &amp; what comes after the MVP</h2><span class="btn ghost cmtbtn" data-cmt>+ comment</span><span class="caret">▼</span></div>
+    <div class="body">
+      <h4>Things that could bite</h4>
+      <ul data-eid="risk-1">
+        <li><b>Packaging Python</b> — bundling a Python app with all its dependencies is the classic “harder than it looks” step. It's the main reason WS4 is medium, not small.</li>
+        <li><b>Cache correctness</b> — the “only re-render what changed” logic has to be right, or you'll either re-render too much (slow) or too little (stale clips).</li>
+        <li><b>Port already in use</b> — if something else uses port 8000, the app should pick a free port automatically.</li>
+      </ul>
+      <h4>The “if this wins” path (deferred on purpose)</h4>
+      <p data-eid="risk-2">If the MVP proves people want this, the upgrades are: code-signing + notarization (so others can install it), auto-update, Windows/Linux, and eventually — if you want flagship-grade timeline performance — a <b>native Swift</b> version (like ChatGPT's Mac app). That's a reward for a proven idea, not a starting bet. Electron lets you find out first, cheaply.</p>
+      <div class="comments" data-comments></div>
+    </div>
+  </section>
+
+  <footer>
+    <h3>Overall comments</h3>
+    <p style="color:var(--muted);font-size:14px;margin:0 0 4px">Big-picture reactions to the whole plan. Then hit <b>Export feedback</b> up top and send me the file.</p>
+    <div class="comments" data-sid="overall" data-comments style="border:none;padding-top:6px"></div>
+  </footer>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  var NS='onolan_plan_v1';
+  var $=function(s,r){return (r||document).querySelector(s)};
+  var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+  var load=function(k,d){try{return JSON.parse(localStorage.getItem(NS+'_'+k))??d}catch(e){return d}};
+  var save=function(k,v){localStorage.setItem(NS+'_'+k,JSON.stringify(v))};
+  var toast=function(m){var t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove('show')},1800)};
+  var esc=function(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML};
+  var now=function(){var d=new Date();return d.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})};
+
+  /* ---- snapshot originals (once) for edit export/diff ---- */
+  var originals=load('orig',null);
+  if(!originals){originals={};$$('[data-eid]').forEach(function(el){originals[el.dataset.eid]=el.innerHTML});save('orig',originals)}
+
+  /* ---- restore edits ---- */
+  var edits=load('edits',{});
+  $$('[data-eid]').forEach(function(el){
+    var id=el.dataset.eid;
+    if(edits[id]!=null){el.innerHTML=edits[id]}
+    if(edits[id]!=null && edits[id]!==originals[id]) el.classList.add('edited');
+  });
+
+  /* ---- edit mode ---- */
+  var editing=false;
+  var debounce={};
+  function setEditable(on){
+    editing=on;document.body.classList.toggle('editing',on);
+    $$('[data-eid]').forEach(function(el){el.contentEditable=on?'true':'false'});
+    $('#editBtn').classList.toggle('on',on);
+    $('#editBtn').innerHTML=on?'✏️ Editing — click to finish':'✏️ Edit mode';
+    if(on)toast('Edit mode on — type into any text. Saves automatically.');
+  }
+  $('#editBtn').addEventListener('click',function(){setEditable(!editing)});
+  document.addEventListener('input',function(e){
+    var el=e.target.closest&&e.target.closest('[data-eid]');if(!el||!editing)return;
+    var id=el.dataset.eid;clearTimeout(debounce[id]);
+    debounce[id]=setTimeout(function(){
+      edits[id]=el.innerHTML;save('edits',edits);
+      el.classList.toggle('edited',el.innerHTML!==originals[id]);
+    },350);
+  });
+
+  /* ---- collapse ---- */
+  var collapsed=load('collapsed',{});
+  $$('.blk').forEach(function(b){
+    var sid=b.dataset.sid;if(collapsed[sid])b.classList.add('collapsed');
+    $('.head',b).addEventListener('click',function(e){
+      if(e.target.closest('[data-cmt]'))return;
+      b.classList.toggle('collapsed');collapsed[sid]=b.classList.contains('collapsed');save('collapsed',collapsed);
+    });
+  });
+
+  /* ---- comments ---- */
+  var comments=load('comments',{}); // {sid:[{a,t,m}]}
+  function sectionTitle(sid){
+    var s=$('[data-sid="'+sid+'"]');if(!s)return sid;
+    var h=$('h2',s)||$('h3',s);return h?h.textContent.replace(/\s+/g,' ').trim():sid;
+  }
+  function renderComments(){
+    var total=0;
+    $$('[data-comments]').forEach(function(box){
+      var sid=box.closest('[data-sid]').dataset.sid;
+      var list=comments[sid]||[];total+=list.length;
+      box.innerHTML='<h5>💬 Comments <span class="count">'+list.length+'</span></h5>'+
+        list.map(function(c,i){return '<div class="cmt"><span class="x" data-del="'+sid+':'+i+'">×</span>'+
+          '<div class="meta2"><b>'+esc(c.a)+'</b> · '+esc(c.t)+'</div>'+esc(c.m).replace(/\n/g,'<br>')+'</div>'}).join('')+
+        '<div class="composer"><textarea rows="1" placeholder="Leave a comment on “'+esc(sectionTitle(sid))+'”…"></textarea>'+
+        '<button class="btn" data-add="'+sid+'">Add</button></div>';
+    });
+    $('#cmtCount').textContent=total;
+  }
+  document.addEventListener('click',function(e){
+    var add=e.target.closest('[data-add]');
+    if(add){var sid=add.dataset.add;var ta=add.previousElementSibling;var m=ta.value.trim();if(!m)return;
+      (comments[sid]=comments[sid]||[]).push({a:'Het',t:now(),m:m});save('comments',comments);renderComments();toast('Comment added');return;}
+    var del=e.target.closest('[data-del]');
+    if(del){var p=del.dataset.del.split(':');comments[p[0]].splice(+p[1],1);save('comments',comments);renderComments();return;}
+    var open=e.target.closest('[data-cmt]');
+    if(open){var blk=open.closest('.blk');if(blk.classList.contains('collapsed'))blk.classList.remove('collapsed');
+      var ta=$('[data-comments] textarea',blk);if(ta){ta.focus();ta.scrollIntoView({block:'center',behavior:'smooth'})}}
+  });
+  // auto-grow textareas
+  document.addEventListener('input',function(e){if(e.target.tagName==='TEXTAREA'){e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}});
+
+  /* ---- comments show/hide ---- */
+  var showCmts=load('showcmts',true);
+  function applyCmtVis(){$$('[data-comments]').forEach(function(b){b.classList.toggle('hidden',!showCmts)});
+    $('#cmtBtn').classList.toggle('on',showCmts)}
+  $('#cmtBtn').addEventListener('click',function(){showCmts=!showCmts;save('showcmts',showCmts);applyCmtVis();});
+
+  /* ---- decisions ---- */
+  var decisions=load('decisions',{}); // {did:{choice:idx,note:''}}
+  $$('.decision').forEach(function(d){
+    var did=d.dataset.did;var opts=$$('.opt',d);var note=$('.note',d);var saved=decisions[did]||{};
+    if(saved.choice!=null){opts[saved.choice].classList.add('sel');$('input',opts[saved.choice]).checked=true}
+    if(saved.note)note.value=saved.note;
+    opts.forEach(function(o,i){o.addEventListener('click',function(){
+      opts.forEach(function(x){x.classList.remove('sel')});o.classList.add('sel');$('input',o).checked=true;
+      decisions[did]=decisions[did]||{};decisions[did].choice=i;save('decisions',decisions);toast('Choice saved');
+    })});
+    note.addEventListener('input',function(){decisions[did]=decisions[did]||{};decisions[did].note=note.value;save('decisions',decisions)});
+  });
+  function decisionLabel(did){return $('[data-did="'+did+'"] .q').textContent.trim()}
+  function decisionChoiceText(did,i){var o=$$('[data-did="'+did+'"] .opt')[i];return o?$('b',o).textContent.replace(/recommended.*/i,'').trim():''}
+
+  /* ---- export ---- */
+  function buildMarkdown(){
+    var L=['# OpenNolan Desktop MVP — Plan Feedback','','_Exported '+now()+' by Het_',''];
+    // decisions
+    L.push('## Decisions');
+    var anyD=false;
+    $$('.decision').forEach(function(d){var did=d.dataset.did;var s=decisions[did]||{};
+      if(s.choice!=null||s.note){anyD=true;L.push('- **'+decisionLabel(did)+'** → '+(s.choice!=null?'`'+decisionChoiceText(did,s.choice)+'`':'_no pick_')+(s.note?(' — '+s.note):''))}});
+    if(!anyD)L.push('_none yet_');L.push('');
+    // comments
+    L.push('## Comments');var anyC=false;
+    Object.keys(comments).forEach(function(sid){(comments[sid]||[]).forEach(function(c){anyC=true});});
+    $$('[data-sid]').forEach(function(s){var sid=s.dataset.sid;var list=comments[sid]||[];if(!list.length)return;
+      L.push('### '+sectionTitle(sid));list.forEach(function(c){L.push('- ['+c.t+'] '+c.m.replace(/\n/g,' '))});L.push('')});
+    if(!anyC)L.push('_none yet_'),L.push('');
+    // edits
+    L.push('## Edited text');var anyE=false;
+    $$('[data-eid]').forEach(function(el){var id=el.dataset.eid;if(edits[id]!=null&&edits[id]!==originals[id]){anyE=true;
+      var sec=el.closest('[data-sid]');var sname=sec?sectionTitle(sec.dataset.sid):'';
+      L.push('### '+(sname?sname+' — ':'')+'`'+id+'`');L.push(el.textContent.replace(/\s+/g,' ').trim());L.push('')}});
+    if(!anyE)L.push('_no edits_'),L.push('');
+    return L.join('\n');
+  }
+  function dl(name,text,type){var b=new Blob([text],{type:type});var u=URL.createObjectURL(b);
+    var a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u)}
+  $('#expBtn').addEventListener('click',function(){
+    var md=buildMarkdown();
+    var json=JSON.stringify({decisions:decisions,comments:comments,edits:Object.keys(edits).reduce(function(o,id){if(edits[id]!==originals[id])o[id]=document.querySelector('[data-eid="'+id+'"]').textContent.trim();return o},{})},null,2);
+    dl('plan-feedback.md',md,'text/markdown');
+    setTimeout(function(){dl('plan-feedback.json',json,'application/json')},200);
+    toast('Exported plan-feedback.md + .json to Downloads');
+  });
+
+  /* ---- reset ---- */
+  $('#resetBtn').addEventListener('click',function(){
+    if(!confirm('Clear all your edits, comments, and decisions for this plan? (The plan text resets to the original.)'))return;
+    ['edits','comments','decisions','collapsed','showcmts','orig'].forEach(function(k){localStorage.removeItem(NS+'_'+k)});
+    location.reload();
+  });
+
+  renderComments();applyCmtVis();
+})();
+</script>
+</body>
+</html>

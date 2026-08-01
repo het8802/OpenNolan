@@ -1,0 +1,250 @@
+"""Dev-observability sink for the editor's UI session recorder.
+
+The Studio recorder (`web/src/debug/recorder.js`) batch-POSTs timestamped events
+(console output, uncaught errors, user interactions, and domain events such as
+scrub/seek) to `POST /api/debug/log`. We append them, one JSON object per line
+(NDJSON), to a per-session file the coding agent can read back:
+
+    <home>/.agents/tools/logs/ui-sessions/<session>.ndjson
+
+`home()` is the writable data root — the repo checkout in dev (so these land next
+to the existing `.agents/tools/logs/backend.log`, gitignored dev tooling), or
+~/Library/Application Support/OpenNolan in the packaged app. Set
+`OPENNOLAN_DEBUG_LOG_DIR` to redirect the directory (used by tests to stay
+hermetic).
+
+`append_events`/`list_sessions` own IO. `analyze_session` is the "query, don't read"
+layer: a session can be thousands of lines (tens of thousands of tokens), so agents
+must NEVER read the raw NDJSON into context — they call the analyzer (or
+`scripts/debug_session.py`), which returns a compact report (histogram + anomalies +
+verbatim errors) that stays small regardless of session length.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterator, Optional
+
+from lib import app_paths
+
+# Session ids are minted client-side from a wall-clock stamp + random suffix; keep
+# the charset tight so a session name can never escape the logs dir or inject path
+# separators. (The file name is `<session>.ndjson`.)
+_SESSION_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+
+
+def logs_dir() -> Path:
+    override = os.environ.get("OPENNOLAN_DEBUG_LOG_DIR")
+    base = Path(override) if override else (app_paths.home() / ".agents" / "tools" / "logs" / "ui-sessions")
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _session_path(session: str) -> Path:
+    if not session or not _SESSION_RE.match(session):
+        raise ValueError("invalid session id")
+    return logs_dir() / f"{session}.ndjson"
+
+
+def append_events(session: str, events: list[Any]) -> int:
+    """Append event objects as NDJSON. Returns the number of lines written."""
+    path = _session_path(session)
+    written = 0
+    with path.open("a", encoding="utf-8") as fh:
+        for ev in events:
+            if not isinstance(ev, dict):
+                continue
+            fh.write(json.dumps(ev, ensure_ascii=False, separators=(",", ":")) + "\n")
+            written += 1
+    return written
+
+
+def list_sessions() -> list[dict[str, Any]]:
+    """Newest-first summary of recorded sessions (for tooling / a future picker)."""
+    out: list[dict[str, Any]] = []
+    for p in logs_dir().glob("*.ndjson"):
+        st = p.stat()
+        out.append(
+            {
+                "session": p.stem,
+                "bytes": st.st_size,
+                "mtime": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(),
+            }
+        )
+    out.sort(key=lambda s: s["mtime"], reverse=True)
+    return out
+
+
+def latest_session() -> Optional[str]:
+    sessions = list_sessions()
+    return sessions[0]["session"] if sessions else None
+
+
+def delete_session(session: str) -> bool:
+    """Discard a recorded session's NDJSON file (the user chose not to send it). Returns True if a
+    file was removed, False if there was nothing to delete (idempotent). Raises ValueError on an
+    invalid session id — the same guard as the writer, so this can never unlink outside the logs dir."""
+    path = _session_path(session)  # validates the id → cannot escape logs_dir()
+    try:
+        path.unlink()
+        return True
+    except FileNotFoundError:
+        return False
+
+
+# Cap the emailed log at ~2.5 MB raw. base64 inflates ~33% (→ ~3.4 MB), which must stay under the
+# Vercel serverless request-body limit (4.5 MB) the relay runs behind. A repro is seconds of clicks,
+# so this is generous; the rare runaway session is tail-truncated (below).
+# ponytail: single global cap; if huge sessions ever need full fidelity, switch to gzip + a bigger cap.
+MAX_ATTACHMENT_BYTES = 2_500_000
+
+
+def read_session_bytes(session: str, max_bytes: int = MAX_ATTACHMENT_BYTES) -> bytes:
+    """Raw NDJSON bytes for a session, to email as a file attachment. If the file is larger than
+    max_bytes, returns the LAST max_bytes (the most recent events — where a repro's failure lands),
+    dropping a partial leading line and prefixing a truncation marker so the result is still valid
+    NDJSON. Raises FileNotFoundError / ValueError like the other readers."""
+    path = _session_path(session)
+    if not path.exists():
+        raise FileNotFoundError(session)
+    size = path.stat().st_size
+    with path.open("rb") as fh:
+        if size <= max_bytes:
+            return fh.read()
+        fh.seek(size - max_bytes)
+        tail = fh.read()
+    nl = tail.find(b"\n")  # drop the partial first line so no torn JSON object survives
+    if nl != -1:
+        tail = tail[nl + 1:]
+    marker = (
+        '{"type":"session.truncated","note":"showing last '
+        f'{len(tail)} of {size} bytes"}}\n'
+    ).encode("utf-8")
+    return marker + tail
+
+
+def _iter_events(session: str) -> Iterator[dict[str, Any]]:
+    path = _session_path(session)
+    if not path.exists():
+        raise FileNotFoundError(session)
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(obj, dict):
+                yield obj
+
+
+# Event types that are always worth surfacing verbatim (rare + high signal).
+_ERROR_TYPES = {"error", "unhandledrejection", "preview.video.error", "preview.video.stalled"}
+
+# Discrete editing actions (from Studio.jsx commit/live/undo/redo). Their `data` is a
+# summarizeDocChange() diff — collected into an ordered "edit history" in the report.
+_EDIT_TYPES = {"edit.commit", "edit.undo", "edit.redo"}
+_MAX_EDITS = 60
+
+
+def analyze_session(session: str, *, sample: int = 15) -> dict[str, Any]:
+    """Compact, token-cheap report for a session — the thing agents read INSTEAD of the raw log.
+
+    Returns: metadata + an event-type histogram + all error/warning events verbatim (capped) +
+    a domain analysis of the source-video seek lifecycle (the scrub→canvas path). The output
+    size is bounded by `sample`/caps, so it stays small even for a 100k-line session.
+    """
+    path = _session_path(session)
+    if not path.exists():
+        raise FileNotFoundError(session)
+
+    hist: Counter[str] = Counter()
+    errors: list[dict[str, Any]] = []
+    first_wall: Optional[str] = None
+    last_wall: Optional[str] = None
+    started_meta: Any = None
+
+    req = fired = seek_started = seek_finished = 0
+    stuck_sample: list[dict[str, Any]] = []
+    pending: Optional[dict[str, Any]] = None  # a 'seeking' awaiting its 'seeked'
+    edits: list[dict[str, Any]] = []
+    edits_total = 0
+
+    total = 0
+    for e in _iter_events(session):
+        total += 1
+        etype = e.get("type", "?")
+        hist[etype] += 1
+        wall = e.get("wall")
+        if wall:
+            if first_wall is None:
+                first_wall = wall
+            last_wall = wall
+        if etype in ("session.start", "session.resume") and started_meta is None:
+            started_meta = e.get("data")
+
+        if etype in _ERROR_TYPES or (etype == "console" and e.get("level") in ("error", "warn")):
+            if len(errors) < 40:
+                errors.append(e)
+
+        # Ordered edit history — what the user (or agent) changed, in sequence.
+        if etype in _EDIT_TYPES:
+            edits_total += 1
+            if len(edits) < _MAX_EDITS:
+                edits.append({"seq": e.get("seq"), "t": e.get("t"), "type": etype, **(e.get("data") or {})})
+
+        # Source-video seek lifecycle: a 'seeking' with no 'seeked' before the NEXT 'seeking'
+        # was superseded (the browser coalesced/dropped it) — that's the stuck-canvas signature.
+        if etype == "preview.seekReq":
+            req += 1
+            if (e.get("data") or {}).get("fired"):
+                fired += 1
+        elif etype == "preview.video.seeking":
+            if pending is not None and len(stuck_sample) < sample:
+                stuck_sample.append({"seq": pending.get("seq"), "t": pending.get("t"), **(pending.get("data") or {})})
+            pending = e
+            seek_started += 1
+        elif etype == "preview.video.seeked":
+            seek_finished += 1
+            pending = None
+
+    report: dict[str, Any] = {
+        "session": session,
+        "file": str(path),
+        "bytes": path.stat().st_size,
+        "events": total,
+        "first_wall": first_wall,
+        "last_wall": last_wall,
+        "started": started_meta,
+        "histogram": dict(hist.most_common()),
+        "errors": errors,
+    }
+
+    if edits_total:
+        report["edits"] = {"total": edits_total, "log": edits}
+
+    if req or seek_started:
+        rate = (seek_finished / seek_started) if seek_started else None
+        report["seeks"] = {
+            "requests": req,
+            "fired": fired,
+            "started": seek_started,
+            "finished": seek_finished,
+            "superseded_before_finishing": seek_started - seek_finished,
+            "completion_rate": round(rate, 3) if rate is not None else None,
+            "stuck_sample": stuck_sample,
+        }
+        if rate is not None and rate < 0.6:
+            report.setdefault("notes", []).append(
+                f"{100 * (1 - rate):.0f}% of source-video seeks never completed — canvas freeze on scrub. "
+                "Prime suspect: the paused-scrub seek in StudioPreview sets video.currentTime without "
+                "guarding on v.seeking, so a seek issued mid-seek is coalesced/dropped."
+            )
+    return report

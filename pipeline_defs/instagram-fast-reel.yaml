@@ -1,0 +1,306 @@
+name: instagram-fast-reel
+version: "1.0"
+description: >
+  Lean, footage-led pipeline that turns YOUR talking-head clips into a fast-paced vertical
+  reel. The agent transcribes the take, plans the cuts + animations in one pass, tightens the
+  talking head into a punchy jump-cut edit (dead air / rambles removed), then layers on
+  keyframe-animated overlays, meme GIFs, motion-graphic captions (word-by-word), SFX on the
+  cuts, and music — and renders a watermark-free 9:16 export.
+
+  Deliberately short: idea -> script -> assets -> edit -> compose -> qa (no separate research,
+  scene_plan, or publish stage). scene planning is folded into `script` as a beat/cut/animation
+  map; export is folded into `compose`. A dedicated `qa` stage closes the pipeline: it inspects
+  the HOOK at 5 fps first, then the whole reel at 2 fps, plus a full technical probe.
+
+  Difference from anthropic-style-animated-talking-head: THIS pipeline is fast-cut-first. The
+  talking head is CUT (jump cuts, silence removal) rather than kept byte-for-byte — audio is cut
+  WITH the video so the pacing stays tight. The animations/GIFs/captions are timed to the CUT
+  timeline, not the original take.
+
+  Difference from instagram-reels-studio: this one is specialized for a talking head as the
+  spine and is leaner (5 stages, no template/scene stages). It reuses the same Edits-parity
+  toolset (keyframe overlays, sticker/GIF search, beat cutting, motion ops, text cards,
+  word-level captions, SFX library).
+
+  After compose, the human hand-tunes the result in the Studio editor: the pipeline writes the
+  shared live `edit_decisions.json` that the editor opens (agent + user share ONE doc).
+
+category: talking_head
+stability: beta
+default_checkpoint_policy: guided
+
+extensions:
+  custom_scripts: false
+  custom_playbooks: true
+  custom_skills: true
+  custom_tools: false
+
+required_skills:
+  - pipelines/instagram-fast-reel/idea-director
+  - pipelines/instagram-fast-reel/script-director
+  - pipelines/instagram-fast-reel/asset-director
+  - pipelines/instagram-fast-reel/edit-director
+  - pipelines/instagram-fast-reel/compose-director
+  - pipelines/instagram-fast-reel/qa-director
+  - meta/reviewer
+  - meta/checkpoint-protocol
+
+compatible_playbooks:
+  # Fixed design theme for this pipeline (see metadata.design_theme):
+  #   overall surface / typography / captions / motion-graphics = Anthropic editorial
+  #   the animated motion-graphic beats = Greg Isenberg motion grammar
+  recommended:
+    - anthropic-editorial-animated
+    - greg-isenberg-product-explainer
+  also_works:
+    - greg-editorial
+    - kinetic-whiteboard-captions
+  custom_allowed: false
+
+reference_input:
+  supported: true
+  analysis_depth: standard
+  analysis_tools:
+    - video_analyzer
+
+stages:
+  # ── idea: brief + talking-head intake ─────────────────────────────
+  - name: idea
+    skill: pipelines/instagram-fast-reel/idea-director
+    produces:
+      - brief
+      - decision_log
+    optional_tools:
+      - video_analyzer
+    tools_available:
+      - video_analyzer
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Brief captures topic, hook, target platform (Reels/Shorts/TikTok), target duration, tone, and pacing energy (how aggressive the cutting should be)
+      - Provided talking-head footage is referenced; HDR/SDR + resolution + fps + audio presence probed (is_hdr_source) and recorded in decision_log
+      - Caption style chosen (word-by-word karaoke vs punch-word hits vs clean lower-third) and locked in the brief
+      - "render_runtime chosen explicitly and BOTH runtimes presented (HARD RULE): ffmpeg default (fast cuts + keyframe overlays + GIFs + drawtext/animated caption cards); hyperframes optional for premium animated title/caption cards"
+    success_criteria:
+      - Schema-valid brief artifact
+      - Brief records render_runtime, caption style, pacing energy, and the source talking-head clip(s)
+      - HDR check logged (never silently tonemap); SDR confirmed or HDR handling decided with the user
+
+  # ── script: transcribe + plan cuts, animations, GIFs, captions ────
+  - name: script
+    skill: pipelines/instagram-fast-reel/script-director
+    required_artifacts_in:
+      - brief
+    produces:
+      - script
+      - transcript
+    required_tools:
+      - transcriber
+    optional_tools:
+      - silence_cutter
+      - frame_sampler
+    tools_available:
+      - transcriber
+      - silence_cutter
+      - frame_sampler
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Word-level transcript produced (whisperx); dead-air / filler / rambling spans identified as CUT candidates (this is the fast-pacing plan)
+      - Hook lands in the first ~2s; the edit is arranged so the strongest line opens
+      - Per beat, the plan flags what gets an ANIMATION (emphasis word -> pop/keyframe overlay), a MEME GIF (reaction moment), or a CAPTION emphasis, each pinned to a word-timestamp trigger
+      - "NARRATION SYNC (hard rule): every planned reveal/GIF/caption hit is tied to its trigger word and lands ON it, never before"
+    success_criteria:
+      - Schema-valid script artifact + transcript with word-level timestamps
+      - script carries a cut plan (keep/drop spans), and an annotation plan (animation / gif / caption per beat with trigger-word timestamps)
+
+  # ── assets: build animation + caption assets, fetch GIFs, music/SFX
+  - name: assets
+    skill: pipelines/instagram-fast-reel/asset-director
+    required_artifacts_in:
+      - script
+    optional_artifacts_in:
+      - brief
+    produces:
+      - asset_manifest
+    optional_tools:
+      - text_card_gen
+      - sticker_search
+      - subtitle_gen
+      - sfx_kit
+      - music_gen
+      - freesound_music
+      - pixabay_music
+      - audio_enhance
+    tools_available:
+      - text_card_gen
+      - sticker_search
+      - subtitle_gen
+      - sfx_kit
+      - music_gen
+      - freesound_music
+      - pixabay_music
+      - audio_enhance
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Emphasis / caption cards baked as tight transparent PNGs via text_card_gen where the script called for animated text
+      - Meme GIFs fetched via sticker_search (GIPHY/Tenor); each result's attribution string captured for export metadata (API requirement)
+      - Word-level captions prepared via subtitle_gen from the transcript; SFX pulled from the in-repo assets/sfx/ library (generate only on a miss); music chosen (library/gen) with a ducking plan
+      - Any paid/generative tool was confirm-gated and cached
+    success_criteria:
+      - Schema-valid asset_manifest with provenance (provider, url/path, license/attribution, trigger reference) for every asset
+      - GIF attribution present for every GIPHY/Tenor sticker
+
+  # ── edit: THE HEART — fast cuts + keyframe animations + GIFs + captions
+  - name: edit
+    skill: pipelines/instagram-fast-reel/edit-director
+    required_artifacts_in:
+      - script
+      - asset_manifest
+    optional_artifacts_in:
+      - brief
+    produces:
+      - edit_decisions
+    required_tools:
+      - keyframe_animate
+    optional_tools:
+      - silence_cutter
+      - beat_cutter
+      - motion_ops
+      - text_card_gen
+      - sticker_search
+      - sfx_kit
+      - video_trimmer
+    tools_available:
+      - silence_cutter
+      - beat_cutter
+      - keyframe_animate
+      - motion_ops
+      - text_card_gen
+      - sticker_search
+      - sfx_kit
+      - video_trimmer
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - "Fast pacing is real: dead-air / filler removed via silence_cutter (or the script's cut spans) as jump cuts on the talking head; audio is cut WITH the video (no dead air left in the VO)"
+      - Keyframe animations present as overlays[].keyframes (pop / slide / scale / opacity with easing) for every emphasis the script planned; each reveal lands ON its trigger word
+      - Meme GIFs placed as overlays with keyframes (entrance + hold + exit) at their reaction moments; sticker attribution carried into export metadata
+      - Motion-graphic captions present (word-by-word subtitles and/or animated text cards), never bottom-pinned into the platform UI shadow zone
+      - Energy ops applied where planned via motion_ops (punch-in/pan on a beat, speed-up on a ramble, freeze on a punchline); SFX (whoosh/impact) seated on the hard cuts; music set with ducking
+      - "render_runtime carried UNCHANGED from the brief; compose_target set to 1080x1920 (9:16)"
+    success_criteria:
+      - Schema-valid edit_decisions artifact (validates against schemas/artifacts/edit_decisions.schema.json; Save never 422s)
+      - Cut list reflects the tightened pacing; keyframed overlays + GIF overlays + captions all validate; motion-ops derivatives registered in the asset_manifest
+
+  # ── compose: render + watermark-free export ───────────────────────
+  - name: compose
+    skill: pipelines/instagram-fast-reel/compose-director
+    required_artifacts_in:
+      - edit_decisions
+      - asset_manifest
+    produces:
+      - render_report
+    required_tools:
+      - video_compose
+    optional_tools:
+      - audio_mixer
+      - color_grade
+    tools_available:
+      - video_compose
+      - audio_mixer
+      - color_grade
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - video_compose routes by edit_decisions.render_runtime (no silent runtime swap)
+      - Output canvas is 1080x1920 (9:16) and watermark-free
+      - "Basic render validity only (deep QA is the `qa` stage): output file exists and passes an ffprobe sanity probe (valid container, decodes)"
+      - HDR not silently tonemapped (honor the idea-stage decision)
+    success_criteria:
+      - Schema-valid render_report; output file exists at projects/<name>/renders/final.mp4 and passes an ffprobe sanity probe
+      - render_runtime that ran matches the one locked in the brief (no silent swap)
+
+  # ── qa: hook @5fps, full reel @2fps, full technical probe ─────────
+  - name: qa
+    skill: pipelines/instagram-fast-reel/qa-director
+    required_artifacts_in:
+      - render_report
+      - edit_decisions
+    optional_artifacts_in:
+      - script
+      - asset_manifest
+      - brief
+    produces:
+      - final_review
+    required_tools:
+      - frame_sampler
+      - visual_qa
+    optional_tools:
+      - content_signal
+    tools_available:
+      - frame_sampler
+      - visual_qa
+      - content_signal
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - "STEP 1 — HOOK at 5 fps: sample the hook window (first ~3s, the duration of cuts[0]) at frame_sampler interval_seconds=0.2. If the hook fails (weak/broken/black first frame, late caption, no motion in the opening), STOP and report before wasting the full pass — the hook is the whole reel."
+      - "STEP 2 — FULL REEL at 2 fps: sample the entire output at frame_sampler interval_seconds=0.5. Scan every sampled frame for black/frozen frames, broken or missing overlays, GIFs that never appear, captions in the UI shadow zone or clipped off-frame, unreadable text."
+      - "STEP 3 — TECHNICALS: visual_qa probe with expected {width:1080, height:1920, has_audio:true} — container valid, resolution/fps/codec/pixel_format correct, duration matches the tightened edit (shorter than source); decode clean (no errors), no long black segments; visual_qa audio_levels — VO present + intelligible, music ducked, no clipping, no leftover dead air."
+      - "SYNC: using the sampled frames, confirm no animation/GIF/caption appears BEFORE its trigger word (early reveal = CRITICAL)."
+      - content_signal advisory score reviewed (informational, never a gate)
+    success_criteria:
+      - Schema-valid final_review artifact with status pass/revise/fail and recommended_action
+      - technical_probe, visual_spotcheck (hook @5fps + full @2fps), audio_spotcheck, and subtitle_check all completed; frame_paths recorded
+      - Any CRITICAL finding (bad hook, early reveal, black frames, wrong resolution, missing audio) sets status to revise/fail with a concrete next action (re_render / revise_edit / revise_assets)
+
+metadata:
+  canvas: "1080x1920 (9:16)"
+  design_theme:
+    fixed: true
+    overall: >
+      Anthropic editorial (playbook: anthropic-editorial-animated). This governs the whole
+      surface: warm ivory paper canvas (#F0EDE6 with a soft radial vignette), slate ink
+      (#1A1A18), clay/terracotta coral (#CC785C) as the brand + emphasis color, forest-green =
+      approved/positive and amber = gated/caution semantic accents. Typography: Fraunces (900,
+      tracking -0.03em) for titles / card labels / product names / narrative phrases; Inter (600)
+      for eyebrows, sub-labels, pills, and numerals. Rounded cards with soft warm-gray shadows,
+      thin charcoal/clay connectors. NO neon, purple/violet/lavender, obsidian, or cyberpunk.
+    animations: >
+      Greg Isenberg motion grammar (playbook: greg-isenberg-product-explainer, skill:
+      creative/greg-isenberg-product-explainer). The animated motion-graphic beats (the keyframe
+      overlays / cards / diagrams that pop over the talking head) use Greg's motion vocabulary:
+      receipt-stack-in, phrase-collage-build (serif phrases build in short word groups),
+      connector-draw, prompt-submit -> response-to-artifact loops, proof-board-land. Rapid pop +
+      settle (back.out scale-from-0.8 + slide, 0.28-0.45s), restrained cubic ease-outs, subtle
+      2-4% camera push-ins on holds. Emphasis words scale only to 1.03-1.06 with a color hit.
+      NO meme bounces, yoyo, random glitch, or infinite repeats.
+    captions: >
+      Motion-graphic captions follow the Anthropic editorial look: Fraunces for punch-word / card
+      captions, Inter for running word-by-word captions; clay/coral or amber/green emphasis hits;
+      seated in the safe band, never bottom-pinned into the platform UI shadow zone.
+    reconcile: >
+      Both playbooks are warm-editorial and share Fraunces + ivory paper, so they compose without
+      clashing. Keep the PALETTE Anthropic (clay/coral brand + emphasis) across everything;
+      borrow Greg's forest/mint/gold only as the semantic accent inside animated diagram/receipt
+      beats. When the two disagree on a token, Anthropic wins for the surface and Greg wins for
+      the motion.
+  audio_policy: >
+    Fast-cut pipeline: the talking-head audio is CUT WITH the video (silence/filler removed as
+    jump cuts) so the VO stays tight — it is NOT preserved byte-for-byte. Music sits under the VO
+    with ducking; SFX punctuate the hard cuts. (This is the deliberate contrast with
+    anthropic-style-animated-talking-head, where the VO is untouched.)
+  north_star: >
+    Drop a talking head in, get a fast reel out. The agent plans + builds the animations/GIFs/
+    captions and assembles the fast cut; the human then hand-tunes in the Studio editor via the
+    shared live edit_decisions.json (agent + user share ONE doc).
+  fast_pacing_rules:
+    - "Remove dead air, long pauses, filler ('um', 'uh', restarts) via silence_cutter or the script's cut spans — this is what makes it feel fast."
+    - "Prefer hard jump cuts on the talking head; use a quick whoosh SFX or a small punch-in (motion_ops pan_zoom) on the cut to hide the jump."
+    - "Speed up rambling explanation beats; freeze on a punchline; keep the hook first."
+  annotation_layers:
+    keyframe_animation: "overlays[].keyframes (pop/slide/scale/opacity with easing) on emphasis words — pixels from text_card_gen or a small graphic; reveal lands ON the trigger word."
+    meme_gif: "sticker_search (GIPHY/Tenor) placed as an overlay with entrance+hold+exit keyframes at a reaction moment; carry attribution into export metadata."
+    motion_graphic_captions: "word-by-word (karaoke) captions via subtitle_gen, and/or animated text cards (text_card_gen presets: black_pill_caption, outline_pop, bold_center) animated via overlays[].keyframes; never bottom-pinned into the platform UI shadow zone."

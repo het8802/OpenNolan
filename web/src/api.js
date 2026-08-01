@@ -9,9 +9,117 @@ async function json(resp) {
 }
 
 export const getPipelines = () => fetch('/api/pipelines').then(json)
+// Visual style playbooks (built-in + user-created) for the New Project picker.
+export const getStyles = () => fetch('/api/styles').then(json)
 export const getProjects = () => fetch('/api/projects').then(json)
+
+// BYOK: read the local .env (curated variable menu + current values) and save edits back.
+export const getEnv = () => fetch('/api/env').then(json)
+export const saveEnv = (vars) =>
+  fetch('/api/env', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vars }),
+  }).then(json)
+// Anthropic account auth ("Sign in with Claude" OAuth + API-key fallback).
+export const getAuthStatus = () => fetch('/api/auth/status').then(json)
+export const startOAuth = () => fetch('/api/auth/oauth/start', { method: 'POST' }).then(json)
+export const finishOAuth = (code) =>
+  fetch('/api/auth/oauth/finish', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  }).then(json)
+export const connectApiKey = (api_key) =>
+  fetch('/api/auth/api-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key }),
+  }).then(json)
+export const disconnectAuth = () => fetch('/api/auth/disconnect', { method: 'POST' }).then(json)
+
+// In-app feedback (bug/feature/other). Stored locally + PostHog event + best-effort email.
+// Pass { debug_session } to attach a recorded editor session's analysis to the report.
+export const sendFeedback = (body) =>
+  fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(json)
+
+// Discard a recorded debug session's logs (user chose not to send the debug report). Idempotent.
+export const discardDebugSession = (session) =>
+  fetch(`/api/debug/sessions/${encodeURIComponent(session)}`, { method: 'DELETE' }).then(json)
+
+// Product-analytics opt-out state (+ anonymous device id) and the toggle to flip it.
+export const getAnalytics = () => fetch('/api/settings/analytics').then(json)
+export const setAnalytics = (disabled) =>
+  fetch('/api/settings/analytics', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ disabled }),
+  }).then(json)
+
+// Fire-and-forget crash reporter. Called from window.onerror / the React ErrorBoundary, so it must
+// NEVER throw (that would loop) and never use `json()` (which throws on !ok). Deduped + capped so a
+// tight render-error loop can't flood the backend.
+const _reported = new Set()
+export function reportClientError(source, message, stack, context) {
+  try {
+    const sig = `${source}:${String(message).slice(0, 200)}`
+    if (_reported.has(sig) || _reported.size > 25) return
+    _reported.add(sig)
+    fetch('/api/telemetry/error', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source, message: String(message).slice(0, 1000), stack: stack ? String(stack).slice(0, 8000) : null, context }),
+    }).catch(() => {})
+  } catch { /* reporting must never throw */ }
+}
+
 export const getState = (id) => fetch(`/api/projects/${id}/state`).then(json)
 export const getCapabilities = () => fetch('/api/capabilities').then(json)
+
+// First-run / capability provisioning status: core/ffmpeg/composition + per-pack installed flags
+// and metadata (label, size_mb). Drives the Capabilities settings panel.
+export const getDoctor = () => fetch('/api/doctor').then(json)
+
+// Install a lazy capability pack (transcription/vision/bg-removal/beat-sync/tts). Streams NDJSON
+// frames {type:'log'|'done'|'error', ...} while pip runs — plain newline-delimited JSON (NOT the
+// SSE `data:` framing that chatStream uses), so parse line-by-line.
+export async function* provisionStream(pack, signal) {
+  const resp = await fetch(`/api/provision/${encodeURIComponent(pack)}`, { method: 'POST', signal })
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}))
+    throw new Error(body.detail || `install failed (${resp.status})`)
+  }
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let nl
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const raw = buffer.slice(0, nl).trim()
+      buffer = buffer.slice(nl + 1)
+      if (!raw) continue
+      try { yield JSON.parse(raw) } catch { /* ignore malformed line */ }
+    }
+  }
+  const tail = buffer.trim()
+  if (tail) { try { yield JSON.parse(tail) } catch { /* ignore */ } }
+}
+
+// Answer an agent `request_capability` prompt: unblock the waiting tool after the UI installed
+// (installed=true → agent retries) or the user declined (installed=false).
+export const provideCapability = (id, cap_request_id, installed) =>
+  fetch(`/api/projects/${id}/agent/provide-capability`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cap_request_id, installed }),
+  }).then(json)
 export const listAssets = (id) => fetch(`/api/projects/${id}/assets`).then(json)
 // `v` is an optional cache-bust token (e.g. a file's mtime). Including it makes the
 // URL change when the file's contents change, so a <video>/<img> re-fetches the new
@@ -55,11 +163,11 @@ export const getActivity = (id, { limit, since } = {}) => {
   return fetch(`/api/projects/${id}/activity${qs ? `?${qs}` : ''}`).then(json)
 }
 
-export const createProject = (name, pipeline_type) =>
+export const createProject = (name, pipeline_type, style) =>
   fetch('/api/projects', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, pipeline_type }),
+    body: JSON.stringify({ name, pipeline_type, style }),
   }).then(json)
 
 export const uploadAsset = (id, kind, file) => {
@@ -83,6 +191,14 @@ export const answerQuestion = (id, question_id, answer) =>
     body: JSON.stringify({ question_id, answer }),
   }).then(json)
 
+// Answer an agent `request_api_key` prompt: save the key to BYOK (skipped=false) or decline it.
+export const provideKey = (id, body) =>
+  fetch(`/api/projects/${id}/agent/provide-key`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(json)
+
 export const stopAgent = (id) =>
   fetch(`/api/projects/${id}/agent/stop`, { method: 'POST' }).then(json)
 
@@ -104,11 +220,11 @@ export const saveThread = (id, tid, body) =>
 
 // Stream an agent turn. /chat is POST, so we read the SSE body off fetch
 // (EventSource can't POST). Yields one parsed event object per `data:` line.
-export async function* chatStream(id, message, thread_id, signal) {
+export async function* chatStream(id, message, thread_id, signal, model) {
   const resp = await fetch(`/api/projects/${id}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, thread_id }),
+    body: JSON.stringify({ message, thread_id, model }),
     signal,
   })
   if (!resp.ok) {

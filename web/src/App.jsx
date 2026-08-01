@@ -1,11 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { marked } from 'marked'
+import { useEffect, useRef, useState } from 'react'
 import * as api from './api.js'
 import { LineChart } from './components/LineChart.jsx'
-import Editor from './editor/Editor.jsx'
-
-// Configure marked for safe, compact output
-marked.setOptions({ breaks: true, gfm: true })
+import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, IconMessage, ClaudeLogo, IconMovie, IconMic, IconStar, IconMusic, IconListDetails } from './components/icons.jsx'
+import Studio from './studio/Studio.jsx'
+import ChatPanel from './chat/ChatPanel.jsx'
+import CapabilitiesModal from './CapabilitiesModal.jsx'
+import UpdateBanner from './UpdateBanner.jsx'
+import { useAgentChat } from './chat/useAgentChat.js'
+import { useAuth } from './auth/useAuth.js'
+import ConnectClaudeModal from './auth/ConnectClaudeModal.jsx'
 
 const STATUS_LABEL = {
   pending: 'pending',
@@ -16,61 +19,33 @@ const STATUS_LABEL = {
   error: 'error',
 }
 
-const ASSET_KINDS = ['images', 'video', 'audio', 'music']
-
-const TOOL_ICON = {
-  Read: '📄',
-  Write: '✏️',
-  Edit: '✏️',
-  MultiEdit: '✏️',
-  Bash: '⌨️',
-  Glob: '🔍',
-  Grep: '🔍',
-  WebSearch: '🌐',
-  WebFetch: '🌐',
-  Skill: '🛠',
-  TodoWrite: '📋',
-}
-
-// Detect render-in-progress from a tool_use event
-function isRenderCommand(item) {
-  if (item.kind !== 'tool_use' || item.name !== 'Bash') return false
-  const d = (item.detail || '').toLowerCase()
-  return d.includes('npx remotion') || d.includes('ffmpeg') || d.includes('npm run render') || d.includes('hyperframes render')
-}
+// 'renders' is read-only (not uploadable): the agent's HyperFrames clips from hf/renders,
+// served by the backend as `agent_renders` (distinct from the "Final render" in `renders`).
+const ASSET_KINDS = ['images', 'video', 'audio', 'music', 'renders']
 
 export default function App() {
   const [pipelines, setPipelines] = useState([])
+  const [styles, setStyles] = useState([])                    // available visual style playbooks
   const [projects, setProjects] = useState([])
   const [selected, setSelected] = useState(null)
   const [state, setState] = useState(null)
-  const [messages, setMessages] = useState([])
-  const [pendingConfirm, setPendingConfirm] = useState(null)
-  const [pendingQuestion, setPendingQuestion] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [input, setInput] = useState('')
   const [toast, setToast] = useState(null)
-  const [renderingStage, setRenderingStage] = useState(null) // tool_use id of in-flight render
-  const [toolResults, setToolResults] = useState({})          // tool_use_id -> result, for expansion
   const [uploadTick, setUploadTick] = useState(0)             // bump to refresh asset listing
-  const [threads, setThreads] = useState([])                  // chat threads for the project
-  const [activeThread, setActiveThread] = useState(null)      // current thread id
   const [editing, setEditing] = useState(false)               // manual editor open (full-screen)
-  const messagesRef = useRef([])                              // latest messages, for thread persistence
-  const sessionIdRef = useRef(null)                           // latest agent session_id
-  const abortRef = useRef(null)                               // aborts the in-flight chat stream (Stop)
-  useEffect(() => { messagesRef.current = messages }, [messages])
+  const [showConnect, setShowConnect] = useState(false)        // "Sign in with Claude" modal open
 
-  // Persist the active thread continuously (debounced), not just at turn end —
-  // so reloading mid-turn (a full pipeline can run for minutes) keeps the chat.
-  useEffect(() => {
-    if (!selected || !activeThread || messages.length === 0) return
-    const t = setTimeout(() => persistThread(activeThread), 700)
-    return () => clearTimeout(t)
-  }, [messages, selected, activeThread])
+  // Anthropic account auth — one instance for the whole app (sign-in CTA, top-right re-auth,
+  // in-chat reconnect box). The backend is the source of truth; refresh() re-checks on demand.
+  const auth = useAuth()
+
+  // All agent-chat state + handlers live in one hook so the pipeline window and the editor
+  // share a single conversation (revived from disk whenever `selected` changes). A turn-level auth
+  // failure calls onAuthError → re-check auth so the reconnect surfaces immediately.
+  const chat = useAgentChat(selected, { onError: showError, onAuthError: () => auth.refresh() })
 
   useEffect(() => {
     api.getPipelines().then(d => setPipelines(d.pipelines || [])).catch(showError)
+    api.getStyles().then(d => setStyles(d.styles || [])).catch(showError)
     refreshProjects()
     // Poll the project list so externally/agent-created projects appear live.
     const id = setInterval(refreshProjects, 4000)
@@ -100,179 +75,40 @@ export default function App() {
     return api.getProjects().then(d => setProjects(d.projects || [])).catch(showError)
   }
 
-  function refreshThreads(projectId) {
-    const id = projectId || selected
-    if (!id) return Promise.resolve()
-    return api.listThreads(id).then(d => setThreads(d.threads || [])).catch(() => {})
-  }
-
-  function clearChat() {
-    setMessages([])
-    setPendingConfirm(null)
-    setPendingQuestion(null)
-    setRenderingStage(null)
-    setToolResults({})
-    setInput('')
-    sessionIdRef.current = null
-  }
-
-  // '+' new chat: start a fresh thread (created lazily on first message).
-  function newChat() {
-    clearChat()
-    setActiveThread(null)
-  }
-
-  async function loadThread(tid, projectId = selected) {
-    if (!projectId || !tid) return
-    try {
-      const rec = await api.getThread(projectId, tid)
-      clearChat()
-      setMessages(rec.messages || [])
-      sessionIdRef.current = rec.session_id || null
-      setActiveThread(tid)
-    } catch (e) { showError(e) }
-  }
-
-  // Open a project and revive its most recent conversation, so a reload lands
-  // you back in the chat you were in (not a blank one).
-  async function openProject(id) {
+  // Open a project; the chat hook revives its most recent conversation from disk.
+  function openProject(id) {
     setSelected(id)
-    clearChat()
-    setActiveThread(null)
-    try {
-      const d = await api.listThreads(id)              // newest-updated first
-      setThreads(d.threads || [])
-      const latest = (d.threads || []).find(t => (t.message_count || 0) > 0)
-      if (latest) loadThread(latest.thread_id, id)
-    } catch { setThreads([]) }
   }
 
-  function deriveTitle(msgs) {
-    const firstUser = (msgs || []).find(m => m.role === 'user')
-    const t = (firstUser?.text || 'New chat').trim().replace(/\s+/g, ' ')
-    return t.length > 48 ? t.slice(0, 48) + '…' : t
-  }
-
-  function persistThread(tid) {
-    if (!selected || !tid) return
-    api.saveThread(selected, tid, {
-      messages: messagesRef.current,
-      session_id: sessionIdRef.current,
-      title: deriveTitle(messagesRef.current),
-    }).then(() => refreshThreads()).catch(() => {})
-  }
-
-  const send = useCallback(async (text) => {
-    const message = (text || input).trim()
-    if (!message || !selected || busy) return
-    setInput('')
-    setMessages(m => [...m, { role: 'user', text: message }])
-    setBusy(true)
-    // Ensure a thread exists to persist this conversation into.
-    let tid = activeThread
-    if (!tid) {
-      try {
-        const rec = await api.createThread(selected, deriveTitle([{ role: 'user', text: message }]))
-        tid = rec.thread_id
-        setActiveThread(tid)
-      } catch { /* persistence is best-effort; continue the chat regardless */ }
-    }
-    const controller = new AbortController()
-    abortRef.current = controller
-    try {
-      for await (const evt of api.chatStream(selected, message, tid, controller.signal)) {
-        if (evt.type === 'assistant') {
-          setMessages(m => {
-            const last = m[m.length - 1]
-            // If last message is assistant, merge items into it for streaming effect
-            if (last?.role === 'assistant_stream') {
-              return [...m.slice(0, -1), { ...last, items: [...(last.items || []), ...evt.items] }]
-            }
-            return [...m, { role: 'assistant_stream', items: evt.items }]
-          })
-          // Capture render state + pair tool results to their tool_use by id
-          for (const it of evt.items || []) {
-            if (isRenderCommand(it)) setRenderingStage(it.id)
-            if (it.kind === 'tool_result') {
-              setToolResults(prev => ({ ...prev, [it.tool_use_id]: it }))
-              if (it.tool_use_id === renderingStage) setRenderingStage(null)
-            }
-          }
-        } else if (evt.type === 'result') {
-          setRenderingStage(null)
-          if (evt.session_id) sessionIdRef.current = evt.session_id
-          setMessages(m => {
-            // Finalize the last assistant_stream -> assistant (KEEP its text),
-            // then append the result line.
-            const last = m[m.length - 1]
-            if (last?.role === 'assistant_stream') {
-              const finalized = { ...last, role: 'assistant' }
-              return [...m.slice(0, -1), finalized, { role: 'result', ...evt }]
-            }
-            return [...m, { role: 'result', ...evt }]
-          })
-        } else if (evt.type === 'confirm_request') {
-          setPendingConfirm(evt)
-        } else if (evt.type === 'question') {
-          setPendingQuestion(evt)
-        } else if (evt.type === 'error') {
-          setMessages(m => [...m, { role: 'error', text: evt.detail }])
-        }
-      }
-    } catch (e) {
-      if (e.name === 'AbortError' || controller.signal.aborted) {
-        setRenderingStage(null)
-        setMessages(m => [...m, { role: 'note', text: '■ Stopped. Your next message resumes this session with its context.' }])
-      } else {
-        setMessages(m => [...m, { role: 'error', text: String(e.message || e) }])
-      }
-    } finally {
-      abortRef.current = null
-      setBusy(false)
-      // Persist the conversation (messages + session_id) so the thread is revivable.
-      if (tid) setTimeout(() => persistThread(tid), 0)
-    }
-  }, [input, selected, busy, renderingStage, activeThread])
-
-  async function stop() {
-    if (!selected) return
-    // Interrupt the agent server-side (context preserved), then stop reading.
-    try { await api.stopAgent(selected) } catch { /* best effort */ }
-    abortRef.current?.abort()
-  }
-
-  async function resolveConfirm(approved) {
-    if (!pendingConfirm || !selected) return
-    try { await api.confirmTool(selected, pendingConfirm.confirm_id, approved) }
-    catch (e) { showError(e) }
-    finally { setPendingConfirm(null) }
-  }
-
-  async function answerQuestion(answer) {
-    if (!pendingQuestion || !selected) return
-    setMessages(m => [...m, { role: 'user', text: answer }])  // show the choice in the chat
-    try { await api.answerQuestion(selected, pendingQuestion.question_id, answer) }
-    catch (e) { showError(e) }
-    finally { setPendingQuestion(null) }
-  }
+  // One connect/reconnect modal, shared across every view (dashboard, editor, project).
+  const connectModal = showConnect && (
+    <ConnectClaudeModal
+      initialStatus={auth.status}
+      onClose={() => setShowConnect(false)}
+      onConnected={() => { setShowConnect(false); auth.refresh(); showOk('Connected to Claude') }}
+    />
+  )
 
   if (!selected) {
     return (
       <div className="app">
         <Dashboard
           pipelines={pipelines}
+          styles={styles}
           projects={projects}
           onOpen={openProject}
-          onCreate={async (name, pipeline) => {
-            const m = await api.createProject(name, pipeline)
+          auth={auth.status}
+          onConnect={() => setShowConnect(true)}
+          onCreate={async (name, pipeline, style) => {
+            const m = await api.createProject(name, pipeline, style)
             await refreshProjects()
-            setSelected(m.project_id)
-            newChat()
-            refreshThreads(m.project_id)
+            setSelected(m.project_id)   // chat hook starts a fresh conversation for the new project
             showOk(`Created "${m.name}"`)
           }}
         />
+        {connectModal}
         {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+        <UpdateBanner />
       </div>
     )
   }
@@ -280,8 +116,11 @@ export default function App() {
   if (editing) {
     return (
       <div className="app">
-        <Editor projectId={selected} state={state} onClose={() => setEditing(false)} />
+        <Studio projectId={selected} state={state} onClose={() => setEditing(false)} chat={chat}
+          auth={auth.status} onReconnect={() => setShowConnect(true)} />
+        {connectModal}
         {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+        <UpdateBanner />
       </div>
     )
   }
@@ -291,18 +130,11 @@ export default function App() {
       <ProjectBar
         state={state} projects={projects} selected={selected}
         onEdit={() => setEditing(true)}
-        onBack={() => { setSelected(null); clearChat(); setActiveThread(null); setEditing(false) }}
+        onBack={() => { setSelected(null); setEditing(false) }}
       />
       <main className="grid">
-        <ChatPanel
-          messages={messages} input={input} setInput={setInput}
-          onSend={send} onNewChat={newChat} onStop={stop}
-          busy={busy} disabled={!selected}
-          pendingConfirm={pendingConfirm} onConfirm={resolveConfirm}
-          pendingQuestion={pendingQuestion} onAnswer={answerQuestion}
-          renderingStage={renderingStage} toolResults={toolResults}
-          threads={threads} activeThread={activeThread} onLoadThread={loadThread}
-        />
+        <ChatPanel chat={chat} disabled={!selected}
+          auth={auth.status} onReconnect={() => setShowConnect(true)} />
         <WorkPanel state={state} selected={selected} />
         <AssetPanel
           selected={selected}
@@ -316,7 +148,9 @@ export default function App() {
           }}
         />
       </main>
+      {connectModal}
       {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+      <UpdateBanner />
     </div>
   )
 }
@@ -336,15 +170,58 @@ function fmtDate(s) {
   } catch { return '' }
 }
 
-function Dashboard({ pipelines, projects, onOpen, onCreate }) {
+function Dashboard({ pipelines, styles = [], projects, onOpen, onCreate, auth, onConnect }) {
   const [creating, setCreating] = useState(false)
+  const [showEnv, setShowEnv] = useState(false)
+  const [showCaps, setShowCaps] = useState(false)
+  const [showFeedback, setShowFeedback] = useState(false)
   const sorted = [...projects].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+  // auth === null while the first status check is in flight — don't flash the CTA before we know.
+  const connected = auth?.authenticated
+  const needsReauth = !!auth?.needs_reauth
   return (
     <div className="dashboard">
       <header className="dash-header">
         <div className="brand"><span className="dot" /> OpenNolan <span className="muted">· Mission Control</span></div>
         <div className="dash-sub">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
+        {auth && connected && (
+          <button
+            className={`claude-btn claude-btn-sm reauth-btn${needsReauth ? ' warn' : ''}`}
+            onClick={onConnect}
+            title={needsReauth ? 'Your Claude connection needs attention' : 'Re-authenticate with Claude'}>
+            <ClaudeLogo size={15} /> Re-authenticate with Claude
+          </button>
+        )}
+        <button className="byok-btn" onClick={() => setShowCaps(true)} title="Manage optional on-device capabilities">
+          Capabilities
+        </button>
+        <button className="byok-btn" onClick={() => setShowFeedback(true)} title="Send feedback or report a problem">
+          <IconMessage /> Feedback
+        </button>
+        <button className="byok-btn" onClick={() => setShowEnv(true)} title="Manage your API keys (.env)">
+          <IconKey /> BYOK
+        </button>
       </header>
+      {auth && !connected && (
+        <div className="auth-hero">
+          <div className="auth-hero-text">
+            <div className="auth-hero-title">Sign in with Claude to get started</div>
+            <div className="auth-hero-sub">
+              OpenNolan's AI agent uses your own Anthropic account to build and edit your videos.
+              Connect it once — your credentials stay on this Mac.
+            </div>
+          </div>
+          <button className="claude-btn claude-btn-lg" onClick={onConnect}>
+            <ClaudeLogo size={20} /> Authenticate with Claude
+          </button>
+        </div>
+      )}
+      {auth && connected && needsReauth && (
+        <div className="auth-warn-bar">
+          <span><IconAlert size={15} /> Your Claude connection needs attention — the agent may not be able to run.</span>
+          <button className="linkish" onClick={onConnect}>Re-authenticate</button>
+        </div>
+      )}
       <div className="dash-grid">
         <button className="tile tile-new" onClick={() => setCreating(true)}>
           <span className="tile-plus">＋</span>
@@ -365,6 +242,7 @@ function Dashboard({ pipelines, projects, onOpen, onCreate }) {
                   {p.pipeline_type
                     ? <span className="tile-type">{p.pipeline_type}</span>
                     : <span className="tile-type unknown">{p.legacy ? 'unknown type' : 'agent picks'}</span>}
+                  {p.style && <span className="tile-style" title={`style: ${p.style}`}>{p.style}</span>}
                   {p.legacy && <span className="tile-legacy">existing</span>}
                 </span>
                 {p.created_at && <span className="tile-date">{fmtDate(p.created_at)}</span>}
@@ -374,23 +252,242 @@ function Dashboard({ pipelines, projects, onOpen, onCreate }) {
         })}
       </div>
       {creating && (
-        <CreateModal pipelines={pipelines} onClose={() => setCreating(false)} onCreate={onCreate} />
+        <CreateModal pipelines={pipelines} styles={styles} onClose={() => setCreating(false)} onCreate={onCreate} />
       )}
+      {showEnv && <EnvModal onClose={() => setShowEnv(false)} />}
+      {showCaps && <CapabilitiesModal onClose={() => setShowCaps(false)} />}
+      {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
     </div>
   )
 }
 
-function CreateModal({ pipelines, onClose, onCreate }) {
-  const [name, setName] = useState('')
-  const [pipeline, setPipeline] = useState('')   // '' = let the agent decide
+// ─── Feedback + privacy ─────────────────────────────────────────────────────────
+// One place for "tell us something" (bug/feature/other → /api/feedback) and the anonymous-usage
+// opt-out. Co-located on purpose: where we ask for feedback we also disclose telemetry + let the
+// user turn it off. Feedback is always stored locally + emitted to PostHog; email is best-effort.
+function FeedbackModal({ onClose }) {
+  const [kind, setKind] = useState('bug')
+  const [message, setMessage] = useState('')
+  const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+  const [sent, setSent] = useState(false)
+
+  const [analyticsDisabled, setAnalyticsDisabled] = useState(null)  // null = still loading
+  useEffect(() => {
+    api.getAnalytics().then(a => setAnalyticsDisabled(!!a.disabled)).catch(() => {})
+  }, [])
+
+  async function toggleAnalytics() {
+    const next = !analyticsDisabled
+    setAnalyticsDisabled(next)  // optimistic
+    try { await api.setAnalytics(next) }
+    catch { setAnalyticsDisabled(!next) }  // revert on failure
+  }
+
+  async function submit(e) {
+    e.preventDefault()
+    if (!message.trim() || busy) return
+    setBusy(true); setErr(null)
+    try {
+      await api.sendFeedback({ kind, message: message.trim(), email: email.trim() || null })
+      setSent(true)
+    } catch (e) {
+      setErr(String(e.message || e)); setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal feedback-modal" onClick={e => e.stopPropagation()}>
+        <div className="env-head">
+          <div className="env-head-text">
+            <h3>Feedback</h3>
+            <div className="env-sub">Found a bug or have an idea? Tell us — it goes straight to the developer.</div>
+          </div>
+          <button className="am-close" onClick={onClose} title="Close" aria-label="Close"><IconX /></button>
+        </div>
+
+        {sent ? (
+          <div className="feedback-sent">
+            <div className="feedback-sent-msg"><IconCheck /><span>Thanks — your {kind === 'bug' ? 'report' : 'note'} was sent.</span></div>
+            <div className="modal-actions"><button onClick={onClose}>Close</button></div>
+          </div>
+        ) : (
+          <form className="feedback-body" onSubmit={submit}>
+            {err && <div className="modal-err">⚠ {err}</div>}
+            <label className="modal-field">
+              Type
+              <select value={kind} onChange={e => setKind(e.target.value)}>
+                <option value="bug">Bug / something broke</option>
+                <option value="feature">Feature idea</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label className="modal-field">
+              Message
+              <textarea rows={5} value={message} maxLength={5000} autoFocus
+                placeholder={kind === 'bug' ? 'What happened? What did you expect?' : 'Tell us more…'}
+                onChange={e => setMessage(e.target.value)} />
+            </label>
+            <label className="modal-field">
+              Email <span className="modal-hint" style={{ marginTop: 0 }}>(optional — so we can reply)</span>
+              <input type="email" value={email} placeholder="you@example.com"
+                onChange={e => setEmail(e.target.value)} />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="modal-cancel" onClick={onClose}>Cancel</button>
+              <button type="submit" disabled={busy || !message.trim()}>{busy ? 'Sending…' : 'Send'}</button>
+            </div>
+          </form>
+        )}
+
+        <div className="feedback-privacy">
+          <label className="privacy-row">
+            <input type="checkbox"
+              checked={analyticsDisabled === false}
+              disabled={analyticsDisabled === null}
+              onChange={toggleAnalytics} />
+            <span>
+              Share anonymous usage &amp; crash data
+              <span className="modal-hint" style={{ marginTop: 0 }}>
+                No account, no file contents — an anonymous device id only. Helps us fix crashes.
+              </span>
+            </span>
+          </label>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── BYOK panel (populate the local .env, one variable per row) ──────────────────
+// Reads the curated variable menu + current values from /api/env (the repo .env) and writes edits
+// back. Secrets render as masked inputs with a reveal toggle; blank = leave unset. The whole draft
+// is sent on Save — the backend writes only what actually changed.
+
+function EnvModal({ onClose }) {
+  const [vars, setVars] = useState(null)
+  const [draft, setDraft] = useState({})
+  const [reveal, setReveal] = useState({})   // key -> show plaintext
+  const [path, setPath] = useState('')
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    api.getEnv()
+      .then(d => {
+        if (!alive) return
+        setVars(d.vars); setPath(d.path)
+        setDraft(Object.fromEntries(d.vars.map(v => [v.key, v.value || ''])))
+      })
+      .catch(e => alive && setErr(String(e.message || e)))
+    return () => { alive = false }
+  }, [])
+
+  const setVal = (key, val) => { setDraft(d => ({ ...d, [key]: val })); setSaved(null) }
+
+  async function save() {
+    setBusy(true); setErr(null); setSaved(null)
+    try {
+      const res = await api.saveEnv(draft)
+      setVars(res.vars)
+      setDraft(Object.fromEntries(res.vars.map(v => [v.key, v.value || ''])))
+      const n = (res.changed || []).length
+      setSaved(n ? `Saved ${n} variable${n === 1 ? '' : 's'} to .env` : 'No changes')
+    } catch (e) { setErr(String(e.message || e)) }
+    finally { setBusy(false) }
+  }
+
+  // Group, preserving the first-seen order from the API.
+  const groups = []
+  const byGroup = {}
+  for (const v of (vars || [])) {
+    if (!byGroup[v.group]) { byGroup[v.group] = []; groups.push(v.group) }
+    byGroup[v.group].push(v)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal env-modal" onClick={e => e.stopPropagation()}>
+        <div className="env-head">
+          <div className="env-head-text">
+            <h3><IconKey /> Bring your own keys</h3>
+            <div className="env-sub">
+              Stored in your local <code>.env</code>{path ? ` · ${path}` : ''}. Fill in what you have — leave the rest blank.
+            </div>
+          </div>
+          <button className="am-close" onClick={onClose} title="Close" aria-label="Close"><IconX /></button>
+        </div>
+        <div className="env-body">
+          {err && <div className="modal-err">⚠ {err}</div>}
+          {!vars && !err && <p className="empty">Loading…</p>}
+          {vars && groups.map(g => (
+            <div key={g} className="env-group">
+              <div className="env-group-head">{g}</div>
+              {byGroup[g].map(v => (
+                <div key={v.key} className="env-row">
+                  <div className="env-row-label">
+                    <span className="env-name">{v.label}</span>
+                    <code className="env-key">{v.key}</code>
+                    {v.description && <span className="env-desc">{v.description}</span>}
+                    {v.url && (
+                      <a className="env-getkey" href={v.url} target="_blank" rel="noreferrer noopener">
+                        Get key ↗
+                      </a>
+                    )}
+                  </div>
+                  <div className="env-input">
+                    <input
+                      type={v.secret && !reveal[v.key] ? 'password' : 'text'}
+                      value={draft[v.key] ?? ''}
+                      placeholder="not set"
+                      autoComplete="off" spellCheck={false}
+                      onChange={e => setVal(v.key, e.target.value)} />
+                    {v.secret && (
+                      <button type="button" className="env-eye"
+                        title={reveal[v.key] ? 'Hide' : 'Show'} aria-label={reveal[v.key] ? 'Hide value' : 'Show value'}
+                        onClick={() => setReveal(r => ({ ...r, [v.key]: !r[v.key] }))}>
+                        {reveal[v.key] ? <IconEyeOff /> : <IconEye />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="env-actions">
+          {saved && <span className="env-saved"><IconCheck /> {saved}</span>}
+          <button className="modal-cancel" onClick={onClose}>Close</button>
+          <button onClick={save} disabled={busy || !vars}>{busy ? 'Saving…' : 'Save to .env'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CreateModal({ pipelines, styles = [], onClose, onCreate }) {
+  // Packaged app ships a single pipeline → preselect it (no "agent decides").
+  const single = pipelines.length === 1
+  const [name, setName] = useState('')
+  const [pipeline, setPipeline] = useState(single ? pipelines[0].name : '')   // '' = let the agent decide
+  const [style, setStyle] = useState('')                                       // '' = let the agent decide
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  // Group styles so user-created ones (from the Style Studio) sit in their own section.
+  const builtinStyles = styles.filter(s => !s.user)
+  const userStyles = styles.filter(s => s.user)
+  const styleName = s => s.label || s.name
 
   async function submit(e) {
     e.preventDefault()
     if (!name.trim() || busy) return
     setBusy(true); setErr(null)
-    try { await onCreate(name.trim(), pipeline); onClose() }
+    try { await onCreate(name.trim(), pipeline, style); onClose() }
     catch (e) { setErr(String(e.message || e)); setBusy(false) }
   }
 
@@ -405,13 +502,28 @@ function CreateModal({ pipelines, onClose, onCreate }) {
         </label>
         <label className="modal-field">
           <span>Pipeline type</span>
-          <select value={pipeline} onChange={e => setPipeline(e.target.value)}>
-            <option value="">✨ Let the agent decide</option>
+          <select value={pipeline} onChange={e => setPipeline(e.target.value)} disabled={single}>
+            {!single && <option value="">Let the agent decide</option>}
             {pipelines.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
           </select>
         </label>
+        <label className="modal-field">
+          <span>Style</span>
+          <select value={style} onChange={e => setStyle(e.target.value)}>
+            <option value="">Let the agent decide</option>
+            {userStyles.length > 0 && (
+              <optgroup label="Your styles">
+                {userStyles.map(s => <option key={s.name} value={s.name}>{styleName(s)}</option>)}
+              </optgroup>
+            )}
+            <optgroup label="Built-in styles">
+              {builtinStyles.map(s => <option key={s.name} value={s.name}>{styleName(s)}</option>)}
+            </optgroup>
+          </select>
+        </label>
         <div className="modal-hint">
-          {pipeline ? `Stages locked to the ${pipeline} pipeline.` : 'The agent reads your request and picks the best-fit pipeline.'}
+          {style ? `Visuals locked to the “${style}” style.`
+                 : 'The agent picks a visual style to match your request — or make your own with “Create New Style”.'}
         </div>
         {err && <div className="modal-err">⚠ {err}</div>}
         <div className="modal-actions">
@@ -429,7 +541,6 @@ function ProjectBar({ state, projects, selected, onBack, onEdit }) {
   const p = projects.find(x => x.project_id === selected)
   const name = state?.name || p?.name || selected
   const type = state?.pipeline_type || p?.pipeline_type || ''
-  const runtime = state?.runtime || null
   return (
     <header className="header project-bar">
       <button className="back-btn" onClick={onBack} title="Back to all projects">← Projects</button>
@@ -439,233 +550,9 @@ function ProjectBar({ state, projects, selected, onBack, onEdit }) {
         {type && <span className="pb-type">{type}</span>}
       </div>
       <div className="runtimes">
-        {runtime
-          ? <span className="chip on runtime-used" title="Composition runtime used by this project">🎬 {runtime}</span>
-          : <span className="chip off" title="No render runtime chosen yet">runtime: not set</span>}
         {onEdit && <button className="editor-open-btn" onClick={onEdit} title="Hand-edit this project's timeline">✎ Edit</button>}
       </div>
     </header>
-  )
-}
-
-// ─── Chat Panel ───────────────────────────────────────────────────────────────
-
-function ChatPanel({ messages, input, setInput, onSend, onNewChat, onStop, busy, disabled, pendingConfirm, onConfirm, pendingQuestion, onAnswer, renderingStage, toolResults, threads, activeThread, onLoadThread }) {
-  const endRef = useRef(null)
-  const msgsRef = useRef(null)
-  const stickRef = useRef(true)        // auto-scroll only while parked at the bottom
-  const taRef = useRef(null)
-
-  // Auto-scroll to the newest message, but ONLY if the user hasn't scrolled up
-  // to read history. Scrolling up parks them there until they return to bottom.
-  useEffect(() => {
-    if (stickRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, pendingConfirm, pendingQuestion, renderingStage])
-
-  function onMessagesScroll() {
-    const el = msgsRef.current
-    if (!el) return
-    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-  }
-
-  // Grow the composer with its content, up to ~10 lines, then scroll inside it.
-  useEffect(() => {
-    const el = taRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 220) + 'px'
-  }, [input])
-
-  return (
-    <section className="panel chat">
-      <div className="chat-header">
-        <h2>Agent</h2>
-        <div className="chat-header-actions">
-          {threads && threads.length > 0 && (
-            <select
-              className="thread-select"
-              value={activeThread || ''}
-              onChange={e => e.target.value && onLoadThread(e.target.value)}
-              disabled={busy}
-              title="Chat history"
-            >
-              <option value="">{activeThread ? 'Switch thread…' : 'History…'}</option>
-              {threads.map(t => (
-                <option key={t.thread_id} value={t.thread_id}>{t.title}</option>
-              ))}
-            </select>
-          )}
-          <button className="new-chat-btn" onClick={onNewChat} title="New chat" disabled={busy}>＋</button>
-        </div>
-      </div>
-      <div className="messages" ref={msgsRef} onScroll={onMessagesScroll}>
-        {messages.length === 0 && (
-          <p className="empty">{disabled ? 'Select or create a project to start.' : 'Tell the agent what to make.'}</p>
-        )}
-        {messages.map((m, i) => <Message key={i} m={m} toolResults={toolResults} />)}
-        {renderingStage && <RenderProgress />}
-        {pendingConfirm && (
-          <div className="confirm-card">
-            <div className="confirm-title">⚠ Confirm command</div>
-            <div className="confirm-reason">{pendingConfirm.reason}</div>
-            <pre className="confirm-cmd">{pendingConfirm.input?.command || JSON.stringify(pendingConfirm.input)}</pre>
-            <div className="confirm-actions">
-              <button className="approve" onClick={() => onConfirm(true)}>Allow</button>
-              <button className="deny" onClick={() => onConfirm(false)}>Block</button>
-            </div>
-          </div>
-        )}
-        <div ref={endRef} />
-      </div>
-      {pendingQuestion && <QuestionCard q={pendingQuestion} onAnswer={onAnswer} />}
-      <form className="composer" onSubmit={e => { e.preventDefault(); onSend() }}>
-        <textarea
-          ref={taRef}
-          className="composer-input"
-          rows={1}
-          placeholder={busy ? 'Agent is working…' : 'Message the agent…  (Enter to send, Shift+Enter for newline)'}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              onSend()
-            }
-          }}
-          disabled={disabled || busy}
-        />
-        {busy
-          ? <button type="button" className="stop-btn" onClick={onStop} title="Stop the agent">■ Stop</button>
-          : <button type="submit" disabled={disabled || !input.trim()}>Send</button>}
-      </form>
-    </section>
-  )
-}
-
-function RenderProgress() {
-  const [pct, setPct] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setPct(p => Math.min(p + 1.5, 90)), 400)
-    return () => clearInterval(id)
-  }, [])
-  return (
-    <div className="render-progress">
-      <div className="rp-label">🎬 Rendering…</div>
-      <div className="rp-bar"><div className="rp-fill" style={{ width: `${pct}%` }} /></div>
-      <div className="rp-pct">{Math.round(pct)}%</div>
-    </div>
-  )
-}
-
-// ─── Question Card (agent asked a clarifying question) ──────────────────────────
-
-function QuestionCard({ q, onAnswer }) {
-  return (
-    <div className="question-card">
-      {q.header && <div className="q-header">{q.header}</div>}
-      <div className="q-body md-body" dangerouslySetInnerHTML={{ __html: marked.parse(q.question || '') }} />
-      <div className="q-options">
-        {(q.options || []).map((opt, i) => (
-          <button
-            key={i}
-            className="q-option"
-            onClick={() => onAnswer(opt)}
-            dangerouslySetInnerHTML={{ __html: marked.parseInline(opt) }}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ─── Message ─────────────────────────────────────────────────────────────────
-
-function Message({ m, toolResults }) {
-  if (m.role === 'user') return <div className="msg user">{m.text}</div>
-  if (m.role === 'error') return <div className="msg error">⚠ {m.text}</div>
-  if (m.role === 'note') return <div className="msg note">{m.text}</div>
-  if (m.role === 'result') {
-    return (
-      <div className="msg result">
-        {m.is_error ? '⚠ Turn ended — your next message resumes this session with its context.' : 'Turn complete.'}
-        {m.total_cost_usd != null && <span className="cost"> ${m.total_cost_usd.toFixed(3)}</span>}
-        {m.num_turns != null && <span className="muted"> · {m.num_turns} steps</span>}
-      </div>
-    )
-  }
-  // assistant / assistant_stream — render items in the ORDER they happened so
-  // tool calls and text stay interleaved (text → tool → text → …), not all
-  // tool calls hoisted above all text. Consecutive text items are merged so a
-  // paragraph split across stream chunks renders as one markdown block.
-  const items = m.items || []
-  const nodes = []
-  let buf = []
-  const flush = (key) => {
-    if (!buf.length) return
-    nodes.push(
-      <div key={`t-${key}`} className="md-body"
-        dangerouslySetInnerHTML={{ __html: marked.parse(buf.join('')) }} />
-    )
-    buf = []
-  }
-  items.forEach((it, i) => {
-    if (it.kind === 'text') { buf.push(it.text); return }
-    if (it.kind === 'tool_use' || it.kind === 'thinking') {
-      flush(i)
-      nodes.push(<ActivityChip key={`a-${i}`} item={it} result={it.id ? toolResults?.[it.id] : null} />)
-    }
-  })
-  flush('end')
-
-  return <div className="msg assistant">{nodes}</div>
-}
-
-function formatToolInput(item) {
-  const inp = item.input || {}
-  if (item.name === 'Bash') return inp.command || ''
-  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(item.name)) {
-    const path = inp.file_path || inp.path || ''
-    if (inp.content != null) return `${path}\n\n${inp.content}`
-    if (inp.old_string != null || inp.new_string != null) {
-      return `${path}\n\n- - - old - - -\n${inp.old_string || ''}\n\n+ + + new + + +\n${inp.new_string || ''}`
-    }
-    return path
-  }
-  return JSON.stringify(inp, null, 2)
-}
-
-function ActivityChip({ item, result }) {
-  const [open, setOpen] = useState(false)
-  if (item.kind === 'thinking') return <span className="activity-chip thinking">💭 thinking…</span>
-
-  const icon = TOOL_ICON[item.name] || '🔧'
-  const hasResult = result != null
-  const resultErr = hasResult && result.is_error
-  return (
-    <div className={`tool-block ${open ? 'open' : ''}`}>
-      <button className={`activity-chip tool clickable ${resultErr ? 'tool-err' : ''}`} onClick={() => setOpen(o => !o)}>
-        <span className="tc-caret">{open ? '▾' : '▸'}</span>
-        <span className="tc-icon">{icon}</span>
-        <span className="tc-name">{item.name}</span>
-        {item.detail && <span className="tc-detail">{item.detail}</span>}
-        {resultErr && <span className="tc-badge err">error</span>}
-      </button>
-      {open && (
-        <div className="tool-expand">
-          <div className="te-label">input</div>
-          <pre className="te-pre">{formatToolInput(item)}</pre>
-          {hasResult && (
-            <>
-              <div className={`te-label ${resultErr ? 'err' : ''}`}>{resultErr ? 'error' : 'output'}</div>
-              <pre className={`te-pre ${resultErr ? 'err' : ''}`}>
-                {typeof result.content === 'string' ? result.content : JSON.stringify(result.content, null, 2)}
-              </pre>
-            </>
-          )}
-          {!hasResult && <div className="te-pending">awaiting result…</div>}
-        </div>
-      )}
-    </div>
   )
 }
 
@@ -779,7 +666,7 @@ function PipelineTab({ state, artifacts, onOpen }) {
           <div className="pl-extra-label">Cross-cutting</div>
           {dlog?.present && (
             <button className="art-chip" onClick={() => onOpen('decision_log')}>
-              <span className="art-icon">⚖</span>
+              <span className="art-icon"><IconListDetails size={14} /></span>
               <span className="art-name">Decision log</span>
               <span className="art-size">{dlog.decision_count} decision{dlog.decision_count === 1 ? '' : 's'}</span>
             </button>
@@ -1134,7 +1021,7 @@ function ScenePlanView({ c }) {
               <span className="sc-id">{s.id || `sc${i + 1}`}</span>
               {s.type && <span className="sc-type">{s.type}</span>}
               {timing(s) && <span className="sc-time">{timing(s)}</span>}
-              {s.hero_moment && <span className="sc-hero">★ hero</span>}
+              {s.hero_moment && <span className="sc-hero"><IconStar size={11} /> hero</span>}
             </div>
             {s.description && <div className="sc-desc">{s.description}</div>}
             <div className="sc-attrs">
@@ -1174,7 +1061,7 @@ function ScriptView({ c }) {
               {timing(s) && <span className="ss-time">{timing(s)}</span>}
             </div>
             {s.text && <div className="ss-text">{s.text}</div>}
-            {s.speaker_directions && <div className="ss-dir">🎙 {s.speaker_directions}</div>}
+            {s.speaker_directions && <div className="ss-dir"><IconMic size={12} /> {s.speaker_directions}</div>}
             {Array.isArray(s.enhancement_cues) && s.enhancement_cues.length > 0 && (
               <div className="ss-cues">
                 {s.enhancement_cues.map((q, j) => (
@@ -1407,12 +1294,15 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
   }
 
   const renders = data?.renders || []
-  const files = data?.kinds?.[activeKind] || []
+  // The Renders tab reads agent_renders (hf/renders clips); every other tab reads kinds[].
+  const files = (activeKind === 'renders' ? data?.agent_renders : data?.kinds?.[activeKind]) || []
 
   // Lightbox item lists. The URL carries the file's mtime as a cache-bust token so
   // a freshly finished render (same path, new bytes) reloads without a page refresh.
+  // Renders are videos — tag them 'video' so the tile + lightbox use the video player.
   const gridItems = files.map(f => ({
-    kind: activeKind, name: f.name, path: f.path, url: api.fileUrl(selected, f.path, f.mtime),
+    kind: activeKind === 'renders' ? 'video' : activeKind,
+    name: f.name, path: f.path, url: api.fileUrl(selected, f.path, f.mtime),
   }))
   const renderItems = renders.map(r => ({
     kind: 'video', name: r.name, path: r.path, url: api.fileUrl(selected, r.path, r.mtime),
@@ -1427,7 +1317,7 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
           {/* Final render(s) — shown when the reel is done (#1) */}
           {renders.length > 0 && (
             <div className="renders">
-              <div className="renders-label">🎬 Final render</div>
+              <div className="renders-label"><IconMovie size={13} /> Final render</div>
               {renders.map((r, i) => (
                 <div key={r.path} className="render-item">
                   {/* key on path+mtime so a re-render (or a poll that first caught the
@@ -1454,7 +1344,8 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
                 className={`asset-tab ${activeKind === k ? 'active' : ''}`}
                 onClick={() => setActiveKind(k)}
               >
-                {k}{data?.kinds?.[k]?.length ? ` (${data.kinds[k].length})` : ''}
+                {k}{(k === 'renders' ? data?.agent_renders : data?.kinds?.[k])?.length
+                  ? ` (${(k === 'renders' ? data.agent_renders : data.kinds[k]).length})` : ''}
               </button>
             ))}
           </div>
@@ -1467,16 +1358,18 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
             ))}
           </div>
 
-          <div
-            className={`dropzone ${dragging ? 'drag' : ''}`}
-            onClick={() => inputRef.current?.click()}
-            onDragOver={e => { e.preventDefault(); setDragging(true) }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={e => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files) }}
-          >
-            Drop a <strong>{activeKind}</strong> file here, or click to choose
-            <input ref={inputRef} type="file" hidden onChange={e => handleFiles(e.target.files)} />
-          </div>
+          {activeKind !== 'renders' && (
+            <div
+              className={`dropzone ${dragging ? 'drag' : ''}`}
+              onClick={() => inputRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={e => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files) }}
+            >
+              Drop a <strong>{activeKind}</strong> file here, or click to choose
+              <input ref={inputRef} type="file" hidden onChange={e => handleFiles(e.target.files)} />
+            </div>
+          )}
         </div>
       )}
       {viewer && (
@@ -1502,7 +1395,7 @@ function AssetItem({ kind, url, name, onOpen }) {
         </div>
       )}
       {(kind === 'audio' || kind === 'music') && (
-        <div className="asset-thumb audio"><span className="asset-audio-icon">🎵</span></div>
+        <div className="asset-thumb audio"><span className="asset-audio-icon"><IconMusic size={26} /></span></div>
       )}
       <div className="asset-name">{name}</div>
     </div>
@@ -1548,7 +1441,7 @@ function AssetModal({ items, index, onClose }) {
             {item.kind === 'video' && <video src={item.url} controls autoPlay />}
             {(item.kind === 'audio' || item.kind === 'music') && (
               <div className="al-audio">
-                <div className="al-audio-icon">🎵</div>
+                <div className="al-audio-icon"><IconMusic size={44} /></div>
                 <audio src={item.url} controls autoPlay />
               </div>
             )}

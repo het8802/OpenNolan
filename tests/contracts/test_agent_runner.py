@@ -8,6 +8,8 @@ CLAUDE_CODE_OAUTH_TOKEN required.
 
 import asyncio
 import sys
+import shlex
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -27,10 +29,16 @@ from claude_agent_sdk import (
 from server.agent_runner import (
     ACTION_ALLOW,
     ACTION_CONFIRM,
+    ACTION_DENY,
+    AGENT_MODELS,
+    DEFAULT_MODEL,
     AgentRunner,
+    Sandbox,
     auth_configured,
     bash_destructive_reason,
+    bash_path_escape_reason,
     build_agent_options,
+    build_sandbox,
     decide_tool,
     make_can_use_tool,
 )
@@ -85,6 +93,183 @@ def test_question_tools_always_allowed():
     # The built-in question tool and our in-process ask_user tool never confirm.
     assert decide_tool("AskUserQuestion", {}).action == ACTION_ALLOW
     assert decide_tool("mcp__mc__ask_user", {"question": "?"}).action == ACTION_ALLOW
+
+
+def test_no_sandbox_skips_path_checks():
+    # sandbox=None (the dev default) → any path is allowed, unchanged behavior.
+    assert decide_tool("Read", {"file_path": "/etc/passwd"}).action == ACTION_ALLOW
+    assert decide_tool("Bash", {"command": "cat /etc/passwd"}).action == ACTION_ALLOW
+
+
+# --- filesystem sandbox ---------------------------------------------------
+
+def test_sandbox_allows_in_bounds(tmp_path):
+    proj = tmp_path / "projects"
+    proj.mkdir()
+    sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(), proj.resolve()))
+    # relative path resolves under base (the agent cwd)
+    assert decide_tool("Read", {"file_path": "AGENT_GUIDE.md"}, sb).action == ACTION_ALLOW
+    # absolute path under a root
+    assert decide_tool("Write", {"file_path": str(proj / "x/a.json")}, sb).action == ACTION_ALLOW
+    # search rooted inside the workspace
+    assert decide_tool("Grep", {"pattern": "foo", "path": str(tmp_path / "lib")}, sb).action == ACTION_ALLOW
+
+
+@pytest.mark.parametrize("tool,inp", [
+    ("Read", {"file_path": "/etc/passwd"}),
+    ("Read", {"file_path": "~/secret.txt"}),
+    ("Write", {"file_path": "/Users/someone-else/other/file"}),
+    ("Edit", {"file_path": "../../../../etc/hosts"}),
+    ("LS", {"path": "/"}),
+    ("Glob", {"pattern": "/Users/**"}),
+    ("NotebookRead", {"notebook_path": "/private/other/x.ipynb"}),
+])
+def test_sandbox_denies_out_of_bounds(tmp_path, tool, inp):
+    sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(),))
+    assert decide_tool(tool, inp, sb).action == ACTION_DENY
+
+
+def test_sandbox_bash_escape_confirms(tmp_path):
+    sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(),))
+    assert decide_tool("Bash", {"command": "cat /etc/passwd"}, sb).action == ACTION_CONFIRM
+    assert decide_tool("Bash", {"command": "ls ~"}, sb).action == ACTION_CONFIRM
+    assert decide_tool("Bash", {"command": "cat $HOME/.ssh/id_rsa"}, sb).action == ACTION_CONFIRM
+    assert bash_path_escape_reason("cat /etc/passwd", sb) is not None
+
+
+def test_sandbox_bash_in_bounds_allowed(tmp_path):
+    sb = Sandbox(base=tmp_path, roots=(
+        tmp_path.resolve(),
+        Path("/tmp").resolve(),
+        Path(tempfile.gettempdir()).resolve(),
+    ))
+    for cmd in [
+        "python scripts/update_stage.py p research in_progress ig",
+        "ffmpeg -i in.mp4 out.mp4",
+        "cat projects/x/artifacts/script.json",
+        "echo hi 2>/dev/null",
+        "ls -la .",
+        "curl https://example.com/api",  # a URL is not a filesystem escape
+        "curl https://example.com/api?a=/etc/x",  # =/path inside a URL is not an assignment
+    ]:
+        assert bash_path_escape_reason(cmd, sb) is None, cmd
+        assert decide_tool("Bash", {"command": cmd}, sb).action == ACTION_ALLOW, cmd
+
+
+def test_sandbox_bash_allows_quoted_in_bounds_path_with_spaces(tmp_path):
+    """Regression: a quoted in-bounds path CONTAINING A SPACE must not be flagged. The app's own
+    data dir is under macOS '~/Library/Application Support/…' — the old space-splitting regex
+    truncated the quoted path at the space and flagged the (out-of-bounds) prefix."""
+    root = tmp_path / "Application Support" / "opennolan-desktop" / "projects"
+    root.mkdir(parents=True)
+    sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(), root.resolve()))
+    vid = root / "test-proj-1" / "assets" / "video" / "clip.MP4"
+    # bare, quoted, VAR=, and an unterminated `python -c "` trailing (the exact shape we hit)
+    for cmd in [
+        f'ffprobe "{vid}"',
+        f'V="{vid}"\npython -c "',
+        f'cat {shlex.quote(str(vid))}',
+    ]:
+        assert bash_path_escape_reason(cmd, sb) is None, cmd
+        assert decide_tool("Bash", {"command": cmd}, sb).action == ACTION_ALLOW, cmd
+    # a QUOTED path with spaces that truly escapes is still caught
+    assert bash_path_escape_reason('cat "/Users/someone/secret file.txt"', sb) is not None
+
+
+def test_build_sandbox_on_by_default_in_dev(monkeypatch, tmp_path):
+    # OPN-10: the dev default deliberately FLIPPED from unsandboxed to sandboxed.
+    monkeypatch.delenv("OPENNOLAN_CODE_ROOT", raising=False)
+    monkeypatch.delenv("OPENNOLAN_AGENT_SANDBOX", raising=False)
+    sb = build_sandbox(tmp_path, tmp_path / "projects")
+    assert sb is not None
+    assert tmp_path.resolve() in sb.roots
+
+
+def test_build_sandbox_off_when_disabled(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENNOLAN_CODE_ROOT", raising=False)
+    monkeypatch.setenv("OPENNOLAN_AGENT_SANDBOX", "0")
+    assert build_sandbox(tmp_path, tmp_path / "projects") is None
+
+
+def test_build_sandbox_disabled_wins_over_packaged(monkeypatch, tmp_path):
+    # Explicit falsy is the support escape hatch — honored even in the packaged app.
+    monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(tmp_path))
+    monkeypatch.setenv("OPENNOLAN_AGENT_SANDBOX", "false")
+    assert build_sandbox(tmp_path, tmp_path / "projects") is None
+
+
+def test_build_sandbox_on_when_forced(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENNOLAN_CODE_ROOT", raising=False)
+    monkeypatch.setenv("OPENNOLAN_AGENT_SANDBOX", "1")
+    sb = build_sandbox(tmp_path, tmp_path / "projects")
+    assert sb is not None
+    assert tmp_path.resolve() in sb.roots
+
+
+def test_build_sandbox_on_when_packaged(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(tmp_path))
+    sb = build_sandbox(tmp_path, tmp_path / "projects")
+    assert sb is not None
+    assert tmp_path.resolve() in sb.roots
+
+
+def test_temp_roots_cover_system_and_routed_scratch(monkeypatch, tmp_path):
+    import tempfile as _tempfile
+
+    from server.agent_runner import _temp_roots
+
+    monkeypatch.setenv("OPENNOLAN_CACHE_DIR", str(tmp_path / "cache"))
+    roots = _temp_roots()
+    assert Path(_tempfile.gettempdir()).resolve() in roots
+    assert (tmp_path / "cache" / "scratch").resolve() in roots
+
+
+def _runner_with_project(tmp_path):
+    from lib.project import create_project
+    from server.agent_runner import AgentRunner
+
+    projects = tmp_path / "projects"
+    create_project(projects, "My Reel")
+    runner = AgentRunner(repo_root=tmp_path, projects_dir=projects,
+                         client_factory=lambda pid: None)
+    return runner, projects
+
+
+def test_store_asset_moves_src_from_temp(tmp_path):
+    # OPN-10: a temp-staged file is RELOCATED into the project — /tmp used to
+    # keep a disposable twin of every stored asset.
+    import tempfile as _tempfile
+
+    runner, projects = _runner_with_project(tmp_path)
+    staging = Path(_tempfile.mkdtemp())
+    src = staging / "frame.png"
+    src.write_bytes(b"png")
+    asyncio.run(runner._store_asset("my-reel", {"kind": "image", "src": str(src)}))
+    assert not src.exists()
+    assert (projects / "my-reel" / "assets/images/frame.png").is_file()
+
+
+def test_store_asset_copies_non_temp_src(monkeypatch, tmp_path):
+    # pytest's tmp_path itself lives under /private/var/folders (a temp root),
+    # so pin the roots elsewhere to exercise the copy path.
+    import server.agent_runner as ar
+
+    runner, projects = _runner_with_project(tmp_path)
+    monkeypatch.setattr(ar, "_temp_roots", lambda: (Path("/nonexistent-temp-root"),))
+    src = tmp_path / "keep.png"
+    src.write_bytes(b"png")
+    asyncio.run(runner._store_asset("my-reel", {"kind": "image", "src": str(src)}))
+    assert src.is_file()  # copied, not consumed — the file wasn't ours
+    assert (projects / "my-reel" / "assets/images/keep.png").is_file()
+
+
+def test_can_use_tool_sandbox_denies_out_of_bounds(tmp_path):
+    sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(),))
+    cb = make_can_use_tool(confirm_handler=None, sandbox=sb)
+    denied = asyncio.run(cb("Read", {"file_path": "/etc/passwd"}, None))
+    assert isinstance(denied, PermissionResultDeny)
+    ok = asyncio.run(cb("Read", {"file_path": "notes.txt"}, None))
+    assert isinstance(ok, PermissionResultAllow)
 
 
 # --- can_use_tool callback ------------------------------------------------
@@ -159,6 +344,40 @@ class FakeClient:
         for m in self._messages:
             yield m
 
+    async def receive_messages(self):
+        # Nothing buffered between turns in this fake — the warm-client drain no-ops.
+        for m in ():
+            yield m
+
+    async def disconnect(self):
+        pass
+
+
+class DrainFakeClient:
+    """A warm client that has a COMPLETED unsolicited turn already buffered (what a
+    background-task completion leaves in the SDK stream), plus a scripted answer to the
+    next query. Models the off-by-one setup so the drain can be asserted."""
+
+    def __init__(self, buffered, response):
+        self._buffered = list(buffered)
+        self._response = response
+        self.queries: list[str] = []
+
+    async def connect(self, prompt=None):
+        pass
+
+    async def query(self, prompt, session_id="default"):
+        self.queries.append(prompt)
+
+    async def receive_messages(self):
+        # The buffered stray turn drains once, then the stream is empty.
+        while self._buffered:
+            yield self._buffered.pop(0)
+
+    async def receive_response(self):
+        for m in self._response:
+            yield m
+
     async def disconnect(self):
         pass
 
@@ -196,6 +415,38 @@ def test_run_turn_collects_text_cost_and_reuses_session():
     asyncio.run(runner.run_turn("proj", "again", on_event=lambda e: events.append(e)))
     assert fake.connects == 1
     assert fake.queries[1] == "again"
+
+
+def test_run_turn_drains_buffered_unsolicited_turn():
+    """The off-by-one regression: a completed background-task turn buffered in the stream
+    must be drained as a `background_update` and NOT returned as the answer to this message.
+    Before the fix, res.text would be the stray turn's text ('silence cut complete')."""
+    stray = [
+        AssistantMessage(content=[TextBlock(text="silence cut complete")], model="m"),
+        ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+                      num_turns=1, session_id="s", total_cost_usd=0.01, result="silence cut complete"),
+    ]
+    answer = [
+        AssistantMessage(content=[TextBlock(text="here is your 1.5x")], model="m"),
+        ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+                      num_turns=1, session_id="s", total_cost_usd=0.02, result="here is your 1.5x"),
+    ]
+    fake = DrainFakeClient(buffered=stray, response=answer)
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: fake,
+                         drain_idle_timeout_s=0.02, drain_result_timeout_s=0.05)
+    # Pre-warm the client (as if a prior turn already ran) so it is NOT fresh and the drain runs.
+    runner._clients["proj"] = fake
+
+    events: list[dict] = []
+    res = asyncio.run(runner.run_turn("proj", "1.5x this video", on_event=lambda e: events.append(e)))
+
+    # The stray turn is surfaced as a background note, correctly separated…
+    assert any(e["type"] == "background_update" and "silence cut complete" in e["text"] for e in events)
+    # …and the answer to THIS message is the 1.5x turn — no off-by-one.
+    assert res.text == "here is your 1.5x"
+    assert "silence cut complete" not in res.text
+    # The stray turn was consumed, so the real query still ran and was recorded.
+    assert fake.queries == ["1.5x this video"]
 
 
 # --- confirm round-trip mechanics ----------------------------------------
@@ -356,3 +607,74 @@ def test_first_turn_preamble_includes_context_even_for_fresh_project(tmp_path):
     pre = runner._first_turn_preamble("fresh")
     assert "PROJECT CONTEXT" in pre
     assert "RESUMING WORK" not in pre
+
+
+# --- model selection -------------------------------------------------------
+
+def test_default_model_is_a_selectable_model():
+    # The UI dropdown validates against AGENT_MODELS; the default must be one of them.
+    assert DEFAULT_MODEL in AGENT_MODELS
+
+
+def test_model_for_defaults_then_reflects_selection():
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+    assert runner._model_for("proj") == DEFAULT_MODEL
+    other = next(m for m in AGENT_MODELS if m != DEFAULT_MODEL)
+    asyncio.run(runner.set_model("proj", other))
+    assert runner._model_for("proj") == other
+
+
+def test_set_model_ignores_unknown_and_empty():
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+    asyncio.run(runner.set_model("proj", "not-a-real-model"))
+    asyncio.run(runner.set_model("proj", None))
+    asyncio.run(runner.set_model("proj", ""))
+    assert runner._model_for("proj") == DEFAULT_MODEL  # unchanged
+
+
+def test_set_model_change_tears_down_client_and_resumes_session():
+    fake = FakeClient(_scripted_turn())
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: fake)
+    runner._clients["proj"] = fake
+    runner._session_ids["proj"] = "sess-1"   # there IS a live session to preserve
+    other = next(m for m in AGENT_MODELS if m != DEFAULT_MODEL)
+    asyncio.run(runner.set_model("proj", other))
+    # client dropped so the next turn rebuilds with the new model, resuming context
+    assert "proj" not in runner._clients
+    assert runner._resume_next.get("proj") is True
+    assert runner._model_for("proj") == other
+
+
+def test_set_model_noop_when_unchanged_keeps_client():
+    fake = FakeClient(_scripted_turn())
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: fake)
+    runner._clients["proj"] = fake
+    asyncio.run(runner.set_model("proj", DEFAULT_MODEL))  # same as default -> no-op
+    assert runner._clients.get("proj") is fake
+    assert runner._resume_next.get("proj") is None
+
+
+def test_set_model_fresh_project_no_resume_flag():
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+    other = next(m for m in AGENT_MODELS if m != DEFAULT_MODEL)
+    asyncio.run(runner.set_model("proj", other))  # no session yet
+    assert runner._resume_next.get("proj") is None
+    assert runner._model_for("proj") == other
+
+
+def test_default_factory_builds_client_with_selected_model(monkeypatch):
+    runner = AgentRunner(repo_root=".")  # real default factory
+    other = next(m for m in AGENT_MODELS if m != DEFAULT_MODEL)
+    runner._models["p"] = other
+
+    captured: dict = {}
+    import server.agent_runner as ar
+    real_build = ar.build_agent_options
+
+    def fake_build(repo_root, **kwargs):
+        captured.update(kwargs)
+        return real_build(repo_root, **kwargs)  # real options so ClaudeSDKClient constructs fine
+
+    monkeypatch.setattr(ar, "build_agent_options", fake_build)
+    runner._default_client_factory("p")  # construct only (no connect, no network)
+    assert captured.get("model") == other

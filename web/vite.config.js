@@ -14,4 +14,10 @@ export default defineConfig({
       },
     },
   },
+  // Vitest: jsdom so component (.jsx) tests can render; pure unit tests don't use the DOM
+  // but run fine here too. setup wires @testing-library/jest-dom matchers + per-test cleanup.
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.js'],
+  },
 })

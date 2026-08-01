@@ -25,9 +25,20 @@ def _load_dotenv() -> None:
 
     This ensures API keys are available before any tool is instantiated,
     even when tools are imported directly without going through the registry.
-    Only sets variables that are not already in the environment.
+    Only sets variables that are not already in the environment — so a key the
+    user just saved MID-SESSION (via the BYOK panel or the agent's request_api_key
+    prompt) is picked up by a freshly-spawned tool subprocess even though the live
+    agent CLI still holds a stale env snapshot.
+
+    Resolves the BYOK .env via app_paths (the App-Support file in the packaged app,
+    the repo .env in dev) so it reads the SAME file the panel writes; falls back to
+    the repo-root .env if app_paths is unavailable.
     """
-    env_path = Path(__file__).resolve().parent.parent / ".env"
+    try:
+        from lib import app_paths
+        env_path = app_paths.env_path()
+    except Exception:
+        env_path = Path(__file__).resolve().parent.parent / ".env"
     if not env_path.is_file():
         return
     with open(env_path, encoding="utf-8", errors="ignore") as f:

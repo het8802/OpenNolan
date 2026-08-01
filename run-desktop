@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+#
+# run-desktop — launch the OpenNolan desktop app (Electron shell).
+#
+# Usage:
+#   ./run-desktop          production: build the web UI, boot the backend, open the window
+#   ./run-desktop --dev    hot-reload: start Vite (:5173) + Electron pointed at it
+#
+# Everything runs locally (BYOK). Put API keys in the repo .env — ANTHROPIC_API_KEY
+# powers the agent; provider keys (REPLICATE_API_TOKEN, ELEVENLABS_API_KEY, …) power
+# generation. Ctrl-C stops the app (and, in --dev, the Vite server it started).
+#
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+usage() {
+  cat <<EOF
+Usage: ./run-desktop [--dev]
+
+  (no flag)   production — build the web UI, boot the backend, open the Electron window
+  --dev       hot-reload — start Vite (http://localhost:5173) + Electron dev
+  -h, --help  show this help
+EOF
+}
+
+mode="prod"
+for arg in "$@"; do
+  case "$arg" in
+    --dev)     mode="dev" ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "run-desktop: unknown flag '$arg'" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+# Electron deps (one-time).
+if [ ! -d "desktop/node_modules" ]; then
+  echo "run-desktop: desktop/node_modules missing — installing (npm install)…"
+  (cd desktop && npm install)
+fi
+# Web deps (the prod build and the Vite dev server both need them).
+if [ ! -d "web/node_modules" ]; then
+  echo "run-desktop: web/node_modules missing — installing (npm install)…"
+  (cd web && npm install)
+fi
+
+# Sanity: a Python for the backend (Electron prefers .venv, falls back to python3).
+if [ ! -x ".venv/bin/python" ] && ! command -v python3 >/dev/null 2>&1; then
+  echo "run-desktop: no Python found (.venv/bin/python or python3) — the backend can't start." >&2
+  exit 1
+fi
+
+# Friendly heads-up if the agent has no credential (read/write + render still work).
+if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ] \
+   && ! grep -qsE '^(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)=' .env; then
+  echo "run-desktop: note — no Anthropic credential found; agent chat will be disabled" >&2
+  echo "             until you add ANTHROPIC_API_KEY to the repo .env." >&2
+fi
+
+if [ "$mode" = "dev" ]; then
+  pids=()
+  cleanup() {
+    trap - INT TERM EXIT
+    for pid in "${pids[@]:-}"; do [ -n "$pid" ] && kill "$pid" 2>/dev/null || true; done
+  }
+  trap cleanup INT TERM EXIT
+
+  echo "→ frontend  http://localhost:5173  (vite)"
+  ( exec npm --prefix web run dev ) &
+  pids+=("$!")
+
+  echo "run-desktop: waiting for Vite on :5173…"
+  for _ in $(seq 1 60); do
+    curl -sf -o /dev/null "http://localhost:5173" && break
+    sleep 0.5
+  done
+
+  echo "→ desktop   Electron (dev; backend auto-managed on :8000)"
+  npm --prefix desktop run dev
+else
+  echo "→ desktop   Electron (prod; builds web, serves it same-origin, opens the window)"
+  exec npm --prefix desktop start
+fi

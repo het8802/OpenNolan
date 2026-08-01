@@ -1,0 +1,52 @@
+#!/bin/sh
+# Account guard — pushes to this public personal repo must authenticate as het8802.
+#
+# The git credential helper is `gh auth git-credential`, which always hands back
+# whichever gh account is ACTIVE — regardless of the remote URL. (Verified: passing
+# username=het8802 to the helper returns nothing; gh ignores it.) So the only place
+# to catch a work-account push is right here.
+#
+# Auto-switch, by choice. Note the two honest limits:
+#   1. `gh auth switch` is GLOBAL. After this runs, every repo and terminal uses
+#      het8802 until switched back.
+#   2. git has no post-push hook, so this cannot restore the previous account
+#      afterwards. The message below says how.
+#
+# Enabled by:  git config core.hooksPath .githooks
+
+WANT='het8802'
+
+command -v gh >/dev/null 2>&1 || exit 0   # no gh, no gh-based credentials to police
+
+ACTIVE="$(gh auth status --active 2>/dev/null |
+	sed -n 's/.*Logged in to github.com account \([^ ]*\).*/\1/p')"
+
+[ -z "$ACTIVE" ] && exit 0                # not logged in / unparseable — let git fail on its own
+[ "$ACTIVE" = "$WANT" ] && exit 0         # already correct, the common case
+
+if ! gh auth switch --user "$WANT" >/dev/null 2>&1; then
+	cat >&2 <<EOF
+
+  ✗ PUSH BLOCKED — active GitHub account is '$ACTIVE', not '$WANT'
+
+  Auto-switch failed. Is '$WANT' still authenticated?
+
+      gh auth status
+      gh auth login --hostname github.com
+
+EOF
+	exit 1
+fi
+
+cat >&2 <<EOF
+
+  ⚠ gh account switched: $ACTIVE  →  $WANT   (this change is GLOBAL)
+
+    Pushing as $WANT. Every other repo — tenant-manager included — now also
+    uses $WANT until you switch back:
+
+        gh auth switch --user $ACTIVE
+
+EOF
+
+exit 0

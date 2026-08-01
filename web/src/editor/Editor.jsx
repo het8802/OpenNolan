@@ -7,6 +7,7 @@ import {
   updateCut, updateOverlay, setOverlayKeyframes, scaffoldEditDecisions, timelineDuration,
   trimCut, splitCutAtPlayhead,
 } from './interp.js'
+import { IconMovie } from '../components/icons.jsx'
 
 // Full-screen manual editor. Loads a project's edit_decisions, lets the human edit cuts /
 // overlays / keyframes, saves through the schema-validated PUT, and renders previews through
@@ -168,7 +169,7 @@ export default function Editor({ projectId, state, onClose }) {
         <button className="back-btn" onClick={onClose}>← Close editor</button>
         <div className="editor-title">
           <strong>{state?.name || projectId}</strong>
-          {runtime && <span className={`chip ${ffmpegPath ? 'on' : 'off'}`}>🎬 {runtime}</span>}
+          {runtime && <span className={`chip ${ffmpegPath ? 'on' : 'off'}`}><IconMovie size={12} /> {runtime}</span>}
           {dirty && <span className="editor-dirty">● unsaved</span>}
         </div>
         <div className="editor-actions">

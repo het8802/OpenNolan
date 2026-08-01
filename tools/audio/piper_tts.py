@@ -39,7 +39,7 @@ class PiperTTS(BaseTool):
         "  pip install piper-tts\n"
         "Or download from https://github.com/rhasspy/piper/releases\n"
         "Then download a voice model:\n"
-        "  piper --download-dir ~/.piper/models --model en_US-lessac-medium"
+        '  piper --download-dir "${OPENNOLAN_CACHE_DIR:-$HOME/.cache/opennolan}/piper/models" --model en_US-lessac-medium'
     )
     agent_skills = ["text-to-speech"]
 

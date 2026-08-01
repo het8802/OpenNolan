@@ -21,8 +21,16 @@ into an Anthropic-style animated explainer. Produce the `brief`.
    rough duration (= footage duration), and the CTA/close.
 4. **Lock the look.** Playbook = `anthropic-editorial-animated` (ivory/clay/slate, Fraunces + Inter).
    Note any brand specifics (e.g. a product this reel is about) so logos/screenshots can be sourced.
-5. **Lock render path.** `render_runtime`: HyperFrames for animated assets + FFmpeg segment-rebuild
-   assembly; audio copied through. Record in `decision_log` (note both runtimes considered).
+5. **Lock the render path (present the runtime choice).** This pipeline AUTHORS its animated assets
+   in **hyperframes** (HTML/CSS/GSAP → mp4/mov) but ASSEMBLES the timeline in **ffmpeg** (render-once:
+   `video_compose operation=render_proxies` caches each scene's proxy and concats cheaply), so the
+   reel opens in the desktop editor for the human to refine. Present both composition runtimes to the
+   user before locking — hyperframes vs remotion for the animated assets — with a one-line tradeoff
+   each and your recommendation (hyperframes here, for the Anthropic-editorial motion). Then set
+   `render_runtime: "ffmpeg"` (the assemble runtime) and log a **`render_runtime_selection`** decision
+   in `decision_log` recording BOTH runtimes considered and why. The HDR talking head is preserved by
+   the ffmpeg assemble (10-bit + color tags; SDR graphics lifted into the HDR container) — never
+   silently tonemapped. Audio (the VO) is carried continuous and untouched.
 
 ## Output: `brief`
 - topic, hook, audience, platform, duration_s, cta
