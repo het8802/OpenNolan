@@ -6,7 +6,13 @@
 # username=het8802 to the helper returns nothing; gh ignores it.) So the only place
 # to catch a work-account push is right here.
 #
-# Auto-switch, by choice. Note the two honest limits:
+# It switches the account and then BLOCKS, telling you to run the push again.
+# That is not timidity — git authenticates during ref discovery, which happens
+# BEFORE pre-push runs, so the credential for the current push is already chosen
+# by the time this hook executes. Letting the push continue after switching would
+# still use the old account. Switch now, succeed on the retry.
+#
+# Two more honest limits:
 #   1. `gh auth switch` is GLOBAL. After this runs, every repo and terminal uses
 #      het8802 until switched back.
 #   2. git has no post-push hook, so this cannot restore the previous account
@@ -40,13 +46,17 @@ fi
 
 cat >&2 <<EOF
 
-  ⚠ gh account switched: $ACTIVE  →  $WANT   (this change is GLOBAL)
+  ⚠ PUSH STOPPED — gh account was '$ACTIVE', switched to '$WANT'
 
-    Pushing as $WANT. Every other repo — tenant-manager included — now also
-    uses $WANT until you switch back:
+    Run the same push again; it will go through as $WANT.
+    (git picks its credential before this hook runs, so the switch cannot
+     apply to the push already in flight.)
+
+    This switch is GLOBAL. Every other repo — tenant-manager included — now
+    also uses $WANT until you switch back:
 
         gh auth switch --user $ACTIVE
 
 EOF
 
-exit 0
+exit 1
