@@ -89,3 +89,32 @@ def test_hdr_encoders_found_when_ffmpeg_present():
     # at least one of the known 10-bit HEVC encoders should exist in a normal ffmpeg build
     assert isinstance(encs, list)
     assert all(e in ("hevc_videotoolbox", "libx265") for e in encs)
+
+
+def test_hdr_encoder_capability_requires_a_successful_encode(monkeypatch):
+    from types import SimpleNamespace
+
+    from tools.video.video_compose import VideoCompose
+
+    monkeypatch.setattr("shutil.which", lambda name: f"/test/{name}")
+    calls = []
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        if "-encoders" in command:
+            return SimpleNamespace(stdout="hevc_videotoolbox libx265", returncode=0)
+        encoder = command[command.index("-c:v") + 1]
+        return SimpleNamespace(
+            stdout="", stderr="", returncode=1 if encoder == "hevc_videotoolbox" else 0
+        )
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    if hasattr(VideoCompose._hdr_encoders, "cache_clear"):
+        VideoCompose._hdr_encoders.cache_clear()
+
+    assert VideoCompose._hdr_encoders() == ["libx265"]
+    assert VideoCompose._hdr_encoders() == ["libx265"]
+    assert len(calls) == 3
+
+    if hasattr(VideoCompose._hdr_encoders, "cache_clear"):
+        VideoCompose._hdr_encoders.cache_clear()

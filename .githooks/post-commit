@@ -1,0 +1,27 @@
+#!/bin/sh
+# Record the handoff SHA locally and keep Orca's manager-facing card current.
+# This hook never starts a reviewer and never blocks a commit.
+
+ROOT="$(git rev-parse --show-toplevel)"
+SHA="$(git rev-parse HEAD)"
+SHORT="$(git rev-parse --short HEAD)"
+SUBJECT="$(git show -s --format=%s HEAD)"
+
+mkdir -p "$ROOT/.local/run"
+printf '{"sha":"%s"}\n' "$SHA" > "$ROOT/.local/run/last-commit.json"
+
+if [ -n "${ORCA_CLI_COMMAND:-}" ]; then
+	ORCA_BIN="$ORCA_CLI_COMMAND"
+elif [ -n "${ORCA_DEV_REPO_ROOT:-}" ]; then
+	ORCA_BIN="orca-dev"
+elif [ "$(uname -s)" = "Linux" ]; then
+	ORCA_BIN="orca-ide"
+else
+	ORCA_BIN="orca"
+fi
+
+if command -v "$ORCA_BIN" >/dev/null 2>&1; then
+	"$ORCA_BIN" worktree set --worktree active --comment "commit $SHORT: $SUBJECT" --json >/dev/null 2>&1 || true
+fi
+
+exit 0

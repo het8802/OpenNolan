@@ -1,0 +1,1953 @@
+#!/usr/bin/env python3
+"""OpenNolan's shared development command for humans, agents, hooks, and CI."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import re
+import secrets
+import shlex
+import signal
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import zlib
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+WORKTREE_ENV = ROOT / ".env.worktree"
+RUN_DIR = ROOT / ".local" / "run"
+PID_FILE = RUN_DIR / "app.json"
+REVIEW_CONTEXT = "review-current"
+
+
+def _github_repository() -> str:
+    configured = os.environ.get("GITHUB_REPOSITORY")
+    if configured and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", configured):
+        return configured
+    remotes = subprocess.run(
+        ["git", "remote"], cwd=ROOT, text=True, capture_output=True, check=False
+    ).stdout.splitlines()
+    for remote in remotes:
+        url = subprocess.run(
+            ["git", "remote", "get-url", remote],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).stdout.strip()
+        match = re.search(r"github\.com[/:]([^/\s]+)/([^/\s]+?)(?:\.git)?$", url)
+        if match:
+            return f"{match.group(1)}/{match.group(2)}"
+    raise RuntimeError("cannot derive GitHub repository; set GITHUB_REPOSITORY=owner/repo")
+
+
+def _review_coordinator_dir() -> Path:
+    configured = os.environ.get("OPENNOLAN_REVIEW_COORDINATOR_DIR")
+    return Path(configured).resolve() if configured else ROOT / ".local" / "reviews" / "coordinator"
+
+
+def _protected_review_coordinator_dir() -> tuple[Path | None, str | None]:
+    configured = os.environ.get("OPENNOLAN_REVIEW_COORDINATOR_DIR")
+    if not configured:
+        return None, "OPENNOLAN_REVIEW_COORDINATOR_DIR must name protected storage outside the worktree"
+    coordinator_dir = Path(configured).resolve()
+    try:
+        coordinator_dir.relative_to(ROOT.resolve())
+    except ValueError:
+        return coordinator_dir, None
+    return None, "coordinator storage must be outside agent-writable worktrees"
+
+
+def _review_request_path(sha: str) -> Path:
+    return _review_coordinator_dir() / "requests" / f"{sha}.json"
+
+
+def _review_draft_dir() -> Path:
+    configured = os.environ.get("OPENNOLAN_REVIEW_DRAFT_DIR")
+    return Path(configured).resolve() if configured else ROOT / ".local" / "reviews" / "drafts"
+
+
+def _load_worktree_env() -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not WORKTREE_ENV.is_file():
+        return values
+    for raw_line in WORKTREE_ENV.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+        values[key] = value
+    return values
+
+
+def _suggested_ports() -> tuple[int, int]:
+    base = 20_000 + (zlib.crc32(str(ROOT).encode("utf-8")) % 10_000)
+    return base, base + 1
+
+
+def _ports() -> tuple[int, int]:
+    suggested_backend, suggested_frontend = _suggested_ports()
+    return (
+        int(os.environ.get("OPENNOLAN_BACKEND_PORT", suggested_backend)),
+        int(os.environ.get("OPENNOLAN_FRONTEND_PORT", suggested_frontend)),
+    )
+
+
+def _choose_port_pair() -> tuple[int, int]:
+    backend_port, frontend_port = _ports()
+    for offset in range(0, 100, 2):
+        candidate_backend = backend_port + offset
+        candidate_frontend = frontend_port + offset
+        if _port_available(candidate_backend) and _port_available(candidate_frontend):
+            return candidate_backend, candidate_frontend
+    raise RuntimeError("could not find a free backend/frontend port pair")
+
+
+def _tool(name: str, version_args: list[str]) -> dict[str, Any]:
+    path = shutil.which(name)
+    if path is None:
+        return {"available": False, "path": None, "version": None}
+    try:
+        result = subprocess.run(
+            [path, *version_args],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        output = (result.stdout or result.stderr).strip().splitlines()
+        version = output[0] if output else None
+    except (OSError, subprocess.TimeoutExpired):
+        version = None
+    return {"available": True, "path": path, "version": version}
+
+
+def _port_available(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.2)
+        try:
+            return sock.connect_ex(("127.0.0.1", port)) != 0
+        except OSError:
+            # Some agent sandboxes forbid local socket probes. The launch path
+            # performs the authoritative bind check outside that environment.
+            return True
+
+
+def _branch_protection() -> dict[str, Any]:
+    try:
+        repository = _github_repository()
+    except RuntimeError as exc:
+        return {"checked": True, "ok": False, "error": str(exc)}
+    command = ["gh", "api", f"repos/{repository}/branches/main/protection"]
+    github_environment = os.environ.copy()
+    coordinator_token = os.environ.get("OPENNOLAN_REVIEW_STATUS_TOKEN")
+    if coordinator_token:
+        github_environment["GH_TOKEN"] = coordinator_token
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        env=github_environment,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=20,
+    )
+    if result.returncode != 0:
+        return {"checked": True, "ok": False, "error": _bounded_redacted(result.stderr or result.stdout)}
+    try:
+        protection = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"checked": True, "ok": False, "error": "GitHub returned invalid branch-protection JSON"}
+    reviews = protection.get("required_pull_request_reviews") or {}
+    status_checks = protection.get("required_status_checks") or {}
+    contexts = set(status_checks.get("contexts") or [])
+    expected_app_id = os.environ.get("OPENNOLAN_REVIEW_STATUS_APP_ID")
+    app_bound_checks = status_checks.get("checks") or []
+    review_current_bound = bool(
+        expected_app_id
+        and any(
+            check.get("context") == REVIEW_CONTEXT and str(check.get("app_id")) == expected_app_id
+            for check in app_bound_checks
+            if isinstance(check, dict)
+        )
+    )
+    conversation = protection.get("required_conversation_resolution") or {}
+    checks = {
+        "dismiss_stale_reviews": bool(reviews.get("dismiss_stale_reviews")),
+        "required_conversation_resolution": bool(conversation.get("enabled")),
+        "merge_ready_required": "merge-ready" in contexts,
+        "review_current_required": REVIEW_CONTEXT in contexts or "review-current" in contexts,
+        "review_current_bound_to_coordinator_app": review_current_bound,
+        "enforce_admins": bool((protection.get("enforce_admins") or {}).get("enabled")),
+        "force_pushes_disabled": not bool((protection.get("allow_force_pushes") or {}).get("enabled")),
+    }
+    required = (
+        "dismiss_stale_reviews",
+        "required_conversation_resolution",
+        "merge_ready_required",
+        "review_current_required",
+        "review_current_bound_to_coordinator_app",
+    )
+    return {"checked": True, "ok": all(checks[name] for name in required), "checks": checks}
+
+
+def doctor(*, check_remote: bool = False) -> dict[str, Any]:
+    _load_worktree_env()
+    backend_port, frontend_port = _ports()
+    tools = {
+        "python": _tool(
+            str(ROOT / ".venv" / "bin" / "python") if (ROOT / ".venv" / "bin" / "python").is_file() else "python3",
+            ["--version"],
+        ),
+        "uv": _tool("uv", ["--version"]),
+        "node": _tool("node", ["--version"]),
+        "npm": _tool("npm", ["--version"]),
+        "ffmpeg": _tool("ffmpeg", ["-version"]),
+    }
+    issues = [f"{name} is not available" for name, info in tools.items() if not info["available"]]
+    if backend_port == frontend_port:
+        issues.append("backend and frontend ports must differ")
+    github = _branch_protection() if check_remote else {"checked": False, "ok": None}
+    if check_remote and not github["ok"]:
+        issues.append("GitHub branch protection does not match the required review gates")
+    return {
+        "command": "doctor",
+        "ok": not issues,
+        "worktree": {
+            "root": str(ROOT),
+            "backend_port": backend_port,
+            "frontend_port": frontend_port,
+            "backend_port_available": _port_available(backend_port),
+            "frontend_port_available": _port_available(frontend_port),
+            "env_file": str(WORKTREE_ENV),
+        },
+        "tools": tools,
+        "github": github,
+        "issues": issues,
+    }
+
+
+def _setup_environment() -> dict[str, str]:
+    backend_port, frontend_port = _choose_port_pair()
+    return {
+        "OPENNOLAN_BACKEND_PORT": str(backend_port),
+        "OPENNOLAN_FRONTEND_PORT": str(frontend_port),
+        "OPENNOLAN_HOME": str(ROOT / ".local"),
+    }
+
+
+def _write_worktree_env(values: dict[str, str]) -> None:
+    lines = [
+        "# Generated by scripts/dev setup. Ports and paths only; never add secrets.",
+        *(f"{key}={value}" for key, value in values.items()),
+        "",
+    ]
+    fd, temp_name = tempfile.mkstemp(prefix=".env.worktree.", dir=ROOT, text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines))
+        os.replace(temp_name, WORKTREE_ENV)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+
+
+def _run_setup_command(command: list[str]) -> dict[str, Any]:
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return {
+        "argv": command,
+        "ok": result.returncode == 0,
+        "returncode": result.returncode,
+        "output": (result.stdout or result.stderr).strip()[-4000:],
+    }
+
+
+def setup(*, dry_run: bool) -> dict[str, Any]:
+    _load_worktree_env()
+    health = doctor()
+    environment = _setup_environment()
+    commands: list[list[str]] = []
+    if not (ROOT / ".venv" / "bin" / "python").is_file():
+        commands.append(["uv", "venv", "--seed", ".venv"])
+    commands.extend(
+        [
+            ["uv", "pip", "install", "--python", ".venv/bin/python", "-r", "requirements-dev.txt"],
+            ["npm", "ci", "--prefix", "web"],
+            ["npm", "ci", "--prefix", "desktop"],
+            ["npm", "--prefix", "desktop", "exec", "--", "playwright", "install", "chromium"],
+            ["git", "config", "core.hooksPath", ".githooks"],
+        ]
+    )
+    if dry_run:
+        return {
+            "command": "setup",
+            "ok": True,
+            "dry_run": True,
+            "doctor": health,
+            "environment": environment,
+            "actions": [{"argv": command, "ok": None} for command in commands],
+        }
+
+    (ROOT / ".local" / "logs").mkdir(parents=True, exist_ok=True)
+    (ROOT / ".local" / "run").mkdir(parents=True, exist_ok=True)
+    (ROOT / ".local" / "test-results").mkdir(parents=True, exist_ok=True)
+    (ROOT / ".local" / "screenshots").mkdir(parents=True, exist_ok=True)
+    _write_worktree_env(environment)
+    os.environ.update(environment)
+
+    actions = []
+    for command in commands:
+        action = _run_setup_command(command)
+        actions.append(action)
+        if not action["ok"]:
+            break
+    return {
+        "command": "setup",
+        "ok": all(action["ok"] for action in actions) and len(actions) == len(commands),
+        "dry_run": False,
+        "doctor": health,
+        "environment": environment,
+        "actions": actions,
+    }
+
+
+def _parse_duration(value: str) -> int:
+    units = {"s": 1, "m": 60, "h": 3600}
+    normalized = value.strip().lower()
+    if not normalized:
+        raise argparse.ArgumentTypeError("duration cannot be empty")
+    suffix = normalized[-1]
+    if suffix in units:
+        number = normalized[:-1]
+        multiplier = units[suffix]
+    else:
+        number = normalized
+        multiplier = 1
+    try:
+        seconds = int(number) * multiplier
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("duration must look like 90s, 30m, or 2h") from exc
+    if seconds <= 0:
+        raise argparse.ArgumentTypeError("duration must be greater than zero")
+    return seconds
+
+
+def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent, text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(temp_name, path)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _read_pid_file(path: Path) -> dict[str, Any] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _owned_process(record: dict[str, Any]) -> bool:
+    try:
+        pid = int(record["pid"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if pid <= 1 or not _pid_alive(pid):
+        return False
+    result = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "command="],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    expected_root = str(record.get("root", ""))
+    return result.returncode == 0 and expected_root and expected_root in result.stdout and "run-dev" in result.stdout
+
+
+def run_app(*, ttl_seconds: int | None, dry_run: bool) -> dict[str, Any]:
+    _load_worktree_env()
+    backend_port, frontend_port = _ports()
+    command = [str(ROOT / "run-dev")]
+    base_report: dict[str, Any] = {
+        "command": "run",
+        "ok": True,
+        "dry_run": dry_run,
+        "argv": command,
+        "ttl_seconds": ttl_seconds,
+        "ports": {"backend": backend_port, "frontend": frontend_port},
+    }
+    if dry_run:
+        return base_report
+
+    existing = _read_pid_file(PID_FILE)
+    if existing and _owned_process(existing):
+        return {**base_report, "ok": False, "error": "the app is already running", "process": existing}
+    if existing:
+        PID_FILE.unlink(missing_ok=True)
+    unavailable = [port for port in (backend_port, frontend_port) if not _port_available(port)]
+    if unavailable:
+        return {
+            **base_report,
+            "ok": False,
+            "error": f"worktree port already in use: {', '.join(map(str, unavailable))}",
+        }
+
+    log_path = ROOT / ".local" / "logs" / "app.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    RUN_DIR.mkdir(parents=True, exist_ok=True)
+    environment = os.environ.copy()
+    environment.setdefault("OPENNOLAN_HOME", str(ROOT / ".local"))
+    started_at = datetime.now(UTC).isoformat()
+    with log_path.open("a", encoding="utf-8") as log:
+        log.write(f"\n[{started_at}] starting {' '.join(command)}\n")
+        log.flush()
+        process = subprocess.Popen(
+            command,
+            cwd=ROOT,
+            env=environment,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            text=True,
+        )
+        record = {
+            "pid": process.pid,
+            "pgid": process.pid,
+            "root": str(ROOT),
+            "argv": command,
+            "started_at": started_at,
+            "ttl_seconds": ttl_seconds,
+            "backend_port": backend_port,
+            "frontend_port": frontend_port,
+            "log": str(log_path),
+        }
+        _atomic_json(PID_FILE, record)
+        deadline = time.monotonic() + ttl_seconds if ttl_seconds else None
+        expired = False
+        try:
+            while process.poll() is None:
+                if deadline is not None and time.monotonic() >= deadline:
+                    expired = True
+                    os.killpg(process.pid, signal.SIGTERM)
+                    break
+                time.sleep(0.25)
+            try:
+                returncode = process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                returncode = process.wait(timeout=5)
+        except KeyboardInterrupt:
+            os.killpg(process.pid, signal.SIGTERM)
+            returncode = process.wait(timeout=10)
+        finally:
+            PID_FILE.unlink(missing_ok=True)
+    return {
+        **base_report,
+        "ok": expired or returncode == 0,
+        "expired": expired,
+        "returncode": returncode,
+        "log": str(log_path),
+    }
+
+
+def _stop_pid_file(path: Path) -> dict[str, Any] | None:
+    record = _read_pid_file(path)
+    if record is None:
+        return None
+    if not _owned_process(record):
+        path.unlink(missing_ok=True)
+        return None
+    pid = int(record["pid"])
+    pgid = int(record.get("pgid", pid))
+    if pid <= 1 or pgid <= 1 or pgid != pid or pgid == os.getpgrp():
+        path.unlink(missing_ok=True)
+        return None
+    os.killpg(pgid, signal.SIGTERM)
+    deadline = time.monotonic() + 10
+    while _pid_alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if _pid_alive(pid):
+        os.killpg(pgid, signal.SIGKILL)
+    path.unlink(missing_ok=True)
+    return {"root": record.get("root"), "pid": pid}
+
+
+def _worktree_roots() -> list[Path]:
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return [ROOT]
+    return [Path(line.removeprefix("worktree ")) for line in result.stdout.splitlines() if line.startswith("worktree ")]
+
+
+def stop(*, all_worktrees: bool) -> dict[str, Any]:
+    roots = _worktree_roots() if all_worktrees else [ROOT]
+    stopped = []
+    errors = []
+    for root in roots:
+        path = root / ".local" / "run" / "app.json"
+        try:
+            result = _stop_pid_file(path)
+            if result is not None:
+                stopped.append(result)
+        except (OSError, ValueError) as exc:
+            errors.append({"root": str(root), "error": str(exc)})
+    return {"command": "stop", "ok": not errors, "all": all_worktrees, "stopped": stopped, "errors": errors}
+
+
+def _python() -> str:
+    local = ROOT / ".venv" / "bin" / "python"
+    return str(local) if local.is_file() else (shutil.which("python3") or "python3")
+
+
+def _changed_files() -> list[Path]:
+    names: set[str] = set()
+    commands = [
+        ["git", "diff", "--name-only"],
+        ["git", "diff", "--cached", "--name-only"],
+        ["git", "ls-files", "--others", "--exclude-standard"],
+    ]
+    base = subprocess.run(
+        ["git", "rev-parse", "--verify", "main"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if base.returncode == 0:
+        commands.append(["git", "diff", "--name-only", "main...HEAD"])
+    for command in commands:
+        result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
+        if result.returncode == 0:
+            names.update(line for line in result.stdout.splitlines() if line)
+    return sorted((ROOT / name for name in names), key=str)
+
+
+def _fast_commands() -> list[list[str]]:
+    python = _python()
+    changed = _changed_files()
+    commands = [
+        [python, "-m", "ruff", "check", "server", "lib", "tools", "scripts", "scripts/dev", "tests"],
+    ]
+    format_targets = [
+        str(path.relative_to(ROOT))
+        for path in changed
+        if path.suffix == ".py" and ".agents" not in path.parts and path.exists()
+    ]
+    if (ROOT / "scripts" / "dev") in changed:
+        format_targets.append("scripts/dev")
+    if format_targets:
+        commands.append([python, "-m", "ruff", "format", "--check", *format_targets])
+
+    python_tests = {
+        str(path.relative_to(ROOT))
+        for path in changed
+        if path.is_file() and path.suffix == ".py" and "tests" in path.parts and path.name.startswith("test_")
+    }
+    production_python = [
+        path
+        for path in changed
+        if path.is_file() and path.suffix == ".py" and "tests" not in path.parts and ".agents" not in path.parts
+    ]
+    unmatched = set(production_python)
+    if production_python:
+        for test_path in (ROOT / "tests").rglob("test_*.py"):
+            try:
+                source = test_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            for production_path in production_python:
+                relative = production_path.relative_to(ROOT)
+                module = relative.with_suffix("").as_posix().replace("/", ".")
+                if module in source or relative.name in source or relative.stem in test_path.stem:
+                    python_tests.add(str(test_path.relative_to(ROOT)))
+                    unmatched.discard(production_path)
+    if unmatched:
+        # Unknown source-to-test relationships must fail safe. Contracts are the
+        # broad, deterministic boundary suite; a future explicit mapping can
+        # narrow this once the module gains direct tests.
+        python_tests.add("tests/contracts")
+    commands.append(
+        [
+            python,
+            "-m",
+            "pytest",
+            *(sorted(python_tests) or ["tests/contracts/test_dev_cli.py", "tests/contracts/test_app_paths.py"]),
+            "-q",
+        ]
+    )
+    if any(path.parts[len(ROOT.parts)] == "web" for path in changed if len(path.parts) > len(ROOT.parts)):
+        commands.append(["npm", "--prefix", "web", "test"])
+    return commands
+
+
+def _test_commands(tier: str) -> list[list[str]]:
+    python = _python()
+    if tier == "fast":
+        return _fast_commands()
+    if tier == "full":
+        return [
+            [python, "-m", "ruff", "check", "server", "lib", "tools", "scripts", "scripts/dev", "tests"],
+            [python, "-m", "pytest", "tests", "-q"],
+            ["npm", "--prefix", "web", "test"],
+            ["npm", "--prefix", "web", "run", "build"],
+        ]
+    if tier == "app":
+        return [[str(ROOT / "scripts" / "dev"), "smoke"]]
+    if tier == "media":
+        return [[python, "-m", "pytest", "tests/tools", "tests/qa", "-q"]]
+    return []
+
+
+def _test_environment(scratch: Path) -> dict[str, str]:
+    _load_worktree_env()
+    environment = os.environ.copy()
+    credential_name = re.compile(
+        r"(?:^|_)(?:API_?KEY|KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?|AUTHORIZATION)(?:_|$)",
+        re.IGNORECASE,
+    )
+    for key in tuple(environment):
+        if credential_name.search(key):
+            environment.pop(key)
+    environment.pop("OPENNOLAN_CACHES_ROUTED", None)
+    environment.update(
+        {
+            "OPENNOLAN_HOME": str(scratch),
+            "OPENNOLAN_PROJECTS_DIR": str(scratch / "projects"),
+            "OPENNOLAN_CACHE_DIR": str(scratch / "cache"),
+            # Every relevant path is already explicit. Keep process-wide cache
+            # routing off so tests that exercise route_caches() can own/reset it.
+            "OPENNOLAN_ROUTE_CACHES": "0",
+            "TMPDIR": str(scratch / "tmp"),
+        }
+    )
+    for child in ("projects", "cache", "tmp"):
+        (scratch / child).mkdir(parents=True, exist_ok=True)
+    (scratch / "settings.json").write_text('{"analytics_disabled": true}\n', encoding="utf-8")
+    return environment
+
+
+SECRET_PATTERNS = (
+    re.compile(r"\bsk-ant-[A-Za-z0-9_-]{10,}"),
+    re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}"),
+    re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b"),
+)
+HIGH_ENTROPY_TOKEN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_+/=-]{32,}(?![A-Za-z0-9])")
+LABELED_CREDENTIAL = re.compile(r"(?i)\b(api[_-]?key|token|secret|password|credential)\s*([=:])\s*([^\s,;]+)")
+AUTHORIZATION_CREDENTIAL = re.compile(r"(?i)\b(authorization\s*:\s*(?:bearer\s+)?)([^\s,;]+)")
+
+
+def _entropy(value: str) -> float:
+    if not value:
+        return 0.0
+    return -sum((value.count(char) / len(value)) * math.log2(value.count(char) / len(value)) for char in set(value))
+
+
+def _looks_like_secret(value: str) -> bool:
+    if re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", value):
+        return False
+    return _entropy(value) >= 4.0
+
+
+def _possible_secret_kinds(text: str) -> list[str]:
+    kinds = [
+        f"known credential pattern {index + 1}" for index, pattern in enumerate(SECRET_PATTERNS) if pattern.search(text)
+    ]
+    if any(_looks_like_secret(match.group(0)) for match in HIGH_ENTROPY_TOKEN.finditer(text)):
+        kinds.append("high-entropy token")
+    if LABELED_CREDENTIAL.search(text) or AUTHORIZATION_CREDENTIAL.search(text):
+        kinds.append("labeled credential")
+    return kinds
+
+
+def _redact(text: str) -> str:
+    scrubbed = text.replace(str(ROOT), "$WORKTREE").replace(str(Path.home()), "~")
+    scrubbed = LABELED_CREDENTIAL.sub(r"\1\2[redacted]", scrubbed)
+    scrubbed = AUTHORIZATION_CREDENTIAL.sub(r"\1[redacted]", scrubbed)
+    for pattern in SECRET_PATTERNS:
+        scrubbed = pattern.sub("[redacted]", scrubbed)
+    scrubbed = HIGH_ENTROPY_TOKEN.sub(
+        lambda match: "[redacted]" if _looks_like_secret(match.group(0)) else match.group(0), scrubbed
+    )
+    return scrubbed
+
+
+def _truncate_with_marker(text: str, limit: int) -> str:
+    if limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    omitted = len(text) - limit
+    while True:
+        marker = f"\n...[truncated {omitted} characters]...\n"
+        available = limit - len(marker)
+        if available <= 0:
+            return marker[:limit]
+        actual_omitted = len(text) - available
+        if actual_omitted == omitted:
+            break
+        omitted = actual_omitted
+    head = (available * 2) // 3
+    tail = available - head
+    return text[:head] + marker + (text[-tail:] if tail else "")
+
+
+def _bounded_redacted(text: str, limit: int = 6000) -> str:
+    return _truncate_with_marker(_redact(text), limit)
+
+
+def _display_argv(command: list[str]) -> list[str]:
+    return [_bounded_redacted(str(part), 500) for part in command]
+
+
+def run_tests(
+    tier: str,
+    *,
+    dry_run: bool,
+    provider: str | None,
+    max_spend: float | None,
+    merge_base: str | None,
+) -> dict[str, Any]:
+    if tier == "provider":
+        missing = [flag for flag, value in (("--provider", provider), ("--max-spend", max_spend)) if value is None]
+        if missing:
+            return {
+                "command": "test",
+                "tier": tier,
+                "ok": False,
+                "dry_run": dry_run,
+                "actions": [],
+                "error": f"provider tests require {' and '.join(missing)}",
+            }
+        return {
+            "command": "test",
+            "tier": tier,
+            "ok": True,
+            "dry_run": dry_run,
+            "provider": provider,
+            "max_spend_usd": max_spend,
+            "status": "skipped",
+            "actions": [],
+            "reason": "no paid provider replay harness is registered yet",
+        }
+
+    if merge_base is not None:
+        return run_merge_test(tier, merge_base, dry_run=dry_run)
+
+    commands = _test_commands(tier)
+    if dry_run:
+        return {
+            "command": "test",
+            "tier": tier,
+            "ok": True,
+            "dry_run": True,
+            "actions": [{"argv": command, "ok": None} for command in commands],
+        }
+
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    scratch = ROOT / ".local" / "test-results" / f"{tier}-{stamp}"
+    environment = _test_environment(scratch)
+    actions: list[dict[str, Any]] = []
+    for command in commands:
+        started = time.monotonic()
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        action = {
+            "argv": _display_argv(command),
+            "ok": result.returncode == 0,
+            "returncode": result.returncode,
+            "duration_seconds": round(time.monotonic() - started, 2),
+            "output": _bounded_redacted((result.stdout or "") + (result.stderr or "")),
+        }
+        actions.append(action)
+        if not action["ok"]:
+            break
+    report = {
+        "command": "test",
+        "tier": tier,
+        "ok": len(actions) == len(commands) and all(action["ok"] for action in actions),
+        "dry_run": False,
+        "scratch": _redact(str(scratch)),
+        "actions": actions,
+    }
+    _atomic_json(scratch / "report.json", report)
+    return report
+
+
+def run_merge_test(tier: str, merge_base: str, *, dry_run: bool) -> dict[str, Any]:
+    head = _resolve_sha("HEAD")
+    base_sha = _resolve_sha(merge_base)
+    report: dict[str, Any] = {
+        "command": "test",
+        "tier": tier,
+        "ok": True,
+        "dry_run": dry_run,
+        "merge_base": merge_base,
+        "feature_sha": head,
+        "base_sha": base_sha,
+        "actions": [],
+    }
+    if head is None or base_sha is None:
+        return {**report, "ok": False, "error": f"cannot resolve HEAD or merge base {merge_base!r}"}
+    planned = [
+        ["git", "worktree", "add", "--detach", "<temporary-worktree>", head],
+        ["git", "merge", base_sha, "--no-commit", "--no-ff"],
+        ["scripts/dev", "setup"],
+        ["scripts/dev", "test", tier],
+        ["git", "worktree", "remove", "--force", "<temporary-worktree>"],
+    ]
+    if dry_run:
+        report["actions"] = [{"argv": command, "ok": None} for command in planned]
+        return report
+    if not _git_clean():
+        return {**report, "ok": False, "error": "merge mode requires a clean feature worktree"}
+
+    parent = ROOT / ".local" / "merge-tests"
+    parent.mkdir(parents=True, exist_ok=True)
+    temporary = parent / f"{head[:12]}-{secrets.token_hex(16)}"
+    actions: list[dict[str, Any]] = []
+
+    def execute(command: list[str], *, cwd: Path = ROOT) -> bool:
+        started = time.monotonic()
+        result = subprocess.run(command, cwd=cwd, text=True, capture_output=True, check=False)
+        actions.append(
+            {
+                "argv": command,
+                "ok": result.returncode == 0,
+                "returncode": result.returncode,
+                "duration_seconds": round(time.monotonic() - started, 2),
+                "output": _bounded_redacted((result.stdout or "") + (result.stderr or "")),
+            }
+        )
+        return result.returncode == 0
+
+    added = False
+    try:
+        if not execute(["git", "worktree", "add", "--detach", str(temporary), head]):
+            return {**report, "ok": False, "actions": actions, "error": "could not create merge-test worktree"}
+        added = True
+        if not execute(["git", "merge", base_sha, "--no-commit", "--no-ff"], cwd=temporary):
+            return {**report, "ok": False, "actions": actions, "error": "merge conflict against current base"}
+        if not execute(
+            [
+                "git",
+                "-c",
+                "user.name=OpenNolan Merge Test",
+                "-c",
+                "user.email=70150247+het8802@users.noreply.github.com",
+                "commit",
+                "--no-verify",
+                "--allow-empty",
+                "-m",
+                f"merge-test: {head[:12]} with {base_sha[:12]}",
+            ],
+            cwd=temporary,
+        ):
+            return {**report, "ok": False, "actions": actions, "error": "could not record synthetic merge"}
+        merged_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=temporary, text=True, capture_output=True, check=True
+        ).stdout.strip()
+        if not execute([str(temporary / "scripts" / "dev"), "setup"], cwd=temporary):
+            return {
+                **report,
+                "ok": False,
+                "actions": actions,
+                "merge_sha": merged_sha,
+                "error": "merge-test setup failed",
+            }
+        passed = execute([str(temporary / "scripts" / "dev"), "test", tier], cwd=temporary)
+        return {
+            **report,
+            "ok": passed,
+            "actions": actions,
+            "merge_sha": merged_sha,
+            "error": None if passed else "tests failed on the synthetic merge",
+        }
+    finally:
+        if added:
+            cleanup = subprocess.run(
+                ["git", "worktree", "remove", "--force", str(temporary)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            actions.append(
+                {
+                    "argv": ["git", "worktree", "remove", "--force", str(temporary)],
+                    "ok": cleanup.returncode == 0,
+                    "returncode": cleanup.returncode,
+                    "output": _bounded_redacted((cleanup.stdout or "") + (cleanup.stderr or "")),
+                }
+            )
+
+
+def _git_result(root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", "-C", str(root), *args], text=True, capture_output=True, check=False)
+
+
+def _orca_prefix() -> list[str]:
+    configured = os.environ.get("ORCA_CLI_COMMAND")
+    if configured:
+        return shlex.split(configured)
+    if os.environ.get("ORCA_DEV_REPO_ROOT"):
+        return ["orca-dev"]
+    if sys.platform.startswith("linux"):
+        return ["orca-ide"]
+    return ["orca"]
+
+
+def reap(*, dry_run: bool) -> dict[str, Any]:
+    main_sha = _resolve_sha("main")
+    rows: list[dict[str, Any]] = []
+    if main_sha is None:
+        return {
+            "command": "reap",
+            "ok": False,
+            "dry_run": dry_run,
+            "current_worktree": str(ROOT),
+            "worktrees": rows,
+            "error": "main cannot be resolved",
+        }
+    porcelain = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"], cwd=ROOT, text=True, capture_output=True, check=False
+    )
+    blocks = [block for block in porcelain.stdout.strip().split("\n\n") if block.strip()]
+    for block in blocks:
+        fields: dict[str, str] = {}
+        for line in block.splitlines():
+            key, _, value = line.partition(" ")
+            fields[key] = value
+        root = Path(fields.get("worktree", ""))
+        if not root or root == ROOT:
+            continue
+        branch_ref = fields.get("branch")
+        branch = branch_ref.removeprefix("refs/heads/") if branch_ref else None
+        head = fields.get("HEAD")
+        merged = bool(
+            head
+            and subprocess.run(
+                ["git", "merge-base", "--is-ancestor", head, main_sha], cwd=ROOT, capture_output=True, check=False
+            ).returncode
+            == 0
+        )
+        clean = _git_result(root, ["status", "--porcelain"]).stdout.strip() == ""
+        upstream = _git_result(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+        no_unpushed = False
+        if upstream.returncode == 0:
+            ahead = _git_result(root, ["rev-list", "--count", f"{upstream.stdout.strip()}..HEAD"])
+            no_unpushed = ahead.returncode == 0 and ahead.stdout.strip() == "0"
+        pid_record = _read_pid_file(root / ".local" / "run" / "app.json")
+        idle = not (pid_record and _owned_process(pid_record))
+        safe = bool(branch and merged and clean and no_unpushed and idle)
+        reasons = []
+        if not branch:
+            reasons.append("detached")
+        if not merged:
+            reasons.append("not merged into main")
+        if not clean:
+            reasons.append("dirty")
+        if not no_unpushed:
+            reasons.append("unpushed commits or no upstream")
+        if not idle:
+            reasons.append("running")
+        row: dict[str, Any] = {
+            "root": str(root),
+            "branch": branch,
+            "head": head,
+            "safe_to_remove": safe,
+            "removed": False,
+            "reasons": reasons,
+        }
+        if safe and not dry_run:
+            orca = _orca_prefix()
+            if shutil.which(orca[0]) is None:
+                row["reasons"] = [f"Orca removal failed: {orca[0]} is unavailable"]
+            else:
+                result = subprocess.run(
+                    [*orca, "worktree", "rm", "--worktree", f"path:{root}", "--force", "--json"],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                row["removed"] = result.returncode == 0
+                if result.returncode != 0:
+                    row["reasons"] = [f"Orca removal failed: {_bounded_redacted(result.stderr or result.stdout)}"]
+        rows.append(row)
+    failed_removals = [row for row in rows if row["safe_to_remove"] and not dry_run and not row["removed"]]
+    return {
+        "command": "reap",
+        "ok": not failed_removals,
+        "dry_run": dry_run,
+        "current_worktree": str(ROOT),
+        "worktrees": rows,
+    }
+
+
+def smoke(*, dry_run: bool) -> dict[str, Any]:
+    command = ["npm", "--prefix", "desktop", "run", "test:smoke"]
+    _load_worktree_env()
+    worktree_backend, worktree_frontend = _ports()
+    smoke_backend = worktree_backend + 2_000
+    smoke_frontend = worktree_frontend + 2_000
+    for offset in range(0, 100, 2):
+        candidate_backend = smoke_backend + offset
+        candidate_frontend = smoke_frontend + offset
+        if _port_available(candidate_backend) and _port_available(candidate_frontend):
+            smoke_backend, smoke_frontend = candidate_backend, candidate_frontend
+            break
+    else:
+        return {"command": "smoke", "ok": False, "dry_run": dry_run, "error": "no free smoke-test ports"}
+    ports = {"backend": smoke_backend, "frontend": smoke_frontend}
+    if dry_run:
+        return {
+            "command": "smoke",
+            "ok": True,
+            "dry_run": True,
+            "ports": ports,
+            "actions": [{"argv": command, "ok": None}],
+        }
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    scratch = ROOT / ".local" / "test-results" / f"smoke-{stamp}"
+    environment = _test_environment(scratch)
+    environment["OPENNOLAN_BACKEND_PORT"] = str(smoke_backend)
+    environment["OPENNOLAN_FRONTEND_PORT"] = str(smoke_frontend)
+    environment["OPENNOLAN_TEST_RESULTS"] = str(scratch)
+    started = time.monotonic()
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    action = {
+        "argv": _display_argv(command),
+        "ok": result.returncode == 0,
+        "returncode": result.returncode,
+        "duration_seconds": round(time.monotonic() - started, 2),
+        "output": _bounded_redacted((result.stdout or "") + (result.stderr or "")),
+    }
+    report = {
+        "command": "smoke",
+        "ok": action["ok"],
+        "dry_run": False,
+        "scratch": _redact(str(scratch)),
+        "ports": ports,
+        "actions": [action],
+    }
+    _atomic_json(scratch / "report.json", report)
+    return report
+
+
+def _resolve_sha(value: str) -> str | None:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{value}^{{commit}}"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _git_clean() -> bool:
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0 and not result.stdout.strip()
+
+
+def _opposite_provider(author_provider: str) -> str:
+    return "codex" if author_provider == "claude" else "claude"
+
+
+def _status_command(sha: str, state: str, description: str, *, target_url: str | None = None) -> list[str]:
+    command = [
+        "gh",
+        "api",
+        "-X",
+        "POST",
+        f"repos/{_github_repository()}/statuses/{sha}",
+        "-f",
+        f"state={state}",
+        "-f",
+        f"context={REVIEW_CONTEXT}",
+        "-f",
+        f"description={description[:140]}",
+    ]
+    if target_url:
+        command.extend(["-f", f"target_url={target_url}"])
+    return command
+
+
+def _review_comment(record: dict[str, Any]) -> str:
+    report = record["report"] or "No separate report was supplied."
+    return _truncate_with_marker(
+        "\n".join(
+            [
+                f"<!-- opennolan-agent-review:{record['sha']} -->",
+                "## Cross-provider review",
+                "",
+                f"- Reviewed SHA: `{record['sha']}`",
+                f"- Author provider: `{record['author_provider']}`",
+                f"- Reviewer provider: `{record['reviewer_provider']}`",
+                f"- Verdict: **{record['verdict']}**",
+                f"- Summary: {record['summary']}",
+                "",
+                "### Redacted report",
+                "",
+                report,
+            ]
+        ),
+        60_000,
+    )
+
+
+def _read_review_draft(report_path: Path) -> tuple[str | None, str | None]:
+    draft_dir = _review_draft_dir()
+    try:
+        resolved = report_path.resolve(strict=True)
+        resolved.relative_to(draft_dir.resolve())
+    except (OSError, ValueError):
+        return None, f"review report must be a regular file inside the review draft directory: {draft_dir}"
+    if report_path.is_symlink() or not resolved.is_file():
+        return None, "review report must be a non-symlink regular file"
+    try:
+        raw = resolved.read_text(encoding="utf-8")
+    except OSError as exc:
+        return None, f"cannot read review report: {exc}"
+    secrets_found = _possible_secret_kinds(raw)
+    if secrets_found:
+        return None, f"possible secret in review report ({', '.join(secrets_found)}); publication refused"
+    return _truncate_with_marker(_redact(raw), 50_000), None
+
+
+def _validate_public_summary(summary: str) -> str | None:
+    if len(summary) > 500 or "\n" in summary or "\r" in summary:
+        return "review summary must be one line and at most 500 characters"
+    secrets_found = _possible_secret_kinds(summary)
+    if secrets_found:
+        return f"possible secret in review summary ({', '.join(secrets_found)}); publication refused"
+    return None
+
+
+def _command_json(
+    command: list[str], *, cwd: Path = ROOT, env: dict[str, str] | None = None
+) -> tuple[dict[str, Any] | None, str | None]:
+    result = subprocess.run(command, cwd=cwd, env=env, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        return None, _bounded_redacted((result.stderr or result.stdout).strip())
+    try:
+        parsed = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None, "command returned invalid JSON"
+    return parsed, None
+
+
+def _find_key(value: Any, keys: tuple[str, ...]) -> Any:
+    if isinstance(value, dict):
+        for key in keys:
+            if value.get(key):
+                return value[key]
+        for child in value.values():
+            found = _find_key(child, keys)
+            if found:
+                return found
+    if isinstance(value, list):
+        for child in value:
+            found = _find_key(child, keys)
+            if found:
+                return found
+    return None
+
+
+def _receipt_id(receipt: dict[str, Any] | None, entity: str) -> Any:
+    """Read an entity id without mistaking Orca's top-level RPC id for it."""
+    if not isinstance(receipt, dict):
+        return None
+    result = receipt.get("result", receipt)
+    if not isinstance(result, dict):
+        return None
+    camel = f"{entity}Id"
+    snake = f"{entity}_id"
+    direct = result.get(camel) or result.get(snake)
+    if direct:
+        return direct
+    nested = result.get(entity)
+    if isinstance(nested, dict) and nested.get("id"):
+        return nested["id"]
+    return _find_key(result, (camel, snake))
+
+
+def _receipt_entity(receipt: dict[str, Any] | None, entity: str) -> dict[str, Any] | None:
+    if not isinstance(receipt, dict):
+        return None
+    result = receipt.get("result", receipt)
+    if not isinstance(result, dict):
+        return None
+    nested = result.get(entity)
+    if isinstance(nested, dict):
+        return nested
+    return result
+
+
+def _orca_setup_status(receipt: Any) -> str | None:
+    if isinstance(receipt, dict):
+        setup = receipt.get("setup")
+        if isinstance(setup, dict) and setup.get("status"):
+            return str(setup["status"])
+        for value in receipt.values():
+            status = _orca_setup_status(value)
+            if status:
+                return status
+    elif isinstance(receipt, list):
+        for value in receipt:
+            status = _orca_setup_status(value)
+            if status:
+                return status
+    return None
+
+
+def request_review(sha_value: str, author_provider: str, *, dry_run: bool) -> dict[str, Any]:
+    sha = _resolve_sha(sha_value)
+    if sha is None:
+        return {"command": "review", "action": "request", "ok": False, "error": f"unknown commit: {sha_value}"}
+    reviewer_provider = _opposite_provider(author_provider)
+    worktree_name = f"review-{sha[:12]}-{reviewer_provider}"
+    request_nonce = secrets.token_urlsafe(24)
+    required_checks = [
+        "assert the review worktree is clean and HEAD equals the full reviewed SHA",
+        "scripts/dev test full",
+        "scripts/dev smoke",
+        "scripts/dev test full --merge-base main",
+        "inspect the diff from merge-base(HEAD, main)",
+        "repeat the clean-tree and exact-SHA assertions immediately before publishing",
+    ]
+    base_report: dict[str, Any] = {
+        "command": "review",
+        "action": "request",
+        "ok": True,
+        "dry_run": dry_run,
+        "sha": sha,
+        "author_provider": author_provider,
+        "reviewer_provider": reviewer_provider,
+        "status_context": REVIEW_CONTEXT,
+        "worktree_name": worktree_name,
+        "request_nonce": request_nonce,
+        "required_checks": required_checks,
+    }
+    if dry_run:
+        return base_report
+    coordinator_dir, coordinator_error = _protected_review_coordinator_dir()
+    if coordinator_error:
+        return {**base_report, "ok": False, "error": coordinator_error}
+    token = os.environ.get("OPENNOLAN_REVIEW_STATUS_TOKEN")
+    app_id = os.environ.get("OPENNOLAN_REVIEW_STATUS_APP_ID")
+    if not token or not app_id:
+        return {**base_report, "ok": False, "error": "a coordinator credential is required to request a review"}
+    protection = _branch_protection()
+    if not protection.get("ok"):
+        return {
+            **base_report,
+            "ok": False,
+            "branch_protection": protection,
+            "error": "review-current is not bound to the configured coordinator GitHub App",
+        }
+    assert coordinator_dir is not None
+    head = _resolve_sha("HEAD")
+    if head != sha:
+        return {**base_report, "ok": False, "error": f"current HEAD is {head}; expected reviewed SHA {sha}"}
+    if not _git_clean():
+        return {**base_report, "ok": False, "error": "review requests require a clean author worktree"}
+    orca = _orca_prefix()
+    if shutil.which(orca[0]) is None:
+        return {**base_report, "ok": False, "error": "orca is not available"}
+
+    run_receipt, error = _command_json(
+        [*orca, "orchestration", "run-create", "--objective", f"Cross-provider review of {sha}", "--json"]
+    )
+    if error:
+        return {**base_report, "ok": False, "error": error}
+    run_id = _receipt_id(run_receipt, "run")
+    spec = (
+        f"Review-only task for exact commit {sha}. Author provider: {author_provider}; reviewer provider: "
+        f"{reviewer_provider}. Do not edit the author's branch. Assert HEAD equals the SHA and the tree is clean; "
+        "run scripts/dev test full, scripts/dev smoke, and scripts/dev test full --merge-base main; inspect the diff "
+        "from merge-base(HEAD, main) for correctness, architecture, efficiency, security, readability, accessibility, "
+        "and regression risk. Repeat the clean-tree and exact-SHA assertions immediately before publishing. Publish "
+        "approved, changes_requested, or blocked with scripts/dev review publish, naming this exact SHA and both "
+        "providers and attaching a redacted report. Then report worker_done with the verdict and findings. If changes "
+        "are requested, tell the coordinator to create a remediation task for the original author; after two review "
+        "rounds, route any further dispute through a manager decision gate. When publishing, pass request nonce "
+        f"{request_nonce}."
+    )
+    task_receipt, error = _command_json([*orca, "orchestration", "task-create", "--spec", spec, "--json"])
+    if error:
+        return {**base_report, "ok": False, "run_id": run_id, "error": error}
+    task_id = _receipt_id(task_receipt, "task")
+    if not task_id:
+        return {**base_report, "ok": False, "run_id": run_id, "error": "Orca did not return a task id"}
+
+    create_command = [
+        *orca,
+        "worktree",
+        "create",
+        "--name",
+        worktree_name,
+        "--no-parent",
+        "--base-branch",
+        sha,
+        "--agent",
+        reviewer_provider,
+        "--setup",
+        "run",
+        "--json",
+    ]
+    worktree_receipt, error = _command_json(create_command)
+    if error:
+        return {**base_report, "ok": False, "run_id": run_id, "task_id": task_id, "error": error}
+    setup_status = _orca_setup_status(worktree_receipt)
+    if setup_status != "succeeded":
+        return {
+            **base_report,
+            "ok": False,
+            "run_id": run_id,
+            "task_id": task_id,
+            "setup_status": setup_status,
+            "error": (
+                "Orca setup did not finish before agent startup; configure this repository for wait-for-setup "
+                "and keep its setup slot set to scripts/dev setup"
+            ),
+        }
+    worktree_id = _find_key(worktree_receipt, ("worktreeId", "worktree_id"))
+    if worktree_id is None and isinstance(worktree_receipt, dict):
+        worktree = _find_key(worktree_receipt, ("worktree",))
+        if isinstance(worktree, dict):
+            worktree_id = worktree.get("id")
+    terminal_handle = _find_key(worktree_receipt, ("agentTerminalHandle", "handle"))
+    worktree_path = _find_key(worktree_receipt, ("worktreePath", "path"))
+    if not terminal_handle or not worktree_path:
+        return {
+            **base_report,
+            "ok": False,
+            "run_id": run_id,
+            "task_id": task_id,
+            "error": "Orca created the worktree but did not return its agent handle/path",
+        }
+    pinned = subprocess.run(
+        ["git", "-C", str(worktree_path), "rev-parse", "HEAD"],
+        text=True,
+        capture_output=True,
+        check=False,
+    ).stdout.strip()
+    if pinned != sha:
+        return {**base_report, "ok": False, "error": f"review worktree resolved to {pinned}, expected {sha}"}
+    clean = subprocess.run(
+        ["git", "-C", str(worktree_path), "status", "--porcelain"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if clean.returncode != 0 or clean.stdout.strip():
+        return {**base_report, "ok": False, "error": "review worktree is not clean after setup"}
+
+    _, error = _command_json(
+        [
+            *orca,
+            "terminal",
+            "wait",
+            "--terminal",
+            str(terminal_handle),
+            "--for",
+            "tui-idle",
+            "--timeout-ms",
+            "60000",
+            "--json",
+        ]
+    )
+    if error:
+        return {**base_report, "ok": False, "error": error}
+    pending = _status_command(sha, "pending", f"waiting for {reviewer_provider} review of {author_provider} change")
+    github_environment = os.environ.copy()
+    github_environment["GH_TOKEN"] = token
+    pending_result = subprocess.run(
+        pending,
+        cwd=ROOT,
+        env=github_environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if pending_result.returncode != 0:
+        return {**base_report, "ok": False, "error": _bounded_redacted(pending_result.stderr or pending_result.stdout)}
+    dispatch_receipt, error = _command_json(
+        [
+            *orca,
+            "orchestration",
+            "dispatch",
+            "--task",
+            str(task_id),
+            "--to",
+            str(terminal_handle),
+            "--inject",
+            "--json",
+        ]
+    )
+    if error:
+        failed = _status_command(sha, "error", f"could not dispatch {reviewer_provider} review")
+        subprocess.run(failed, cwd=ROOT, env=github_environment, text=True, capture_output=True, check=False)
+        return {**base_report, "ok": False, "error": error}
+    dispatch_id = _receipt_id(dispatch_receipt, "dispatch")
+    if not dispatch_id:
+        failed = _status_command(sha, "error", f"Orca returned no dispatch for {reviewer_provider} review")
+        subprocess.run(failed, cwd=ROOT, env=github_environment, text=True, capture_output=True, check=False)
+        return {**base_report, "ok": False, "error": "Orca did not return a dispatch id"}
+    result = {
+        **base_report,
+        "run_id": run_id,
+        "task_id": task_id,
+        "dispatch_id": dispatch_id,
+        "worktree_id": worktree_id,
+        "worktree_path": str(worktree_path),
+        "terminal_handle": str(terminal_handle),
+    }
+    try:
+        _atomic_json(
+            _review_request_path(sha),
+            {
+                "sha": sha,
+                "author_provider": author_provider,
+                "reviewer_provider": reviewer_provider,
+                "run_id": run_id,
+                "task_id": task_id,
+                "dispatch_id": dispatch_id,
+                "worktree_id": worktree_id,
+                "worktree_path": str(worktree_path),
+                "terminal_handle": str(terminal_handle),
+                "request_nonce": request_nonce,
+                "created_at": datetime.now(UTC).isoformat(),
+            },
+        )
+    except OSError as exc:
+        failed = _status_command(sha, "error", "could not store coordinator review request")
+        subprocess.run(failed, cwd=ROOT, env=github_environment, text=True, capture_output=True, check=False)
+        return {**base_report, "ok": False, "error": f"could not store coordinator request: {exc}"}
+    return result
+
+
+def publish_review(
+    sha_value: str,
+    author_provider: str,
+    reviewer_provider: str,
+    verdict: str,
+    summary: str,
+    *,
+    report_path: Path | None,
+    task_id: str,
+    dispatch_id: str,
+    request_nonce: str,
+    dry_run: bool,
+) -> dict[str, Any]:
+    base_report: dict[str, Any] = {"command": "review", "action": "publish", "ok": True, "dry_run": dry_run}
+    if author_provider == reviewer_provider:
+        return {**base_report, "ok": False, "error": "an author provider cannot review itself"}
+    if _opposite_provider(author_provider) != reviewer_provider:
+        return {**base_report, "ok": False, "error": "reviewer must be the opposite configured provider"}
+    summary_error = _validate_public_summary(summary)
+    if summary_error:
+        return {**base_report, "ok": False, "error": summary_error}
+    sha = _resolve_sha(sha_value)
+    if sha is None:
+        return {**base_report, "ok": False, "error": f"unknown commit: {sha_value}"}
+    report_content = ""
+    if report_path is not None:
+        report_content, report_error = _read_review_draft(report_path)
+        if report_error:
+            return {**base_report, "ok": False, "error": report_error}
+        assert report_content is not None
+    record = {
+        "sha": sha,
+        "author_provider": author_provider,
+        "reviewer_provider": reviewer_provider,
+        "verdict": verdict,
+        "summary": summary,
+        "status_context": REVIEW_CONTEXT,
+        "task_id": task_id,
+        "dispatch_id": dispatch_id,
+        "request_nonce": request_nonce,
+        "published_at": datetime.now(UTC).isoformat(),
+        "report": report_content,
+    }
+    orca_command = [
+        *_orca_prefix(),
+        "orchestration",
+        "send",
+        "--type",
+        "worker_done",
+        "--subject",
+        f"review {verdict}: {sha[:12]}",
+        "--body",
+        summary,
+        "--task-id",
+        task_id,
+        "--dispatch-id",
+        dispatch_id,
+        "--outcome",
+        "succeeded",
+        "--report-path",
+        str(report_path) if report_path is not None else "",
+        "--payload",
+        json.dumps(record, separators=(",", ":")),
+        "--json",
+    ]
+    if dry_run:
+        return {
+            **base_report,
+            **record,
+            "orca_command": orca_command,
+        }
+    if report_path is None:
+        return {**base_report, "ok": False, "error": "publishing a review requires --report"}
+    head = _resolve_sha("HEAD")
+    if head != sha or not _git_clean():
+        return {**base_report, "ok": False, "error": "publish from a clean worktree pinned to the reviewed SHA"}
+    dispatch, error = _command_json([*_orca_prefix(), "orchestration", "dispatch-show", "--task", task_id, "--json"])
+    if error:
+        return {**base_report, "ok": False, "error": f"could not verify Orca dispatch: {error}"}
+    actual_dispatch = _receipt_id(dispatch, "dispatch")
+    if actual_dispatch != dispatch_id:
+        return {**base_report, "ok": False, "error": "current Orca task does not own the supplied dispatch"}
+    sent, error = _command_json(orca_command)
+    if error:
+        return {**base_report, "ok": False, "error": f"Orca rejected the attested review result: {error}"}
+    record_path = ROOT / ".local" / "reviews" / f"{sha}.json"
+    _atomic_json(record_path, record)
+    return {
+        **base_report,
+        **record,
+        "orca_receipt": sent,
+        "record_path": str(record_path),
+    }
+
+
+def finalize_review(result_path: Path, *, dry_run: bool) -> dict[str, Any]:
+    base_report: dict[str, Any] = {"command": "review", "action": "finalize", "ok": True, "dry_run": dry_run}
+    token = os.environ.get("OPENNOLAN_REVIEW_STATUS_TOKEN")
+    app_id = os.environ.get("OPENNOLAN_REVIEW_STATUS_APP_ID")
+    if not token or not app_id:
+        return {**base_report, "ok": False, "error": "a coordinator credential is required to finalize a review"}
+    coordinator_dir, coordinator_error = _protected_review_coordinator_dir()
+    if coordinator_error:
+        return {**base_report, "ok": False, "error": coordinator_error}
+    assert coordinator_dir is not None
+    try:
+        result_path.resolve().relative_to((coordinator_dir / "inbox").resolve())
+    except ValueError:
+        return {**base_report, "ok": False, "error": "attested review result must be inside the coordinator inbox"}
+    try:
+        record = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {**base_report, "ok": False, "error": f"cannot read attested review result: {exc}"}
+    required = (
+        "sha",
+        "author_provider",
+        "reviewer_provider",
+        "verdict",
+        "summary",
+        "report",
+        "task_id",
+        "dispatch_id",
+        "request_nonce",
+    )
+    if not isinstance(record, dict) or any(not record.get(key) for key in required):
+        return {**base_report, "ok": False, "error": "attested review result is missing required fields"}
+    summary_error = _validate_public_summary(str(record["summary"]))
+    if summary_error:
+        return {**base_report, "ok": False, "error": summary_error}
+    report_secrets = _possible_secret_kinds(str(record["report"]))
+    if report_secrets:
+        return {**base_report, "ok": False, "error": "possible secret in attested review report; publication refused"}
+    record["report"] = _truncate_with_marker(_redact(str(record["report"])), 50_000)
+    if _opposite_provider(str(record["author_provider"])) != record["reviewer_provider"]:
+        return {**base_report, "ok": False, "error": "attested review does not use the opposite provider"}
+    if record["verdict"] not in {"approved", "changes_requested", "blocked"}:
+        return {**base_report, "ok": False, "error": "attested review has an unknown verdict"}
+    sha = _resolve_sha(str(record["sha"]))
+    if sha != record["sha"]:
+        return {**base_report, "ok": False, "error": "attested review SHA is not available locally"}
+    request_path = _review_request_path(sha)
+    try:
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {**base_report, "ok": False, "error": "no matching coordinator request exists for this review"}
+    attested_fields = (
+        "sha",
+        "author_provider",
+        "reviewer_provider",
+        "task_id",
+        "dispatch_id",
+        "request_nonce",
+    )
+    if any(request.get(key) != record.get(key) for key in attested_fields):
+        return {**base_report, "ok": False, "error": "review result does not match the coordinator request"}
+    if not request.get("terminal_handle") or not request.get("worktree_path"):
+        return {**base_report, "ok": False, "error": "coordinator request is missing reviewer placement provenance"}
+
+    state = {"approved": "success", "changes_requested": "failure", "blocked": "error"}[record["verdict"]]
+    description = (
+        f"{record['verdict']} by {record['reviewer_provider']}; author {record['author_provider']}; {record['summary']}"
+    )
+    comment_body = _review_comment(record)
+    comment_command = [
+        "gh",
+        "api",
+        "-X",
+        "POST",
+        f"repos/{_github_repository()}/commits/{sha}/comments",
+        "-f",
+        f"body={comment_body}",
+    ]
+    if dry_run:
+        return {
+            **base_report,
+            **record,
+            "comment_command": comment_command,
+            "status_command": _status_command(sha, state, description, target_url="<review-comment-url>"),
+        }
+
+    dispatch, error = _command_json(
+        [*_orca_prefix(), "orchestration", "dispatch-show", "--task", str(record["task_id"]), "--json"]
+    )
+    if error:
+        return {**base_report, "ok": False, "error": f"could not verify Orca dispatch: {error}"}
+    if _receipt_id(dispatch, "dispatch") != record["dispatch_id"]:
+        return {**base_report, "ok": False, "error": "review result does not match the attested Orca dispatch"}
+    dispatch_record = _receipt_entity(dispatch, "dispatch")
+    dispatch_status = _find_key(dispatch_record, ("status", "state"))
+    if dispatch_status != "completed":
+        return {**base_report, "ok": False, "error": "attested Orca dispatch is not completed"}
+    dispatch_terminal = _find_key(
+        dispatch_record,
+        ("terminalHandle", "terminal_handle", "agentTerminalHandle", "targetTerminalHandle"),
+    )
+    if str(dispatch_terminal) != str(request["terminal_handle"]):
+        return {**base_report, "ok": False, "error": "Orca dispatch does not match the requested reviewer terminal"}
+    review_worktree = Path(str(request["worktree_path"]))
+    reviewed_head = subprocess.run(
+        ["git", "-C", str(review_worktree), "rev-parse", "HEAD"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    reviewed_status = subprocess.run(
+        ["git", "-C", str(review_worktree), "status", "--porcelain"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if (
+        reviewed_head.returncode != 0
+        or reviewed_head.stdout.strip() != sha
+        or reviewed_status.returncode != 0
+        or reviewed_status.stdout.strip()
+    ):
+        return {
+            **base_report,
+            "ok": False,
+            "error": "review worktree is no longer clean and pinned to the attested SHA",
+        }
+
+    github_environment = os.environ.copy()
+    github_environment["GH_TOKEN"] = token
+    comment, error = _command_json(comment_command, env=github_environment)
+    if error:
+        return {**base_report, "ok": False, "error": f"could not publish review details: {error}"}
+    comment_url = _find_key(comment, ("html_url",))
+    if not comment_url:
+        return {**base_report, "ok": False, "error": "GitHub did not return the review comment URL"}
+    status_command = _status_command(sha, state, description, target_url=str(comment_url))
+    result = subprocess.run(
+        status_command,
+        cwd=ROOT,
+        env=github_environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return {**base_report, "ok": False, "error": _bounded_redacted(result.stderr or result.stdout)}
+    return {**base_report, **record, "comment_url": comment_url}
+
+
+def verify_review(sha_value: str, *, dry_run: bool) -> dict[str, Any]:
+    sha = _resolve_sha(sha_value)
+    if sha is None:
+        return {"command": "review", "action": "verify", "ok": False, "error": f"unknown commit: {sha_value}"}
+    command = [
+        "gh",
+        "api",
+        f"repos/{_github_repository()}/commits/{sha}/status",
+        "--jq",
+        f'.statuses[] | select(.context == "{REVIEW_CONTEXT}") | .state',
+    ]
+    if dry_run:
+        return {"command": "review", "action": "verify", "ok": True, "dry_run": True, "sha": sha, "argv": command}
+    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
+    states = result.stdout.splitlines() if result.returncode == 0 else []
+    current = states[0] if states else None
+    return {
+        "command": "review",
+        "action": "verify",
+        "ok": current == "success",
+        "dry_run": False,
+        "sha": sha,
+        "state": current,
+        "status_context": REVIEW_CONTEXT,
+        "error": None if current == "success" else "no approved cross-provider review exists for this SHA",
+    }
+
+
+def _print_human(report: dict[str, Any]) -> None:
+    if report["command"] == "setup":
+        state = "ready" if report["ok"] else "failed"
+        mode = "dry run" if report["dry_run"] else "complete"
+        print(f"OpenNolan setup: {state} ({mode})")
+        for key, value in report["environment"].items():
+            print(f"  {key}={value}")
+        for action in report["actions"]:
+            result = "planned" if action["ok"] is None else ("ok" if action["ok"] else "failed")
+            print(f"  {result}: {' '.join(action['argv'])}")
+        return
+    if report["command"] == "run":
+        if report.get("dry_run"):
+            print(f"OpenNolan run: planned ({report['ports']['backend']} + {report['ports']['frontend']})")
+        elif report["ok"]:
+            print(f"OpenNolan run: stopped; log: {report.get('log')}")
+        else:
+            print(f"OpenNolan run: failed: {report.get('error', 'see log')}")
+        return
+    if report["command"] == "stop":
+        print(f"OpenNolan stop: stopped {len(report['stopped'])} process group(s)")
+        for error in report["errors"]:
+            print(f"  issue: {error['root']}: {error['error']}")
+        return
+    if report["command"] == "test":
+        state = "passed" if report["ok"] else "failed"
+        print(f"OpenNolan {report['tier']} tests: {state}")
+        if report.get("error"):
+            print(f"  {report['error']}")
+        if report.get("status") == "skipped":
+            print(f"  skipped: {report.get('reason')}")
+        for action in report["actions"]:
+            result = "planned" if action["ok"] is None else ("ok" if action["ok"] else "failed")
+            print(f"  {result}: {' '.join(action['argv'])}")
+            if action.get("output") and not action["ok"]:
+                print(action["output"])
+        return
+    if report["command"] == "smoke":
+        state = "passed" if report["ok"] else "failed"
+        print(f"OpenNolan app smoke: {state}")
+        for action in report["actions"]:
+            result = "planned" if action["ok"] is None else ("ok" if action["ok"] else "failed")
+            print(f"  {result}: {' '.join(action['argv'])}")
+            if action.get("output") and not action["ok"]:
+                print(action["output"])
+        return
+    if report["command"] == "review":
+        state = "ok" if report["ok"] else "failed"
+        print(f"OpenNolan review {report['action']}: {state}")
+        for key in ("sha", "author_provider", "reviewer_provider", "verdict", "dispatch_id", "state"):
+            if report.get(key) is not None:
+                print(f"  {key}: {report[key]}")
+        if report.get("error"):
+            print(f"  error: {report['error']}")
+        return
+    if report["command"] == "reap":
+        state = "ok" if report["ok"] else "failed"
+        print(f"OpenNolan worktree reap: {state} ({'dry run' if report['dry_run'] else 'apply'})")
+        for row in report["worktrees"]:
+            action = "removed" if row["removed"] else ("would remove" if row["safe_to_remove"] else "kept")
+            reason = ", ".join(row["reasons"])
+            print(f"  {action}: {row['root']}{f' ({reason})' if reason else ''}")
+        if report.get("error"):
+            print(f"  error: {report['error']}")
+        return
+    state = "ready" if report["ok"] else "needs attention"
+    print(f"OpenNolan worktree: {state}")
+    print(f"  root: {report['worktree']['root']}")
+    print(f"  ports: backend={report['worktree']['backend_port']} frontend={report['worktree']['frontend_port']}")
+    for name, info in report["tools"].items():
+        detail = info["version"] or "missing"
+        print(f"  {name}: {detail}")
+    for issue in report["issues"]:
+        print(f"  issue: {issue}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="scripts/dev")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    doctor_parser = subparsers.add_parser("doctor", help="check the worktree environment")
+    doctor_parser.add_argument("--json", action="store_true", dest="as_json")
+    doctor_parser.add_argument("--remote", action="store_true", help="also verify GitHub branch protection")
+    setup_parser = subparsers.add_parser("setup", help="prepare the current worktree")
+    setup_parser.add_argument("--json", action="store_true", dest="as_json")
+    setup_parser.add_argument("--dry-run", action="store_true")
+    run_parser = subparsers.add_parser("run", help="start the app for this worktree")
+    run_parser.add_argument("--json", action="store_true", dest="as_json")
+    run_parser.add_argument("--dry-run", action="store_true")
+    run_parser.add_argument("--ttl", type=_parse_duration)
+    stop_parser = subparsers.add_parser("stop", help="stop managed app processes")
+    stop_parser.add_argument("--json", action="store_true", dest="as_json")
+    stop_parser.add_argument("--all", action="store_true", dest="all_worktrees")
+    test_parser = subparsers.add_parser("test", help="run a deterministic test tier")
+    test_parser.add_argument("tier", choices=("fast", "full", "app", "media", "provider"))
+    test_parser.add_argument("--json", action="store_true", dest="as_json")
+    test_parser.add_argument("--dry-run", action="store_true")
+    test_parser.add_argument("--provider")
+    test_parser.add_argument("--max-spend", type=float)
+    test_parser.add_argument("--merge-base")
+    smoke_parser = subparsers.add_parser("smoke", help="run the Playwright app smoke")
+    smoke_parser.add_argument("--json", action="store_true", dest="as_json")
+    smoke_parser.add_argument("--dry-run", action="store_true")
+    review_parser = subparsers.add_parser("review", help="request, publish, or verify cross-provider review")
+    review_subparsers = review_parser.add_subparsers(dest="review_action", required=True)
+    review_request = review_subparsers.add_parser("request", help="dispatch the opposite provider")
+    review_request.add_argument("--sha", required=True)
+    review_request.add_argument("--author-provider", choices=("claude", "codex"), required=True)
+    review_request.add_argument("--dry-run", action="store_true")
+    review_request.add_argument("--json", action="store_true", dest="as_json")
+    review_publish = review_subparsers.add_parser("publish", help="publish a SHA-bound verdict")
+    review_publish.add_argument("--sha", required=True)
+    review_publish.add_argument("--author-provider", choices=("claude", "codex"), required=True)
+    review_publish.add_argument("--reviewer-provider", choices=("claude", "codex"), required=True)
+    review_publish.add_argument("--verdict", choices=("approved", "changes_requested", "blocked"), required=True)
+    review_publish.add_argument("--summary", required=True)
+    review_publish.add_argument("--report", type=Path)
+    review_publish.add_argument("--task-id", required=True)
+    review_publish.add_argument("--dispatch-id", required=True)
+    review_publish.add_argument("--request-nonce", required=True)
+    review_publish.add_argument("--dry-run", action="store_true")
+    review_publish.add_argument("--json", action="store_true", dest="as_json")
+    review_finalize = review_subparsers.add_parser("finalize", help="publish an Orca-attested verdict as coordinator")
+    review_finalize.add_argument("--result", type=Path, required=True)
+    review_finalize.add_argument("--dry-run", action="store_true")
+    review_finalize.add_argument("--json", action="store_true", dest="as_json")
+    review_verify = review_subparsers.add_parser("verify", help="verify the current SHA's GitHub status")
+    review_verify.add_argument("--sha", required=True)
+    review_verify.add_argument("--dry-run", action="store_true")
+    review_verify.add_argument("--json", action="store_true", dest="as_json")
+    reap_parser = subparsers.add_parser("reap", help="remove only merged, clean, idle Orca worktrees")
+    reap_parser.add_argument("--dry-run", action="store_true")
+    reap_parser.add_argument("--json", action="store_true", dest="as_json")
+    args = parser.parse_args(argv)
+
+    if args.command == "doctor":
+        report = doctor(check_remote=args.remote)
+    elif args.command == "setup":
+        report = setup(dry_run=args.dry_run)
+    elif args.command == "run":
+        report = run_app(ttl_seconds=args.ttl, dry_run=args.dry_run)
+    elif args.command == "stop":
+        report = stop(all_worktrees=args.all_worktrees)
+    elif args.command == "test":
+        report = run_tests(
+            args.tier,
+            dry_run=args.dry_run,
+            provider=args.provider,
+            max_spend=args.max_spend,
+            merge_base=args.merge_base,
+        )
+    elif args.command == "smoke":
+        report = smoke(dry_run=args.dry_run)
+    elif args.command == "review":
+        if args.review_action == "request":
+            report = request_review(args.sha, args.author_provider, dry_run=args.dry_run)
+        elif args.review_action == "publish":
+            report = publish_review(
+                args.sha,
+                args.author_provider,
+                args.reviewer_provider,
+                args.verdict,
+                args.summary,
+                report_path=args.report,
+                task_id=args.task_id,
+                dispatch_id=args.dispatch_id,
+                request_nonce=args.request_nonce,
+                dry_run=args.dry_run,
+            )
+        elif args.review_action == "finalize":
+            report = finalize_review(args.result, dry_run=args.dry_run)
+        else:
+            report = verify_review(args.sha, dry_run=args.dry_run)
+    elif args.command == "reap":
+        report = reap(dry_run=args.dry_run)
+    else:
+        return 2
+    if args.as_json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        _print_human(report)
+    return 0 if report["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

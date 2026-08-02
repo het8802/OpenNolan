@@ -9,6 +9,7 @@
     "prestart": "npm --prefix ../web run build",
     "start": "electron .",
     "dev": "ELECTRON_DEV=1 electron .",
+    "test:smoke": "playwright test",
     "fetch-runtime": "node ../scripts/fetch-python.mjs && node ../scripts/fetch-uv.mjs && node ../scripts/fetch-node.mjs",
     "dist": "npm run fetch-runtime && npm --prefix ../web run build && electron-builder --mac --arm64",
     "dist:dir": "npm run fetch-runtime && npm --prefix ../web run build && electron-builder --mac --arm64 --dir"

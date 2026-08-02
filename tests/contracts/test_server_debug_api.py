@@ -6,6 +6,8 @@ tmp dir so nothing touches the real .agents/ tree.
 """
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -33,7 +35,10 @@ def _client(tmp_path, monkeypatch):
 def test_debug_log_appends_ndjson(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     session = "2026-07-01T00-00-00-000Z-abcd"
-    body = {"session": session, "events": [{"seq": 0, "type": "session.start"}, {"seq": 1, "type": "ui.seek", "data": {"t": 1.5}}]}
+    body = {
+        "session": session,
+        "events": [{"seq": 0, "type": "session.start"}, {"seq": 1, "type": "ui.seek", "data": {"t": 1.5}}],
+    }
 
     r = client.post("/api/debug/log", json=body)
     assert r.status_code == 200
@@ -121,7 +126,7 @@ def test_discard_deletes_session(tmp_path, monkeypatch):
 
     r = client.delete(f"/api/debug/sessions/{session}")
     assert r.status_code == 200 and r.json() == {"ok": True, "removed": True}
-    assert not log.exists()                                             # logs are gone
+    assert not log.exists()  # logs are gone
     assert client.get(f"/api/debug/sessions/{session}/analyze").status_code == 404  # nothing to send
 
     # Idempotent: discarding an already-gone session is a 200 with removed=false, not a 404/500.
@@ -138,9 +143,17 @@ def test_analyze_collects_edit_history(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     session = "edits-sess"
     events = [
-        {"seq": 0, "type": "edit.commit", "data": {"cuts": {"added": ["c2"]}}},        # split/add
-        {"seq": 1, "type": "edit.commit", "data": {"cuts": {"changed": [{"id": "c2", "fields": ["out_seconds"]}]}}},  # trim
-        {"seq": 2, "type": "edit.commit", "data": {"overlays": {"changed": [{"index": 0, "fields": ["text"]}]}}},     # text edit
+        {"seq": 0, "type": "edit.commit", "data": {"cuts": {"added": ["c2"]}}},  # split/add
+        {
+            "seq": 1,
+            "type": "edit.commit",
+            "data": {"cuts": {"changed": [{"id": "c2", "fields": ["out_seconds"]}]}},
+        },  # trim
+        {
+            "seq": 2,
+            "type": "edit.commit",
+            "data": {"overlays": {"changed": [{"index": 0, "fields": ["text"]}]}},
+        },  # text edit
         {"seq": 3, "type": "edit.undo", "data": {"overlays": {"changed": [{"index": 0, "fields": ["text"]}]}}},
         {"seq": 4, "type": "ui.save", "data": {"result": "ok"}},
     ]
@@ -152,3 +165,38 @@ def test_analyze_collects_edit_history(tmp_path, monkeypatch):
     assert types == ["edit.commit", "edit.commit", "edit.commit", "edit.undo"]
     assert rep["edits"]["log"][0]["cuts"] == {"added": ["c2"]}
     assert rep["histogram"]["ui.save"] == 1
+
+
+def test_debug_analyzer_can_redact_exported_evidence(tmp_path):
+    session_dir = tmp_path / "ui-sessions"
+    session_dir.mkdir()
+    session = "redact-me"
+    private_text = "private launch script"
+    secret = "sk-test-secret-value"
+    event = {
+        "seq": 0,
+        "type": "console",
+        "level": "error",
+        "data": {
+            "projectId": "client-project",
+            "message": private_text,
+            "token": secret,
+            "file": str(Path.home() / "client" / "source.mp4"),
+        },
+    }
+    (session_dir / f"{session}.ndjson").write_text(json.dumps(event) + "\n", encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(PROJECT_ROOT / "scripts" / "debug_session.py"), session, "--json", "--redact"],
+        cwd=PROJECT_ROOT,
+        env={**os.environ, "OPENNOLAN_DEBUG_LOG_DIR": str(session_dir)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    exported = result.stdout
+    assert private_text not in exported
+    assert secret not in exported
+    assert str(Path.home()) not in exported
+    assert "[redacted]" in exported

@@ -37,6 +37,6 @@ EOF
 	exit 1
 fi
 
-# ponytail: identity only for now. The fast test gate (scripts/dev test fast)
-# joins this hook in Phase 2 — see docs/plans/wiring-repo-for-agent/merged/.
-exit 0
+ROOT="$(git rev-parse --show-toplevel)"
+echo "  → running fast repository gate" >&2
+"$ROOT/scripts/dev" test fast

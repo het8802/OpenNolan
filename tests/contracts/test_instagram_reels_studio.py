@@ -84,6 +84,9 @@ def test_social_reel_renderer_family_resolves():
 
 
 def test_social_reel_composition_registered_in_remotion_root():
-    root = (REPO / "remotion-composer" / "src" / "Root.tsx").read_text()
+    root_path = REPO / "remotion-composer" / "src" / "Root.tsx"
+    if not root_path.is_file():
+        pytest.skip("remotion-composer is an intentionally untracked optional checkout")
+    root = root_path.read_text()
     assert 'id="SocialReel"' in root, "SocialReel composition not registered in Root.tsx"
     assert (REPO / "remotion-composer" / "src" / "SocialReel.tsx").exists()

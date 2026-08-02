@@ -95,7 +95,7 @@ describe('ChatPanel render contract', () => {
   it('renders the model selector with Opus marked recommended and selects the chat model', () => {
     const chat = mockChat({ model: 'claude-sonnet-5' })
     const { getByTitle, getByText } = render(<ChatPanel chat={chat} disabled={false} />)
-    const select = getByTitle('Agent model')
+    const select = getByTitle('Agent model (applies to your next message)')
     expect(select.value).toBe('claude-sonnet-5')
     expect(getByText('Opus 4.8 · Recommended')).toBeInTheDocument()
   })
@@ -103,7 +103,7 @@ describe('ChatPanel render contract', () => {
   it('changing the model selector calls chat.setModel', () => {
     const chat = mockChat()
     const { getByTitle } = render(<ChatPanel chat={chat} disabled={false} />)
-    fireEvent.change(getByTitle('Agent model'), { target: { value: 'claude-haiku-4-5-20251001' } })
+    fireEvent.change(getByTitle('Agent model (applies to your next message)'), { target: { value: 'claude-haiku-4-5-20251001' } })
     expect(chat.setModel).toHaveBeenCalledWith('claude-haiku-4-5-20251001')
   })
 

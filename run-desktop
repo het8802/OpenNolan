@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./run-desktop          production: build the web UI, boot the backend, open the window
-#   ./run-desktop --dev    hot-reload: start Vite (:5173) + Electron pointed at it
+#   ./run-desktop --dev    hot-reload: start Vite + Electron on this worktree's ports
 #
 # Everything runs locally (BYOK). Put API keys in the repo .env — ANTHROPIC_API_KEY
 # powers the agent; provider keys (REPLICATE_API_TOKEN, ELEVENLABS_API_KEY, …) power
@@ -15,12 +15,35 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+if [ -f "$ROOT/.env.worktree" ]; then
+  backend_port_was_set="${OPENNOLAN_BACKEND_PORT+yes}"
+  backend_port_override="${OPENNOLAN_BACKEND_PORT-}"
+  frontend_port_was_set="${OPENNOLAN_FRONTEND_PORT+yes}"
+  frontend_port_override="${OPENNOLAN_FRONTEND_PORT-}"
+  home_was_set="${OPENNOLAN_HOME+yes}"
+  home_override="${OPENNOLAN_HOME-}"
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT/.env.worktree"
+  set +a
+  [ "$backend_port_was_set" = "yes" ] && export OPENNOLAN_BACKEND_PORT="$backend_port_override"
+  [ "$frontend_port_was_set" = "yes" ] && export OPENNOLAN_FRONTEND_PORT="$frontend_port_override"
+  [ "$home_was_set" = "yes" ] && export OPENNOLAN_HOME="$home_override"
+fi
+
+if [ -z "${OPENNOLAN_BACKEND_PORT:-}" ] || [ -z "${OPENNOLAN_FRONTEND_PORT:-}" ]; then
+  echo "run-desktop: worktree ports are missing; run scripts/dev setup first." >&2
+  exit 1
+fi
+BACKEND_PORT="$OPENNOLAN_BACKEND_PORT"
+FRONTEND_PORT="$OPENNOLAN_FRONTEND_PORT"
+
 usage() {
   cat <<EOF
 Usage: ./run-desktop [--dev]
 
   (no flag)   production — build the web UI, boot the backend, open the Electron window
-  --dev       hot-reload — start Vite (http://localhost:5173) + Electron dev
+  --dev       hot-reload — start Vite (http://localhost:$FRONTEND_PORT) + Electron dev
   -h, --help  show this help
 EOF
 }
@@ -66,17 +89,17 @@ if [ "$mode" = "dev" ]; then
   }
   trap cleanup INT TERM EXIT
 
-  echo "→ frontend  http://localhost:5173  (vite)"
+  echo "→ frontend  http://localhost:$FRONTEND_PORT  (vite)"
   ( exec npm --prefix web run dev ) &
   pids+=("$!")
 
-  echo "run-desktop: waiting for Vite on :5173…"
+  echo "run-desktop: waiting for Vite on :$FRONTEND_PORT…"
   for _ in $(seq 1 60); do
-    curl -sf -o /dev/null "http://localhost:5173" && break
+    curl -sf -o /dev/null "http://localhost:$FRONTEND_PORT" && break
     sleep 0.5
   done
 
-  echo "→ desktop   Electron (dev; backend auto-managed on :8000)"
+  echo "→ desktop   Electron (dev; backend auto-managed on :$BACKEND_PORT)"
   npm --prefix desktop run dev
 else
   echo "→ desktop   Electron (prod; builds web, serves it same-origin, opens the window)"
