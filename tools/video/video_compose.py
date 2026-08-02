@@ -28,6 +28,7 @@ import math
 import re
 import subprocess
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
@@ -437,8 +438,14 @@ class VideoCompose(BaseTool):
         return info
 
     @staticmethod
+    @lru_cache(maxsize=1)
     def _hdr_encoders() -> list[str]:
-        """Names of available 10-bit-HEVC-capable encoders (for HDR preservation)."""
+        """Return 10-bit HEVC encoders that can actually encode on this host.
+
+        ``ffmpeg -encoders`` lists compiled adapters, including VideoToolbox in
+        headless sessions where macOS refuses to open the hardware encoder. A
+        one-frame probe keeps capability reporting and test selection honest.
+        """
         import shutil
         import subprocess
 
@@ -453,7 +460,25 @@ class VideoCompose(BaseTool):
             return []
         found = []
         for enc in ("hevc_videotoolbox", "libx265"):
-            if enc in out:
+            if enc not in out:
+                continue
+            codec_args = ["-c:v", enc, "-pix_fmt", "yuv420p10le"]
+            if enc == "hevc_videotoolbox":
+                codec_args.extend(["-profile:v", "main10"])
+            else:
+                codec_args.extend(["-x265-params", "pools=1:frame-threads=1"])
+            try:
+                probe = subprocess.run(
+                    [
+                        "ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+                        "color=c=black:s=640x360:r=1:d=0.1", "-frames:v", "1",
+                        *codec_args, "-f", "null", "-",
+                    ],
+                    capture_output=True, text=True, timeout=30, check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if probe.returncode == 0:
                 found.append(enc)
         return found
 

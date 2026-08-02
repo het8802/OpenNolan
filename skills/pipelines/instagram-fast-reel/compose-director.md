@@ -8,6 +8,8 @@ Run `video_compose`. It routes by `edit_decisions.render_runtime` — **no silen
 If the locked runtime is unavailable, surface a structured blocker (AGENT_GUIDE "Escalate
 Blockers Explicitly") and get approval before any substitute. Output canvas = 1080x1920 (9:16)
 from `metadata.compose_target`; export watermark-free to `projects/<name>/renders/final.mp4`.
+HyperFrames is a valid runtime only when the brief explicitly locks it and its renderer is
+available; otherwise preserve the chosen Remotion or FFmpeg runtime and report the constraint.
 
 - Keyframed text/GIF overlays and captions render as planned.
 - Music ducks under the VO; SFX land on the cuts.

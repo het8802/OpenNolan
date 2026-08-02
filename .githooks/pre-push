@@ -22,16 +22,13 @@
 
 WANT='het8802'
 
-command -v gh >/dev/null 2>&1 || exit 0   # no gh, no gh-based credentials to police
+if command -v gh >/dev/null 2>&1; then
+	ACTIVE="$(gh auth status --active 2>/dev/null |
+		sed -n 's/.*Logged in to github.com account \([^ ]*\).*/\1/p')"
 
-ACTIVE="$(gh auth status --active 2>/dev/null |
-	sed -n 's/.*Logged in to github.com account \([^ ]*\).*/\1/p')"
-
-[ -z "$ACTIVE" ] && exit 0                # not logged in / unparseable — let git fail on its own
-[ "$ACTIVE" = "$WANT" ] && exit 0         # already correct, the common case
-
-if ! gh auth switch --user "$WANT" >/dev/null 2>&1; then
-	cat >&2 <<EOF
+	if [ -n "$ACTIVE" ] && [ "$ACTIVE" != "$WANT" ]; then
+		if ! gh auth switch --user "$WANT" >/dev/null 2>&1; then
+			cat >&2 <<EOF
 
   ✗ PUSH BLOCKED — active GitHub account is '$ACTIVE', not '$WANT'
 
@@ -41,10 +38,10 @@ if ! gh auth switch --user "$WANT" >/dev/null 2>&1; then
       gh auth login --hostname github.com
 
 EOF
-	exit 1
-fi
+			exit 1
+		fi
 
-cat >&2 <<EOF
+		cat >&2 <<EOF
 
   ⚠ PUSH STOPPED — gh account was '$ACTIVE', switched to '$WANT'
 
@@ -59,4 +56,42 @@ cat >&2 <<EOF
 
 EOF
 
-exit 1
+		exit 1
+	fi
+fi
+
+# The account is correct. Run the deterministic pre-review gate before upload.
+ROOT="$(git rev-parse --show-toplevel)"
+REMOTE_URL="${2:-}"
+if [ -z "$REMOTE_URL" ] && [ -n "${1:-}" ]; then
+	REMOTE_URL="$(git remote get-url "$1" 2>/dev/null || true)"
+fi
+case "$REMOTE_URL" in
+	https://github.com/*) REPO_SLUG="${REMOTE_URL#https://github.com/}" ;;
+	git@github.com:*) REPO_SLUG="${REMOTE_URL#git@github.com:}" ;;
+	ssh://git@github.com/*) REPO_SLUG="${REMOTE_URL#ssh://git@github.com/}" ;;
+	*) REPO_SLUG="" ;;
+esac
+REPO_SLUG="${REPO_SLUG%.git}"
+echo "  → running full repository gate before push" >&2
+"$ROOT/scripts/dev" test full </dev/null || exit $?
+
+# A review cannot exist until GitHub has seen the commit, so this is a courtesy
+# warning only. Branch protection owns the authoritative review-current gate.
+while read -r local_ref local_sha remote_ref remote_sha; do
+	[ "$local_sha" = "0000000000000000000000000000000000000000" ] && continue
+	[ -z "$REPO_SLUG" ] && continue
+	state="$(gh api "repos/$REPO_SLUG/commits/$local_sha/status" \
+		--jq '.statuses[] | select(.context == "review-current") | .state' \
+		2>/dev/null | head -n 1)"
+	if [ "$state" != "success" ]; then
+		cat >&2 <<EOF
+
+  ⚠ no current cross-provider review is recorded for $local_sha
+    Push is allowed so GitHub can receive the SHA. Request review before merge.
+
+EOF
+	fi
+done
+
+exit 0

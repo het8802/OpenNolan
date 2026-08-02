@@ -1,5 +1,7 @@
 """Contract tests for the local character-animation pipeline."""
 
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -208,15 +210,29 @@ def test_character_style_is_normalized_for_schema(tmp_path):
     }
 
 
+@pytest.mark.skipif(
+    not (os.environ.get("HYPERFRAMES_QA") and os.environ.get("HYPERFRAMES_QA_RENDER")),
+    # `runtime_available` only proves node/ffmpeg/npx exist and npm can reach the registry.
+    # Unless the pinned runtime is provisioned, hyperframes_compose falls back to
+    # `npx --yes hyperframes`, so this test would render against whatever version npm
+    # published today — a real browser render, over the network, inside the deterministic
+    # suite. Opt in the same way tests/qa/test_09_hyperframes_compose.py does.
+    reason=(
+        "Real HyperFrames render is opt-in. Set HYPERFRAMES_QA=1 and HYPERFRAMES_QA_RENDER=1 "
+        "to run the character render handoff."
+    ),
+)
 def test_character_renderer_can_handoff_to_video_compose(tmp_path):
     hyperframes = HyperFramesCompose()
     runtime = hyperframes._runtime_check()
     if not runtime["runtime_available"]:
         pytest.skip("HyperFrames runtime is required for character render handoff")
 
-    character_design = CharacterSpecGenerator().execute(
-        {"characters": [{"id": "mouse_lead", "role": "lead", "body_type": "mouse with tail"}]}
-    ).data["character_design"]
+    character_design = (
+        CharacterSpecGenerator()
+        .execute({"characters": [{"id": "mouse_lead", "role": "lead", "body_type": "mouse with tail"}]})
+        .data["character_design"]
+    )
     rig_plan = SvgRigBuilder().execute({"character_design": character_design}).data["rig_plan"]
     pose_library = PoseLibraryBuilder().execute({"rig_plan": rig_plan}).data["pose_library"]
     scene_plan = {
@@ -239,9 +255,11 @@ def test_character_renderer_can_handoff_to_video_compose(tmp_path):
         ],
     }
     validate_artifact("scene_plan", scene_plan)
-    action_timeline = ActionTimelineCompiler().execute(
-        {"scene_plan": scene_plan, "character_ids": ["mouse_lead"]}
-    ).data["action_timeline"]
+    action_timeline = (
+        ActionTimelineCompiler()
+        .execute({"scene_plan": scene_plan, "character_ids": ["mouse_lead"]})
+        .data["action_timeline"]
+    )
 
     render_result = CharacterRigRenderer().execute(
         {
@@ -252,7 +270,11 @@ def test_character_renderer_can_handoff_to_video_compose(tmp_path):
             "workspace_path": str(tmp_path / "hyperframes"),
         }
     )
-    assert render_result.success
+    # `error` only says "validate exit 1"; the CLI's own stderr lives in the per-step data.
+    # Without it a failure here is undiagnosable from a CI log.
+    assert render_result.success, (
+        f"{render_result.error}\n\nsteps:\n{json.dumps(render_result.data.get('steps', {}), indent=2, default=str)}"
+    )
     validate_artifact("asset_manifest", render_result.data["asset_manifest"])
     validate_artifact("edit_decisions", render_result.data["edit_decisions"])
     assert render_result.data["edit_decisions"]["render_runtime"] == "hyperframes"

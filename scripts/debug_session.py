@@ -23,12 +23,45 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from server import debug_log  # noqa: E402
+
+
+_SECRET_FIELDS = ("apikey", "api_key", "authorization", "secret", "token")
+_CONTENT_FIELDS = (
+    "content",
+    "description",
+    "message",
+    "project",
+    "projectid",
+    "project_id",
+    "prompt",
+    "text",
+    "transcript",
+)
+
+
+def _redact_report(value, *, field: str = ""):
+    """Remove secrets, local paths, and private project text from exportable evidence."""
+    normalized = field.lower().replace("-", "_")
+    compact = normalized.replace("_", "")
+    if any(marker.replace("_", "") in compact for marker in _SECRET_FIELDS):
+        return "[redacted]"
+    if any(marker.replace("_", "") == compact for marker in _CONTENT_FIELDS):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {key: _redact_report(item, field=str(key)) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_report(item, field=field) for item in value]
+    if isinstance(value, str):
+        scrubbed = value.replace(str(Path(__file__).resolve().parents[1]), "$WORKTREE")
+        return re.sub(r"(?:/Users/|/home/|/private/|/var/|/tmp/)[^\s\"']+", "[path]", scrubbed)
+    return value
 
 
 def _print_report(rep: dict) -> None:
@@ -53,9 +86,11 @@ def _print_report(rep: dict) -> None:
     seeks = rep.get("seeks")
     if seeks:
         print("\nsource-video seek lifecycle (scrub → canvas):")
-        print(f"  requests={seeks['requests']}  fired={seeks['fired']}  "
-              f"started={seeks['started']}  finished={seeks['finished']}  "
-              f"superseded={seeks['superseded_before_finishing']}")
+        print(
+            f"  requests={seeks['requests']}  fired={seeks['fired']}  "
+            f"started={seeks['started']}  finished={seeks['finished']}  "
+            f"superseded={seeks['superseded_before_finishing']}"
+        )
         rate = seeks["completion_rate"]
         if rate is not None:
             print(f"  completion_rate={rate:.1%}  (share of started seeks that actually finished)")
@@ -78,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("session", nargs="?", default="latest", help="session id, or 'latest' (default)")
     ap.add_argument("--list", action="store_true", help="list recorded sessions and exit")
     ap.add_argument("--json", action="store_true", help="print the raw report JSON")
+    ap.add_argument("--redact", action="store_true", help="scrub secrets, local paths, and project content")
     args = ap.parse_args(argv)
 
     if args.list:
@@ -98,6 +134,9 @@ def main(argv: list[str] | None = None) -> int:
     except FileNotFoundError:
         print(f"session {session!r} not found", file=sys.stderr)
         return 1
+
+    if args.redact:
+        rep = _redact_report(rep)
 
     if args.json:
         print(json.dumps(rep, indent=2))

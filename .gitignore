@@ -48,6 +48,8 @@ music_library/
 .env
 .env.local
 *.env
+.env.worktree
+/.local/
 .youtube-token.json
 
 # In-app feedback / bug reports written at runtime (contains user messages + emails — never commit)

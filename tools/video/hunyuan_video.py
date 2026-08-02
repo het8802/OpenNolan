@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 from tools.base_tool import (
     BaseTool,
@@ -16,7 +17,13 @@ from tools.base_tool import (
     ToolStatus,
     ToolTier,
 )
-from tools.video._shared import HUNYUAN_VARIANTS, estimate_local_runtime, generate_local_video, local_generation_status, local_install_instructions
+from tools.video._shared import (
+    HUNYUAN_VARIANTS,
+    estimate_local_runtime,
+    generate_local_video,
+    local_generation_status,
+    local_install_instructions,
+)
 
 
 class HunyuanVideo(BaseTool):
@@ -47,7 +54,9 @@ class HunyuanVideo(BaseTool):
         "teams that want one known Hunyuan baseline instead of multiple variants",
     ]
     not_good_for = ["CPU-only machines"]
-    provider_matrix = {key: {"tool": "hunyuan_video", **value, "mode": "local_gpu"} for key, value in HUNYUAN_VARIANTS.items()}
+    provider_matrix = {
+        key: {"tool": "hunyuan_video", **value, "mode": "local_gpu"} for key, value in HUNYUAN_VARIANTS.items()
+    }
 
     input_schema = {
         "type": "object",
@@ -85,10 +94,14 @@ class HunyuanVideo(BaseTool):
 
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
         if self.get_status() != ToolStatus.AVAILABLE:
-            return ToolResult(success=False, error="Hunyuan local video generation is unavailable. " + self.install_instructions)
+            return ToolResult(
+                success=False, error="Hunyuan local video generation is unavailable. " + self.install_instructions
+            )
         start = time.time()
         try:
-            result = generate_local_video(tool_name=self.name, variants=HUNYUAN_VARIANTS, default_variant="hunyuan-1.5", inputs=inputs)
+            result = generate_local_video(
+                tool_name=self.name, variants=HUNYUAN_VARIANTS, default_variant="hunyuan-1.5", inputs=inputs
+            )
         except Exception as exc:
             return ToolResult(success=False, error=f"Hunyuan video generation failed: {exc}")
         result.duration_seconds = round(time.time() - start, 2)

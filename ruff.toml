@@ -1,0 +1,21 @@
+target-version = "py312"
+line-length = 120
+force-exclude = true
+extend-exclude = [
+  ".agents",
+  ".local",
+  ".venv",
+  "desktop",
+  "remotion-composer",
+  "web",
+]
+
+[format]
+# Legacy renderer files. Format them in a dedicated mechanical change; mixing
+# that churn into a behavior fix makes review and rollback unsafe.
+exclude = ["tools/video/video_compose.py", "tests/tools/test_hdr_detection.py"]
+
+[lint]
+# Start with correctness rules that can be enabled on the existing repository
+# without a mechanical rewrite. Expand this set as the baseline is cleaned.
+select = ["E9", "F63", "F7", "F82"]

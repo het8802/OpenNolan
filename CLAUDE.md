@@ -9,6 +9,15 @@ Skipping it WILL cause you to take the wrong action.
 
 All other OpenNolan production instructions are in AGENT_GUIDE.md & RULES.md.
 
+## Mandatory repository operating skill
+
+Always use the `karpathy-guidelines` skill when operating in this repository.
+Before planning, coding, reviewing, debugging, testing, or modifying repository
+files, read and follow
+[`.agents/skills/karpathy-guidelines/SKILL.md`](.agents/skills/karpathy-guidelines/SKILL.md).
+Keep changes simple, surgical, explicit about assumptions, and tied to a
+verifiable success condition.
+
 ## Where plan docs go
 
 Every plan, design, or architecture doc goes here:
@@ -19,7 +28,13 @@ docs/plans/<topic-in-kebab-case>/<your-agent-name>/<doc-name>.md
                                   claude | codex | cursor | human
 ```
 
-Example: `docs/plans/wiring-repo-for-agent/claude/architecture.md`
+Examples:
+
+- `docs/plans/wiring-repo-for-agent/claude/architecture.md`
+- `docs/plans/wiring-repo-for-agent/codex/architecture.md`
+
+Do not put a parallel-agent plan directly in the topic folder. Use the agent
+folder so each proposal remains separate until a human chooses what to adopt.
 
 Why the agent folder: several agents work the same topic in parallel. Each
 writes into its own folder, so nobody overwrites anyone and you can diff two
@@ -34,6 +49,32 @@ Rules for the doc itself — it will be read by both humans and AI agents:
   omit it rather than guess.
 - Say what you are deliberately NOT building, and what would change your mind.
 - Mark the status at the top: PLAN / IN PROGRESS / BUILT.
+
+## Development workflow
+
+Use the same repository commands whether you are a human, Claude, Codex, a Git
+hook, or CI:
+
+```text
+scripts/dev setup
+scripts/dev test fast
+scripts/dev test full
+scripts/dev smoke
+```
+
+Work in one worktree per concern. Before asking for review, commit the change,
+leave the tree clean, and run FULL plus smoke. The author must not review its own
+work: Claude-authored changes go to Codex; Codex-authored changes go to Claude.
+The review is valid only for the exact commit SHA named by `review-current`.
+
+Use `scripts/dev review request --sha <sha> --author-provider claude|codex` to
+create the opposite-provider review through Orca. Run that command only from the
+trusted coordinator with its protected storage and GitHub App credential. The
+reviewer does not edit the author branch and never publishes GitHub status
+directly; it reports through its Orca dispatch for the coordinator to finalize.
+Stop managed app processes with `scripts/dev stop` before marking work complete.
+Full details are in
+[`docs/development/agent-workflow.md`](docs/development/agent-workflow.md).
 
 ## GBrain development memory
 

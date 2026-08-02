@@ -1,0 +1,71 @@
+name: repository-gates
+
+on:
+  pull_request:
+  merge_group:
+
+concurrency:
+  group: repository-gates-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  merge-ready:
+    name: merge-ready
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: "true"
+    steps:
+      - name: Check out GitHub's merge commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # scripts/dev scopes changed-file detection and merge mode against `main`.
+          # The default shallow checkout has no history and no `main` ref at all.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+
+      - name: Prepare the worktree
+        run: scripts/dev setup
+
+      - name: Install Chromium system dependencies
+        run: npm --prefix desktop exec -- playwright install --with-deps chromium
+
+      - name: Run deterministic full suite
+        run: scripts/dev test full
+
+      - name: Prove the app starts and writes isolated data
+        run: scripts/dev smoke
+
+      - name: Upload bounded failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-gate-evidence
+          path: .local/test-results/
+          if-no-files-found: ignore
+          retention-days: 7

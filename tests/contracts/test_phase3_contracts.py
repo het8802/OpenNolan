@@ -34,6 +34,7 @@ from tools.audio.tts_selector import TTSSelector
 
 # ---- TTS Provider Tools ----
 
+
 class TestElevenLabsTTS:
     def test_identity(self):
         tool = ElevenLabsTTS()
@@ -117,7 +118,9 @@ class TestCapabilityMetadata:
         info = tool.get_info()
         assert info["capability"] == "tts"
         assert info["provider"] == "elevenlabs"
-        assert info["usage_location"].endswith("tools\\audio\\elevenlabs_tts.py") or info["usage_location"].endswith("tools/audio/elevenlabs_tts.py")
+        assert info["usage_location"].endswith("tools\\audio\\elevenlabs_tts.py") or info["usage_location"].endswith(
+            "tools/audio/elevenlabs_tts.py"
+        )
         assert "related_skills" in info
         assert "fallback_tools" in info
 
@@ -147,6 +150,7 @@ class TestCapabilityMetadata:
 
 
 # ---- Animated Explainer Pipeline ----
+
 
 class TestAnimatedExplainerManifest:
     def test_loads(self):
@@ -195,6 +199,7 @@ class TestAnimatedExplainerManifest:
 
 
 # ---- Style Playbooks ----
+
 
 class TestStylePlaybooks:
     def test_all_listed(self):
@@ -248,55 +253,68 @@ class TestStylePlaybooks:
 
 # ---- Skills Existence ----
 
+
 class TestSkillsExist:
     SKILLS_DIR = PROJECT_ROOT / "skills"
 
-    @pytest.mark.parametrize("skill_path", [
-        "pipelines/explainer/idea-director.md",
-        "pipelines/explainer/script-director.md",
-        "pipelines/explainer/scene-director.md",
-        "pipelines/explainer/asset-director.md",
-        "pipelines/explainer/edit-director.md",
-        "pipelines/explainer/compose-director.md",
-        "pipelines/explainer/publish-director.md",
-    ])
+    @pytest.mark.parametrize(
+        "skill_path",
+        [
+            "pipelines/explainer/idea-director.md",
+            "pipelines/explainer/script-director.md",
+            "pipelines/explainer/scene-director.md",
+            "pipelines/explainer/asset-director.md",
+            "pipelines/explainer/edit-director.md",
+            "pipelines/explainer/compose-director.md",
+            "pipelines/explainer/publish-director.md",
+        ],
+    )
     def test_director_skills_exist(self, skill_path):
         full_path = self.SKILLS_DIR / skill_path
         assert full_path.exists(), f"Missing director skill: {skill_path}"
         content = full_path.read_text(encoding="utf-8")
         assert len(content) > 500, f"Skill too short to be useful: {skill_path}"
 
-    @pytest.mark.parametrize("skill_path", [
-        "meta/reviewer.md",
-        "meta/checkpoint-protocol.md",
-        "meta/skill-creator.md",
-    ])
+    @pytest.mark.parametrize(
+        "skill_path",
+        [
+            "meta/reviewer.md",
+            "meta/checkpoint-protocol.md",
+            "meta/skill-creator.md",
+        ],
+    )
     def test_meta_skills_exist(self, skill_path):
         full_path = self.SKILLS_DIR / skill_path
         assert full_path.exists(), f"Missing meta skill: {skill_path}"
         content = full_path.read_text(encoding="utf-8")
         assert len(content) > 500, f"Skill too short to be useful: {skill_path}"
 
-    @pytest.mark.parametrize("skill_path", [
-        "pipelines/explainer/idea-director.md",
-        "pipelines/explainer/script-director.md",
-        "pipelines/explainer/scene-director.md",
-        "pipelines/explainer/asset-director.md",
-        "pipelines/explainer/edit-director.md",
-        "pipelines/explainer/compose-director.md",
-        "pipelines/explainer/publish-director.md",
-    ])
+    @pytest.mark.parametrize(
+        "skill_path",
+        [
+            "pipelines/explainer/idea-director.md",
+            "pipelines/explainer/script-director.md",
+            "pipelines/explainer/scene-director.md",
+            "pipelines/explainer/asset-director.md",
+            "pipelines/explainer/edit-director.md",
+            "pipelines/explainer/compose-director.md",
+            "pipelines/explainer/publish-director.md",
+        ],
+    )
     def test_director_skills_have_required_sections(self, skill_path):
         content = (self.SKILLS_DIR / skill_path).read_text(encoding="utf-8")
         assert "## When to Use" in content
         assert "## Process" in content or "## Protocol" in content
         assert "Self-Evaluate" in content or "self-evaluate" in content.lower()
 
-    @pytest.mark.parametrize("skill_path", [
-        "meta/reviewer.md",
-        "meta/checkpoint-protocol.md",
-        "meta/skill-creator.md",
-    ])
+    @pytest.mark.parametrize(
+        "skill_path",
+        [
+            "meta/reviewer.md",
+            "meta/checkpoint-protocol.md",
+            "meta/skill-creator.md",
+        ],
+    )
     def test_meta_skills_have_required_sections(self, skill_path):
         content = (self.SKILLS_DIR / skill_path).read_text(encoding="utf-8")
         assert "## When to Use" in content
@@ -305,8 +323,13 @@ class TestSkillsExist:
 
 # ---- Remotion Scaffold ----
 
+
 class TestRemotionScaffold:
     REMOTION_DIR = PROJECT_ROOT / "remotion-composer"
+    pytestmark = pytest.mark.skipif(
+        not (REMOTION_DIR / "package.json").is_file(),
+        reason="remotion-composer is an intentionally untracked optional checkout",
+    )
 
     def test_package_json_exists(self):
         assert (self.REMOTION_DIR / "package.json").exists()
@@ -329,9 +352,11 @@ class TestRemotionScaffold:
 
 # ---- Video Compose Operations ----
 
+
 class TestVideoComposeOperations:
     def test_render_operation_exists(self):
         from tools.video.video_compose import VideoCompose
+
         tool = VideoCompose()
         ops = tool.input_schema["properties"]["operation"]["enum"]
         assert "render" in ops
@@ -339,6 +364,7 @@ class TestVideoComposeOperations:
 
     def test_render_rejects_missing_inputs(self):
         from tools.video.video_compose import VideoCompose
+
         tool = VideoCompose()
         result = tool.execute({"operation": "render"})
         assert not result.success

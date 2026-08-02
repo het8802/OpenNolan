@@ -8,8 +8,8 @@
 // calls work with no CORS and none of the file:// asset/fetch breakage.
 //
 // Prod (`npm start`):  backend on a free port serves web/dist -> window loads http://127.0.0.1:<port>
-// Dev  (`npm run dev`): window loads Vite on http://localhost:5173 (Vite proxies /api -> :8000);
-//                       reuses an already-running backend on :8000, else spawns one.
+// Dev  (`npm run dev`): window loads Vite and its API proxy on this worktree's configured ports;
+//                       reuses an already-running backend there, else spawns one.
 
 const { app, BrowserWindow, dialog, shell, session, ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
@@ -19,6 +19,7 @@ const https = require('node:https');
 const net = require('node:net');
 const fs = require('node:fs');
 const os = require('node:os');
+const worktreeConfig = require('./worktree-config');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const DEV = process.env.ELECTRON_DEV === '1';
@@ -541,7 +542,7 @@ function startBackend(port) {
 }
 
 function rendererUrl() {
-  return DEV ? 'http://localhost:5173' : 'http://127.0.0.1:' + backendPort;
+  return DEV ? worktreeConfig.frontendUrl() : 'http://127.0.0.1:' + backendPort;
 }
 
 // Prod-only CSP (defense-in-depth for a local same-origin app). Skipped in dev
@@ -624,11 +625,11 @@ async function boot() {
   try {
     applyCsp();
     if (DEV) {
-      backendPort = 8000;
+      backendPort = worktreeConfig.backendPort();
       const alreadyUp = await probeHealth(backendPort);
       if (!alreadyUp) {
-        // Nothing healthy on :8000 — own a backend. (If a separate run-dev is
-        // already serving :8000, we reuse it and never spawn, so no port clash.)
+        // Nothing healthy on this worktree's backend port — own a backend. If a
+        // separate run-dev already serves it, reuse that process instead.
         backend = startBackend(backendPort);
         await waitForHealth(backendPort).catch(() => { /* surfaced via exit handler / did-fail-load */ });
       }
