@@ -33,6 +33,16 @@ from pydantic import BaseModel
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif"}
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
 AUDIO_EXTS = {".mp3", ".wav", ".aac", ".m4a", ".ogg", ".flac"}
+# Browser-only: readable companions to the media (subtitles, notes). Deliberately no .json —
+# stage artifacts are JSON and the Pipeline tab already surfaces them per stage.
+TEXT_EXTS = {".srt", ".vtt", ".txt", ".md"}
+
+
+# Project-relative folders the asset browser hides: engine internals (the content-keyed
+# proxy cache) and the stage artifacts, which are JSON — never media — and already surfaced
+# per stage by the Pipeline tab. (Dot-entries — `.mc/` agent chat history,
+# `.final_review_frames/` — are hidden by the leading-dot rule instead.)
+HIDDEN_BROWSE_DIRS = {"artifacts", "renders/proxies"}
 
 
 def _classify(rel_parts: tuple[str, ...], ext: str) -> Optional[str]:
@@ -44,6 +54,30 @@ def _classify(rel_parts: tuple[str, ...], ext: str) -> Optional[str]:
     if ext in AUDIO_EXTS:
         return "music" if "music" in rel_parts else "audio"
     return None
+
+
+def _browse_hidden(rel: Path) -> bool:
+    return rel.name.startswith(".") or rel.as_posix() in HIDDEN_BROWSE_DIRS
+
+
+def _browse_kind(rel: Path, ext: str) -> Optional[str]:
+    """What the asset browser calls a file: the four asset kinds, plus `text` for the
+    readable companions the kinds map has no bucket for (subtitles, notes)."""
+    return _classify(rel.parts, ext) or ("text" if ext.lower() in TEXT_EXTS else None)
+
+
+def _browse_count(d: Path, proj: Path) -> int:
+    """How many entries the browser would show one level inside `d` (no recursion), so a
+    folder row can say "12" or "empty" without a second request."""
+    try:
+        return sum(
+            1
+            for c in d.iterdir()
+            if not _browse_hidden(c.relative_to(proj)) and (c.is_dir() or _browse_kind(c.relative_to(proj), c.suffix))
+        )
+    except OSError:
+        return 0
+
 
 from lib.env_loader import load_env
 from lib.pipeline_loader import get_stage_order, list_pipelines, load_pipeline
@@ -72,13 +106,13 @@ from server.state import FileStateSource, StateSource
 class CreateProjectRequest(BaseModel):
     name: str
     pipeline_type: Optional[str] = None  # None/empty -> the agent picks one
-    style: Optional[str] = None          # None/empty -> the agent picks a style
+    style: Optional[str] = None  # None/empty -> the agent picks a style
 
 
 class ChatRequest(BaseModel):
     message: str
     thread_id: Optional[str] = None
-    model: Optional[str] = None   # UI-selected agent model (validated against AGENT_MODELS)
+    model: Optional[str] = None  # UI-selected agent model (validated against AGENT_MODELS)
 
 
 class ThreadCreate(BaseModel):
@@ -130,7 +164,7 @@ class AnalyticsUpdateRequest(BaseModel):
 class FeedbackRequest(BaseModel):
     kind: str  # "bug" | "feature" | "other"
     message: str
-    email: Optional[str] = None       # optional, so we can reply
+    email: Optional[str] = None  # optional, so we can reply
     diagnostics: Optional[str] = None  # optional client-attached logs/context
     debug_session: Optional[str] = None  # attach a recorded UI session's analysis (editor debug report)
 
@@ -138,7 +172,7 @@ class FeedbackRequest(BaseModel):
 class ClientErrorReport(BaseModel):
     # A JS/renderer error posted by web/src/main.jsx (window.onerror / ErrorBoundary) or by the
     # Electron shell. Forwarded to PostHog Error Tracking; body is redacted server-side.
-    source: str                        # e.g. "renderer", "unhandledrejection", "react-boundary"
+    source: str  # e.g. "renderer", "unhandledrejection", "react-boundary"
     message: str
     stack: Optional[str] = None
     context: Optional[dict[str, Any]] = None
@@ -158,6 +192,7 @@ class OAuthFinishRequest(BaseModel):
 class ApiKeyRequest(BaseModel):
     # An Anthropic API key (fallback to "Sign in with Claude"). Verified live before it is saved.
     api_key: str
+
 
 from lib import app_paths
 
@@ -234,6 +269,7 @@ def create_app(
 
     # One product event per backend boot. No-op when opted out / posthog absent / under pytest.
     import platform
+
     analytics_mod.capture("app_opened", {"os": platform.platform(), "app_version": app.version})
 
     # First launch on this install ≈ an install/"download" (a fresh install has a new settings.json,
@@ -253,9 +289,7 @@ def create_app(
             # Share ONE RenderJobStore with the editor so the agent's in-process
             # `render` tool runs through it (tracked/superseded), instead of the old
             # background-Bash render that broke turn attribution.
-            app.state.agent_runner = AgentRunner(
-                repo_root=REPO_ROOT, projects_dir=pdir, render_store=_render_store()
-            )
+            app.state.agent_runner = AgentRunner(repo_root=REPO_ROOT, projects_dir=pdir, render_store=_render_store())
         return app.state.agent_runner
 
     @app.get("/api/health")
@@ -268,12 +302,14 @@ def create_app(
         for name in list_pipelines():
             try:
                 manifest = load_pipeline(name)
-                out.append({
-                    "name": name,
-                    "description": (manifest.get("description") or "").strip(),
-                    "stability": manifest.get("stability"),
-                    "stages": get_stage_order(manifest),
-                })
+                out.append(
+                    {
+                        "name": name,
+                        "description": (manifest.get("description") or "").strip(),
+                        "stability": manifest.get("stability"),
+                        "stages": get_stage_order(manifest),
+                    }
+                )
             except Exception as exc:  # a broken manifest shouldn't hide the others
                 out.append({"name": name, "error": str(exc)[:200]})
         return {"pipelines": out}
@@ -295,14 +331,16 @@ def create_app(
         for name in list_playbooks():
             entry: dict[str, Any] = {"name": name, "user": name not in builtins}
             try:
-                ident = (load_playbook(name).get("identity") or {})
-                entry.update({
-                    "category": ident.get("category"),
-                    "mood": ident.get("mood"),
-                    "pace": ident.get("pace"),
-                    "best_for": ident.get("best_for"),
-                    "label": ident.get("name") or name,
-                })
+                ident = load_playbook(name).get("identity") or {}
+                entry.update(
+                    {
+                        "category": ident.get("category"),
+                        "mood": ident.get("mood"),
+                        "pace": ident.get("pace"),
+                        "best_for": ident.get("best_for"),
+                        "label": ident.get("name") or name,
+                    }
+                )
             except Exception as exc:  # don't let one malformed style hide the rest
                 entry["error"] = str(exc)[:200]
             out.append(entry)
@@ -405,8 +443,9 @@ def create_app(
                 kind = _classify(rel.parts, f.suffix)
                 if kind:
                     stat = f.stat()
-                    kinds[kind].append({"path": str(rel), "name": f.name,
-                                        "size_bytes": stat.st_size, "mtime": int(stat.st_mtime)})
+                    kinds[kind].append(
+                        {"path": str(rel), "name": f.name, "size_bytes": stat.st_size, "mtime": int(stat.st_mtime)}
+                    )
 
         renders: list[dict[str, Any]] = []
         renders_dir = proj / "renders"
@@ -421,8 +460,14 @@ def create_app(
                     stat = f.stat()
                     # mtime is the cache-bust/remount key the UI uses so a freshly
                     # finished (or re-rendered) MP4 reloads without a page refresh.
-                    renders.append({"path": str(f.relative_to(proj)), "name": f.name,
-                                    "size_bytes": stat.st_size, "mtime": int(stat.st_mtime)})
+                    renders.append(
+                        {
+                            "path": str(f.relative_to(proj)),
+                            "name": f.name,
+                            "size_bytes": stat.st_size,
+                            "mtime": int(stat.st_mtime),
+                        }
+                    )
 
         # Agent-rendered HyperFrames clips: the intermediate building blocks the agent
         # produces under hf/renders/ (separate from the editor's final output in renders/).
@@ -433,11 +478,70 @@ def create_app(
             for f in sorted(hf_renders_dir.rglob("*")):
                 if f.is_file() and f.suffix.lower() in VIDEO_EXTS and not f.name.startswith("."):
                     stat = f.stat()
-                    agent_renders.append({"path": str(f.relative_to(proj)), "name": f.name,
-                                          "size_bytes": stat.st_size, "mtime": int(stat.st_mtime)})
+                    agent_renders.append(
+                        {
+                            "path": str(f.relative_to(proj)),
+                            "name": f.name,
+                            "size_bytes": stat.st_size,
+                            "mtime": int(stat.st_mtime),
+                        }
+                    )
 
-        return {"project_id": project_id, "kinds": kinds, "renders": renders,
-                "agent_renders": agent_renders}
+        return {"project_id": project_id, "kinds": kinds, "renders": renders, "agent_renders": agent_renders}
+
+    @app.get("/api/projects/{project_id}/browse")
+    def browse_project(project_id: str, path: str = "") -> dict[str, Any]:
+        """List ONE folder inside a project — powers the editor's asset browser, which
+        walks the real project tree instead of four flat kind tabs.
+
+        Only what a user needs in order to FIND their media is listed: sub-folders, plus
+        image / video / audio files and their readable companions (subtitles, notes).
+        Everything else is noise for this purpose and is omitted — dot-entries (`.mc/`, the
+        agent's chat history), JSON artifacts, HyperFrames HTML/CSS, HIDDEN_BROWSE_DIRS."""
+        proj = (pdir / project_id).resolve()
+        if not proj.is_dir():
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        target = (proj / path).resolve()
+        # Same path-traversal guard as /file: the resolved dir must stay inside the project.
+        if target != proj and proj not in target.parents:
+            raise HTTPException(status_code=400, detail="path traversal detected")
+        if not target.is_dir():
+            raise HTTPException(status_code=404, detail=f"folder {path!r} not found")
+
+        entries: list[dict[str, Any]] = []
+        # Folders first, then files; each group alphabetical (case-insensitive).
+        for f in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+            rel = f.relative_to(proj)
+            if _browse_hidden(rel):
+                continue
+            if f.is_dir():
+                entries.append(
+                    {"name": f.name, "path": rel.as_posix(), "is_dir": True, "count": _browse_count(f, proj)}
+                )
+                continue
+            kind = _browse_kind(rel, f.suffix)
+            if not kind:
+                continue
+            stat = f.stat()
+            # `kind` picks the viewer in the asset dialog and what its add button does on the
+            # timeline (image→overlay, video→cut, music→bed, audio→SFX; text has no add);
+            # `mtime` is the cache-bust key for thumbnails.
+            entries.append(
+                {
+                    "name": f.name,
+                    "path": rel.as_posix(),
+                    "is_dir": False,
+                    "kind": kind,
+                    "size_bytes": stat.st_size,
+                    "mtime": int(stat.st_mtime),
+                }
+            )
+
+        return {
+            "project_id": project_id,
+            "path": "" if target == proj else target.relative_to(proj).as_posix(),
+            "entries": entries,
+        }
 
     @app.get("/api/projects/{project_id}/file")
     def get_file(project_id: str, path: str):
@@ -535,8 +639,7 @@ def create_app(
             raise HTTPException(status_code=503, detail="ffmpeg not available for frame extraction")
         out = Path(tempfile.mkstemp(suffix=".jpg")[1])
         proc = subprocess.run(
-            ["ffmpeg", "-y", "-ss", str(max(0.0, t)), "-i", str(target),
-             "-frames:v", "1", "-q:v", "3", str(out)],
+            ["ffmpeg", "-y", "-ss", str(max(0.0, t)), "-i", str(target), "-frames:v", "1", "-q:v", "3", str(out)],
             capture_output=True,
         )
         if proc.returncode != 0 or not out.exists() or out.stat().st_size == 0:
@@ -581,15 +684,31 @@ def create_app(
             rel = str(target)  # a shared in-repo asset (sfx/kit) resolved outside the project
 
         meta: dict[str, Any] = {
-            "project_id": project_id, "ref": ref, "path": rel,
-            "duration": None, "width": None, "height": None,
+            "project_id": project_id,
+            "ref": ref,
+            "path": rel,
+            "duration": None,
+            "width": None,
+            "height": None,
         }
         if shutil.which("ffprobe") is not None:
             proc = subprocess.run(
-                ["ffprobe", "-v", "error", "-select_streams", "v:0",
-                 "-show_entries", "stream=width,height", "-show_entries", "format=duration",
-                 "-of", "json", str(target)],
-                capture_output=True, text=True,
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=width,height",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "json",
+                    str(target),
+                ],
+                capture_output=True,
+                text=True,
             )
             if proc.returncode == 0:
                 try:
@@ -605,9 +724,7 @@ def create_app(
         return meta
 
     @app.get("/api/projects/{project_id}/activity")
-    def project_activity(
-        project_id: str, limit: Optional[int] = None, since: Optional[str] = None
-    ) -> dict[str, Any]:
+    def project_activity(project_id: str, limit: Optional[int] = None, since: Optional[str] = None) -> dict[str, Any]:
         """The agent's persisted tool-activity log (files touched, skills run,
         tools used) plus a synthesized 'how this was made' summary."""
         if get_project_record(pdir, project_id) is None:
@@ -630,12 +747,14 @@ def create_app(
     def get_env() -> dict[str, Any]:
         """BYOK: the curated variable menu + each var's current value from the local .env."""
         from server import env_config
+
         return {"path": str(env_config.ENV_PATH), "vars": env_config.list_env_vars()}
 
     @app.put("/api/env")
     def put_env(body: EnvUpdateRequest) -> dict[str, Any]:
         """BYOK: persist edited variables back to the local .env, then reload them for this session."""
         from server import env_config
+
         try:
             changed = env_config.write_env_vars(body.vars)
         except ValueError as exc:
@@ -703,10 +822,9 @@ def create_app(
         """In-app bug / feature feedback. Always stored locally (never lost); a PostHog event is
         emitted (metadata only); emailed via Resend when configured. See server/feedback.py."""
         from server import feedback as feedback_mod
+
         try:
-            return feedback_mod.submit(
-                body.kind, body.message, body.email, body.diagnostics, body.debug_session
-            )
+            return feedback_mod.submit(body.kind, body.message, body.email, body.diagnostics, body.debug_session)
         except feedback_mod.FeedbackError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -722,6 +840,7 @@ def create_app(
         """First-run provisioning status: is the managed venv/core/ffmpeg present, which capability
         packs are installed. Drives the setup UI + the 'install pack' prompts. See lib/provision.py."""
         from lib import provision
+
         return provision.doctor()
 
     def _stream_provision(work, done_extra: Optional[dict] = None) -> StreamingResponse:
@@ -760,6 +879,7 @@ def create_app(
         after a failed/skipped install. Registered BEFORE /api/provision/{pack} so this static path wins
         over the {pack} param route (else 'composition' would be read as an unknown pack -> 404)."""
         from lib import provision
+
         return _stream_provision(provision.provision_composition, {"tier": "composition"})
 
     @app.post("/api/provision/{pack}")
@@ -948,8 +1068,12 @@ def create_app(
     @app.put("/api/projects/{project_id}/threads/{thread_id}")
     def save_thread(project_id: str, thread_id: str, body: ThreadSave) -> dict[str, Any]:
         return thread_store.save_thread(
-            pdir, project_id, thread_id,
-            messages=body.messages, session_id=body.session_id, title=body.title,
+            pdir,
+            project_id,
+            thread_id,
+            messages=body.messages,
+            session_id=body.session_id,
+            title=body.title,
         )
 
     # ── Dev observability: UI session recorder sink ────────────────────────────

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import * as api from './api.js'
 import { LineChart } from './components/LineChart.jsx'
-import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, IconMessage, ClaudeLogo, IconMovie, IconMic, IconStar, IconMusic, IconListDetails } from './components/icons.jsx'
+import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, IconMessage, ClaudeLogo, IconMovie, IconMic, IconStar, IconMusic, IconListDetails, IconFileText } from './components/icons.jsx'
 import Studio from './studio/Studio.jsx'
 import ChatPanel from './chat/ChatPanel.jsx'
 import CapabilitiesModal from './CapabilitiesModal.jsx'
 import UpdateBanner from './UpdateBanner.jsx'
+import { FolderNav, useFolderBrowse, uploadKindFor, uploadDirLabel } from './components/FolderBrowser.jsx'
+import AssetModal from './components/AssetModal.jsx'
 import { useAgentChat } from './chat/useAgentChat.js'
 import { useAuth } from './auth/useAuth.js'
 import ConnectClaudeModal from './auth/ConnectClaudeModal.jsx'
@@ -18,10 +20,6 @@ const STATUS_LABEL = {
   failed: 'failed',
   error: 'error',
 }
-
-// 'renders' is read-only (not uploadable): the agent's HyperFrames clips from hf/renders,
-// served by the backend as `agent_renders` (distinct from the "Final render" in `renders`).
-const ASSET_KINDS = ['images', 'video', 'audio', 'music', 'renders']
 
 export default function App() {
   const [pipelines, setPipelines] = useState([])
@@ -1272,7 +1270,6 @@ function ContentSignalView({ c }) {
 // ─── Assets Panel ─────────────────────────────────────────────────────────────
 
 function AssetPanel({ selected, onUpload, uploadTick }) {
-  const [activeKind, setActiveKind] = useState('images')
   const [data, setData] = useState(null)
   const inputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
@@ -1288,21 +1285,21 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
     return () => { alive = false; clearInterval(id) }
   }, [selected, uploadTick])
 
-  function handleFiles(files) {
-    if (!selected || !files?.length) return
-    onUpload(activeKind, files[0])
+  // Browse the project like a folder instead of flat kind tabs; `data` is the 4s poll, so each
+  // tick re-lists the open folder too and agent-written files appear as they land.
+  const { cwd, setCwd, entries, dirs, files } = useFolderBrowse(selected, data)
+
+  function handleFiles(fl) {
+    if (!selected || !fl?.length) return
+    onUpload(uploadKindFor(cwd, fl[0]), fl[0])
   }
 
   const renders = data?.renders || []
-  // The Renders tab reads agent_renders (hf/renders clips); every other tab reads kinds[].
-  const files = (activeKind === 'renders' ? data?.agent_renders : data?.kinds?.[activeKind]) || []
 
   // Lightbox item lists. The URL carries the file's mtime as a cache-bust token so
   // a freshly finished render (same path, new bytes) reloads without a page refresh.
-  // Renders are videos — tag them 'video' so the tile + lightbox use the video player.
   const gridItems = files.map(f => ({
-    kind: activeKind === 'renders' ? 'video' : activeKind,
-    name: f.name, path: f.path, url: api.fileUrl(selected, f.path, f.mtime),
+    kind: f.kind, name: f.name, path: f.path, url: api.fileUrl(selected, f.path, f.mtime),
   }))
   const renderItems = renders.map(r => ({
     kind: 'video', name: r.name, path: r.path, url: api.fileUrl(selected, r.path, r.mtime),
@@ -1337,39 +1334,26 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
             </div>
           )}
 
-          <div className="asset-tabs">
-            {ASSET_KINDS.map(k => (
-              <button
-                key={k}
-                className={`asset-tab ${activeKind === k ? 'active' : ''}`}
-                onClick={() => setActiveKind(k)}
-              >
-                {k}{(k === 'renders' ? data?.agent_renders : data?.kinds?.[k])?.length
-                  ? ` (${(k === 'renders' ? data.agent_renders : data.kinds[k]).length})` : ''}
-              </button>
-            ))}
-          </div>
+          <FolderNav cwd={cwd} dirs={dirs} onNavigate={setCwd} />
 
           <div className="asset-grid">
-            {files.length === 0 && <p className="empty">No {activeKind} yet.</p>}
+            {entries.length === 0 && <p className="empty">This folder is empty.</p>}
             {gridItems.map((it, i) => (
               <AssetItem key={it.path} kind={it.kind} url={it.url} name={it.name}
                 onOpen={() => setViewer({ items: gridItems, index: i })} />
             ))}
           </div>
 
-          {activeKind !== 'renders' && (
-            <div
-              className={`dropzone ${dragging ? 'drag' : ''}`}
-              onClick={() => inputRef.current?.click()}
-              onDragOver={e => { e.preventDefault(); setDragging(true) }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={e => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files) }}
-            >
-              Drop a <strong>{activeKind}</strong> file here, or click to choose
-              <input ref={inputRef} type="file" hidden onChange={e => handleFiles(e.target.files)} />
-            </div>
-          )}
+          <div
+            className={`dropzone ${dragging ? 'drag' : ''}`}
+            onClick={() => inputRef.current?.click()}
+            onDragOver={e => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={e => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files) }}
+          >
+            Drop a file here, or click to choose — saves to <strong>{uploadDirLabel(cwd)}</strong>
+            <input ref={inputRef} type="file" hidden onChange={e => handleFiles(e.target.files)} />
+          </div>
         </div>
       )}
       {viewer && (
@@ -1397,59 +1381,10 @@ function AssetItem({ kind, url, name, onOpen }) {
       {(kind === 'audio' || kind === 'music') && (
         <div className="asset-thumb audio"><span className="asset-audio-icon"><IconMusic size={26} /></span></div>
       )}
+      {kind === 'text' && (
+        <div className="asset-thumb text"><span className="asset-audio-icon"><IconFileText size={26} /></span></div>
+      )}
       <div className="asset-name">{name}</div>
-    </div>
-  )
-}
-
-// Center lightbox: opens an asset full-screen over the app, mirroring how artifacts
-// open in the middle. Esc / backdrop-click closes; ←/→ steps through the current list.
-function AssetModal({ items, index, onClose }) {
-  const [i, setI] = useState(index)
-  useEffect(() => { setI(index) }, [index])
-  const prev = () => setI(x => (x - 1 + items.length) % items.length)
-  const next = () => setI(x => (x + 1) % items.length)
-
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') onClose()
-      else if (e.key === 'ArrowLeft') setI(x => (x - 1 + items.length) % items.length)
-      else if (e.key === 'ArrowRight') setI(x => (x + 1) % items.length)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [items.length, onClose])
-
-  const item = items[i]
-  if (!item) return null
-  const multi = items.length > 1
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="asset-lightbox" onClick={e => e.stopPropagation()}>
-        <div className="al-head">
-          <span className="al-name" title={item.name}>{item.name}</span>
-          <div className="al-actions">
-            <a className="al-dl" href={item.url} download={item.name} title="Download">⤓</a>
-            <button className="am-close" onClick={onClose} title="Close (Esc)">✕</button>
-          </div>
-        </div>
-        <div className="al-stage">
-          {multi && <button className="al-nav prev" onClick={prev} title="Previous (←)">‹</button>}
-          {/* key on the URL so navigating remounts the media (fresh load + autoplay) */}
-          <div className="al-media" key={item.url}>
-            {item.kind === 'images' && <img src={item.url} alt={item.name} />}
-            {item.kind === 'video' && <video src={item.url} controls autoPlay />}
-            {(item.kind === 'audio' || item.kind === 'music') && (
-              <div className="al-audio">
-                <div className="al-audio-icon"><IconMusic size={44} /></div>
-                <audio src={item.url} controls autoPlay />
-              </div>
-            )}
-          </div>
-          {multi && <button className="al-nav next" onClick={next} title="Next (→)">›</button>}
-        </div>
-        {multi && <div className="al-count">{i + 1} / {items.length}</div>}
-      </div>
     </div>
   )
 }

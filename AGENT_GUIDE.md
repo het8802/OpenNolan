@@ -215,8 +215,9 @@ Create the project directory at pipeline initialization, before any stage runs. 
 pipeline should run `hf render` from the `hf/` workspace so per-scene clips land in `hf/renders/`
 (this is the HyperFrames CLI default, `renders/<name>_<timestamp>`, resolved relative to that
 workspace) — the **only** assembled deliverable belongs in `renders/final.mp4`. Keeping the two
-apart is what lets the desktop editor's **Assets → Renders** tab show the agent's building-block
-clips without dredging up the final export or its render proxies. This convention is documented
+apart is what lets the desktop app's **Assets** panels browse into `hf/renders/` for the agent's
+building-block clips without dredging up the final export or its render proxies (the proxy cache
+is hidden from the browser entirely). This convention is documented
 here, the single place every pipeline inherits, rather than repeated in each pipeline's skills.
 
 ## Music Library

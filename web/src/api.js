@@ -121,6 +121,9 @@ export const provideCapability = (id, cap_request_id, installed) =>
     body: JSON.stringify({ cap_request_id, installed }),
   }).then(json)
 export const listAssets = (id) => fetch(`/api/projects/${id}/assets`).then(json)
+// Folder-style listing of one directory in the project (sub-folders + media files only).
+export const browseProject = (id, path = '') =>
+  fetch(`/api/projects/${id}/browse?path=${encodeURIComponent(path)}`).then(json)
 // `v` is an optional cache-bust token (e.g. a file's mtime). Including it makes the
 // URL change when the file's contents change, so a <video>/<img> re-fetches the new
 // bytes instead of serving a stale (or mid-write, unplayable) copy from cache.
