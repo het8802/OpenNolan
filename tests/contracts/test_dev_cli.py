@@ -955,3 +955,69 @@ def test_merge_mode_and_reaper_have_non_mutating_dry_runs() -> None:
     assert reap_report["command"] == "reap"
     assert reap_report["dry_run"] is True
     assert reap_report["current_worktree"] == str(REPO_ROOT)
+
+
+def test_resolve_sha_finds_main_when_it_only_exists_on_a_remote(tmp_path: Path) -> None:
+    """A CI checkout is detached with no local branches, so `main` lives only under a remote.
+
+    The remote is not always named `origin` — this repository's is `het8802`.
+    """
+    resolve_sha = runpy.run_path(str(DEV))["_resolve_sha"]
+
+    def git(*argv: str) -> str:
+        result = subprocess.run(["git", *argv], cwd=tmp_path, text=True, capture_output=True, check=False)
+        # check=True would hide git's stderr behind a bare CalledProcessError.
+        assert result.returncode == 0, f"git {' '.join(argv)} failed: {result.stderr.strip()}"
+        return result.stdout.strip()
+
+    git("init", "--initial-branch", "scratch")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "Test")
+    (tmp_path / "file.txt").write_text("contents\n", encoding="utf-8")
+    git("add", "file.txt")
+    git("commit", "--message", "initial")
+    head = git("rev-parse", "HEAD")
+
+    # `main` exists only as a remote-tracking ref, under a non-`origin` remote name.
+    git("remote", "add", "upstream", "https://example.invalid/repo.git")
+    git("update-ref", "refs/remotes/upstream/main", head)
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", "main"], cwd=tmp_path, capture_output=True, check=False
+        ).returncode
+        != 0
+    ), "fixture must not have a local main branch"
+
+    assert resolve_sha("main", cwd=tmp_path) == head
+    assert resolve_sha("HEAD", cwd=tmp_path) == head
+    assert resolve_sha("no-such-ref", cwd=tmp_path) is None
+
+
+def test_test_environment_does_not_leave_git_config_half_scrubbed(tmp_path: Path) -> None:
+    """The credential scrub eats GIT_CONFIG_KEY_n; leaving COUNT behind breaks every git call.
+
+    Git reads env config as GIT_CONFIG_COUNT plus matching KEY_n/VALUE_n triples and hard-fails
+    with "missing config key" if the count outruns the keys.
+    """
+    namespace = runpy.run_path(str(DEV))
+    environment = dict(os.environ) | {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "user.name",
+        "GIT_CONFIG_VALUE_0": "Ambient",
+    }
+    with pytest.MonkeyPatch.context() as patch:
+        for name, value in environment.items():
+            patch.setenv(name, value)
+        scrubbed = namespace["_test_environment"](tmp_path / "scratch")
+
+    assert "GIT_CONFIG_COUNT" not in scrubbed
+    assert not [key for key in scrubbed if key.startswith("GIT_CONFIG_")]
+    probe = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=REPO_ROOT,
+        env=scrubbed,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert probe.returncode == 0, probe.stderr

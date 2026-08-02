@@ -549,15 +549,9 @@ def _changed_files() -> list[Path]:
         ["git", "diff", "--cached", "--name-only"],
         ["git", "ls-files", "--others", "--exclude-standard"],
     ]
-    base = subprocess.run(
-        ["git", "rev-parse", "--verify", "main"],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if base.returncode == 0:
-        commands.append(["git", "diff", "--name-only", "main...HEAD"])
+    base = _resolve_sha("main")
+    if base is not None:
+        commands.append(["git", "diff", "--name-only", f"{base}...HEAD"])
     for command in commands:
         result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
         if result.returncode == 0:
@@ -650,6 +644,14 @@ def _test_environment(scratch: Path) -> dict[str, str]:
     )
     for key in tuple(environment):
         if credential_name.search(key):
+            environment.pop(key)
+    # Git's env-based config is a COUNT plus matching KEY_n/VALUE_n triples. The scrub above
+    # eats GIT_CONFIG_KEY_n (it matches `_KEY_`) but not the count, leaving git with a config
+    # it refuses to parse — every git subprocess in the suite then exits 128. Drop the whole
+    # mechanism: VALUE_n can itself hold a credential (http.extraheader), and tests must not
+    # depend on ambient git config anyway.
+    for key in tuple(environment):
+        if key == "GIT_CONFIG_COUNT" or re.fullmatch(r"GIT_CONFIG_(?:KEY|VALUE)_\d+", key):
             environment.pop(key)
     environment.pop("OPENNOLAN_CACHES_ROUTED", None)
     environment.update(
@@ -804,13 +806,22 @@ def run_tests(
             capture_output=True,
             check=False,
         )
+        combined = (result.stdout or "") + (result.stderr or "")
         action = {
             "argv": _display_argv(command),
             "ok": result.returncode == 0,
             "returncode": result.returncode,
             "duration_seconds": round(time.monotonic() - started, 2),
-            "output": _bounded_redacted((result.stdout or "") + (result.stderr or "")),
+            "output": _bounded_redacted(combined),
         }
+        if result.returncode != 0:
+            # report.json stays bounded so it is readable, but the bound was cutting the middle
+            # out of pytest failures — exactly where a subprocess tool's structured error lives.
+            # Keep the whole redacted transcript beside it; CI uploads this directory.
+            log = scratch / f"{len(actions):02d}-{Path(command[0]).name}.log"
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text(_redact(combined), encoding="utf-8")
+            action["output_log"] = _redact(str(log))
         actions.append(action)
         if not action["ok"]:
             break
@@ -1094,15 +1105,30 @@ def smoke(*, dry_run: bool) -> dict[str, Any]:
     return report
 
 
-def _resolve_sha(value: str) -> str | None:
-    result = subprocess.run(
-        ["git", "rev-parse", "--verify", f"{value}^{{commit}}"],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
+def _resolve_sha(value: str, *, cwd: Path = ROOT) -> str | None:
+    """Resolve a revision to a commit SHA, falling back to remote-tracking branches.
+
+    A CI checkout is shallow and detached with no local branches, so a bare
+    `main` does not resolve there. `git rev-parse` never DWIMs a bare name to
+    `<remote>/<name>`, so try each configured remote explicitly. The remote is
+    not always `origin` (this repository uses `het8802`), hence the loop.
+    """
+    for candidate in [value, *(f"{remote}/{value}" for remote in _git_remotes(cwd))]:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{candidate}^{{commit}}"],
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    return None
+
+
+def _git_remotes(cwd: Path = ROOT) -> list[str]:
+    result = subprocess.run(["git", "remote"], cwd=cwd, text=True, capture_output=True, check=False)
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()] if result.returncode == 0 else []
 
 
 def _git_clean() -> bool:
