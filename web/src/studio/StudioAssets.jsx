@@ -1,46 +1,40 @@
-// Studio Assets tab — shown in the properties panel when nothing is selected (feat 4).
-// Mirrors the agent window's asset kinds (images / video / audio / music). Clicking an asset
-// ADDS it to the timeline in the way that fits its kind — this is where images come from now
-// that +Image left the project toolbar:
+// Studio Assets browser — shown in the properties panel when nothing is selected (feat 4).
+// It is a FOLDER browser over the real project tree (it replaced four flat kind tabs), so the
+// user finds their uploads AND the agent's created assets where they actually live:
+//   assets/{images,video,audio,music}/ · hf/renders/ (agent clips) · renders/ (final export)
+// The backend's /browse endpoint decides what's worth navigating: sub-folders + media files
+// only — no dot-folders (`.mc/` = the agent's chat history), no JSON/HTML, no proxy cache.
+// Clicking a file OPENS it in the shared dialog (play it, read it, see it full size); the dialog's
+// primary button then adds it to the timeline in the way that fits its kind — this is where images
+// come from now that +Image left the project toolbar:
 //   image → image overlay   ·   video → appended cut   ·   music → music bed   ·   audio → SFX
-// Pure display + click-to-add; all mutation goes through the interp mutators wired in Studio.
+// Dragging a file onto the timeline stays the direct path, no dialog.
+// Pure display; all mutation goes through the interp mutators wired in Studio.
 
 import { useRef, useState } from 'react'
 import * as api from '../api.js'
-import { IconPlay, IconMusic } from '../components/icons.jsx'
+import { IconPlay, IconMusic, IconFileText } from '../components/icons.jsx'
+import { FolderNav, useFolderBrowse, uploadKindFor, uploadDirLabel } from '../components/FolderBrowser.jsx'
+import AssetModal from '../components/AssetModal.jsx'
 
-// 'renders' is NOT a user-uploadable asset kind — it surfaces the agent's HyperFrames
-// clips from {project}/hf/renders (the backend's `agent_renders` array). They behave like
-// videos on the timeline (click → append a cut; drag → drop wherever), so the upload
-// dropzone is hidden for this tab.
-const KINDS = ['images', 'video', 'audio', 'music', 'renders']
-const HINT = {
-  images: 'click to add as an overlay · or drag onto the timeline',
-  video: 'click to append a clip · or drag onto the timeline',
-  audio: 'click to drop an SFX at the playhead',
-  music: 'click to set the music bed',
-  renders: 'AI-rendered clips · click to append, or drag onto the timeline',
-}
-
-// Editor Assets panel (shown when nothing is selected) — same look + upload flow as the pipeline
-// page's Assets panel. Clicking an asset ADDS it to the timeline (image→overlay, video→cut,
-// music→bed, audio→SFX); the dropzone uploads a new file for the active kind (via onUploadAsset).
 export default function StudioAssets({ projectId, assets, background, onAddImage, onAddClip, onAddSfx, onSetMusic, onSetBackground, onUploadAsset }) {
-  const [kind, setKind] = useState('images')
   const [dragging, setDragging] = useState(false)
+  const [viewer, setViewer] = useState(null)   // index into `files` — the open dialog
   const inputRef = useRef(null)
-  // 'renders' reads the top-level agent_renders array; every other kind is under assets.kinds.
-  const filesFor = (k) => (k === 'renders' ? assets?.agent_renders : assets?.kinds?.[k]) || []
-  const files = filesFor(kind)
-  const isVideoKind = kind === 'video' || kind === 'renders'
+  // `assets` is the parent's asset listing — it re-lists after an upload and at the end of an
+  // agent turn, so keying off it re-lists this folder too (new clips show without reopening).
+  const { cwd, setCwd, entries, dirs, files } = useFolderBrowse(projectId, assets)
 
-  const onPick = (path) => {
-    if (kind === 'images') onAddImage(path)
-    else if (isVideoKind) onAddClip(path) // renders are video clips → append as a cut
-    else if (kind === 'music') onSetMusic(path)
-    else onAddSfx(path)
+  const onAdd = (f) => {
+    if (f.kind === 'images') onAddImage(f.path)
+    else if (f.kind === 'video') onAddClip(f.path)
+    else if (f.kind === 'music') onSetMusic(f.path)
+    else if (f.kind === 'audio') onAddSfx(f.path)
   }
-  const handleFiles = (fl) => { if (onUploadAsset && fl && fl.length) onUploadAsset(kind, fl[0]) }
+  const handleFiles = (fl) => {
+    const file = fl && fl[0]
+    if (onUploadAsset && file) onUploadAsset(uploadKindFor(cwd, file), file)
+  }
 
   return (
     <aside className="st-inspector st-assets">
@@ -49,49 +43,47 @@ export default function StudioAssets({ projectId, assets, background, onAddImage
           background={background} onSetBackground={onSetBackground} />
       )}
       <h3 className="st-insp-head">Assets</h3>
-      <div className="asset-tabs">
-        {KINDS.map(k => (
-          <button key={k} className={`asset-tab ${kind === k ? 'active' : ''}`} onClick={() => setKind(k)}>
-            {k}{filesFor(k).length ? ` (${filesFor(k).length})` : ''}
-          </button>
-        ))}
-      </div>
-      <div className="st-hint">{HINT[kind]}</div>
+
+      <FolderNav cwd={cwd} dirs={dirs} onNavigate={setCwd} />
+
+      {files.length > 0 && (
+        <div className="st-hint">click a file to open it · or drag it onto the timeline</div>
+      )}
 
       <div className="asset-grid">
-        {files.length === 0 && <p className="empty">No {kind} yet.</p>}
-        {files.map(f => (
+        {entries.length === 0 && <p className="empty">This folder is empty.</p>}
+        {files.map((f, i) => (
           <div
             key={f.path}
             className="asset-item clickable"
-            title={`${f.name} — click to add, or drag onto the timeline`}
+            title={`${f.name} — click to open, or drag onto the timeline`}
             role="button" tabIndex={0} draggable
             onDragStart={(e) => {
-              // A render IS a video clip — tag the drag as 'video' so the timeline's drop
-              // handler (onAssetDrop) routes it to a cut / video-overlay, not an image overlay.
-              const dndKind = kind === 'renders' ? 'video' : kind
-              e.dataTransfer.setData('application/x-opennolan-asset', JSON.stringify({ kind: dndKind, path: f.path }))
+              e.dataTransfer.setData('application/x-opennolan-asset', JSON.stringify({ kind: f.kind, path: f.path }))
               e.dataTransfer.effectAllowed = 'copy'
             }}
-            onClick={() => onPick(f.path)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(f.path) } }}
+            onClick={() => setViewer(i)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setViewer(i) } }}
           >
-            {kind === 'images' && <img src={api.fileUrl(projectId, f.path, f.mtime)} alt={f.name} loading="lazy" />}
-            {isVideoKind && (
+            {f.kind === 'images' && <img src={api.fileUrl(projectId, f.path, f.mtime)} alt={f.name} loading="lazy" />}
+            {f.kind === 'video' && (
               <div className="asset-thumb video">
                 <video src={api.fileUrl(projectId, f.path, f.mtime)} preload="metadata" muted playsInline />
                 <span className="asset-play"><IconPlay /></span>
               </div>
             )}
-            {(kind === 'audio' || kind === 'music') && (
+            {(f.kind === 'audio' || f.kind === 'music') && (
               <div className="asset-thumb audio"><span className="asset-audio-icon"><IconMusic size={26} /></span></div>
+            )}
+            {f.kind === 'text' && (
+              <div className="asset-thumb text"><span className="asset-audio-icon"><IconFileText size={26} /></span></div>
             )}
             <div className="asset-name">{f.name}</div>
           </div>
         ))}
       </div>
 
-      {onUploadAsset && kind !== 'renders' && (
+      {onUploadAsset && (
         <div
           className={`dropzone ${dragging ? 'drag' : ''}`}
           onClick={() => inputRef.current?.click()}
@@ -99,9 +91,16 @@ export default function StudioAssets({ projectId, assets, background, onAddImage
           onDragLeave={() => setDragging(false)}
           onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files) }}
         >
-          Drop a <strong>{kind}</strong> file here, or click to choose
+          Drop a file here, or click to choose — saves to <strong>{uploadDirLabel(cwd)}</strong>
           <input ref={inputRef} type="file" hidden onChange={(e) => handleFiles(e.target.files)} />
         </div>
+      )}
+
+      {viewer !== null && (
+        <AssetModal
+          items={files.map(f => ({ ...f, url: api.fileUrl(projectId, f.path, f.mtime) }))}
+          index={viewer} onClose={() => setViewer(null)} onAdd={onAdd}
+        />
       )}
     </aside>
   )

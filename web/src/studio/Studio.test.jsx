@@ -26,6 +26,7 @@ vi.mock('../api.js', () => ({
     cuts: [{ id: 'c1', source: 'clips/a.mp4', in_seconds: 0, out_seconds: 4 }],
   } })),
   listAssets: vi.fn(() => Promise.resolve({ kinds: { images: [], video: [], audio: [], music: [] }, renders: [], agent_renders: [] })),
+  browseProject: vi.fn(() => Promise.resolve({ path: '', entries: [] })),
   getSourceMeta: vi.fn(() => Promise.resolve({ duration: 4, width: 1920, height: 1080 })),
   saveEditDecisions: vi.fn(() => Promise.resolve({})),
   startRender: vi.fn(() => Promise.resolve({ job_id: 'j1' })),

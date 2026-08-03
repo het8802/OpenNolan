@@ -240,7 +240,15 @@ def test_fast_test_dry_run_shows_only_deterministic_local_checks() -> None:
     )
     assert "scripts/dev" in ruff_check
     assert "pytest" in flattened
-    assert "tests/tools/test_ffmpeg_hdr_preserve.py" in flattened
+    # Which tests get selected depends on what this worktree has changed, so assert the SHAPE of
+    # the selection, not a specific file: every pytest target must be a real path under tests/.
+    # (This line used to name tests/tools/test_ffmpeg_hdr_preserve.py — true only for the commit
+    # that added it, which happened to touch tools/video/. Any change outside video tooling then
+    # failed the gate.)
+    pytest_argv = next(action["argv"] for action in report["actions"] if "pytest" in action["argv"])
+    targets = [arg for arg in pytest_argv if arg.startswith("tests/")]
+    assert targets, f"fast tier selected no tests: {pytest_argv}"
+    assert all((REPO_ROOT / target).exists() for target in targets), targets
     assert "ANTHROPIC" not in flattened
     assert "REPLICATE" not in flattened
 
@@ -957,11 +965,21 @@ def test_merge_mode_and_reaper_have_non_mutating_dry_runs() -> None:
     assert reap_report["current_worktree"] == str(REPO_ROOT)
 
 
-def test_resolve_sha_finds_main_when_it_only_exists_on_a_remote(tmp_path: Path) -> None:
+def test_resolve_sha_finds_main_when_it_only_exists_on_a_remote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A CI checkout is detached with no local branches, so `main` lives only under a remote.
 
     The remote is not always named `origin` — this repository's is `het8802`.
+
+    Git exports GIT_DIR (and friends) to the hooks it runs, and the pre-push hook runs the FULL
+    tier. Inherited, those point every `git` call below — and `_resolve_sha` itself — at the real
+    repository instead of the fixture, so `git add` fails with "must be run in a work tree" and
+    the local-`main` guard would see the real main. Scrub them: the fixture is the only repo here.
     """
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR"):
+        monkeypatch.delenv(name, raising=False)
+
     resolve_sha = runpy.run_path(str(DEV))["_resolve_sha"]
 
     def git(*argv: str) -> str:

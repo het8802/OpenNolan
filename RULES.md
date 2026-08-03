@@ -106,10 +106,21 @@ are point markers. Items are selectable (`{kind:'audio', audioKind, index}`) and
 audio mutators (`updateMusic`/`updateNarration`/`updateSfx` + `remove*`). The source preview
 plays them too: `model.previewAudioTracks(doc)` → hidden `<audio>` synced to the rAF playhead.
 - **Properties panel = selection or assets (feat 4):** show the clip / overlay / **audio** editor
-for the current selection, else the **Assets tab** (same kinds as the agent window: images /
-video / audio / music — plus a read-only **renders** tab fed by the backend's `agent_renders`
-array, i.e. the agent's HyperFrames clips from `{project}/hf/renders`; renders behave like videos
-on the timeline and are NOT uploadable, so their tab has no dropzone). Deselect = click the timeline background (a single handler on
+for the current selection, else the **Assets folder browser** — a navigable view of the real
+project tree (`assets/{images,video,audio,music}/`, the agent's HyperFrames clips in
+`hf/renders/`, the final export in `renders/`), not flat kind tabs. `GET /api/projects/{id}/browse`
+decides what a folder shows: sub-folders + image/video/audio files and their readable companions
+(`text` = .srt/.vtt/.txt/.md) — no dot-entries (`.mc/` is the agent's chat history), no JSON, and
+nothing in `HIDDEN_BROWSE_DIRS`. **A click OPENS the file** in the shared `components/AssetModal.jsx`
+dialog (plays video/audio, shows images full size, renders text read-only); the dialog's primary
+button is what edits the doc, kind-aware — image→overlay, video→cut, music→bed, audio→SFX, text has
+none. Dragging a tile onto the timeline stays the direct path and carries the same `kind`. Uploads
+still POST to `/assets` with a kind (the folder's, else the file's media type). The agent page's
+right-hand **Assets** panel browses the same tree with the same dialog — navigation lives once in
+`components/FolderBrowser.jsx` (`useFolderBrowse` + `FolderNav`, CSS `fb-`); it just passes no
+`onAdd`, so its dialog is view-only. The dialog swallows keydown in the CAPTURE phase so Studio's
+global shortcuts (Space/`s`/Delete) can never edit the timeline behind an open preview.
+Deselect = click the timeline background (a single handler on
 `.st-tl-scroll` that ignores `.st-clip/.st-ov/.st-aud/.st-ruler`) or press Escape → Assets.
 Adding an image comes from Assets, so +Image leaves the project toolbar.
 - **Clip ops home (feat 5):** split / duplicate / delete live in the timeline toolbar and act
