@@ -1,0 +1,15 @@
+# Orca repo-defined hooks. Keeps the worktree lifecycle on the SAME commands humans,
+# Claude, Codex, git hooks, and CI already use (docs/development/agent-workflow.md).
+#
+# setup   — runs when Orca creates a worktree. Without it a fresh worktree has no
+#           .venv and no node_modules, so the first `scripts/dev test fast` fails.
+# archive — runs when Orca removes/archives a worktree. Without it a leaked uvicorn
+#           or vite outlives the worktree and keeps holding its ports.
+#
+# `orca worktree rm` skips the archive hook unless --run-hooks is passed; removal from
+# the Orca UI runs it. Setup follows the repo's policy (`--setup run|skip|inherit`).
+scripts:
+  setup: |
+    scripts/dev setup
+  archive: |
+    scripts/dev stop
