@@ -74,7 +74,14 @@ case "$REMOTE_URL" in
 esac
 REPO_SLUG="${REPO_SLUG%.git}"
 echo "  → running full repository gate before push" >&2
-"$ROOT/scripts/dev" test full </dev/null || exit $?
+# Run the tier with git's hook variables STRIPPED. Git exports GIT_DIR (and friends)
+# to every hook, and they beat a subprocess's cwd — so any test that shells out to git
+# in a temp dir would operate on THIS repository instead. That is not hypothetical:
+# `git init` in such a test re-initialized the worktree's gitdir and wrote
+# `core.bare = true` into the shared config, breaking git in the main clone and every
+# worktree at once. The tier needs no inherited git state; it resolves its own from $ROOT.
+env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
+	-u GIT_COMMON_DIR "$ROOT/scripts/dev" test full </dev/null || exit $?
 
 # A review cannot exist until GitHub has seen the commit, so this is a courtesy
 # warning only. Branch protection owns the authoritative review-current gate.
