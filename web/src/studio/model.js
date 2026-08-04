@@ -352,6 +352,54 @@ export function clamp(x, lo, hi) {
   return Math.max(lo, Math.min(hi, Number(x)))
 }
 
+// ── A text overlay's box: ffmpeg drawtext -> CSS (preview == export) ─────────
+// The renderer emits `boxcolor=<box.color>@<box.opacity>`
+// (video_compose._build_drawtext_filter). It used to hardcode rgba(0,0,0,…) here, so every
+// terracotta caption previewed as a BLACK box (OPN-30).
+//
+// These rules are what ffmpeg 8 actually does, measured, not what its docs imply:
+//   `#CC785C80@0.9`  ==  `#CC785C@0.9`   -> the @suffix OVERRIDES a hex AA byte; it does
+//                                           NOT multiply with it, so box.opacity alone is
+//                                           the alpha (the renderer always appends it).
+//   `#CC785C40`      ->  alpha 0x40/255   -> an AA byte only counts with no @suffix, which
+//                                           this path never produces.
+//   `#CCC`           ->  "Invalid 0xRRGGBB[AA] color string" — the RENDER FAILS. Short hex
+//                                           is a CSS form, not an ffmpeg one.
+//   `red@0.3`        ->  "Invalid alpha value specifier '0.3@0.9'" — also fails, because
+//                                           box.color must not carry its own @alpha.
+// So the two invalid shapes have no exported frame to match; the preview shows the
+// renderer's default box, and ffmpeg's own error names the real problem.
+
+const _FF_HEX_RE = /^#([0-9a-f]{6})(?:[0-9a-f]{2})?$/i   // #RRGGBB[AA]; AA is overridden
+const _FF_NAME_RE = /^[a-z]+$/i                          // ffmpeg's table is the CSS/X11 list
+const FF_BOX_COLOR_DEFAULT = '#000000'   // video_compose.TEXT_BOX_COLOR_DEFAULT = "black"
+const FF_BOX_OPACITY_DEFAULT = 0.5       // video_compose.TEXT_BOX_OPACITY_DEFAULT
+
+/** `box.color` as a CSS `#RRGGBB` or colour name — the renderer's default for anything
+ *  ffmpeg would reject, so the box stays visible instead of silently disappearing. */
+export function ffBoxColorToCss(raw) {
+  let s = String(raw ?? '').trim()
+  if (/^0x/i.test(s)) s = '#' + s.slice(2)          // 0xCC785C -> #CC785C
+  const hex = _FF_HEX_RE.exec(s)
+  if (hex) return `#${hex[1]}`
+  return _FF_NAME_RE.test(s) ? s : FF_BOX_COLOR_DEFAULT
+}
+
+/** The CSS background for a text overlay's `box`, matching `boxcolor=<color>@<opacity>`.
+ *  `rgba()` for the hex forms (the common case, and the only one jsdom resolves);
+ *  `color-mix` for a named colour, which has no channels to read in JS. */
+export function ffBoxBackground(box) {
+  const raw = box?.opacity
+  const alpha = clamp(raw != null && Number.isFinite(Number(raw)) ? Number(raw) : FF_BOX_OPACITY_DEFAULT, 0, 1)
+  if (alpha <= 0) return 'transparent'
+  const css = ffBoxColorToCss(box?.color)
+  if (css.startsWith('#')) {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(css.slice(i, i + 2), 16))
+    return `rgba(${r}, ${g}, ${b}, ${round3(alpha)})`
+  }
+  return alpha >= 1 ? css : `color-mix(in srgb, ${css} ${round3(alpha * 100)}%, transparent)`
+}
+
 // ── Drag-to-scrub number fields (inspector) ──────────────────────────────────
 // The properties panel lets you DRAG a number to change it (After-Effects/CapCut style) AND
 // still type it manually. The drag→value math is pure + testable here; the component only does

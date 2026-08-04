@@ -8,7 +8,7 @@ import {
   KF_DIMS_IMAGE, KF_DIMS_TEXT,
   overlayKind, overlayType, kfDimsFor, newTextOverlay, newImageOverlay, newVideoOverlay, presetKeyframes,
   isFfmpeg, anchorToXY, fmtTime, round3, clamp, previewAudioTracks, groupAudioLanes, isImageSource, clipType,
-  scrubValue, roundTo, fmtScrub, decimalsOf,
+  scrubValue, roundTo, fmtScrub, decimalsOf, ffBoxColorToCss, ffBoxBackground,
   clipFitSize, clipBox, clipDefaultPosition, clipAnchorXY, clipPositionXY,
   isScaleObject, scaleAxes, summarizeDocChange,
 } from './model.js'
@@ -421,5 +421,68 @@ describe('summarizeDocChange (debug-recorder edit diff)', () => {
     expect(summarizeDocChange(prev, next)).toEqual({ fields: ['audio'] })
     const canvasChange = { ...prev, metadata: { canvas: { width: 1920, height: 1080 } } }
     expect(summarizeDocChange(prev, canvasChange)).toEqual({ fields: ['metadata'] })
+  })
+})
+
+// ── A text overlay's box: ffmpeg drawtext -> CSS (OPN-30: preview == export) ──
+// The expectations below are MEASURED against ffmpeg 8, not read off its docs: the
+// renderer emits `boxcolor=<box.color>@<box.opacity>`, and
+//   #CC785C80@0.9 renders identically to #CC785C@0.9  (the @suffix overrides the AA byte)
+//   #CCC and red@0.3 make drawtext FAIL outright     (not CSS-style forms)
+describe('ffBoxColorToCss', () => {
+  it('keeps the hash forms and translates the 0x form', () => {
+    expect(ffBoxColorToCss('#CC785C')).toBe('#CC785C')
+    expect(ffBoxColorToCss('0xCC785C')).toBe('#CC785C')
+    expect(ffBoxColorToCss('  #cc785c  ')).toBe('#cc785c')
+  })
+
+  it('drops a hex AA byte, because box.opacity overrides it in the export', () => {
+    expect(ffBoxColorToCss('#CC785C80')).toBe('#CC785C')
+    expect(ffBoxColorToCss('0xCC785CFF')).toBe('#CC785C')
+  })
+
+  it('keeps a bare colour name (ffmpeg shares the CSS/X11 table)', () => {
+    expect(ffBoxColorToCss('red')).toBe('red')
+    expect(ffBoxColorToCss('Black')).toBe('Black')
+  })
+
+  it("falls back to the renderer's default for anything ffmpeg would reject", () => {
+    // Each of these makes drawtext fail, so there is no exported frame to match; show a
+    // box rather than nothing, and let ffmpeg's own error name the problem.
+    expect(ffBoxColorToCss('#CCC')).toBe('#000000')        // short hex is CSS-only
+    expect(ffBoxColorToCss('red@0.3')).toBe('#000000')     // box.color must not carry @alpha
+    expect(ffBoxColorToCss('rgb(1,2,3)')).toBe('#000000')
+    expect(ffBoxColorToCss('')).toBe('#000000')
+    expect(ffBoxColorToCss(undefined)).toBe('#000000')
+    expect(ffBoxColorToCss('#12345')).toBe('#000000')
+  })
+})
+
+describe('ffBoxBackground', () => {
+  it('builds rgba() from box.color + box.opacity — the export terracotta pill', () => {
+    expect(ffBoxBackground({ color: '#CC785C', opacity: 0.9 })).toBe('rgba(204, 120, 92, 0.9)')
+    expect(ffBoxBackground({ color: '0xCC785C', opacity: 0.9 })).toBe('rgba(204, 120, 92, 0.9)')
+  })
+
+  it("uses box.opacity ALONE as the alpha, since the renderer's @suffix overrides a hex AA", () => {
+    // Measured: boxcolor=#CC785C80@0.9 == boxcolor=#CC785C@0.9. Multiplying 0x80 in would
+    // preview rgba(...,0.45) for a box the export draws at 0.9.
+    expect(ffBoxBackground({ color: '#CC785C80', opacity: 0.9 })).toBe('rgba(204, 120, 92, 0.9)')
+  })
+
+  it("defaults to the renderer's own defaults (black at 0.5)", () => {
+    expect(ffBoxBackground({})).toBe('rgba(0, 0, 0, 0.5)')
+    expect(ffBoxBackground(undefined)).toBe('rgba(0, 0, 0, 0.5)')
+    expect(ffBoxBackground({ color: '#CC785C' })).toBe('rgba(204, 120, 92, 0.5)')
+    expect(ffBoxBackground({ color: '#CC785C', opacity: 'nope' })).toBe('rgba(204, 120, 92, 0.5)')
+  })
+
+  it('uses color-mix for a named colour, which has no channels to read', () => {
+    expect(ffBoxBackground({ color: 'red', opacity: 1 })).toBe('red')
+    expect(ffBoxBackground({ color: 'red', opacity: 0.5 })).toBe('color-mix(in srgb, red 50%, transparent)')
+  })
+
+  it('is transparent at zero opacity (box.opacity: 0 means no box)', () => {
+    expect(ffBoxBackground({ color: '#CC785C', opacity: 0 })).toBe('transparent')
   })
 })

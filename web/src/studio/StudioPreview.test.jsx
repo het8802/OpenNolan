@@ -94,6 +94,51 @@ describe('WYSIWYG canvas', () => {
     expect(c2.querySelector('.st-ov-layer video.st-ov-canvas').muted).toBe(false) // audio_mix on → audible
   })
 
+  it('previews a text box in box.color, not hardcoded black (preview == export)', () => {
+    // The export puts drawtext boxcolor=#CC785C@0.9 on screen; the preview used to paint
+    // rgba(0,0,0,0.9) for every box, so the house terracotta pill showed up black (OPN-30).
+    const doc = {
+      cuts: [videoCut],
+      overlays: [{
+        type: 'text', text: 'OpenNolan', start_seconds: 0, end_seconds: 3, position: 'top-center',
+        font_size: 130, color: '#F0EDE6', box: { color: '#CC785C', opacity: 0.9, padding: 28 },
+      }],
+    }
+    const { container } = render(<StudioPreview {...base} doc={doc} />)
+    const span = container.querySelector('.st-ov-text')
+    expect(span.style.background).toBe('rgba(204, 120, 92, 0.9)')
+    expect(span.style.background).not.toContain('rgba(0, 0, 0')
+  })
+
+  it('defaults a box with no colour to the renderer default (black at 0.5)', () => {
+    const doc = {
+      cuts: [videoCut],
+      overlays: [{ type: 'text', text: 'x', start_seconds: 0, end_seconds: 3, position: 'center', box: { opacity: 0.5 } }],
+    }
+    const { container } = render(<StudioPreview {...base} doc={doc} />)
+    expect(container.querySelector('.st-ov-text').style.background).toBe('rgba(0, 0, 0, 0.5)')
+  })
+
+  it('does not preview a box when the export has no box object', () => {
+    const doc = {
+      cuts: [videoCut],
+      overlays: [{ type: 'text', text: 'x', start_seconds: 0, end_seconds: 3, position: 'center' }],
+    }
+    const { container } = render(<StudioPreview {...base} doc={doc} />)
+    expect(container.querySelector('.st-ov-text').style.background).toBe('transparent')
+  })
+
+  it('previews the alpha the EXPORT uses when box.color carries its own hex AA byte', () => {
+    // Measured: drawtext boxcolor=#CC785C80@0.9 paints the same pixels as #CC785C@0.9 —
+    // the @suffix overrides the AA byte. Multiplying them would preview alpha 0.45.
+    const doc = {
+      cuts: [videoCut],
+      overlays: [{ type: 'text', text: 'x', start_seconds: 0, end_seconds: 3, position: 'center', box: { color: '#CC785C80', opacity: 0.9 } }],
+    }
+    const { container } = render(<StudioPreview {...base} doc={doc} />)
+    expect(container.querySelector('.st-ov-text').style.background).toBe('rgba(204, 120, 92, 0.9)')
+  })
+
   it('pointerdown on a canvas overlay selects it', () => {
     const onSelectOverlay = vi.fn()
     const doc = { cuts: [videoCut], overlays: [{ type: 'text', text: 'x', start_seconds: 0, end_seconds: 3, position: 'center', track: 0 }] }

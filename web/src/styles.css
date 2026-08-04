@@ -325,7 +325,11 @@ select { cursor: pointer; }
 /* ── Assets ── */
 .assets-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
 .renders { margin-bottom: 0.8rem; }
-.renders-label { font-size: 0.78rem; font-weight: 650; color: var(--accent); margin-bottom: 0.4rem; }
+.renders-label { font-size: 0.78rem; font-weight: 650; color: var(--accent); margin-bottom: 0.4rem;
+  display: flex; align-items: center; gap: 0.3rem; }
+/* A render that no longer matches the live timeline, and every earlier render: readable
+   but visibly not the deliverable. */
+.renders-label.stale { color: var(--muted); font-weight: 550; }
 .render-item { margin-bottom: 0.5rem; }
 .render-item video { width: 100%; aspect-ratio: 16 / 9; object-fit: contain;
   border-radius: 8px; background: #000; display: block; }

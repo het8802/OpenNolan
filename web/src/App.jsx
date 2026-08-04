@@ -1314,9 +1314,18 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
           {/* Final render(s) — shown when the reel is done (#1) */}
           {renders.length > 0 && (
             <div className="renders">
-              <div className="renders-label"><IconMovie size={13} /> Final render</div>
               {renders.map((r, i) => (
                 <div key={r.path} className="render-item">
+                  {/* One file is the deliverable (final.mp4); it is CURRENT only while
+                      its receipt matches the live timeline. Everything else under
+                      renders/ is an earlier render — labelling them all "Final render"
+                      is how a stale 15s cut got handed over for a 13s timeline. */}
+                  <div className={`renders-label ${r.current ? '' : 'stale'}`}
+                    title={r.reason || undefined}>
+                    <IconMovie size={13} />{' '}
+                    {r.name !== 'final.mp4' ? 'Earlier render'
+                      : r.current ? 'Final render' : 'Final render (stale — re-render)'}
+                  </div>
                   {/* key on path+mtime so a re-render (or a poll that first caught the
                       file mid-write) remounts the <video> and re-fetches the final bytes. */}
                   <video key={`${r.path}:${r.mtime}`} controls

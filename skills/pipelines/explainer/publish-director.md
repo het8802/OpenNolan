@@ -119,7 +119,7 @@ exports/
         "thumbnail_ready": false
       },
       "export_path": "exports/vector-db-explainer/",
-      "video_path": "renders/output.mp4"
+      "video_path": "renders/final.mp4"
     }
   ]
 }

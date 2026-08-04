@@ -55,6 +55,7 @@ def _seed(projects: Path, *, with_ed: bool = False) -> str:
 
 # ── edit_decisions read/write ────────────────────────────────────────────
 
+
 def test_get_edit_decisions_absent_returns_null(tmp_path):
     client, projects = _client(tmp_path)
     pid = _seed(projects)
@@ -110,6 +111,7 @@ def test_edit_decisions_404_unknown_project(tmp_path):
 
 # ── render jobs (stubbed VideoCompose) ─────────────────────────────────────
 
+
 def _stub_ok(monkeypatch):
     class _FakeVC:
         def execute(self, inputs):
@@ -117,6 +119,7 @@ def _stub_ok(monkeypatch):
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_bytes(b"\x00\x00")
             return ToolResult(success=True, data={"final_review_status": "pass"}, artifacts=[str(out)])
+
     monkeypatch.setattr(RenderJobStore, "_video_compose", lambda self: _FakeVC())
 
 
@@ -147,6 +150,7 @@ def test_render_job_failure_reports_error(tmp_path, monkeypatch):
     class _FailVC:
         def execute(self, inputs):
             return ToolResult(success=False, error="ffmpeg exploded")
+
     monkeypatch.setattr(RenderJobStore, "_video_compose", lambda self: _FailVC())
     client, projects = _client(tmp_path)
     pid = _seed(projects, with_ed=True)
@@ -177,6 +181,7 @@ def test_render_supersede(tmp_path, monkeypatch):
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_bytes(b"\x00\x00")
             return ToolResult(success=True, data={}, artifacts=[str(out)])
+
     monkeypatch.setattr(RenderJobStore, "_video_compose", lambda self: _GatedVC())
 
     client, projects = _client(tmp_path)
@@ -186,9 +191,9 @@ def test_render_supersede(tmp_path, monkeypatch):
     gate.set()
     st2 = _poll(client, pid, j2)
     assert st2["status"] == "done"
-    # j1 was superseded before it could finish — it never flips to done
+    # j1 was superseded before it could publish — terminal, and named as such
     st1 = client.get(f"/api/projects/{pid}/render/{j1}").json()
-    assert st1["status"] in ("running", "queued")
+    assert st1["status"] == "superseded"
 
 
 def test_render_injects_default_renderer_family(tmp_path, monkeypatch):
@@ -204,6 +209,7 @@ def test_render_injects_default_renderer_family(tmp_path, monkeypatch):
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_bytes(b"\x00\x00")
             return ToolResult(success=True, data={}, artifacts=[str(out)])
+
     monkeypatch.setattr(RenderJobStore, "_video_compose", lambda self: _CapVC())
 
     client, projects = _client(tmp_path)
@@ -226,6 +232,7 @@ def test_render_status_404_unknown_job(tmp_path):
 
 # ── frame extraction ───────────────────────────────────────────────────────
 
+
 def test_frame_path_traversal_blocked(tmp_path):
     client, projects = _client(tmp_path)
     pid = _seed(projects)
@@ -240,8 +247,11 @@ def test_frame_extracts_jpeg(tmp_path):
     renders = projects / pid / "renders"
     renders.mkdir(parents=True, exist_ok=True)
     clip = renders / "clip.mp4"
-    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=160x120:d=2:r=24",
-                    "-pix_fmt", "yuv420p", str(clip)], capture_output=True, check=True)
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=160x120:d=2:r=24", "-pix_fmt", "yuv420p", str(clip)],
+        capture_output=True,
+        check=True,
+    )
     r = client.get(f"/api/projects/{pid}/frame", params={"path": "renders/clip.mp4", "t": 1.0})
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/jpeg"
@@ -249,6 +259,7 @@ def test_frame_extracts_jpeg(tmp_path):
 
 
 # ── source resolution + serving (scrub preview) ─────────────────────────────
+
 
 def _seed_source(projects: Path, rel: str = "assets/video/clip.mp4", body: bytes = b"\x00\x01") -> str:
     """Seed a project with a (dummy) source file at `rel`; returns the project id."""
@@ -300,26 +311,21 @@ def test_source_blocks_escape_outside_project(tmp_path):
     """A ref that resolves outside the project dir (traversal or absolute) is rejected."""
     client, projects = _client(tmp_path)
     pid = _seed_source(projects)
-    assert client.get(f"/api/projects/{pid}/source",
-                      params={"ref": "../../../../etc/passwd"}).status_code == 404
-    assert client.get(f"/api/projects/{pid}/source",
-                      params={"ref": "/etc/hosts"}).status_code == 404
+    assert client.get(f"/api/projects/{pid}/source", params={"ref": "../../../../etc/passwd"}).status_code == 404
+    assert client.get(f"/api/projects/{pid}/source", params={"ref": "/etc/hosts"}).status_code == 404
 
 
 def test_source_404_missing_and_unknown_project(tmp_path):
     client, projects = _client(tmp_path)
     pid = _seed(projects)  # no source file written
-    assert client.get(f"/api/projects/{pid}/source",
-                      params={"ref": "assets/video/missing.mp4"}).status_code == 404
-    assert client.get("/api/projects/nope/source",
-                      params={"ref": "assets/video/clip.mp4"}).status_code == 404
+    assert client.get(f"/api/projects/{pid}/source", params={"ref": "assets/video/missing.mp4"}).status_code == 404
+    assert client.get("/api/projects/nope/source", params={"ref": "assets/video/clip.mp4"}).status_code == 404
 
 
 def test_source_meta_404_outside_project(tmp_path):
     client, projects = _client(tmp_path)
     pid = _seed_source(projects)
-    assert client.get(f"/api/projects/{pid}/source_meta",
-                      params={"ref": "/etc/hosts"}).status_code == 404
+    assert client.get(f"/api/projects/{pid}/source_meta", params={"ref": "/etc/hosts"}).status_code == 404
 
 
 @needs_ffmpeg
@@ -328,8 +334,11 @@ def test_source_meta_reports_duration(tmp_path):
     pid = _seed(projects)
     clip = projects / pid / "assets" / "video" / "real.mp4"
     clip.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=160x120:d=3:r=24",
-                    "-pix_fmt", "yuv420p", str(clip)], capture_output=True, check=True)
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=160x120:d=3:r=24", "-pix_fmt", "yuv420p", str(clip)],
+        capture_output=True,
+        check=True,
+    )
     r = client.get(f"/api/projects/{pid}/source_meta", params={"ref": "assets/video/real.mp4"})
     assert r.status_code == 200
     body = r.json()

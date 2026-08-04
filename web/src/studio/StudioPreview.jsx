@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api.js'
 import * as interp from '../editor/interp.js'
-import { fmtTime, previewAudioTracks, overlayType, isImageSource, clipBox, clipPositionXY } from './model.js'
+import { fmtTime, previewAudioTracks, overlayType, isImageSource, clipBox, clipPositionXY, ffBoxBackground } from './model.js'
 import dbg from '../debug/recorder.js'
 
 const OV_DRAG_THRESHOLD = 3 // px before a press on a canvas overlay becomes a position drag
@@ -533,7 +533,6 @@ function renderTextInner(o, scale) {
   const fontSize = (Number(o.font_size) || 48) * scale
   const box = o.box || {}
   const pad = (box.padding != null ? box.padding : 10) * scale
-  const boxOpacity = box.opacity != null ? box.opacity : 0.5
   return (
     <span
       className="st-ov-text"
@@ -541,7 +540,11 @@ function renderTextInner(o, scale) {
         fontSize,
         color: o.color || 'white',
         padding: `${pad * 0.4}px ${pad}px`,
-        background: boxOpacity > 0 ? `rgba(0,0,0,${boxOpacity})` : 'transparent',
+        // NO box object means the renderer emits no box parts at all
+        // (video_compose._build_drawtext_filter), so previewing the default black pill here
+        // would show a box the export never draws. An explicitly present box, even `{}`,
+        // does get the renderer's defaults.
+        background: o.box ? ffBoxBackground(box) : 'transparent',
       }}
     >{o.text || 'text'}</span>
   )
