@@ -33,6 +33,16 @@ from pydantic import BaseModel
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif"}
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
 AUDIO_EXTS = {".mp3", ".wav", ".aac", ".m4a", ".ogg", ".flac"}
+# Browser-only: readable companions to the media (subtitles, notes). Deliberately no .json —
+# stage artifacts are JSON and the Pipeline tab already surfaces them per stage.
+TEXT_EXTS = {".srt", ".vtt", ".txt", ".md"}
+
+
+# Project-relative folders the asset browser hides: engine internals (the content-keyed
+# proxy cache) and the stage artifacts, which are JSON — never media — and already surfaced
+# per stage by the Pipeline tab. (Dot-entries — `.mc/` agent chat history,
+# `.final_review_frames/` — are hidden by the leading-dot rule instead.)
+HIDDEN_BROWSE_DIRS = {"artifacts", "renders/proxies"}
 
 
 def _classify(rel_parts: tuple[str, ...], ext: str) -> Optional[str]:
@@ -44,6 +54,29 @@ def _classify(rel_parts: tuple[str, ...], ext: str) -> Optional[str]:
     if ext in AUDIO_EXTS:
         return "music" if "music" in rel_parts else "audio"
     return None
+
+
+def _browse_hidden(rel: Path) -> bool:
+    return rel.name.startswith(".") or rel.as_posix() in HIDDEN_BROWSE_DIRS
+
+
+def _browse_kind(rel: Path, ext: str) -> Optional[str]:
+    """What the asset browser calls a file: the four asset kinds, plus `text` for the
+    readable companions the kinds map has no bucket for (subtitles, notes)."""
+    return _classify(rel.parts, ext) or ("text" if ext.lower() in TEXT_EXTS else None)
+
+
+def _browse_count(d: Path, proj: Path) -> int:
+    """How many entries the browser would show one level inside `d` (no recursion), so a
+    folder row can say "12" or "empty" without a second request."""
+    try:
+        return sum(
+            1
+            for c in d.iterdir()
+            if not _browse_hidden(c.relative_to(proj)) and (c.is_dir() or _browse_kind(c.relative_to(proj), c.suffix))
+        )
+    except OSError:
+        return 0
 
 
 from lib.env_loader import load_env
@@ -472,6 +505,60 @@ def create_app(
                     )
 
         return {"project_id": project_id, "kinds": kinds, "renders": renders, "agent_renders": agent_renders}
+
+    @app.get("/api/projects/{project_id}/browse")
+    def browse_project(project_id: str, path: str = "") -> dict[str, Any]:
+        """List ONE folder inside a project — powers the editor's asset browser, which
+        walks the real project tree instead of four flat kind tabs.
+
+        Only what a user needs in order to FIND their media is listed: sub-folders, plus
+        image / video / audio files and their readable companions (subtitles, notes).
+        Everything else is noise for this purpose and is omitted — dot-entries (`.mc/`, the
+        agent's chat history), JSON artifacts, HyperFrames HTML/CSS, HIDDEN_BROWSE_DIRS."""
+        proj = (pdir / project_id).resolve()
+        if not proj.is_dir():
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        target = (proj / path).resolve()
+        # Same path-traversal guard as /file: the resolved dir must stay inside the project.
+        if target != proj and proj not in target.parents:
+            raise HTTPException(status_code=400, detail="path traversal detected")
+        if not target.is_dir():
+            raise HTTPException(status_code=404, detail=f"folder {path!r} not found")
+
+        entries: list[dict[str, Any]] = []
+        # Folders first, then files; each group alphabetical (case-insensitive).
+        for f in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+            rel = f.relative_to(proj)
+            if _browse_hidden(rel):
+                continue
+            if f.is_dir():
+                entries.append(
+                    {"name": f.name, "path": rel.as_posix(), "is_dir": True, "count": _browse_count(f, proj)}
+                )
+                continue
+            kind = _browse_kind(rel, f.suffix)
+            if not kind:
+                continue
+            stat = f.stat()
+            # `kind` picks the viewer in the asset dialog and what its add button does on the
+            # timeline (image→overlay, video→cut, music→bed, audio→SFX; text has no add);
+            # `mtime` is the cache-bust key for thumbnails.
+            entries.append(
+                {
+                    "name": f.name,
+                    "path": rel.as_posix(),
+                    "is_dir": False,
+                    "kind": kind,
+                    "size_bytes": stat.st_size,
+                    "mtime": int(stat.st_mtime),
+                }
+            )
+
+        return {
+            "project_id": project_id,
+            "path": "" if target == proj else target.relative_to(proj).as_posix(),
+            "entries": entries,
+        }
 
     @app.get("/api/projects/{project_id}/file")
     def get_file(project_id: str, path: str):

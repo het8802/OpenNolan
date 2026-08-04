@@ -5,6 +5,13 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import StudioInspector from './StudioInspector.jsx'
 
+// The no-selection branch is the Assets folder browser, which lists the project tree over the
+// API. Stub it here; its own suite (StudioAssets.test.jsx) covers navigation and click-to-add.
+vi.mock('../api.js', () => ({
+  browseProject: vi.fn(() => Promise.resolve({ path: '', entries: [] })),
+  fileUrl: (id, path) => `mock:${path}`,
+}))
+
 function setup(overrides = {}) {
   const props = {
     projectId: 'p1', doc: { overlays: [] }, canvas: { width: 1080, height: 1920 }, ffmpeg: true,
@@ -29,22 +36,10 @@ function openTypeInput(getByRole, name) {
 }
 
 describe('selection routing', () => {
-  it('shows the Assets tab when nothing is selected (feat 4)', () => {
+  it('shows the Assets folder browser when nothing is selected (feat 4)', () => {
     const { getByText, getByRole } = setup()
     expect(getByText('Assets')).toBeInTheDocument()
-    expect(getByRole('button', { name: /images/i })).toBeInTheDocument()
-    expect(getByRole('button', { name: /music/i })).toBeInTheDocument()
-  })
-
-  it('Assets-tab items are draggable and carry their kind + path', () => {
-    const { container } = setup({
-      assets: { kinds: { images: [{ path: 'images/logo.png', name: 'logo.png' }], video: [], audio: [], music: [] } },
-    })
-    const item = container.querySelector('.asset-grid .asset-item')
-    expect(item).toHaveAttribute('draggable')
-    const setData = vi.fn()
-    fireEvent.dragStart(item, { dataTransfer: { setData } })
-    expect(setData).toHaveBeenCalledWith('application/x-opennolan-asset', JSON.stringify({ kind: 'images', path: 'images/logo.png' }))
+    expect(getByRole('button', { name: 'Project' })).toBeInTheDocument() // breadcrumb root
   })
 
   it('shows the video-clip inspector for a selected video cut', () => {

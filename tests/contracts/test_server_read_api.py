@@ -287,6 +287,80 @@ def test_render_cache_bust_token_distinguishes_same_second_replacements(tmp_path
     assert second < 2**53, "token must survive JSON -> JS as an exact integer"
 
 
+# ── folder browsing: what the editor's Assets panel navigates ──────────────
+
+
+def _browse_proj(tmp_path):
+    """A project with the full spread: media, agent chat history, artifacts, proxy cache."""
+    projects = tmp_path / "projects"
+    create_project(projects, "Browse Proj", PIPELINE)
+    proj = projects / "browse-proj"
+    (proj / "assets" / "images" / "a.png").write_bytes(b"img")
+    (proj / "assets" / "music" / "bed.mp3").write_bytes(b"mus")
+    (proj / "assets" / "subtitles.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n")
+    (proj / "artifacts" / "script.json").write_text("{}")  # non-media → not listed
+    (proj / "hf" / "renders").mkdir(parents=True)
+    (proj / "hf" / "renders" / "anim.mp4").write_bytes(b"clip")
+    (proj / "hf" / "index.html").write_text("<html>")  # comp source → not listed
+    (proj / ".mc" / "threads").mkdir(parents=True)  # agent chat history → hidden
+    (proj / ".mc" / "activity.jsonl").write_text("{}\n")
+    (proj / "renders" / "proxies").mkdir(parents=True)  # engine cache → hidden
+    (proj / "renders" / "proxies" / "b1.deadbeef.mp4").write_bytes(b"proxy")
+    (proj / "renders" / "final.mp4").write_bytes(b"final")
+    return proj
+
+
+def test_browse_root_hides_dot_dirs_and_internals(tmp_path):
+    """The browser shows folders the user navigates for media — never `.mc/` (the agent's
+    chat history), the proxy cache, or artifacts/ (JSON, shown by the Pipeline tab)."""
+    _browse_proj(tmp_path)
+    body = _client(tmp_path).get("/api/projects/browse-proj/browse").json()
+
+    names = [e["name"] for e in body["entries"]]
+    assert names == ["assets", "hf", "renders"]  # folders first, alphabetical
+    assert ".mc" not in names and "artifacts" not in names
+    assert body["path"] == ""
+
+    inner = _client(tmp_path).get("/api/projects/browse-proj/browse", params={"path": "renders"}).json()
+    assert [e["name"] for e in inner["entries"]] == ["final.mp4"]  # proxies/ hidden
+
+
+def test_browse_lists_media_files_with_kind_and_skips_the_rest(tmp_path):
+    _browse_proj(tmp_path)
+    c = _client(tmp_path)
+
+    hf = c.get("/api/projects/browse-proj/browse", params={"path": "hf"}).json()
+    # index.html isn't media; only the renders/ folder is navigable from here.
+    assert [(e["name"], e["is_dir"], e["count"]) for e in hf["entries"]] == [("renders", True, 1)]
+
+    clips = c.get("/api/projects/browse-proj/browse", params={"path": "hf/renders"}).json()
+    (clip,) = clips["entries"]
+    assert clip["name"] == "anim.mp4" and clip["kind"] == "video" and clip["is_dir"] is False
+    assert clip["path"] == "hf/renders/anim.mp4" and clip["size_bytes"] > 0 and "mtime" in clip
+
+    # A file under assets/music is kind 'music' (→ music bed), not generic audio.
+    music = c.get("/api/projects/browse-proj/browse", params={"path": "assets/music"}).json()
+    assert [e["kind"] for e in music["entries"]] == ["music"]
+
+    # An empty asset folder still lists (count 0) — it stays a visible upload destination.
+    # Subtitles sit beside the kind folders and list as kind 'text' (readable in the dialog,
+    # no timeline action); the JSON artifact next door stays hidden.
+    assets = c.get("/api/projects/browse-proj/browse", params={"path": "assets"}).json()
+    assert ("audio", 0) in [(e["name"], e["count"]) for e in assets["entries"] if e["is_dir"]]
+    assert [(e["name"], e["kind"]) for e in assets["entries"] if not e["is_dir"]] == [("subtitles.srt", "text")]
+
+
+def test_browse_rejects_traversal_and_missing_folders(tmp_path):
+    _browse_proj(tmp_path)
+    c = _client(tmp_path)
+    assert c.get("/api/projects/browse-proj/browse", params={"path": "../.."}).status_code == 400
+    assert c.get("/api/projects/browse-proj/browse", params={"path": "nope"}).status_code == 404
+    assert c.get("/api/projects/no-such-proj/browse").status_code == 404
+    # A file is not a folder.
+    r = c.get("/api/projects/browse-proj/browse", params={"path": "renders/final.mp4"})
+    assert r.status_code == 404
+
+
 def test_get_file_serves_hf_renders_clip(tmp_path):
     """get_file already serves anything inside the project dir, including hf/renders/."""
     projects = tmp_path / "projects"
