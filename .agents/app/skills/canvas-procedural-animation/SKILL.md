@@ -1,6 +1,6 @@
 ---
 name: canvas-procedural-animation
-description: Use p5.js/canvas for local procedural character effects: particles, weather, squash/stretch, walk cycles, and environmental motion.
+description: "Use p5.js/canvas for local procedural character effects: particles, weather, squash/stretch, walk cycles, and environmental motion."
 license: MIT
 ---
 

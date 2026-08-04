@@ -111,6 +111,23 @@ made-up password buried in its body. The agent could recite the description
 without being asked, and could not see the password. So it holds a **menu, not
 the meals.** 78 skills is cheap.
 
+**Correction after QA.** That decoy test used ONE skill. With all 73, the
+descriptions do **not** fit — measured, the whole set costs ~1,000 tokens while
+the descriptions alone would be ~5,000. So the menu the agent gets is
+effectively **just the names**:
+
+```
+no skills at all                24,444 tokens
+73 names, no descriptions       25,343      names cost      ~900
+73 names + real descriptions    25,462      descriptions add ~119
+```
+
+The cost figure in step 4 is right, but it is the price of 73 *names*. The agent
+picks mostly by name, then reads the file. This is not caused by our choice —
+delivering the same 73 the other way costs the same, and it is exactly how the
+app already behaved before this change. Worth knowing, not worth redesigning:
+short, self-explanatory skill names matter more than long descriptions.
+
 ---
 
 ## 5. Keeping the video skills and the coding skills apart

@@ -150,7 +150,7 @@ system prompt. It could not see the **body** → the file is read only when the
 model calls `Skill(name)`. This is progressive disclosure: the agent gets a
 menu, not the meals.
 
-Cost of the menu, measured on the real 78 app skills (symlinked as a plugin):
+Cost of the menu, measured on the real app skills (symlinked as a plugin):
 
 ```
 baseline, no plugin :  24,446 tokens
@@ -158,6 +158,32 @@ baseline, no plugin :  24,446 tokens
                        ---------------
                        +1,014  ==  ~13 tokens/skill
 ```
+
+> **CORRECTION — the number is right, the explanation was wrong.** Codex QA
+> flagged that `claude plugin details` projects **~8,200** always-on tokens, not
+> ~1,014. Re-measured deterministically by comparing the real skills against an
+> identical set with descriptions stripped to one character:
+>
+> ```
+> no plugin                        24,444
+> 73 skills, names only            25,343   names cost      899  (~12/skill)
+> 73 skills, real descriptions     25,462   descriptions add 119
+> ```
+>
+> The descriptions on disk total ~5,000 tokens, so **at this scale the listing is
+> effectively names-only** — only ~119 tokens of description text survives. The
+> `~13 tokens/skill` figure is the cost of a *name*, not of name+description.
+> `plugin details` reports what the descriptions *would* cost, not what is sent.
+>
+> Not a plugin limitation: the same 73 delivered as **project** skills cost
+> 25,327 (+883), i.e. the same names-only behaviour. So this design is no worse
+> than the alternative, and it is unchanged from how the dev agent already
+> behaved with 56 project skills. But do not claim the agent selects on
+> descriptions at this scale — at 73 skills it selects mostly on the **name**,
+> and the description arrives when it invokes the skill.
+>
+> The N=1 canary below is real but does **not** generalize: with one skill the
+> description is present; with 73 it is not.
 
 **(3) Does the list form prune context? — No. It only gates invocation.**
 The docstring claims unlisted skills are "hidden from the model's listing"
@@ -472,6 +498,12 @@ their presence in the video agent's context is judged harmful, the lever is
   a real folder next to our symlinks. If that recurs after Phase 3, add a
   `.gitignore` rule admitting only the tracked symlinks, so the duplicate pile
   cannot silently rebuild.
+- **Anyone clones this repo on Windows.** Codex QA raised it: a default Windows
+  clone with `core.symlinks=false` materializes the seven `.claude/skills`
+  entries as plain text files holding a path, so Claude Code discovers no dev
+  skills there. Codex reads `.agents/skills` directly and is unaffected. Fix if
+  it ever matters: real files in `.claude/skills` and symlinks the other way, or
+  a `scripts/dev setup` step that recreates them.
 - **A future Codex version adds a repo-relative plugin root.** Codex already has
   `.codex-plugin/plugin.json` and `codex plugin marketplace add <local path>`;
   if that becomes usable per-repo, the `.claude/skills` symlinks could be
