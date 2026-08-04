@@ -52,9 +52,9 @@ when both were available is a CRITICAL reviewer finding.
 | Existing React scene stack (text_card, stat_card, chart, caption overlay, TalkingHead, CinematicRenderer) | **remotion** | `skills/core/remotion.md` |
 | Word-level caption burn / karaoke captions | **remotion** | `skills/core/remotion.md` |
 | Avatar / lip-sync / presenter | **remotion** | `skills/core/remotion.md` |
-| Kinetic typography, HTML/GSAP-native motion, product promo, launch reel | **hyperframes** | `skills/core/hyperframes.md` + `.agents/skills/hyperframes/SKILL.md` |
-| Website → video, UI-driven composition | **hyperframes** | `.agents/skills/website-to-hyperframes/SKILL.md` |
-| Registry block needed (data-chart, grain-overlay, shader transitions, etc.) | **hyperframes** | `.agents/skills/hyperframes-registry/SKILL.md` |
+| Kinetic typography, HTML/GSAP-native motion, product promo, launch reel | **hyperframes** | `skills/core/hyperframes.md` + `.agents/app/skills/hyperframes/SKILL.md` |
+| Website → video, UI-driven composition | **hyperframes** | `.agents/app/skills/website-to-hyperframes/SKILL.md` |
+| Registry block needed (data-chart, grain-overlay, shader transitions, etc.) | **hyperframes** | `.agents/app/skills/hyperframes-registry/SKILL.md` |
 | Footage-led cut/trim/concat edit — incl. per-cut xfade transitions, keyframed/text overlays, PiP, crop, custom canvas — with no React/HTML scene composition | **ffmpeg** | `skills/core/ffmpeg.md` |
 | Selected runtime is unavailable | **escalate** — do not substitute silently | `AGENT_GUIDE.md` → Escalate Blockers |
 
@@ -65,25 +65,25 @@ decision matrix and the list of features that stay Remotion-only in Phase 1.
 
 | Animation need | Recommended runtime | Read first |
 |---|---|---|
-| Simple fade / slide / scale / spring | Remotion primitives (no plugin) | `.agents/skills/remotion` |
-| Two-state spring with physics | Remotion `spring()` | `.agents/skills/remotion` |
-| Multi-step sequence with offsets | Remotion `Sequence` + `interpolate()` **or** GSAP timeline | `.agents/skills/remotion` + optionally `.agents/skills/gsap-timeline` |
-| Per-word text reveal synced to narration | Remotion `interpolate` driven by word-level transcript (existing `CaptionOverlay` pattern) | `.agents/skills/remotion` |
-| Per-character kinetic typography (SplitText style) | GSAP SplitText inside Remotion | `.agents/skills/gsap-plugins` (SplitText), `.agents/skills/gsap-react` |
-| SVG shape morph between two paths | GSAP MorphSVG inside Remotion | `.agents/skills/gsap-plugins` (MorphSVG) |
-| Curved camera / object motion along a custom path | GSAP MotionPath inside Remotion | `.agents/skills/gsap-plugins` (MotionPath) |
-| SVG line drawing / stroke reveal | GSAP DrawSVG | `.agents/skills/gsap-plugins` (DrawSVG) |
-| Bespoke bezier / elastic / stutter easing | GSAP CustomEase / EasePack / CustomWiggle | `.agents/skills/gsap-plugins` |
-| Layout-to-layout transition (FLIP) | GSAP Flip inside Remotion | `.agents/skills/gsap-plugins` (Flip) |
-| Disney's 12 animation principles for UI motion | framer-motion + Lottie | `.agents/skills/framer-motion`, `.agents/skills/lottie-bodymovin` |
-| Lottie export from After Effects / Figma | Lottie | `.agents/skills/lottie-bodymovin` |
-| Synthetic terminal / CLI demo | Remotion TerminalScene | `.agents/skills/synthetic-screen-recording` |
-| Mathematical / scientific visualization | Manim | `.agents/skills/manim-composer`, `.agents/skills/manimce-best-practices` |
-| D3 data-driven visualization | D3 | `.agents/skills/d3-viz` |
+| Simple fade / slide / scale / spring | Remotion primitives (no plugin) | `.agents/app/skills/remotion` |
+| Two-state spring with physics | Remotion `spring()` | `.agents/app/skills/remotion` |
+| Multi-step sequence with offsets | Remotion `Sequence` + `interpolate()` **or** GSAP timeline | `.agents/app/skills/remotion` + optionally `.agents/app/skills/gsap-timeline` |
+| Per-word text reveal synced to narration | Remotion `interpolate` driven by word-level transcript (existing `CaptionOverlay` pattern) | `.agents/app/skills/remotion` |
+| Per-character kinetic typography (SplitText style) | GSAP SplitText inside Remotion | `.agents/app/skills/gsap-plugins` (SplitText), `.agents/app/skills/gsap-react` |
+| SVG shape morph between two paths | GSAP MorphSVG inside Remotion | `.agents/app/skills/gsap-plugins` (MorphSVG) |
+| Curved camera / object motion along a custom path | GSAP MotionPath inside Remotion | `.agents/app/skills/gsap-plugins` (MotionPath) |
+| SVG line drawing / stroke reveal | GSAP DrawSVG | `.agents/app/skills/gsap-plugins` (DrawSVG) |
+| Bespoke bezier / elastic / stutter easing | GSAP CustomEase / EasePack / CustomWiggle | `.agents/app/skills/gsap-plugins` |
+| Layout-to-layout transition (FLIP) | GSAP Flip inside Remotion | `.agents/app/skills/gsap-plugins` (Flip) |
+| Disney's 12 animation principles for UI motion | framer-motion + Lottie | `.agents/app/skills/framer-motion`, `.agents/app/skills/lottie-bodymovin` |
+| Lottie export from After Effects / Figma | Lottie | `.agents/app/skills/lottie-bodymovin` |
+| Synthetic terminal / CLI demo | Remotion TerminalScene | `.agents/app/skills/synthetic-screen-recording` |
+| Mathematical / scientific visualization | Manim | `.agents/app/skills/manim-composer`, `.agents/app/skills/manimce-best-practices` |
+| D3 data-driven visualization | D3 | `.agents/app/skills/d3-viz` |
 | Data chart (bar/line/pie/KPI) | Remotion built-in chart components | `remotion-composer/SCENE_TYPES.md` |
-| HyperFrames composition (any motion) | HyperFrames + GSAP (mandatory) | `.agents/skills/hyperframes` + `.agents/skills/gsap-core`, `.agents/skills/gsap-timeline` |
-| HyperFrames composition CLI work (lint/validate/render) | HyperFrames CLI | `.agents/skills/hyperframes-cli` |
-| HyperFrames registry block install (`hyperframes add ...`) | HyperFrames registry | `.agents/skills/hyperframes-registry` |
+| HyperFrames composition (any motion) | HyperFrames + GSAP (mandatory) | `.agents/app/skills/hyperframes` + `.agents/app/skills/gsap-core`, `.agents/app/skills/gsap-timeline` |
+| HyperFrames composition CLI work (lint/validate/render) | HyperFrames CLI | `.agents/app/skills/hyperframes-cli` |
+| HyperFrames registry block install (`hyperframes add ...`) | HyperFrames registry | `.agents/app/skills/hyperframes-registry` |
 
 ## The "keep it simple" bias
 
@@ -118,7 +118,7 @@ const t = frame / durationInFrames;
 const easedValue = easeFn(t);
 ```
 
-For the full breakdown, read `.agents/skills/gsap-react/SKILL.md`.
+For the full breakdown, read `.agents/app/skills/gsap-react/SKILL.md`.
 
 ## Check against the pipeline's stage director
 

@@ -182,10 +182,7 @@ class HyperFramesCompose(BaseTool):
             "strict": {
                 "type": "boolean",
                 "default": False,
-                "description": (
-                    "If true, fail the render on any lint error. Matches "
-                    "`hyperframes render --strict`."
-                ),
+                "description": ("If true, fail the render on any lint error. Matches `hyperframes render --strict`."),
             },
             "skip_contrast": {
                 "type": "boolean",
@@ -198,9 +195,7 @@ class HyperFramesCompose(BaseTool):
         },
     }
 
-    resource_profile = ResourceProfile(
-        cpu_cores=4, ram_mb=3072, vram_mb=0, disk_mb=2000, network_required=False
-    )
+    resource_profile = ResourceProfile(cpu_cores=4, ram_mb=3072, vram_mb=0, disk_mb=2000, network_required=False)
     retry_policy = RetryPolicy(max_retries=0)
     resume_support = ResumeSupport.FROM_START
     idempotency_key_fields = ["operation", "workspace_path", "edit_decisions"]
@@ -234,9 +229,7 @@ class HyperFramesCompose(BaseTool):
         if not node:
             return None
         try:
-            out = subprocess.run(
-                [node, "--version"], capture_output=True, text=True, timeout=5
-            )
+            out = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=5)
             if out.returncode != 0:
                 return None
             match = re.match(r"v?(\d+)\.", out.stdout.strip())
@@ -268,11 +261,13 @@ class HyperFramesCompose(BaseTool):
         # per fresh process) and deterministic. The live `npm view` below is the dev/unprovisioned path.
         try:
             from lib import provision
+
             if provision.hyperframes_ok():
                 pkg_json = provision.hyperframes_root() / "node_modules" / cls._NPM_PACKAGE / "package.json"
                 version = None
                 if pkg_json.exists():
                     import json as _json
+
                     version = _json.loads(pkg_json.read_text()).get("version")
                 cls._npm_resolve_cache = {"version": version or "local"}
                 return cls._npm_resolve_cache
@@ -302,9 +297,7 @@ class HyperFramesCompose(BaseTool):
             stderr = (proc.stderr or "").strip()
             # Most common failure is 404 (package unpublished or name wrong).
             if "404" in stderr or "E404" in stderr:
-                cls._npm_resolve_cache = {
-                    "error": f"npm package `{cls._NPM_PACKAGE}` not found (404)"
-                }
+                cls._npm_resolve_cache = {"error": f"npm package `{cls._NPM_PACKAGE}` not found (404)"}
             else:
                 tail = stderr.splitlines()[-1][:200] if stderr else f"exit {proc.returncode}"
                 cls._npm_resolve_cache = {"error": f"npm view failed: {tail}"}
@@ -333,9 +326,7 @@ class HyperFramesCompose(BaseTool):
         if node_major is None:
             reasons.append("node not found on PATH")
         elif node_major < self._NODE_FLOOR_MAJOR:
-            reasons.append(
-                f"node major version {node_major} < required {self._NODE_FLOOR_MAJOR}"
-            )
+            reasons.append(f"node major version {node_major} < required {self._NODE_FLOOR_MAJOR}")
         if not npx_ok:
             reasons.append("npx not found on PATH")
         if not ffmpeg_ok:
@@ -347,10 +338,7 @@ class HyperFramesCompose(BaseTool):
         if not reasons:
             npm_resolve = self._resolve_npm_package()
             if "error" in npm_resolve:
-                reasons.append(
-                    f"npm package `{self._NPM_PACKAGE}` not resolvable: "
-                    f"{npm_resolve['error']}"
-                )
+                reasons.append(f"npm package `{self._NPM_PACKAGE}` not resolvable: {npm_resolve['error']}")
 
         return {
             "runtime_available": not reasons,
@@ -440,10 +428,7 @@ class HyperFramesCompose(BaseTool):
         if not check["runtime_available"]:
             return ToolResult(
                 success=False,
-                error=(
-                    "HyperFrames runtime floor not met: "
-                    + "; ".join(check["reasons"])
-                ),
+                error=("HyperFrames runtime floor not met: " + "; ".join(check["reasons"])),
                 data=out,
             )
 
@@ -616,7 +601,7 @@ class HyperFramesCompose(BaseTool):
         that land at `compositions/components/<name>.html`. After install, the
         caller is responsible for wiring the block into `index.html` via
         `data-composition-src` or pasting the component's snippet — see
-        `.agents/skills/hyperframes-registry/SKILL.md`.
+        `.agents/app/skills/hyperframes-registry/SKILL.md`.
         """
         workspace = self._require_workspace(inputs)
         block = (inputs.get("block_name") or "").strip()
@@ -628,10 +613,7 @@ class HyperFramesCompose(BaseTool):
         if not workspace.exists():
             return ToolResult(
                 success=False,
-                error=(
-                    f"Workspace {workspace} does not exist. Run "
-                    "operation='scaffold_workspace' first."
-                ),
+                error=(f"Workspace {workspace} does not exist. Run operation='scaffold_workspace' first."),
             )
         args = ["add", block, "--json", "--no-clipboard"]
         proc = self._run_hf(args, cwd=workspace, timeout=300, check=False)
@@ -716,15 +698,16 @@ class HyperFramesCompose(BaseTool):
             )
 
         # 4. Render.
-        width, height, fps = self._resolve_dimensions(
-            inputs.get("profile"), inputs.get("fps", 30)
-        )
+        width, height, fps = self._resolve_dimensions(inputs.get("profile"), inputs.get("fps", 30))
         quality = inputs.get("quality", "standard")
         args = [
             "render",
-            "--output", str(output_path),
-            "--fps", str(fps),
-            "--quality", quality,
+            "--output",
+            str(output_path),
+            "--fps",
+            str(fps),
+            "--quality",
+            quality,
         ]
         proc = self._run_hf(args, cwd=workspace, timeout=1800, check=False)
         steps["render"] = {
@@ -776,13 +759,12 @@ class HyperFramesCompose(BaseTool):
         return Path(raw).resolve()
 
     @staticmethod
-    def _resolve_dimensions(
-        profile_name: Optional[str], fps_in: int
-    ) -> tuple[int, int, int]:
+    def _resolve_dimensions(profile_name: Optional[str], fps_in: int) -> tuple[int, int, int]:
         """Resolve output dimensions from the media profile, with a safe default."""
         if profile_name:
             try:
                 from lib.media_profiles import get_profile  # type: ignore
+
                 p = get_profile(profile_name)
                 return int(p.width), int(p.height), int(p.fps)
             except Exception:
@@ -900,6 +882,7 @@ class HyperFramesCompose(BaseTool):
         """
         try:
             from lib.hyperframes_style_bridge import style_bridge  # type: ignore
+
             return style_bridge(playbook, edit_decisions)
         except Exception as e:
             log.debug("style_bridge fallback: %s", e)
@@ -1045,9 +1028,7 @@ class HyperFramesCompose(BaseTool):
 </html>
 """
 
-    def _cut_to_html(
-        self, index: int, cut: dict, width: int, height: int
-    ) -> tuple[str, Optional[str]]:
+    def _cut_to_html(self, index: int, cut: dict, width: int, height: int) -> tuple[str, Optional[str]]:
         """Render one cut + its entrance tween. Returns (html, tween or None)."""
         cut_id = f"cut-{index}"
         in_s = float(cut.get("in_seconds", 0) or 0)
@@ -1063,7 +1044,7 @@ class HyperFramesCompose(BaseTool):
 
         # Decide scene shape
         if cut_type in {"text_card", "hero_title", "callout"} or (not source and text):
-            inner = f'<h1>{self._escape_text(text or f"Scene {index + 1}")}</h1>'
+            inner = f"<h1>{self._escape_text(text or f'Scene {index + 1}')}</h1>"
             subtitle = cut.get("subtitle") or cut.get("caption")
             if subtitle:
                 inner += f'<div class="subtitle">{self._escape_text(subtitle)}</div>'
@@ -1150,6 +1131,7 @@ class HyperFramesCompose(BaseTool):
         cmd = ["npx", "--yes", "hyperframes", *args]
         try:
             from lib import provision
+
             local_cli = provision.hyperframes_root() / "node_modules" / ".bin" / "hyperframes"
             if local_cli.exists():
                 cmd = [str(local_cli), *args]
@@ -1200,11 +1182,7 @@ class HyperFramesCompose(BaseTool):
 
     @staticmethod
     def _escape_text(s: str) -> str:
-        return (
-            s.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-        )
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     @staticmethod
     def _escape_attr(s: str) -> str:

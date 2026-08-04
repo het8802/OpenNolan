@@ -1,6 +1,6 @@
 # Diagram Generation Usage for OpenNolan
 
-> Sources: Mermaid.js documentation, existing Layer 3 skill at `.agents/skills/beautiful-mermaid/`,
+> Sources: Mermaid.js documentation, existing Layer 3 skill at `.agents/app/skills/beautiful-mermaid/`,
 > Mermaid-Sonar complexity analysis research, Mermaid GitHub issues #651 (scaling), #3029 (animation)
 
 ## Quick Reference Card

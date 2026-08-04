@@ -16,11 +16,11 @@ Quick routing for common explainer needs:
 |---|---|
 | Title card, fade, slide, scale | Remotion primitives — `interpolate()` + `spring()` |
 | Word-level caption highlight synced to narration | Existing `CaptionOverlay` component (already in `remotion-composer/src/components/`) |
-| Per-character kinetic typography ("words explode in one letter at a time") | GSAP SplitText — read `.agents/skills/gsap-plugins/SKILL.md` |
-| Multi-step choreography across 4+ tweens | GSAP timeline — read `.agents/skills/gsap-timeline/SKILL.md` |
-| Logo build (line drawing, stroke reveal) | GSAP DrawSVG — read `.agents/skills/gsap-plugins/SKILL.md` |
+| Per-character kinetic typography ("words explode in one letter at a time") | GSAP SplitText — read `.agents/app/skills/gsap-plugins/SKILL.md` |
+| Multi-step choreography across 4+ tweens | GSAP timeline — read `.agents/app/skills/gsap-timeline/SKILL.md` |
+| Logo build (line drawing, stroke reveal) | GSAP DrawSVG — read `.agents/app/skills/gsap-plugins/SKILL.md` |
 | Data chart (bar/line/pie/KPI) | Remotion built-in chart components — see `remotion-composer/SCENE_TYPES.md` |
-| Terminal or CLI demo | Remotion TerminalScene — read `.agents/skills/synthetic-screen-recording/SKILL.md` |
+| Terminal or CLI demo | Remotion TerminalScene — read `.agents/app/skills/synthetic-screen-recording/SKILL.md` |
 
 **The keep-it-simple bias:** if Remotion primitives solve a scene in ≤ 20 lines, use them. Only pull in GSAP when the plugin genuinely earns its bundle weight.
 
@@ -268,7 +268,7 @@ the AI model's training data — it may be wrong or outdated.
 If you encounter a generation technique, provider behavior, or prompting pattern you are unsure about:
 
 1. **Search the web** for current best practices — models and APIs change frequently, and the agent's training data may be stale
-2. **Check `.agents/skills/`** for existing Layer 3 knowledge (provider-specific prompting guides, API patterns)
+2. **Check `.agents/app/skills/`** for existing Layer 3 knowledge (provider-specific prompting guides, API patterns)
 3. **If neither helps**, write a project-scoped skill at `projects/<project-name>/skills/<name>.md` documenting what you learned
 4. **Reference source URLs** in the skill so the knowledge is traceable
 5. **Log it** in the decision log: `category: "capability_extension"`, `subject: "learned technique: <name>"`

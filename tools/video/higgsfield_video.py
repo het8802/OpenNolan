@@ -90,7 +90,7 @@ class HiggsFieldVideo(BaseTool):
                     "soul_cinema",
                 ],
                 "default": "seedance_2.0",
-                "description": "Underlying model. Defaults to Seedance 2.0 (preferred premium) — see .agents/skills/seedance-2-0/",
+                "description": "Underlying model. Defaults to Seedance 2.0 (preferred premium) — see .agents/app/skills/seedance-2-0/",
             },
             "duration": {
                 "type": "string",
@@ -108,9 +108,7 @@ class HiggsFieldVideo(BaseTool):
         },
     }
 
-    resource_profile = ResourceProfile(
-        cpu_cores=1, ram_mb=512, vram_mb=0, disk_mb=500, network_required=True
-    )
+    resource_profile = ResourceProfile(cpu_cores=1, ram_mb=512, vram_mb=0, disk_mb=500, network_required=True)
     retry_policy = RetryPolicy(max_retries=2, retryable_errors=["rate_limit", "timeout"])
     idempotency_key_fields = ["prompt", "model", "operation", "duration"]
     side_effects = ["writes video file to output_path", "calls Higgsfield Cloud API"]

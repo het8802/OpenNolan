@@ -67,7 +67,7 @@ OpenNolan/
 │   ├── meta/               # reviewer, checkpoint-protocol, skill-creator
 │   └── pipelines/          # Per-pipeline stage-director skills
 │
-├── .agents/skills/         # Layer 3: external technology skills (FFmpeg, HyperFrames, GSAP, etc.)
+├── .agents/app/skills/         # Layer 3: external technology skills (FFmpeg, HyperFrames, GSAP, etc.)
 ├── styles/                 # Visual style playbooks (YAML) + loader
 ├── remotion-composer/      # Node.js/React — Remotion video composition renderer
 ├── tests/                  # Contract tests, QA integration tests, eval harness
@@ -320,7 +320,7 @@ reconcile(entry_id, $)     # records actual spend
 ## 3-Layer Knowledge Architecture
 
 ```
-Layer 3: .agents/skills/          External technology knowledge (47 skills)
+Layer 3: .agents/app/skills/          External technology knowledge (47 skills)
          "How the technology works"    FFmpeg, ElevenLabs API, FLUX, Remotion, Three.js, etc.
               ^
               | agent_skills[] references
@@ -447,7 +447,7 @@ Consumed via `npx hyperframes` (no monorepo checkout needed). Runtime floor: Nod
 
 - Handles kinetic typography, product promos, launch reels, website-to-video, registry blocks, and SVG/GSAP character rigs
 - Driver: `tools/video/hyperframes_compose.py` materializes a workspace under `projects/<name>/hyperframes/`, then runs `lint → validate → render`
-- Layer 3 skills vendored at `.agents/skills/hyperframes*/`; Layer 2 guide at `skills/core/hyperframes.md`
+- Layer 3 skills vendored at `.agents/app/skills/hyperframes*/`; Layer 2 guide at `skills/core/hyperframes.md`
 - The `character-animation` pipeline uses HyperFrames as the production render package. Browser previews are QA/debug artifacts only, not the render path.
 
 ### FFmpeg (fallback / simple cuts)

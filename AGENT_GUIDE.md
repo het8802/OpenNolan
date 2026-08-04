@@ -56,7 +56,7 @@ When the user asks to make, create, produce, or generate any video content — a
 2. **Read the pipeline manifest.** `pipeline_defs/<pipeline>.yaml` — know the stages, tools, and quality gates.
 3. **Run preflight.** Discover available tools via the registry. Present the capability menu.
 4. **Execute stage by stage.** For EACH stage, read the stage director skill (`skills/pipelines/<pipeline>/<stage>-director.md`) BEFORE doing any work in that stage.
-5. **Read Layer 3 skills before calling tools.** Before using any tool with an `agent_skills` field, read the referenced skill in `.agents/skills/`. These contain provider-specific prompting guidance, parameter optimization, and quality techniques that dramatically improve output.
+5. **Read Layer 3 skills before calling tools.** Before using any tool with an `agent_skills` field, read the referenced skill in `.agents/app/skills/`. These contain provider-specific prompting guidance, parameter optimization, and quality techniques that dramatically improve output.
 
 **Do NOT:**
 - Write ad-hoc Python scripts to call tools directly
@@ -425,7 +425,7 @@ For these requests:
 - Explainer videos with `flat-motion-graphics` playbook -> Remotion animated scenes, not Ken Burns
 - Data-driven videos -> Remotion stat cards and charts, not static image screenshots
 - Any pipeline using still images -> Remotion spring animations, not FFmpeg pan-and-zoom
-- **Screen demos of a CLI/terminal/install flow -> `TerminalScene` (synthetic screen recording), not OS-level capture.** See `.agents/skills/synthetic-screen-recording/SKILL.md`. Faster, deterministic, privacy-safe. Use real capture (`screen_recorder`, `cap_recorder`, `playwright-recording`) only when the demo is a real app UI or requires unpredictable live behavior.
+- **Screen demos of a CLI/terminal/install flow -> `TerminalScene` (synthetic screen recording), not OS-level capture.** See `.agents/app/skills/synthetic-screen-recording/SKILL.md`. Faster, deterministic, privacy-safe. Use real capture (`screen_recorder`, `cap_recorder`, `playwright-recording`) only when the demo is a real app UI or requires unpredictable live behavior.
 
 ### Remotion scene types available in `remotion-composer/`
 
@@ -709,7 +709,7 @@ OpenNolan has three instruction layers:
    What exists, what is available, cost, runtime, fallback, related skills.
 2. `skills/`
    How OpenNolan wants those tools used in pipelines.
-3. `.agents/skills/`
+3. `.agents/app/skills/`
    Raw vendor or technology knowledge.
 
 Reading order:
@@ -728,7 +728,7 @@ Example: Before calling `kling_video`, read its `agent_skills` → `ai-video-gen
 
 ### Layer 3 skills, by category
 
-The `.agents/skills/` directory is large. When you're not coming in through a tool's `agent_skills` pointer, use this table to find the right file by *what you're trying to do*:
+The `.agents/app/skills/` directory is large. When you're not coming in through a tool's `agent_skills` pointer, use this table to find the right file by *what you're trying to do*:
 
 | Category | Skills |
 |---|---|

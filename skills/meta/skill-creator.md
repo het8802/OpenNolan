@@ -36,7 +36,7 @@ Before writing the skill, research:
 |------|-----------|---------|
 | Stage director | `skills/pipelines/<pipeline>/` | How to execute a specific pipeline stage |
 | Meta skill | `skills/meta/` | Cross-cutting protocol (review, checkpoint, etc.) |
-| Tool skill | `.agents/skills/` | How to use a specific API or tool effectively |
+| Tool skill | `.agents/app/skills/` | How to use a specific API or tool effectively |
 | Style skill | `styles/` | Visual/audio style definition (YAML playbook) |
 
 ### Step 4: Write the Skill
@@ -91,7 +91,7 @@ Follow this structure (adapt to skill type):
 After writing the skill file:
 1. Add an entry to `skills/INDEX.md`
 2. If it's a pipeline stage skill, ensure the pipeline manifest references it in the stage's `skill` field
-3. If it's a tool skill, place it in `.agents/skills/<tool-name>/`
+3. If it's a tool skill, place it in `.agents/app/skills/<tool-name>/`
 
 ### Step 6: Validate
 

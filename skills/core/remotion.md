@@ -8,7 +8,7 @@ data-driven batch rendering. For simple cuts, burns, and encodes, prefer FFmpeg 
 
 ## Relationship to Remotion Agent Skills
 
-The **installed agent skills** (`.agents/skills/remotion-best-practices/`) teach correct
+The **installed agent skills** (`.agents/app/skills/remotion-best-practices/`) teach correct
 Remotion API usage — imports, timing, animation constraints, code patterns.
 **This file** teaches how OpenNolan uses Remotion — which compositions map to pipeline
 stages, how artifacts flow in, and how renders are triggered.

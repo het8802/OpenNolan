@@ -36,6 +36,7 @@ def _load_dotenv() -> None:
     """
     try:
         from lib import app_paths
+
         env_path = app_paths.env_path()
     except Exception:
         env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -52,9 +53,9 @@ def _load_dotenv() -> None:
             # Strip inline comments: VAR=value  # comment
             # But only if the # is preceded by whitespace (avoid stripping from values like colors)
             if "  #" in value:
-                value = value[:value.index("  #")].rstrip()
+                value = value[: value.index("  #")].rstrip()
             elif "\t#" in value:
-                value = value[:value.index("\t#")].rstrip()
+                value = value[: value.index("\t#")].rstrip()
             if key and key not in os.environ:
                 os.environ[key] = value
 
@@ -86,10 +87,11 @@ class ToolStatus(str, Enum):
 
 class ToolRuntime(str, Enum):
     """Where and how a tool executes."""
-    LOCAL = "local"            # Runs entirely on-device, free, no network
-    LOCAL_GPU = "local_gpu"    # Runs on-device but needs GPU (VRAM)
-    API = "api"                # Calls an external API, requires API key, costs money
-    HYBRID = "hybrid"          # Can run locally OR via API (e.g., image_selector)
+
+    LOCAL = "local"  # Runs entirely on-device, free, no network
+    LOCAL_GPU = "local_gpu"  # Runs on-device but needs GPU (VRAM)
+    API = "api"  # Calls an external API, requires API key, costs money
+    HYBRID = "hybrid"  # Can run locally OR via API (e.g., image_selector)
 
 
 class ExecutionMode(str, Enum):
@@ -112,6 +114,7 @@ class ResumeSupport(str, Enum):
 @dataclass
 class ResourceProfile:
     """Hardware resource envelope for a tool."""
+
     cpu_cores: int = 1
     ram_mb: int = 512
     vram_mb: int = 0
@@ -122,6 +125,7 @@ class ResourceProfile:
 @dataclass
 class RetryPolicy:
     """Safe retry behavior for a tool."""
+
     max_retries: int = 0
     backoff_seconds: float = 1.0
     retryable_errors: list[str] = field(default_factory=list)
@@ -130,6 +134,7 @@ class RetryPolicy:
 @dataclass
 class ToolResult:
     """Standard result returned by tool execution."""
+
     success: bool
     data: dict[str, Any] = field(default_factory=dict)
     artifacts: list[str] = field(default_factory=list)
@@ -184,7 +189,7 @@ class BaseTool(ABC):
     fallback_tools: list[str] = []
 
     # --- Agent skills (Layer 3 references) ---
-    # Names of installed agent skills in .agents/skills/ that teach the
+    # Names of installed agent skills in .agents/app/skills/ that teach the
     # underlying technology. The orchestrator uses these to load relevant
     # API knowledge when planning tool usage.
     agent_skills: list[str] = []
@@ -216,23 +221,17 @@ class BaseTool(ABC):
             if dep.startswith("cmd:"):
                 cmd_name = dep[4:]
                 if shutil.which(cmd_name) is None:
-                    raise DependencyError(
-                        f"Command {cmd_name!r} not found. {self.install_instructions}"
-                    )
+                    raise DependencyError(f"Command {cmd_name!r} not found. {self.install_instructions}")
             elif dep.startswith("env:"):
                 env_name = dep[4:]
                 if not os.environ.get(env_name):
-                    raise DependencyError(
-                        f"Environment variable {env_name!r} not set. {self.install_instructions}"
-                    )
+                    raise DependencyError(f"Environment variable {env_name!r} not set. {self.install_instructions}")
             elif dep.startswith("python:"):
                 module_name = dep[7:]
                 try:
                     __import__(module_name)
                 except ImportError:
-                    raise DependencyError(
-                        f"Python module {module_name!r} not installed. {self.install_instructions}"
-                    )
+                    raise DependencyError(f"Python module {module_name!r} not installed. {self.install_instructions}")
 
     def get_info(self) -> dict[str, Any]:
         """Return full tool contract info for registry/discovery."""
@@ -345,4 +344,5 @@ class BaseTool(ABC):
 
 class DependencyError(Exception):
     """Raised when a tool's dependency is not satisfied."""
+
     pass

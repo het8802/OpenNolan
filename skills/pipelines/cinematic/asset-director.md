@@ -11,10 +11,10 @@ Before authoring title cards, name plates, or SVG overlays, read **`skills/meta/
 | Cinematic need | Recommended approach |
 |---|---|
 | Hero title with subtle reveal | Remotion `HeroTitle` component (existing) |
-| Logo build / cinematic sting on SVG | GSAP DrawSVG + MotionPath — read `.agents/skills/gsap-plugins/SKILL.md` |
-| Curved camera move across a wide still or overlay | GSAP MotionPath — read `.agents/skills/gsap-plugins/SKILL.md` |
-| Per-character title reveal (prestige / trailer style) | GSAP SplitText — read `.agents/skills/gsap-plugins/SKILL.md` |
-| Cinematic easings (Unreal-style, stuttering, weighted) | GSAP CustomEase / EasePack — read `.agents/skills/gsap-plugins/SKILL.md` |
+| Logo build / cinematic sting on SVG | GSAP DrawSVG + MotionPath — read `.agents/app/skills/gsap-plugins/SKILL.md` |
+| Curved camera move across a wide still or overlay | GSAP MotionPath — read `.agents/app/skills/gsap-plugins/SKILL.md` |
+| Per-character title reveal (prestige / trailer style) | GSAP SplitText — read `.agents/app/skills/gsap-plugins/SKILL.md` |
+| Cinematic easings (Unreal-style, stuttering, weighted) | GSAP CustomEase / EasePack — read `.agents/app/skills/gsap-plugins/SKILL.md` |
 | Name plate lower-third with elastic settle | Remotion `spring()` is usually enough; GSAP CustomEase if you need stutter |
 | Film grain / particle overlay | Remotion `ParticleOverlay` (existing) |
 | Color grade / LUT | `tools/enhancement/color_grade.py` (not an animation concern) |
@@ -150,7 +150,7 @@ the AI model's training data — it may be wrong or outdated.
 If you encounter a generation technique, provider behavior, or prompting pattern you are unsure about:
 
 1. **Search the web** for current best practices — models and APIs change frequently, and the agent's training data may be stale
-2. **Check `.agents/skills/`** for existing Layer 3 knowledge (provider-specific prompting guides, API patterns)
+2. **Check `.agents/app/skills/`** for existing Layer 3 knowledge (provider-specific prompting guides, API patterns)
 3. **If neither helps**, write a project-scoped skill at `projects/<project-name>/skills/<name>.md` documenting what you learned
 4. **Reference source URLs** in the skill so the knowledge is traceable
 5. **Log it** in the decision log: `category: "capability_extension"`, `subject: "learned technique: <name>"`

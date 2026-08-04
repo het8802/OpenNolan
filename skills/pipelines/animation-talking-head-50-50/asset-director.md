@@ -293,7 +293,7 @@ Structure:
 </html>
 ```
 
-Key HyperFrames authoring rules (read `skills/core/hyperframes.md` and `.agents/skills/hyperframes/SKILL.md` before writing):
+Key HyperFrames authoring rules (read `skills/core/hyperframes.md` and `.agents/app/skills/hyperframes/SKILL.md` before writing):
 - **NARRATION SYNC (HARD RULE): every GSAP reveal time comes from `transcript.json words[]`, set to the start of the word it illustrates — never earlier.** When writing the `tl.fromTo(..., abs_time)` calls, look up each trigger word's timestamp and use it as the position parameter. Specific items reveal one-per-keyword in spoken order; multi-part diagrams build progressively across the spoken clause (don't finish drawing before the speaker gets there); reaction-GIF/overlay windows run from the trigger word to the scene cut. A reveal that precedes its word is a defect. (See scene-director "Narration Sync — HARD RULE".) Keep a comment next to each scene's tweens noting the trigger word, e.g. `/* tools land ON search/compare/cart */`.
 - All timed elements have `class="clip"` plus a descriptive class
 - Video elements are FORBIDDEN in this composition (see above)

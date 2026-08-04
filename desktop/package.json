@@ -11,7 +11,7 @@
     "dev": "ELECTRON_DEV=1 electron .",
     "test:smoke": "playwright test",
     "fetch-runtime": "node ../scripts/fetch-python.mjs && node ../scripts/fetch-uv.mjs && node ../scripts/fetch-node.mjs",
-    "dist": "npm run fetch-runtime && npm --prefix ../web run build && electron-builder --mac --arm64",
+    "dist": "npm run fetch-runtime && npm --prefix ../web run build && electron-builder --mac --arm64 --config.mac.notarize=true",
     "dist:dir": "npm run fetch-runtime && npm --prefix ../web run build && electron-builder --mac --arm64 --dir"
   },
   "dependencies": {
@@ -44,7 +44,7 @@
       { "from": "../styles", "to": "backend/styles" },
       { "from": "../AGENT_GUIDE.md", "to": "backend/AGENT_GUIDE.md" },
       { "from": "../PROJECT_CONTEXT.md", "to": "backend/PROJECT_CONTEXT.md" },
-      { "from": "../.agents/skills", "to": "backend/.agents/skills" },
+      { "from": "../.agents/app", "to": "backend/.agents/app" },
       { "from": "../config.yaml", "to": "backend/config.yaml" },
       { "from": "../requirements.txt", "to": "backend/requirements.txt" },
       { "from": "../requirements-ui.txt", "to": "backend/requirements-ui.txt" },
@@ -69,7 +69,8 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
-      "notarize": true,
+      "_notarize_comment": "Default OFF so no local build ever uploads to Apple; `npm run dist` re-enables it with --config.mac.notarize=true. Must stay a real JSON boolean: app-builder-lib gates on `notarizeOptions === false` (MacTargetHelper.js:258), and a CLI-passed string \"false\" is truthy and would NOT skip.",
+      "notarize": false,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "OpenNolan records audio for your videos.",
         "NSCameraUsageDescription": "OpenNolan captures video for your projects."

@@ -1,7 +1,7 @@
 # Image Generation Usage for OpenNolan
 
 > Sources: OpenAI DALL-E 3 documentation, FLUX/BFL API documentation, existing Layer 3 skills
-> at `.agents/skills/flux-best-practices/` and `.agents/skills/bfl-api/`
+> at `.agents/app/skills/flux-best-practices/` and `.agents/app/skills/bfl-api/`
 
 ## Quick Reference Card
 

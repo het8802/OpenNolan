@@ -73,7 +73,7 @@ When the agent discovers technique knowledge during web research:
    - Quality tips and known failure modes
    - Source URLs for the information
 3. Reference it in the decision log
-4. Suggest promoting to `.agents/skills/` if it's generally useful
+4. Suggest promoting to `.agents/app/skills/` if it's generally useful
 
 ## Rules for Tool Wrappers
 

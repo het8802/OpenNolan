@@ -1,6 +1,6 @@
 # Seedance 2.0 — Prompting Guide
 
-> Layer 3 authority: `.agents/skills/seedance-2-0/SKILL.md`
+> Layer 3 authority: `.agents/app/skills/seedance-2-0/SKILL.md`
 > For universal vocabulary, see: `skills/creative/video-gen-prompting.md`
 
 ## When to pick Seedance 2.0
