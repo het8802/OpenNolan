@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import { TOOL_ICON, formatToolInput, AGENT_MODELS, DEFAULT_MODEL } from './chatUtils.js'
-import { ClaudeLogo, IconAlert, IconKey, IconEye, IconEyeOff, IconBrain, IconTool, IconMovie } from '../components/icons.jsx'
+import { ClaudeLogo, IconAlert, IconKey, IconEye, IconEyeOff, IconBrain, IconTool, IconMovie, IconChevron } from '../components/icons.jsx'
 import CapabilityInstall from '../CapabilityInstall.jsx'
 
 // Configure marked for safe, compact output
@@ -32,16 +32,33 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
   // charged per-token, so the number would be a misleading notional figure — hide it there.
   const showCost = auth?.method === 'api_key'
 
-  // Auto-scroll to the newest message, but ONLY if the user hasn't scrolled up
-  // to read history. Scrolling up parks them there until they return to bottom.
+  const [atBottom, setAtBottom] = useState(true)
+
+  // Auto-scroll to the newest message, but ONLY if the user hasn't scrolled up to read
+  // history. Scrolling up parks them there until they return to the bottom.
+  //
+  // ALWAYS instant, never smooth. A streaming turn fires this dozens of times, and each new
+  // smooth scroll cancels the one still in flight — which is what made the transcript judder
+  // for the whole turn. Content arriving is not a gesture the user made, so it gets no motion;
+  // the only smooth scroll in this panel is the explicit "Jump to latest" below.
   useEffect(() => {
-    if (stickRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (stickRef.current) endRef.current?.scrollIntoView({ behavior: 'instant', block: 'end' })
   }, [messages, pendingConfirm, pendingQuestion, pendingKeyRequest, pendingCapability, renderingStage])
 
   function onMessagesScroll() {
     const el = msgsRef.current
     if (!el) return
-    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    const parked = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    stickRef.current = parked
+    setAtBottom(parked)
+  }
+
+  // The one place a smooth scroll is warranted: the user asked to travel. Keyboard activation
+  // lands instantly (Enter/Space on a button is a repeated action; motion would only delay it).
+  function jumpToLatest(e) {
+    stickRef.current = true
+    const smooth = e?.detail > 0   // detail === 0 for keyboard-activated clicks
+    endRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant', block: 'end' })
   }
 
   // Grow the composer with its content, up to ~10 lines, then scroll inside it.
@@ -93,6 +110,9 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
         )}
         <div ref={endRef} />
       </div>
+      {!atBottom && messages.length > 0 && (
+        <button type="button" className="jump-latest" onClick={jumpToLatest}>Jump to latest</button>
+      )}
       {pendingQuestion && <QuestionCard q={pendingQuestion} onAnswer={answerQuestion} />}
       {pendingKeyRequest && <ApiKeyCard req={pendingKeyRequest} onProvide={provideKey} onSkip={skipKeyRequest} />}
       {pendingCapability && <CapabilityCard req={pendingCapability} onResolve={resolveCapability} />}
@@ -127,7 +147,7 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
         />
         {busy
           ? <button type="button" className="stop-btn" onClick={stop} title="Stop the agent">■ Stop</button>
-          : <button type="submit" disabled={disabled || !input.trim()}>Send</button>}
+          : <button type="submit" className="btn-primary" disabled={disabled || !input.trim()}>Send</button>}
       </form>
       <div className="composer-bar">
         <select
@@ -156,7 +176,7 @@ function RenderProgress() {
   return (
     <div className="render-progress">
       <div className="rp-label"><IconMovie size={13} /> Rendering…</div>
-      <div className="rp-bar"><div className="rp-fill" style={{ width: `${pct}%` }} /></div>
+      <div className="rp-bar"><div className="rp-fill" style={{ transform: `scaleX(${pct / 100})` }} /></div>
       <div className="rp-pct">{Math.round(pct)}%</div>
     </div>
   )
@@ -339,7 +359,7 @@ function ActivityChip({ item, result }) {
   return (
     <div className={`tool-block ${open ? 'open' : ''}`}>
       <button className={`activity-chip tool clickable ${resultErr ? 'tool-err' : ''}`} onClick={() => setOpen(o => !o)}>
-        <span className="tc-caret">{open ? '▾' : '▸'}</span>
+        <span className="tc-caret"><IconChevron size={11} /></span>
         <span className="tc-icon"><Icon size={13} /></span>
         <span className="tc-name">{item.name}</span>
         {item.detail && <span className="tc-detail">{item.detail}</span>}

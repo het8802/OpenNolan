@@ -457,8 +457,11 @@ export default function StudioTimeline({
             </div>
           )}
 
-          {/* playhead */}
-          <div className="st-playhead" style={{ left: LANE_PAD + playhead * zoom }} />
+          {/* Playhead. Driven by `transform`, NOT `left`: this moves every animation frame
+              during playback and scrub, and `left` forces layout each time. transform is
+              composited, which also removes the sub-pixel shimmer on the 2px line. */}
+          <div className="st-playhead"
+            style={{ left: LANE_PAD, transform: `translateX(${playhead * zoom}px)` }} />
         </div>
       </div>
     </div>
