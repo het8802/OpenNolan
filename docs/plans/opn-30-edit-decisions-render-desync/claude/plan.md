@@ -760,6 +760,27 @@ its managed macOS sandbox, but independently audited the author-run browser driv
 selectors, screenshots, cache token, and preview/export pixel comparison; that audited 20/20
 evidence supports the final APPROVE verdict."
 
+### 8.2 Merged with main after approval
+
+`main` moved ahead while this was in review, and its PR #7 ("browse project assets as
+folders") rewrote the Assets panel — touching `server/app.py`, `web/src/App.jsx` and
+`web/src/styles.css`, the same three files this change touches. Merged and resolved by hand:
+both `_browse_*` helpers and the `/browse` endpoint kept alongside this branch's `current` /
+`reason` / microsecond token, and all tests from both sides retained. The deliverable tiles
+still sit at the top of the Assets panel with main's `FolderNav` and folder grid below.
+
+Everything was re-run on the MERGED tree, not just on the conflict resolution: pytest **1426
+passed, 0 failed**, npm test **321**, build clean, smoke ok, real-ffmpeg end-to-end clean, and
+the browser check **20/20**.
+
+**A second-order gap main introduced, flagged not fixed:** `HIDDEN_BROWSE_DIRS` hides
+`renders/proxies` but not `renders/`, so the new folder browser lists `final.mp4` beside any
+earlier render as plain files, with no current/stale marker — the labelled tiles are only in
+the panel above it. That surface did not exist when this plan was approved, and the browser's
+job is finding media rather than certifying the deliverable, so widening the diff to cover it
+now would be scope creep. Worth its own small follow-up if the folder browser becomes the
+primary way people pick up a finished reel.
+
 **Still not done by either party, deliberately:** a real agent chat turn. The agent route
 (`_run_render` → validate → `start_with_inputs` → publisher) is covered by contract tests and
 by the end-to-end driving the same store API, so the only untested link is the LLM producing
