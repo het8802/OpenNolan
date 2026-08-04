@@ -13,7 +13,7 @@ This is where words become visuals. A great script with a bad scene plan produce
 | Schema | `schemas/artifacts/scene_plan.schema.json` | Artifact validation |
 | Prior artifacts | `state.artifacts["script"]["script"]`, `state.artifacts["proposal"]["proposal_packet"]` | Script sections and proposal packet |
 | Playbook | Active style playbook | Visual language, transitions, motion rules |
-| Layer 3 | `.agents/skills/flux-best-practices/`, `.agents/skills/beautiful-mermaid/`, `.agents/skills/manim-composer/` | Image gen, diagram, animation knowledge |
+| Layer 3 | `.agents/app/skills/flux-best-practices/`, `.agents/app/skills/beautiful-mermaid/`, `.agents/app/skills/manim-composer/` | Image gen, diagram, animation knowledge |
 
 ## Process
 

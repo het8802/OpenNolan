@@ -6,12 +6,12 @@ provenance for every asset (paths, source_tool, model, cost, scene linkage).
 ## Per planned move
 
 - **Cutouts** → `object_cutout` (SAM2 via Replicate). Before reading, read
-  `.agents/skills/sam2-cutouts/SKILL.md`. It's PAID and confirm-gated: announce the cost, pass
+  `.agents/app/skills/sam2-cutouts/SKILL.md`. It's PAID and confirm-gated: announce the cost, pass
   `confirm=true` (or set OBJECT_CUTOUT_AUTOCONFIRM for batch). Provide explicit click points —
   there is no auto mode. Results cache by (video + clicks). If SAM2 is unavailable the tool
   names `bg_remove` as a person-only fallback — surface that to the user, do NOT silently swap.
 - **Restyle** → `restyle_video` (≤10s hero clip, Luma modify-video by default). PAID +
-  confirm-gated; announce provider + cost. Read `.agents/skills/ai-video-gen`.
+  confirm-gated; announce provider + cost. Read `.agents/app/skills/ai-video-gen`.
 - **Captions** → `subtitle_gen` (word-by-word or sentence per the template/brief).
 - **Music** → check `music_library/` first, else `music_gen`/`freesound_music`. A beat-synced
   reel needs a real track for `beat_cutter`.

@@ -44,15 +44,13 @@ own license terms, which are retained alongside each component. These include
 (non-exhaustive):
 
   - Manim Community Edition examples and documentation
-    (.agents/skills/manimce-best-practices and the corresponding .claude/skills
-    copy)
+    (.agents/app/skills/manimce-best-practices)
       Copyright (C) 2026 Adithya S Kolavi
       Licensed under the MIT License. See the LICENSE.txt within those
       directories.
 
   - ManimGL (3Blue1Brown) examples and documentation
-    (.agents/skills/manimgl-best-practices and the corresponding .claude/skills
-    copy)
+    (.agents/app/skills/manimgl-best-practices)
       Copyright (C) 2025 3Blue1Brown (Grant Sanderson) — original video code
       Copyright (C) 2026 Adithya S Kolavi — adapted examples and documentation
       Licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0

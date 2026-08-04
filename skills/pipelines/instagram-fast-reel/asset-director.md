@@ -14,7 +14,7 @@ Every asset must land in the pipeline's locked look (manifest `metadata.design_t
   and the skill `skills/creative/greg-isenberg-product-explainer.md` for the motion vocabulary
   (receipt-stack-in, phrase-collage-build, connector-draw, prompt→artifact). Keep the Anthropic
   palette; borrow Greg's forest/mint/gold only as the semantic accent inside diagram/receipt beats.
-- Read the design-system skill `.agents/skills/editorial-ai-product-design-system` for card /
+- Read the design-system skill `.agents/app/skills/editorial-ai-product-design-system` for card /
   mascot / workflow-diagram construction.
 
 ## Read Layer 3 first

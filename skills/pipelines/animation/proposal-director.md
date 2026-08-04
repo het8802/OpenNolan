@@ -187,7 +187,7 @@ Estimated cost for 30s video: pull per-image costs from each provider's
 `estimate_cost` (do NOT hardcode — they drift between releases).
 
 Style options: depend on the picked provider; read from playbook and
-  provider-specific Layer 3 skill (e.g. `.agents/skills/flux-best-practices`).
+  provider-specific Layer 3 skill (e.g. `.agents/app/skills/flux-best-practices`).
 
 APPROACH B: Clip-Based Video
 ─────────────────────────────
@@ -454,7 +454,7 @@ Validate the `proposal_packet` artifact against `schemas/artifacts/proposal_pack
 If you encounter a generation technique, provider behavior, or prompting pattern you are unsure about:
 
 1. **Search the web** for current best practices — models and APIs change frequently, and the agent's training data may be stale
-2. **Check `.agents/skills/`** for existing Layer 3 knowledge (provider-specific prompting guides, API patterns)
+2. **Check `.agents/app/skills/`** for existing Layer 3 knowledge (provider-specific prompting guides, API patterns)
 3. **If neither helps**, write a project-scoped skill at `projects/<project-name>/skills/<name>.md` documenting what you learned
 4. **Reference source URLs** in the skill so the knowledge is traceable
 5. **Log it** in the decision log: `category: "capability_extension"`, `subject: "learned technique: <name>"`

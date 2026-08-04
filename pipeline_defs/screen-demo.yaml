@@ -9,7 +9,7 @@ description: >
     2. SYNTHETIC (Remotion TerminalScene) — for CLI/terminal/install-flow demos,
        renders a deterministic terminal animation with typed commands, scrolling
        output, floating command pills, and blinking cursor. See
-       .agents/skills/synthetic-screen-recording/SKILL.md. Preferred when the
+       .agents/app/skills/synthetic-screen-recording/SKILL.md. Preferred when the
        demo content is predictable (install walkthroughs, make targets, git clone,
        API key config) because it's faster to iterate, privacy-safe, pixel-perfect,
        and frame-accurate to narration cues.

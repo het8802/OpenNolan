@@ -90,7 +90,7 @@ class HiggsFieldVideo(BaseTool):
                     "soul_cinema",
                 ],
                 "default": "seedance_2.0",
-                "description": "Underlying model. Defaults to Seedance 2.0 (preferred premium) — see .agents/skills/seedance-2-0/",
+                "description": "Underlying model. Defaults to Seedance 2.0 (preferred premium) — see .agents/app/skills/seedance-2-0/",
             },
             "duration": {
                 "type": "string",

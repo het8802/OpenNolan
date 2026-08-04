@@ -298,7 +298,7 @@ the user paralyzed with equal choices.
 
 1. Read the **Layer 2 skill** for each tool from `skills/` directory (usage guidance, input schemas, best practices)
 2. Check the `agent_skills` field on every tool that will be used
-3. Read each referenced **Layer 3 skill** in `.agents/skills/` (provider-specific prompting)
+3. Read each referenced **Layer 3 skill** in `.agents/app/skills/` (provider-specific prompting)
 4. Apply the provider-specific prompting guidance to all generation prompts
 
 **NEVER read tool source code (*.py) to understand how to use a tool.**

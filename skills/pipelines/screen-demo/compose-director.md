@@ -8,7 +8,7 @@ Render the final screen-demo outputs. The quality bar is simple: the UI must be 
 
 Read `edit_decisions.render_runtime` first. Screen-demo compositions use three distinct runtimes depending on the demo shape:
 
-- **`render_runtime="remotion"` with `TerminalScene`** — the preferred path for synthetic terminal/CLI/install flows. See `.agents/skills/synthetic-screen-recording/`.
+- **`render_runtime="remotion"` with `TerminalScene`** — the preferred path for synthetic terminal/CLI/install flows. See `.agents/app/skills/synthetic-screen-recording/`.
 - **`render_runtime="remotion"`** (other scenes) — for mixed screen-capture + animated overlays.
 - **`render_runtime="hyperframes"`** — for custom synthetic HTML UI demos where CSS + GSAP express the UI naturally. Read `skills/core/hyperframes.md`. `hyperframes lint` and `hyperframes validate` must both pass before render.
 - **`render_runtime="ffmpeg"`** — for simple cut/concat of real screen recordings without composition.

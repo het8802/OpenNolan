@@ -10,7 +10,7 @@ Before any other work, read `edit_decisions.render_runtime`. It was locked at pr
 
 - **`render_runtime="hyperframes"`** — HTML/CSS/GSAP render. Do NOT follow the Remotion-specific sections below (public/ staging, Remotion composition JSON). Instead:
   1. Read `skills/core/hyperframes.md` for the full routing model.
-  2. Read `.agents/skills/hyperframes/SKILL.md` and `.agents/skills/hyperframes-cli/SKILL.md` for authoring contract and CLI usage.
+  2. Read `.agents/app/skills/hyperframes/SKILL.md` and `.agents/app/skills/hyperframes-cli/SKILL.md` for authoring contract and CLI usage.
   3. Call `video_compose` with `edit_decisions.render_runtime="hyperframes"` — it delegates to `hyperframes_compose`, which owns workspace materialization under `projects/<name>/hyperframes/`, runs `hyperframes lint → validate → render`, and returns the MP4 path.
   4. `hyperframes lint` and `hyperframes validate` MUST both pass before render. Never skip validate; contrast can be deferred with `skip_contrast=true` during iteration but not for final delivery.
 - **`render_runtime="ffmpeg"`** — simple concat/trim with no composition. Call `video_compose` directly; it will not auto-upgrade to Remotion.

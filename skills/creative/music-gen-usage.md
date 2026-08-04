@@ -1,7 +1,7 @@
 # Music Generation Usage for OpenNolan
 
 > Sources: ElevenLabs Music API documentation, ElevenLabs best practices guide, Artlist BPM
-> guide, existing Layer 3 skills at `.agents/skills/music/` and `.agents/skills/elevenlabs/`
+> guide, existing Layer 3 skills at `.agents/app/skills/music/` and `.agents/app/skills/elevenlabs/`
 
 ## Quick Reference Card
 

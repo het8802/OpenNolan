@@ -595,6 +595,20 @@ def agent_add_dirs(projects_dir: Path | str | None) -> list[str]:
     return [str(p)] if p.exists() else []
 
 
+def app_skills_plugin_dir(repo_root: Path | str) -> Path:
+    """The plugin root holding the agent's video-production skills (OPN-41).
+
+    A "plugin" here is just a directory with `.claude-plugin/plugin.json` beside a
+    `skills/` folder; the SDK is handed the path and discovers the skills inside it.
+    This is the ONLY way the packaged app can expose skills: the CLI otherwise looks
+    only in `<cwd>/.claude/skills`, and the packaged cwd is `Resources/backend`.
+
+    Kept separate from `.agents/skills` (the coding skills, which Codex reads from the
+    repo root) so the two audiences cannot see each other's skills.
+    """
+    return Path(repo_root) / ".agents" / "app"
+
+
 def build_agent_options(
     repo_root: Path | str,
     *,
@@ -652,7 +666,15 @@ def build_agent_options(
         model=model,
         max_budget_usd=max_budget_usd,
         permission_mode="default",      # so can_use_tool is consulted
-        setting_sources=["project"],    # load CLAUDE.md -> the contract applies
+        # Skills come from the bundled `.agents/app` plugin, never from the
+        # filesystem settings (OPN-41). `setting_sources=[]` is load-bearing:
+        # with "project" the dev-mode agent (cwd == repo root) would also pick up
+        # the repo's own .claude/skills — the CODING skills for Claude/Codex —
+        # which have nothing to do with making a video. The plugin ships inside
+        # the .app, so dev and packaged now discover the SAME set.
+        setting_sources=[],
+        plugins=[{"type": "local", "path": str(app_skills_plugin_dir(repo_root))}],
+        skills="all",
         can_use_tool=make_can_use_tool(confirm_handler, sandbox),
         resume=resume,
         mcp_servers=mcp_servers or {},

@@ -307,8 +307,13 @@ def test_build_agent_options():
     assert opts.model == "claude-sonnet-4-6"
     assert opts.max_budget_usd == 3.0
     assert opts.permission_mode == "default"
-    assert opts.setting_sources == ["project"]
     assert opts.can_use_tool is not None
+    # OPN-41: skills come from the bundled plugin, not filesystem settings. An
+    # empty setting_sources is what keeps the repo's CODING skills (.claude/skills)
+    # out of the video agent when cwd happens to be the repo root in dev.
+    assert opts.setting_sources == []
+    assert opts.skills == "all"
+    assert opts.plugins == [{"type": "local", "path": "/repo/.agents/app"}]
 
 
 def test_auth_configured(monkeypatch):

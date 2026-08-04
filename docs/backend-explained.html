@@ -537,7 +537,7 @@ transcriber
     <dt>best_for / not_good_for</dt><dd>Plain-language guidance the agent reads instead of guessing.</dd>
     <dt>fallback_tools</dt><dd>What to try if this tool is unavailable.</dd>
     <dt>input_schema</dt><dd>JSON-schema of accepted params (also used to validate &amp; document).</dd>
-    <dt>agent_skills</dt><dd>Names of <code>.agents/skills/</code> the agent should read before using this tool.</dd>
+    <dt>agent_skills</dt><dd>Names of <code>.agents/app/skills/</code> the agent should read before using this tool.</dd>
     <dt>idempotency_key_fields</dt><dd>Which inputs form the cache key (so repeated calls are cheap).</dd>
   </dl>
   <p class="mini">Note: <code>_load_dotenv()</code> runs at <i>import</i> time in this file too, so API keys are in <code>os.environ</code> before any tool is even instantiated.</p>

@@ -19,7 +19,7 @@ Layer 2: skills/                          "How OpenNolan uses these tools"
 
          â†" references underlying tech in â†"
 
-Layer 3: .agents/skills/                  "How the technology itself works"
+Layer 3: .agents/app/skills/                  "How the technology itself works"
          Generic API knowledge from        Correct import paths, code patterns,
          skills.sh (47 installed skills)   constraints, parameters â€" tech-agnostic
 ```
@@ -28,7 +28,7 @@ Layer 3: .agents/skills/                  "How the technology itself works"
 1. The orchestrator queries Layer 1 (`tool_registry.support_envelope()`) to see what's available
 2. Each tool's `agent_skills[]` field names the Layer 3 skills it relies on
 3. Layer 2 skills (this directory) teach the agent OpenNolan-specific conventions
-4. Layer 3 skills (`.agents/skills/`) provide generic API knowledge, loaded on-demand
+4. Layer 3 skills (`.agents/app/skills/`) provide generic API knowledge, loaded on-demand
 
 ## Capability Families & Tool Discovery
 
@@ -311,7 +311,7 @@ Load via `styles/playbook_loader.py`: `load_playbook("clean-professional")`
 
 ## Installed Agent Skills (Layer 3)
 
-All agent skills live in `.agents/skills/` and are managed via `npx skills add`.
+All agent skills live in `.agents/app/skills/` and are managed via `npx skills add`.
 Claude Code accesses them via symlinks in `.claude/skills/`.
 
 | Category | Installed Skills | Source |

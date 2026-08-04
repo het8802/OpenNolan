@@ -184,7 +184,7 @@ class BaseTool(ABC):
     fallback_tools: list[str] = []
 
     # --- Agent skills (Layer 3 references) ---
-    # Names of installed agent skills in .agents/skills/ that teach the
+    # Names of installed agent skills in .agents/app/skills/ that teach the
     # underlying technology. The orchestrator uses these to load relevant
     # API knowledge when planning tool usage.
     agent_skills: list[str] = []

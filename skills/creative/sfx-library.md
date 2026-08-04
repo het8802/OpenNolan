@@ -177,7 +177,7 @@ python scripts/generate_educational_sfx.py --only "impact-soft,impact-cinematic"
 
 **To add a new effect:** append a dict to the `LIBRARY` list in the script with `slug`, `category`, `prompt`, `duration_seconds` (≥ 0.5, ≤ 30), `prompt_influence` (0-1), `loop`, and `usage`. Then run with `--skip-existing`. The manifest is regenerated automatically.
 
-**Prompt-writing tips (from `.agents/skills/sound-effects/SKILL.md`):**
+**Prompt-writing tips (from `.agents/app/skills/sound-effects/SKILL.md`):**
 
 - Be specific: "Heavy rain on a tin roof" beats "Rain".
 - Combine elements: "Footsteps on gravel with distant traffic".
@@ -194,5 +194,5 @@ ElevenLabs SFX billing is credit-based; the full 20-effect library costs roughly
 - [`skills/creative/second-hook-sfx.md`](second-hook-sfx.md) — social-native Reel/Short mappings for fail stings, whooshes, risers, overlay pops/clicks, and crickets pauses.
 - [`skills/creative/sound-design.md`](sound-design.md) — full audio levels, ducking, LUFS targets.
 - [`skills/creative/music-gen-usage.md`](music-gen-usage.md) — BPM and music prompt guidance (use alongside SFX, not instead of).
-- [`.agents/skills/sound-effects/SKILL.md`](../../.agents/skills/sound-effects/SKILL.md) — Layer 3 ElevenLabs SFX API reference.
+- [`.agents/app/skills/sound-effects/SKILL.md`](../../.agents/app/skills/sound-effects/SKILL.md) — Layer 3 ElevenLabs SFX API reference.
 - [`scripts/generate_educational_sfx.py`](../../scripts/generate_educational_sfx.py) — generator source.

@@ -35,7 +35,7 @@ Agent reads pipeline manifest (YAML) → reads stage director skill (MD)
 ```
 Layer 1: tools/tool_registry.py     → "What tools exist" (runtime capabilities, status, cost)
 Layer 2: skills/                    → "How OpenNolan uses them" (project conventions)
-Layer 3: .agents/skills/            → "How the technology works" (generic API rules, skills.sh)
+Layer 3: .agents/app/skills/            → "How the technology works" (generic API rules, skills.sh)
 ```
 
 Each tool's `agent_skills[]` field bridges Layer 1 → Layer 3. See `skills/INDEX.md` for the full mapping.
@@ -75,7 +75,7 @@ Each tool's `agent_skills[]` field bridges Layer 1 → Layer 3. See `skills/INDE
 | `tools/character/character_animation.py` | Local character-animation tools — character specs, SVG rig plans, pose libraries, action timelines, HyperFrames packages, and QA reports |
 | `lib/hyperframes_style_bridge.py` | Playbook → CSS custom properties + `DESIGN.md` bridge for HyperFrames workspaces |
 | `remotion-composer/src/components/` | 8 Remotion components (TextCard, StatCard, ProgressBar, CalloutBox, ComparisonCard + charts/) |
-| `.agents/skills/hyperframes*/` | Vendored HyperFrames Layer 3 skills (authoring contract, CLI, registry, website-to-video) |
+| `.agents/app/skills/hyperframes*/` | Vendored HyperFrames Layer 3 skills (authoring contract, CLI, registry, website-to-video) |
 | `skills/core/hyperframes.md` | Layer 2 — when OpenNolan should pick HyperFrames vs Remotion, artifact → workspace mapping |
 | `schemas/styles/playbook.schema.json` | Playbook schema v2 with design tokens (chart_palette, scale_system, weight_matrix, color_rules) |
 | `tests/qa/` | Quality validation test scripts for tool-by-tool output inspection |

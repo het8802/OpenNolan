@@ -30,7 +30,7 @@ auto-proceed. Read each stage's director skill BEFORE doing that stage's work.
 
 Also read these creative skills up front — they carry the depth this pipeline relies on:
 - `skills/creative/greg-isenberg-product-explainer.md` (visual language, motion vocabulary, palette)
-- `.agents/skills/source-backed-reel-evidence-montage/SKILL.md` (claim→source→crop→highlight chain)
+- `.agents/app/skills/source-backed-reel-evidence-montage/SKILL.md` (claim→source→crop→highlight chain)
 - `.claude/skills/instagram-reels/SKILL.md` (hooks, retention, claim discipline)
 
 ## Non-negotiable cross-cutting rules (the hard-won lessons)

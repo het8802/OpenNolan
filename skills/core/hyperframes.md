@@ -9,10 +9,10 @@ For raw HyperFrames knowledge (authoring contract, `data-*` attributes, GSAP
 timeline rules, CLI flags, registry blocks, website-to-video), read the Layer 3
 skills:
 
-- `.agents/skills/hyperframes/` — composition authoring contract + GSAP rules
-- `.agents/skills/hyperframes-cli/` — init, lint, validate, preview, render
-- `.agents/skills/hyperframes-registry/` — `hyperframes add` + block wiring
-- `.agents/skills/website-to-hyperframes/` — capture-to-video workflow
+- `.agents/app/skills/hyperframes/` — composition authoring contract + GSAP rules
+- `.agents/app/skills/hyperframes-cli/` — init, lint, validate, preview, render
+- `.agents/app/skills/hyperframes-registry/` — `hyperframes add` + block wiring
+- `.agents/app/skills/website-to-hyperframes/` — capture-to-video workflow
 
 This file teaches the bridge between the two.
 
