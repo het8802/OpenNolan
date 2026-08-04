@@ -83,8 +83,10 @@ from lib.env_loader import load_env
 from lib.pipeline_loader import get_stage_order, list_pipelines, load_pipeline
 from lib.project import (
     ASSET_SUBDIRS,
+    FINAL_RENDER_NAME,
     ProjectExistsError,
     create_project,
+    final_render_status,
     get_project_record,
     list_projects,
     sanitize_filename,
@@ -450,6 +452,9 @@ def create_app(
         renders: list[dict[str, Any]] = []
         renders_dir = proj / "renders"
         if renders_dir.is_dir():
+            # Is renders/final.mp4 the video of the LIVE timeline? Same callable the QA
+            # gate runs, so the UI and the gate can never disagree about "current".
+            final_status = final_render_status(pdir, project_id)
             # NON-recursive on purpose: only top-level renders/ files are deliverables.
             # Subdirs hold render-engine internals — renders/proxies/ (content-keyed
             # per-scene proxy cache) and renders/.final_review_frames/ — which are NOT
@@ -458,16 +463,28 @@ def create_app(
             for f in sorted(renders_dir.glob("*")):
                 if f.is_file() and f.suffix.lower() in VIDEO_EXTS and not f.name.startswith("."):
                     stat = f.stat()
+                    is_final = f.name == FINAL_RENDER_NAME
                     # mtime is the cache-bust/remount key the UI uses so a freshly
                     # finished (or re-rendered) MP4 reloads without a page refresh.
-                    renders.append(
-                        {
-                            "path": str(f.relative_to(proj)),
-                            "name": f.name,
-                            "size_bytes": stat.st_size,
-                            "mtime": int(stat.st_mtime),
-                        }
-                    )
+                    # SUB-SECOND: now that re-renders reuse ONE filename, two cached
+                    # assemblies inside the same second would share a whole-second token
+                    # and the browser would keep serving the old bytes.
+                    # MICROSECONDS, not nanoseconds: an ns timestamp is 19 digits, past
+                    # float64's exact-integer range, so JSON -> JS silently drops its low
+                    # digits — an opaque token nobody can compare exactly is a trap. us is
+                    # 16 digits (exact in JS) and still far finer than any two renders.
+                    entry: dict[str, Any] = {
+                        "path": str(f.relative_to(proj)),
+                        "name": f.name,
+                        "size_bytes": stat.st_size,
+                        "mtime": stat.st_mtime_ns // 1000,
+                        "current": is_final and final_status["current"],
+                    }
+                    if is_final:
+                        entry["reason"] = final_status["reason"]
+                    renders.append(entry)
+            # The one current deliverable first; everything else is an earlier render.
+            renders.sort(key=lambda r: (r["name"] != FINAL_RENDER_NAME, r["name"]))
 
         # Agent-rendered HyperFrames clips: the intermediate building blocks the agent
         # produces under hf/renders/ (separate from the editor's final output in renders/).

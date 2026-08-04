@@ -4836,13 +4836,93 @@ class VideoCompose(BaseTool):
             "pass font_path (.ttf/.ttc) explicitly"
         )
 
+    # The EXACT hex shapes ffmpeg's color parser takes. Deliberately stricter than the
+    # charset guard above: `#CCC` is a valid CSS colour and passes any charset test, but
+    # ffmpeg answers "Invalid 0xRRGGBB[AA] color string: 'CCC'" and the whole render dies
+    # with exit 234 — long after the point where we could have named the field.
+    _FF_HEX_COLOR_RE = re.compile(r"^(?:#|0x)[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$")
+    @staticmethod
+    def _valid_ff_alpha(alpha: str) -> bool:
+        """Is `alpha` an `@alpha` suffix ffmpeg accepts? Parsed, not spelled.
+
+        A spelling regex looked tidy and rejected `white@00.5`, `white@1.` and `white@0x0`,
+        all of which ffmpeg 8 renders fine (verified) — i.e. it would have broken working
+        reels, which is worse than the deep failure it was meant to prevent. Measured
+        against ffmpeg 8: 00.5 / 1. / .5 / 1.0 / 0x0 / 0x80 / 0x8F accepted;
+        2 / -0.5 / 0x100 / abc / 0X80 rejected.
+        """
+        if not alpha:
+            return False
+        if alpha.startswith("0x"):      # LOWERCASE prefix only — ffmpeg takes 0x80 and 0x8F
+            try:                        # but rejects 0X80 ("Invalid alpha value specifier").
+                return 0 <= int(alpha, 16) <= 255   # Digits themselves are case-free.
+            except ValueError:
+                return False
+        try:
+            value = float(alpha)
+        except ValueError:
+            return False
+        return math.isfinite(value) and 0.0 <= value <= 1.0
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _ff_color_names() -> frozenset[str]:
+        """The colour NAMES this ffmpeg build accepts, lowercased.
+
+        Asked of the binary (`ffmpeg -colors`) rather than hardcoded: a 140-entry literal
+        would drift, and a name we wrongly rejected would break a working reel. Empty set
+        when ffmpeg is unavailable or the output is unparseable — callers then skip name
+        validation rather than refusing something valid.
+        """
+        import shutil
+        if not shutil.which("ffmpeg"):
+            return frozenset()
+        try:
+            out = subprocess.run(["ffmpeg", "-hide_banner", "-colors"],
+                                 capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return frozenset()
+        names = {
+            line.split()[0].lower()
+            for line in out.stdout.splitlines()[1:]        # first line is the header
+            if line.strip() and not line.startswith(" ")
+        }
+        return frozenset(names)
+
     @classmethod
     def _validate_ff_color(cls, value: Any, label: str) -> Optional[str]:
-        """Error string unless `value` looks like a safe ffmpeg color token."""
+        """Error string unless `value` is a colour THIS ffmpeg will actually parse.
+
+        Validated here, by field name, instead of letting the filtergraph fail: a bad
+        colour is a schema-valid value the renderer cannot use, and ffmpeg's own error
+        names neither the overlay nor the field it came from.
+        """
         if not isinstance(value, str) or not value or not cls._FF_COLOR_RE.match(value):
             return (
                 f"{label} must be an ffmpeg color (name, #RRGGBB, or "
                 f"0xRRGGBB[AA]); got {value!r}"
+            )
+        body, sep, alpha = value.partition("@")
+        # `sep`, not `alpha`: "red@" has an EMPTY alpha, which would slip past an
+        # `if alpha` test and emit boxcolor=red@@0.9 for ffmpeg to reject.
+        if sep and (label.endswith("box.color") or not cls._valid_ff_alpha(alpha)):
+            # For a box the renderer appends its own `@box.opacity`, and ffmpeg refuses two
+            # suffixes ("Invalid alpha value specifier '0.3@0.9'").
+            hint = ("; set box.opacity instead, it becomes the box alpha"
+                    if label.endswith("box.color") else "")
+            return f"{label} has an invalid or disallowed '@alpha' suffix ({value!r}){hint}"
+        if body.startswith(("#", "0x", "0X")):
+            if not cls._FF_HEX_COLOR_RE.match(body):
+                return (
+                    f"{label} must be #RRGGBB, #RRGGBBAA, or 0xRRGGBB[AA] — ffmpeg does not "
+                    f"take the 3-digit CSS form; got {value!r}"
+                )
+            return None
+        known = cls._ff_color_names()
+        if known and body.lower() not in known:
+            return (
+                f"{label} is not a color this ffmpeg knows ({value!r}); use a name from "
+                "`ffmpeg -colors`, #RRGGBB, or 0xRRGGBB[AA]"
             )
         return None
 

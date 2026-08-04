@@ -20,6 +20,11 @@ verifiable success condition.
 
 ## Where plan docs go
 
+**How to produce them: [`.agents/skills/plan-then-architecture/SKILL.md`](.agents/skills/plan-then-architecture/SKILL.md).**
+Write `plan.md`, get it torn apart by the opposite provider through Orca until it is
+approved, then write `architecture.md` with ASCII diagrams. Do not write
+implementation code before the reviewer approves the plan.
+
 Every plan, design, or architecture doc goes here:
 
 ```

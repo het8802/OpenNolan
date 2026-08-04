@@ -231,6 +231,62 @@ def test_list_assets_agent_renders_from_hf_renders(tmp_path):
     assert "final.mp4" not in ar_names
 
 
+def test_list_assets_marks_the_current_deliverable(tmp_path):
+    """The panel used to list every file in renders/ under ONE "Final render" heading, so
+    a stale final.mp4 sat next to two fresh renders with nothing to tell them apart."""
+    import json as _json
+
+    from lib.project import publish_final_render
+
+    projects = tmp_path / "projects"
+    create_project(projects, "Cur Proj", PIPELINE)
+    proj = projects / "cur-proj"
+    doc = {"version": "1.0", "render_runtime": "ffmpeg", "cuts": []}
+    (proj / "artifacts").mkdir(parents=True, exist_ok=True)
+    (proj / "artifacts" / "edit_decisions.json").write_text(_json.dumps(doc))
+    src = tmp_path / "v.mp4"
+    src.write_bytes(b"vid")
+    publish_final_render(projects, "cur-proj", src, receipt_doc=doc)
+    (proj / "renders" / "overlay_raw.mp4").write_bytes(b"intermediate")
+
+    client = _client(tmp_path)
+    renders = client.get("/api/projects/cur-proj/assets").json()["renders"]
+    assert [r["name"] for r in renders] == ["final.mp4", "overlay_raw.mp4"]  # deliverable first
+    assert renders[0]["current"] is True
+    assert renders[1]["current"] is False  # never the deliverable, no receipt
+    # The receipt itself is a dotfile, so it cannot appear as a deliverable.
+    assert all(not r["name"].startswith(".") for r in renders)
+
+    # Edit the timeline without re-rendering -> the SAME file is no longer current.
+    (proj / "artifacts" / "edit_decisions.json").write_text(_json.dumps({**doc, "cuts": [{"id": "c1"}]}))
+    renders = client.get("/api/projects/cur-proj/assets").json()["renders"]
+    assert renders[0]["current"] is False
+    assert "timeline changed" in renders[0]["reason"]
+
+
+def test_render_cache_bust_token_distinguishes_same_second_replacements(tmp_path):
+    """Now that re-renders reuse ONE filename, a whole-second mtime would hand the browser
+    the same URL and React key for two different cuts published inside one second."""
+    projects = tmp_path / "projects"
+    create_project(projects, "Tok Proj", PIPELINE)
+    final = projects / "tok-proj" / "renders" / "final.mp4"
+    client = _client(tmp_path)
+
+    final.write_bytes(b"first")
+    first = client.get("/api/projects/tok-proj/assets").json()["renders"][0]["mtime"]
+    final.write_bytes(b"second-cut")
+    second = client.get("/api/projects/tok-proj/assets").json()["renders"][0]["mtime"]
+    assert first != second
+
+    # Sub-second, and EXACTLY representable in the browser that consumes it. A raw ns
+    # timestamp is 19 digits — past float64's exact-integer range — so JSON -> JS silently
+    # dropped its low digits and the token in the URL did not equal the file's mtime.
+    stat = final.stat()
+    assert second == stat.st_mtime_ns // 1000
+    assert second != int(stat.st_mtime)  # not whole seconds
+    assert second < 2**53, "token must survive JSON -> JS as an exact integer"
+
+
 # ── folder browsing: what the editor's Assets panel navigates ──────────────
 
 

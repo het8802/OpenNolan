@@ -650,8 +650,12 @@ def _test_environment(scratch: Path) -> dict[str, str]:
     # it refuses to parse — every git subprocess in the suite then exits 128. Drop the whole
     # mechanism: VALUE_n can itself hold a credential (http.extraheader), and tests must not
     # depend on ambient git config anyway.
+    #
+    # GIT_CONFIG_PARAMETERS is the same mechanism by another name: `git -c foo=bar <cmd>`
+    # exports the override that way to every child, so a hook invoked from a `git -c …` call
+    # hands the suite an ambient config the scrub above would miss entirely.
     for key in tuple(environment):
-        if key == "GIT_CONFIG_COUNT" or re.fullmatch(r"GIT_CONFIG_(?:KEY|VALUE)_\d+", key):
+        if key in ("GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS") or re.fullmatch(r"GIT_CONFIG_(?:KEY|VALUE)_\d+", key):
             environment.pop(key)
     environment.pop("OPENNOLAN_CACHES_ROUTED", None)
     environment.update(

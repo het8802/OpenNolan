@@ -5,7 +5,29 @@ hook first at a HIGH sample rate, then the whole reel at a lower rate, then the 
 is the last stage; it produces the `final_review` artifact and gates the deliverable. Human
 approval required.
 
-## Step 1 — HOOK at 5 fps (do this FIRST)
+## Step 0 — is `final.mp4` even the video of the current timeline? (do this FIRST)
+
+You are about to hand the user `renders/final.mp4` **and** the live `edit_decisions.json`.
+Those are exactly the two things that can silently disagree, so prove they don't before
+you QA a single frame:
+
+```bash
+python -c "import json;from lib import app_paths;from lib.project import final_render_status;\
+print(json.dumps(final_render_status(app_paths.projects_dir(),'<project_id>')))"
+```
+
+`app_paths.projects_dir()`, not the literal `projects` — in the packaged app (and whenever
+`OPENNOLAN_HOME` / `OPENNOLAN_PROJECTS_DIR` is set) the project does not live under the repo,
+and a hardcoded root would report "no final.mp4" for a perfectly current render and block
+delivery. Bare `python` for the same reason AGENT_GUIDE.md gives: your PATH already points at
+the interpreter that has OpenNolan's dependencies.
+
+`current: false` → **stop**. Report `status` revise with `recommended_action: re_render` and
+the returned `reason` verbatim. Do NOT `pass`: the frames you'd sample would not be the
+frames of the timeline you're handing over. This is the same callable the editor's asset
+listing uses to label the render, so the gate and the UI can't drift apart.
+
+## Step 1 — HOOK at 5 fps
 The hook is the whole reel — if it's weak, nothing else matters, so QA it densely before
 spending the full pass.
 - Hook window = the first ~3s (use the duration of `cuts[0]` from `edit_decisions`, capped ~3s).
@@ -49,7 +71,8 @@ spending the full pass.
   `revise_assets` / `block`).
 
 ## Quality bar
-Hook passed at 5fps, full reel scanned at 2fps, all technicals green, sync verified. Any CRITICAL
+Step 0 `current: true`, hook passed at 5fps, full reel scanned at 2fps, all technicals green,
+sync verified. Any CRITICAL
 finding (bad hook, early reveal, black frames, wrong resolution, missing audio, leftover dead air)
 → `status` revise/fail with a concrete next action; do NOT present as complete. On `pass`, point
 the user to `renders/final.mp4` + the live `edit_decisions.json` to hand-tune in the Studio editor.
