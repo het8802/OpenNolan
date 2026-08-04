@@ -36,31 +36,40 @@ from typing import Any, Awaitable, Callable, Optional
 
 from server.activity import record_tool_use
 
-DEFAULT_MODEL = "claude-opus-4-8"            # most capable model; strongest at long-horizon agentic runs
+DEFAULT_MODEL = "claude-opus-4-8"  # most capable model; strongest at long-horizon agentic runs
 
 # Models the user can pick in the agent UI (id -> display label). The UI dropdown
 # and the /chat payload validate against this set — an unknown id is ignored and the
 # session keeps its current model. Keep in sync with web/src/chat/chatUtils.js.
 AGENT_MODELS: dict[str, str] = {
-    "claude-opus-4-8": "Opus 4.8",              # default / recommended
+    "claude-opus-4-8": "Opus 4.8",  # default / recommended
     "claude-sonnet-5": "Sonnet 5",
     "claude-haiku-4-5-20251001": "Haiku 4.5",
 }
 
-DEFAULT_MAX_BUDGET_USD = 15.0                # SDK-native hard ceiling per session
+DEFAULT_MAX_BUDGET_USD = 15.0  # SDK-native hard ceiling per session
 DEFAULT_CONFIRM_TIMEOUT_S = 300
-DEFAULT_ANSWER_TIMEOUT_S = 900               # users may take a while to answer a question
+DEFAULT_ANSWER_TIMEOUT_S = 900  # users may take a while to answer a question
 
 # Always-safe tools (run unattended).
-SAFE_TOOLS = frozenset({
-    "Read", "Glob", "Grep", "LS", "NotebookRead", "TodoWrite", "WebSearch", "WebFetch",
-})
+SAFE_TOOLS = frozenset(
+    {
+        "Read",
+        "Glob",
+        "Grep",
+        "LS",
+        "NotebookRead",
+        "TodoWrite",
+        "WebSearch",
+        "WebFetch",
+    }
+)
 # Writes are legitimate (the agent writes artifacts/checkpoints under projects/).
 WRITE_TOOLS = frozenset({"Write", "Edit", "NotebookEdit", "MultiEdit"})
 
 ACTION_ALLOW = "allow"
 ACTION_CONFIRM = "confirm"
-ACTION_DENY = "deny"      # hard-deny with a steering message (no user prompt)
+ACTION_DENY = "deny"  # hard-deny with a steering message (no user prompt)
 
 import re
 
@@ -103,10 +112,7 @@ def bash_uses_videocompose_render(command: str) -> bool:
     which breaks message attribution (the off-by-one). Marker is specific
     (VideoCompose AND render_proxies), so non-render ffmpeg/remotion calls and
     other video_compose operations (compose/encode/burn_subtitles) are untouched."""
-    return bool(
-        re.search(r"render_proxies", command)
-        and re.search(r"VideoCompose|video_compose", command)
-    )
+    return bool(re.search(r"render_proxies", command) and re.search(r"VideoCompose|video_compose", command))
 
 
 # Heavy media tools that re-encode video — long enough that the Claude CLI auto-detaches
@@ -148,21 +154,34 @@ def bash_runs_heavy_media_op(command: str) -> Optional[str]:
 # OPENNOLAN_AGENT_SANDBOX=0.
 # --------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class Sandbox:
     """A filesystem boundary. ``base`` is the agent cwd (used to resolve relative
     paths); ``roots`` are the only directory trees the agent may read/write."""
+
     base: Path
     roots: tuple[Path, ...]
 
 
 # File tools whose input names a path we must keep in-bounds.
-_PATH_TOOLS = frozenset({
-    "Read", "Write", "Edit", "MultiEdit", "NotebookRead", "NotebookEdit",
-    "LS", "Glob", "Grep",
-})
+_PATH_TOOLS = frozenset(
+    {
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "NotebookRead",
+        "NotebookEdit",
+        "LS",
+        "Glob",
+        "Grep",
+    }
+)
 # Harmless device paths a shell command may legitimately reference.
 _BASH_OK_PATHS = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
+
+
 # Path-like tokens in a shell command: ~…, $HOME…, /abs…, ./rel…, ../rel…
 def _truthy(value: Optional[str]) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
@@ -285,7 +304,10 @@ def _temp_roots() -> tuple[Path, ...]:
     from lib import app_paths
 
     candidates: list[Path | str] = [
-        tempfile.gettempdir(), "/tmp", "/private/tmp", "/var/folders",
+        tempfile.gettempdir(),
+        "/tmp",
+        "/private/tmp",
+        "/var/folders",
         app_paths.cache_dir() / "scratch",
     ]
     roots: list[Path] = []
@@ -655,8 +677,7 @@ def build_agent_options(
     sandbox = build_sandbox(repo_root, projects_dir)
     if sandbox is not None:
         print(
-            "[agent_runner] filesystem sandbox ON; agent confined to: "
-            + ", ".join(str(r) for r in sandbox.roots),
+            "[agent_runner] filesystem sandbox ON; agent confined to: " + ", ".join(str(r) for r in sandbox.roots),
             file=sys.stderr,
         )
 
@@ -665,7 +686,7 @@ def build_agent_options(
         system_prompt=AGENT_SYSTEM_PROMPT,
         model=model,
         max_budget_usd=max_budget_usd,
-        permission_mode="default",      # so can_use_tool is consulted
+        permission_mode="default",  # so can_use_tool is consulted
         # Skills come from the bundled `.agents/app` plugin, never from the
         # filesystem settings (OPN-41). `setting_sources=[]` is load-bearing:
         # with "project" the dev-mode agent (cwd == repo root) would also pick up
@@ -689,6 +710,7 @@ def build_agent_options(
 # --------------------------------------------------------------------------
 # Event normalization — SDK messages -> JSON-serializable dicts for SSE.
 # --------------------------------------------------------------------------
+
 
 def _truncate_input(tool_input: dict[str, Any] | None, limit: int = 4000) -> dict[str, Any]:
     """Truncate large string fields. Limit is generous so the UI can expand a
@@ -748,41 +770,47 @@ def event_of(message: Any) -> dict[str, Any]:
             elif isinstance(block, ToolUseBlock):
                 trunc = _truncate_input(block.input)
                 detail = _tool_detail(block.name, block.input or {})
-                items.append({
-                    "kind": "tool_use",
-                    "name": block.name,
-                    "id": block.id,
-                    "input": trunc,
-                    "detail": detail.get("label", ""),
-                })
+                items.append(
+                    {
+                        "kind": "tool_use",
+                        "name": block.name,
+                        "id": block.id,
+                        "input": trunc,
+                        "detail": detail.get("label", ""),
+                    }
+                )
             elif isinstance(block, ToolResultBlock):
                 # surface errors; truncate large success output
                 content = block.content
                 if isinstance(content, str) and len(content) > 2000:
                     content = content[:2000] + "\n… (truncated)"
-                items.append({
-                    "kind": "tool_result",
-                    "tool_use_id": block.tool_use_id,
-                    "is_error": block.is_error,
-                    "content": content,
-                })
+                items.append(
+                    {
+                        "kind": "tool_result",
+                        "tool_use_id": block.tool_use_id,
+                        "is_error": block.is_error,
+                        "content": content,
+                    }
+                )
             elif isinstance(block, ThinkingBlock):
                 items.append({"kind": "thinking"})
         return {"type": "assistant", "items": items}
     if isinstance(message, UserMessage):
         # Tool results coming back from the environment — emit as activity
         items = []
-        for block in (message.content if isinstance(message.content, list) else []):
+        for block in message.content if isinstance(message.content, list) else []:
             if isinstance(block, ToolResultBlock):
                 content = block.content
                 if isinstance(content, str) and len(content) > 2000:
                     content = content[:2000] + "\n… (truncated)"
-                items.append({
-                    "kind": "tool_result",
-                    "tool_use_id": block.tool_use_id,
-                    "is_error": block.is_error,
-                    "content": content,
-                })
+                items.append(
+                    {
+                        "kind": "tool_result",
+                        "tool_use_id": block.tool_use_id,
+                        "is_error": block.is_error,
+                        "content": content,
+                    }
+                )
         if items:
             return {"type": "assistant", "items": items}
         return {"type": "other", "repr": "UserMessage"}
@@ -821,8 +849,7 @@ async def _maybe_await(value: Any) -> Any:
 def _text_result(payload: dict[str, Any]) -> dict[str, Any]:
     """An MCP tool result carrying a JSON payload. Marks is_error when the
     payload reports an error, so the agent treats a failure as a failure."""
-    return {"content": [{"type": "text", "text": json.dumps(payload)}],
-            "is_error": "error" in payload}
+    return {"content": [{"type": "text", "text": json.dumps(payload)}], "is_error": "error" in payload}
 
 
 @dataclass
@@ -844,11 +871,11 @@ class AgentRunner:
     # it so renders are tracked/superseded instead of run via background Bash (which
     # broke turn attribution). None in tests/no-auth -> the render tool errors cleanly.
     render_store: Optional[Any] = None
-    render_timeout_s: int = 1800            # 30 min cap on a single in-turn render await
-    render_poll_interval_s: float = 0.5     # how often the render tool polls job status
+    render_timeout_s: int = 1800  # 30 min cap on a single in-turn render await
+    render_poll_interval_s: float = 0.5  # how often the render tool polls job status
     # Drain of stray/unsolicited turns before each user turn (the off-by-one safety net).
-    drain_idle_timeout_s: float = 0.15      # how long to wait for a buffered msg when no turn is open
-    drain_result_timeout_s: float = 5.0     # once a stray turn is mid-stream, how long to wait for its result
+    drain_idle_timeout_s: float = 0.15  # how long to wait for a buffered msg when no turn is open
+    drain_result_timeout_s: float = 5.0  # once a stray turn is mid-stream, how long to wait for its result
     # WHERE the agent's project artifacts/checkpoints live. Injected from app.create_app so the
     # agent and the read layer agree; defaults to <repo_root>/projects when omitted (dev + tests).
     # In the packaged app this is the writable App-Support projects dir, NOT inside the bundle.
@@ -860,14 +887,18 @@ class AgentRunner:
     _confirm_seq: int = field(default=0, init=False)
     _answers: dict[str, asyncio.Future] = field(default_factory=dict, init=False)  # question_id -> answer future
     _question_seq: int = field(default=0, init=False)
-    _key_requests: dict[str, asyncio.Future] = field(default_factory=dict, init=False)  # key_request_id -> provided(bool) future
+    _key_requests: dict[str, asyncio.Future] = field(
+        default_factory=dict, init=False
+    )  # key_request_id -> provided(bool) future
     _key_seq: int = field(default=0, init=False)
-    _cap_requests: dict[str, asyncio.Future] = field(default_factory=dict, init=False)  # cap_request_id -> installed(bool) future
+    _cap_requests: dict[str, asyncio.Future] = field(
+        default_factory=dict, init=False
+    )  # cap_request_id -> installed(bool) future
     _cap_seq: int = field(default=0, init=False)
-    _session_ids: dict[str, str] = field(default_factory=dict, init=False)   # last session_id per project
+    _session_ids: dict[str, str] = field(default_factory=dict, init=False)  # last session_id per project
     _resume_next: dict[str, bool] = field(default_factory=dict, init=False)  # rebuild-with-resume after error
-    _fresh_client: dict[str, bool] = field(default_factory=dict, init=False) # client just (re)created this turn
-    _models: dict[str, str] = field(default_factory=dict, init=False)        # UI-selected model per project
+    _fresh_client: dict[str, bool] = field(default_factory=dict, init=False)  # client just (re)created this turn
+    _models: dict[str, str] = field(default_factory=dict, init=False)  # UI-selected model per project
 
     def __post_init__(self) -> None:
         self.repo_root = Path(self.repo_root)
@@ -894,8 +925,11 @@ class AgentRunner:
                 "type": "object",
                 "properties": {
                     "question": {"type": "string", "description": "The question to ask."},
-                    "options": {"type": "array", "items": {"type": "string"},
-                                "description": "Answer choices to offer."},
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Answer choices to offer.",
+                    },
                     "header": {"type": "string", "description": "Short label/topic for the question."},
                 },
                 "required": ["question", "options"],
@@ -927,17 +961,28 @@ class AgentRunner:
             {
                 "type": "object",
                 "properties": {
-                    "edit_decisions": {"type": "object",
-                        "description": "Timeline to render (render_runtime + renderer_family locked). Omit to render the saved artifact."},
-                    "asset_manifest": {"type": "object",
-                        "description": "asset_manifest for asset_id->path resolution."},
-                    "output_path": {"type": "string",
-                        "description": "Where to write the mp4 (project-relative, under renders/). Optional."},
+                    "edit_decisions": {
+                        "type": "object",
+                        "description": "Timeline to render (render_runtime + renderer_family locked). Omit to render the saved artifact.",
+                    },
+                    "asset_manifest": {
+                        "type": "object",
+                        "description": "asset_manifest for asset_id->path resolution.",
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Where to write the mp4 (project-relative, under renders/). Optional.",
+                    },
                     "proxies_dir": {"type": "string", "description": "Proxy cache dir. Optional."},
-                    "hdr_policy": {"type": "string", "enum": ["auto", "preserve", "tonemap", "sdr"],
-                        "description": "HDR handling. Optional (default auto)."},
-                    "proposal_packet": {"type": "object",
-                        "description": "proposal_packet artifact for runtime-swap detection. Optional but recommended."},
+                    "hdr_policy": {
+                        "type": "string",
+                        "enum": ["auto", "preserve", "tonemap", "sdr"],
+                        "description": "HDR handling. Optional (default auto).",
+                    },
+                    "proposal_packet": {
+                        "type": "object",
+                        "description": "proposal_packet artifact for runtime-swap detection. Optional but recommended.",
+                    },
                 },
                 "required": [],
             },
@@ -964,14 +1009,20 @@ class AgentRunner:
             {
                 "type": "object",
                 "properties": {
-                    "kind": {"type": "string",
+                    "kind": {
+                        "type": "string",
                         "enum": ["image", "video", "audio", "music", "render", "final_render"],
-                        "description": "What the file is. Determines the destination folder."},
-                    "src": {"type": "string",
+                        "description": "What the file is. Determines the destination folder.",
+                    },
+                    "src": {
+                        "type": "string",
                         "description": "Path to the file you produced (absolute, or relative to "
-                                       "the repo root). Typically a scratch/temp path a generator wrote."},
-                    "name": {"type": "string",
-                        "description": "Optional final filename. Defaults to the source basename."},
+                        "the repo root). Typically a scratch/temp path a generator wrote.",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Optional final filename. Defaults to the source basename.",
+                    },
                 },
                 "required": ["kind", "src"],
             },
@@ -999,13 +1050,19 @@ class AgentRunner:
             {
                 "type": "object",
                 "properties": {
-                    "env_var": {"type": "string",
+                    "env_var": {
+                        "type": "string",
                         "description": "The exact env-var name the tool needs, e.g. GOOGLE_API_KEY, "
-                                       "REPLICATE_API_TOKEN, ELEVENLABS_API_KEY, FAL_KEY."},
-                    "provider": {"type": "string",
-                        "description": "Human name of the service the key is for, e.g. 'Google (Gemini / Veo)'. Optional."},
-                    "reason": {"type": "string",
-                        "description": "Short reason you need it, e.g. 'to generate the video with Veo'. Optional."},
+                        "REPLICATE_API_TOKEN, ELEVENLABS_API_KEY, FAL_KEY.",
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Human name of the service the key is for, e.g. 'Google (Gemini / Veo)'. Optional.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Short reason you need it, e.g. 'to generate the video with Veo'. Optional.",
+                    },
                 },
                 "required": ["env_var"],
             },
@@ -1039,11 +1096,15 @@ class AgentRunner:
             {
                 "type": "object",
                 "properties": {
-                    "pack": {"type": "string",
+                    "pack": {
+                        "type": "string",
                         "enum": ["transcription", "vision", "bg-removal", "beat-sync", "tts"],
-                        "description": "Which capability pack the failing tool needs."},
-                    "reason": {"type": "string",
-                        "description": "Short reason you need it, e.g. 'to transcribe the clip for captions'. Optional."},
+                        "description": "Which capability pack the failing tool needs.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Short reason you need it, e.g. 'to transcribe the clip for captions'. Optional.",
+                    },
                 },
                 "required": ["pack"],
             },
@@ -1069,17 +1130,21 @@ class AgentRunner:
             "Run a heavy media operation (silence removal, speed change, reframe, …) IN-PROCESS. "
             "Runs the named tool, BLOCKS until it finishes, and returns {success, output_path, "
             "data, error} so you continue in THIS SAME TURN. Use this for any tools.video / "
-            "tools.audio re-encode instead of `python -c \"...execute(...)\"` in Bash (a "
+            'tools.audio re-encode instead of `python -c "...execute(...)"` in Bash (a '
             "background re-encode ends your turn and breaks attribution). Quick read-only calls "
             "(ffprobe, update_stage.py, registry introspection) still run via Bash. After it "
             "produces a file, route that file through `store_asset` as usual.",
             {
                 "type": "object",
                 "properties": {
-                    "tool": {"type": "string",
-                        "description": "The registry tool name to run, e.g. 'silence_cutter', 'motion_ops'."},
-                    "input": {"type": "object",
-                        "description": "The tool's own input dict (same schema you'd pass to its execute())."},
+                    "tool": {
+                        "type": "string",
+                        "description": "The registry tool name to run, e.g. 'silence_cutter', 'motion_ops'.",
+                    },
+                    "input": {
+                        "type": "object",
+                        "description": "The tool's own input dict (same schema you'd pass to its execute()).",
+                    },
                 },
                 "required": ["tool", "input"],
             },
@@ -1092,8 +1157,8 @@ class AgentRunner:
             )
 
         mc_server = create_sdk_mcp_server(
-            "mc", "1.0.0", [ask_user, render, store_asset, request_api_key,
-                            request_capability, run_media_op])
+            "mc", "1.0.0", [ask_user, render, store_asset, request_api_key, request_capability, run_media_op]
+        )
 
         # If a prior session for this project died, resume it so the agent
         # comes back with its full conversation context (on a fresh budget).
@@ -1139,6 +1204,7 @@ class AgentRunner:
         'stepper stuck on pending' bug — the agent wrote to a different project)."""
         try:
             from lib.project import get_project_pipeline_type, read_project_manifest
+
             pt = get_project_pipeline_type(self.projects_dir, project_id)
             _m = read_project_manifest(self.projects_dir, project_id) or {}
             style = (_m.get("style") or "").strip() or None
@@ -1150,6 +1216,7 @@ class AgentRunner:
         if not pt:
             from lib import app_paths
             from lib.pipeline_loader import PACKAGED_PIPELINES
+
             if app_paths.is_packaged() and PACKAGED_PIPELINES:
                 pt = PACKAGED_PIPELINES[0]
         if pt:
@@ -1236,13 +1303,17 @@ class AgentRunner:
         confirm_id = f"{project_id}:{self._confirm_seq}"
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self._pending[confirm_id] = fut
-        await _maybe_await(emit({
-            "type": "confirm_request",
-            "confirm_id": confirm_id,
-            "tool": tool_name,
-            "reason": reason,
-            "input": _truncate_input(tool_input),
-        }))
+        await _maybe_await(
+            emit(
+                {
+                    "type": "confirm_request",
+                    "confirm_id": confirm_id,
+                    "tool": tool_name,
+                    "reason": reason,
+                    "input": _truncate_input(tool_input),
+                }
+            )
+        )
         try:
             return bool(await asyncio.wait_for(fut, timeout=self.confirm_timeout_s))
         except asyncio.TimeoutError:
@@ -1269,13 +1340,17 @@ class AgentRunner:
         question_id = f"{project_id}:q{self._question_seq}"
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self._answers[question_id] = fut
-        await _maybe_await(emit({
-            "type": "question",
-            "question_id": question_id,
-            "header": header,
-            "question": question,
-            "options": list(options),
-        }))
+        await _maybe_await(
+            emit(
+                {
+                    "type": "question",
+                    "question_id": question_id,
+                    "header": header,
+                    "question": question,
+                    "options": list(options),
+                }
+            )
+        )
         try:
             return str(await asyncio.wait_for(fut, timeout=self.answer_timeout_s))
         except asyncio.TimeoutError:
@@ -1300,10 +1375,12 @@ class AgentRunner:
             return _text_result({"error": "request_api_key needs a non-empty env_var name."})
         emit = self._emit.get(project_id)
         if emit is None:
-            return _text_result({"provided": False,
-                                 "detail": "No user is available to provide a key right now; skip this tool."})
+            return _text_result(
+                {"provided": False, "detail": "No user is available to provide a key right now; skip this tool."}
+            )
         try:
             from server import env_config
+
             meta = env_config.describe_var(env_var)
         except Exception:
             meta = {"key": env_var, "label": env_var, "description": ""}
@@ -1311,28 +1388,43 @@ class AgentRunner:
         key_request_id = f"{project_id}:k{self._key_seq}"
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self._key_requests[key_request_id] = fut
-        await _maybe_await(emit({
-            "type": "api_key_request",
-            "key_request_id": key_request_id,
-            "env_var": env_var,
-            "provider": provider or meta.get("label") or env_var,
-            "label": meta.get("label") or env_var,
-            "description": meta.get("description") or "",
-            "reason": reason,
-        }))
+        await _maybe_await(
+            emit(
+                {
+                    "type": "api_key_request",
+                    "key_request_id": key_request_id,
+                    "env_var": env_var,
+                    "provider": provider or meta.get("label") or env_var,
+                    "label": meta.get("label") or env_var,
+                    "description": meta.get("description") or "",
+                    "reason": reason,
+                }
+            )
+        )
         try:
             provided = bool(await asyncio.wait_for(fut, timeout=self.answer_timeout_s))
         except asyncio.TimeoutError:
-            return _text_result({"provided": False,
-                                 "detail": f"No response (timed out) for {env_var}; proceed without it."})
+            return _text_result(
+                {"provided": False, "detail": f"No response (timed out) for {env_var}; proceed without it."}
+            )
         finally:
             self._key_requests.pop(key_request_id, None)
         if provided:
-            return _text_result({"provided": True, "env_var": env_var,
-                                 "detail": f"The user saved {env_var}. It is now available — RETRY the tool that needed it."})
-        return _text_result({"provided": False, "env_var": env_var,
-                             "detail": f"The user declined to provide {env_var}. Do NOT retry that tool; "
-                                       f"use an alternative or continue without it and tell the user what you skipped."})
+            return _text_result(
+                {
+                    "provided": True,
+                    "env_var": env_var,
+                    "detail": f"The user saved {env_var}. It is now available — RETRY the tool that needed it.",
+                }
+            )
+        return _text_result(
+            {
+                "provided": False,
+                "env_var": env_var,
+                "detail": f"The user declined to provide {env_var}. Do NOT retry that tool; "
+                f"use an alternative or continue without it and tell the user what you skipped.",
+            }
+        )
 
     def resolve_key_request(self, key_request_id: str, provided: bool) -> bool:
         """Resolve a pending request_api_key prompt (called by the /provide-key endpoint,
@@ -1349,50 +1441,67 @@ class AgentRunner:
         Returns an MCP text result carrying {installed: bool}."""
         try:
             from lib import provision
+
             packs = provision.PACKS
         except Exception:
             packs = {}
         if pack not in packs:
-            return _text_result({"error": f"unknown capability pack {pack!r}; "
-                                          f"known: {sorted(packs)}"})
+            return _text_result({"error": f"unknown capability pack {pack!r}; known: {sorted(packs)}"})
         # Already installed? Then there's nothing to ask — tell the agent to just retry.
         try:
             if provision.pack_installed(pack):
-                return _text_result({"installed": True, "pack": pack,
-                                     "detail": f"'{pack}' is already installed — RETRY the tool."})
+                return _text_result(
+                    {"installed": True, "pack": pack, "detail": f"'{pack}' is already installed — RETRY the tool."}
+                )
         except Exception:
             pass
         emit = self._emit.get(project_id)
         if emit is None:
-            return _text_result({"installed": False,
-                                 "detail": "No user is available to approve an install right now; skip this tool."})
+            return _text_result(
+                {"installed": False, "detail": "No user is available to approve an install right now; skip this tool."}
+            )
         meta = packs.get(pack, {})
         self._cap_seq += 1
         cap_request_id = f"{project_id}:c{self._cap_seq}"
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self._cap_requests[cap_request_id] = fut
-        await _maybe_await(emit({
-            "type": "capability_request",
-            "cap_request_id": cap_request_id,
-            "pack": pack,
-            "label": meta.get("label") or pack,
-            "size_mb": meta.get("size_mb"),
-            "reason": reason,
-        }))
+        await _maybe_await(
+            emit(
+                {
+                    "type": "capability_request",
+                    "cap_request_id": cap_request_id,
+                    "pack": pack,
+                    "label": meta.get("label") or pack,
+                    "size_mb": meta.get("size_mb"),
+                    "reason": reason,
+                }
+            )
+        )
         try:
             # Installs are large (up to ~2.6 GB) — allow far longer than the question/key timeout.
             installed = bool(await asyncio.wait_for(fut, timeout=max(self.answer_timeout_s, 3600)))
         except asyncio.TimeoutError:
-            return _text_result({"installed": False,
-                                 "detail": f"No response (timed out) for '{pack}'; proceed without it."})
+            return _text_result(
+                {"installed": False, "detail": f"No response (timed out) for '{pack}'; proceed without it."}
+            )
         finally:
             self._cap_requests.pop(cap_request_id, None)
         if installed:
-            return _text_result({"installed": True, "pack": pack,
-                                 "detail": f"'{pack}' is now installed — RETRY the tool that needed it."})
-        return _text_result({"installed": False, "pack": pack,
-                             "detail": f"The user declined to install '{pack}'. Do NOT retry that tool; "
-                                       f"use an alternative or continue without it and tell the user what you skipped."})
+            return _text_result(
+                {
+                    "installed": True,
+                    "pack": pack,
+                    "detail": f"'{pack}' is now installed — RETRY the tool that needed it.",
+                }
+            )
+        return _text_result(
+            {
+                "installed": False,
+                "pack": pack,
+                "detail": f"The user declined to install '{pack}'. Do NOT retry that tool; "
+                f"use an alternative or continue without it and tell the user what you skipped.",
+            }
+        )
 
     def resolve_capability_request(self, cap_request_id: str, installed: bool) -> bool:
         """Resolve a pending request_capability prompt (called by the /provide-capability endpoint
@@ -1409,20 +1518,23 @@ class AgentRunner:
         JSON blob carrying success/output_path/warnings/error."""
         payload = {k: v for k, v in fields.items() if v is not None}
         ok = bool(payload.get("success"))
-        summary = (f"Render succeeded: {payload.get('output_path')}" if ok
-                   else f"Render failed: {payload.get('error', 'unknown error')}")
+        summary = (
+            f"Render succeeded: {payload.get('output_path')}"
+            if ok
+            else f"Render failed: {payload.get('error', 'unknown error')}"
+        )
         text = summary + "\n\n" + json.dumps(payload)
         return {"content": [{"type": "text", "text": text}], "is_error": not ok}
 
     def _build_render_inputs(self, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
         """Collect the render inputs the agent supplied; fall back to the saved
         artifact on disk when edit_decisions is omitted (a thin `render` call)."""
-        keys = ("edit_decisions", "asset_manifest", "output_path",
-                "proxies_dir", "hdr_policy", "proposal_packet")
+        keys = ("edit_decisions", "asset_manifest", "output_path", "proxies_dir", "hdr_policy", "proposal_packet")
         inputs = {k: args[k] for k in keys if args.get(k) is not None}
         if "edit_decisions" not in inputs:
             try:
                 from server.editor import read_asset_manifest, read_edit_decisions
+
                 projects_dir = self.projects_dir
                 ed = read_edit_decisions(projects_dir, project_id)
                 if ed is not None:
@@ -1443,14 +1555,13 @@ class AgentRunner:
         which is what eliminates the off-by-one. On Stop the awaiting handler is
         cancelled but the job keeps running; the next turn's resume note surfaces it."""
         if self.render_store is None:
-            return self._render_tool_result(
-                success=False, error="render store unavailable; cannot render in-process")
+            return self._render_tool_result(success=False, error="render store unavailable; cannot render in-process")
 
         inputs = self._build_render_inputs(project_id, args)
         if not inputs.get("edit_decisions"):
             return self._render_tool_result(
-                success=False,
-                error="no edit_decisions supplied and none saved on disk — build/save the timeline first")
+                success=False, error="no edit_decisions supplied and none saved on disk — build/save the timeline first"
+            )
 
         loop = asyncio.get_event_loop()
         job_id = self.render_store.start_with_inputs(project_id, inputs)
@@ -1465,8 +1576,8 @@ class AgentRunner:
                 st = self.render_store.status(job_id)
                 if st is None:  # superseded/dropped by a newer render
                     return self._render_tool_result(
-                        success=False, job_id=job_id,
-                        error=f"render job {job_id} was superseded by a newer render")
+                        success=False, job_id=job_id, error=f"render job {job_id} was superseded by a newer render"
+                    )
                 status = st.get("status")
                 if status != last_status and emit is not None:
                     await _maybe_await(emit({"type": "render_progress", "job_id": job_id, "status": status}))
@@ -1474,20 +1585,30 @@ class AgentRunner:
                 if status == "done":
                     self.render_store.mark_consumed(job_id)  # seen in-turn; don't re-surface next turn
                     return self._render_tool_result(
-                        success=True, job_id=job_id, output_path=st.get("output_path"),
-                        warnings=st.get("warnings"), final_review_status=st.get("final_review_status"))
+                        success=True,
+                        job_id=job_id,
+                        output_path=st.get("output_path"),
+                        warnings=st.get("warnings"),
+                        final_review_status=st.get("final_review_status"),
+                    )
                 if status == "failed":
                     self.render_store.mark_consumed(job_id)
                     return self._render_tool_result(
-                        success=False, job_id=job_id, error=st.get("error") or "render failed")
+                        success=False, job_id=job_id, error=st.get("error") or "render failed"
+                    )
                 if loop.time() > deadline:
                     # Do NOT cancel — the job keeps running on its thread; the next
                     # turn's resume note surfaces the finished output. Leave UNCONSUMED.
                     return self._render_tool_result(
-                        success=False, timed_out=True, job_id=job_id,
-                        error=(f"render still running after {self.render_timeout_s}s (job {job_id}); "
-                               "it continues in the background and its result will be available on "
-                               "your next turn — do not re-render."))
+                        success=False,
+                        timed_out=True,
+                        job_id=job_id,
+                        error=(
+                            f"render still running after {self.render_timeout_s}s (job {job_id}); "
+                            "it continues in the background and its result will be available on "
+                            "your next turn — do not re-render."
+                        ),
+                    )
                 await asyncio.sleep(self.render_poll_interval_s)
         except asyncio.CancelledError:
             # User hit Stop -> the turn is being cancelled. Leave the job running (it's
@@ -1501,13 +1622,15 @@ class AgentRunner:
         payload = {k: v for k, v in fields.items() if v is not None}
         ok = bool(payload.get("success"))
         label = payload.get("tool") or "media op"
-        summary = (f"{label} done: {payload.get('output_path') or 'ok'}" if ok
-                   else f"{label} failed: {payload.get('error', 'unknown error')}")
+        summary = (
+            f"{label} done: {payload.get('output_path') or 'ok'}"
+            if ok
+            else f"{label} failed: {payload.get('error', 'unknown error')}"
+        )
         text = summary + "\n\n" + json.dumps(payload)
         return {"content": [{"type": "text", "text": text}], "is_error": not ok}
 
-    async def _run_media_op(self, project_id: str, tool_name: str,
-                            tool_input: dict[str, Any]) -> dict[str, Any]:
+    async def _run_media_op(self, project_id: str, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
         """Start a tracked media-op job (any registry tool) on the shared RenderJobStore
         and AWAIT it, emitting progress SSE. Returns the MCP result so the agent continues
         in the SAME turn — the in-process, blocking replacement for running a heavy
@@ -1519,7 +1642,8 @@ class AgentRunner:
         # if a third store-job kind ever appears."""
         if self.render_store is None:
             return self._media_op_result(
-                success=False, tool=tool_name, error="job store unavailable; cannot run media op in-process")
+                success=False, tool=tool_name, error="job store unavailable; cannot run media op in-process"
+            )
         if not tool_name:
             return self._media_op_result(success=False, error="tool name is required")
         if not isinstance(tool_input, dict):
@@ -1529,8 +1653,9 @@ class AgentRunner:
         job_id = self.render_store.start_op(project_id, tool_name, tool_input)
         emit = self._emit.get(project_id)
         if emit is not None:
-            await _maybe_await(emit({"type": "media_op_started", "job_id": job_id,
-                                     "project_id": project_id, "tool": tool_name}))
+            await _maybe_await(
+                emit({"type": "media_op_started", "job_id": job_id, "project_id": project_id, "tool": tool_name})
+            )
 
         deadline = loop.time() + self.render_timeout_s
         last_status: Optional[str] = None
@@ -1539,8 +1664,11 @@ class AgentRunner:
                 st = self.render_store.status(job_id)
                 if st is None:  # superseded/dropped by a newer job
                     return self._media_op_result(
-                        success=False, tool=tool_name, job_id=job_id,
-                        error=f"media op {job_id} was superseded by a newer job")
+                        success=False,
+                        tool=tool_name,
+                        job_id=job_id,
+                        error=f"media op {job_id} was superseded by a newer job",
+                    )
                 status = st.get("status")
                 if status != last_status and emit is not None:
                     await _maybe_await(emit({"type": "media_op_progress", "job_id": job_id, "status": status}))
@@ -1548,21 +1676,31 @@ class AgentRunner:
                 if status == "done":
                     self.render_store.mark_consumed(job_id)  # seen in-turn; don't re-surface next turn
                     return self._media_op_result(
-                        success=True, tool=tool_name, job_id=job_id,
-                        output_path=st.get("output_path"), data=st.get("result_data"))
+                        success=True,
+                        tool=tool_name,
+                        job_id=job_id,
+                        output_path=st.get("output_path"),
+                        data=st.get("result_data"),
+                    )
                 if status == "failed":
                     self.render_store.mark_consumed(job_id)
                     return self._media_op_result(
-                        success=False, tool=tool_name, job_id=job_id,
-                        error=st.get("error") or "media op failed")
+                        success=False, tool=tool_name, job_id=job_id, error=st.get("error") or "media op failed"
+                    )
                 if loop.time() > deadline:
                     # Do NOT cancel — the job keeps running on its thread; the next turn's
                     # resume note surfaces the finished output. Leave UNCONSUMED.
                     return self._media_op_result(
-                        success=False, timed_out=True, tool=tool_name, job_id=job_id,
-                        error=(f"media op still running after {self.render_timeout_s}s (job {job_id}); "
-                               "it continues in the background and its result will be available on your "
-                               "next turn — do not re-run it."))
+                        success=False,
+                        timed_out=True,
+                        tool=tool_name,
+                        job_id=job_id,
+                        error=(
+                            f"media op still running after {self.render_timeout_s}s (job {job_id}); "
+                            "it continues in the background and its result will be available on your "
+                            "next turn — do not re-run it."
+                        ),
+                    )
                 await asyncio.sleep(self.render_poll_interval_s)
         except asyncio.CancelledError:
             # User hit Stop -> leave the job running on its thread; next turn surfaces it.
@@ -1604,12 +1742,14 @@ class AgentRunner:
 
         # Hand back a repo-relative path — directly usable in edit_decisions /
         # asset_manifest — plus the project-relative form.
-        return _text_result({
-            "path": f"projects/{project_id}/{res['path']}",
-            "project_relative": res["path"],
-            "kind": res["kind"],
-            "deduped": res["deduped"],
-        })
+        return _text_result(
+            {
+                "path": f"projects/{project_id}/{res['path']}",
+                "project_relative": res["path"],
+                "kind": res["kind"],
+                "deduped": res["deduped"],
+            }
+        )
 
     def _render_resume_note(self, project_id: str) -> Optional[str]:
         """If there's an UNCONSUMED agent job (a render OR a media op) for this project,
@@ -1638,21 +1778,25 @@ class AgentRunner:
         redo = "re-run it" if is_op else "re-render"
         if status == "done":
             self.render_store.mark_consumed(job_id)
-            return (f"[{tag}: {noun} job {job_id} COMPLETED while you were away. "
-                    f"Output: {job.get('output_path')}. Warnings: {job.get('warnings') or 'none'}. "
-                    f"Do NOT {redo} — pick up from QA/verification of this output.]")
+            return (
+                f"[{tag}: {noun} job {job_id} COMPLETED while you were away. "
+                f"Output: {job.get('output_path')}. Warnings: {job.get('warnings') or 'none'}. "
+                f"Do NOT {redo} — pick up from QA/verification of this output.]"
+            )
         if status == "failed":
             self.render_store.mark_consumed(job_id)
-            return (f"[{tag}: {noun} job {job_id} FAILED: {job.get('error')}. "
-                    f"Diagnose the cause and decide whether to {redo}.]")
+            return (
+                f"[{tag}: {noun} job {job_id} FAILED: {job.get('error')}. "
+                f"Diagnose the cause and decide whether to {redo}.]"
+            )
         # queued / running — surface but do NOT consume (so the 'done' note fires later)
-        return (f"[{tag}: {noun} job {job_id} you started is still {status}. "
-                f"Its result will be available shortly; only call the tool again "
-                f"if you need a fresh run.]")
+        return (
+            f"[{tag}: {noun} job {job_id} you started is still {status}. "
+            f"Its result will be available shortly; only call the tool again "
+            f"if you need a fresh run.]"
+        )
 
-    async def _drain_unsolicited(
-        self, project_id: str, client: Any, on_event: Optional[EmitFn]
-    ) -> None:
+    async def _drain_unsolicited(self, project_id: str, client: Any, on_event: Optional[EmitFn]) -> None:
         """Consume any turn(s) the CLI produced BETWEEN user messages — a background
         Bash-task completion or a scheduled wakeup — before we send the next message.
         Without this, the next receive_response() reads that buffered turn first and stops
@@ -1676,10 +1820,14 @@ class AgentRunner:
             summary = "".join(texts).strip()
             texts.clear()
             if summary and on_event is not None:
-                await _maybe_await(on_event({
-                    "type": "background_update",
-                    "text": f"A background task finished between turns:\n\n{summary}",
-                }))
+                await _maybe_await(
+                    on_event(
+                        {
+                            "type": "background_update",
+                            "text": f"A background task finished between turns:\n\n{summary}",
+                        }
+                    )
+                )
 
         try:
             while True:
@@ -1712,9 +1860,7 @@ class AgentRunner:
             # nothing is silently dropped (rare; see the ponytail note above).
             await _flush()
 
-    async def run_turn(
-        self, project_id: str, message: str, on_event: Optional[EmitFn] = None
-    ) -> TurnResult:
+    async def run_turn(self, project_id: str, message: str, on_event: Optional[EmitFn] = None) -> TurnResult:
         """Send a message to the project's session and stream the response."""
         client = await self._get_client(project_id)
         if on_event is not None:
@@ -1764,8 +1910,10 @@ class AgentRunner:
                             # what files/skills/tools the agent touched, after the
                             # turn and across restarts. Defensive: never raises.
                             record_tool_use(
-                                self.projects_dir, project_id,
-                                it.get("name", ""), it.get("detail", "") or "",
+                                self.projects_dir,
+                                project_id,
+                                it.get("name", ""),
+                                it.get("detail", "") or "",
                             )
                 elif evt["type"] == "result":
                     result.is_error = bool(evt.get("is_error"))
@@ -1832,7 +1980,7 @@ class AgentRunner:
                 pass
         if session_id:
             self._session_ids[project_id] = session_id
-            self._resume_next[project_id] = True   # rebuild WITH resume
+            self._resume_next[project_id] = True  # rebuild WITH resume
         else:
             self._session_ids.pop(project_id, None)
             self._resume_next.pop(project_id, None)  # brand-new thread -> fresh session
