@@ -186,9 +186,9 @@ def test_render_supersede(tmp_path, monkeypatch):
     gate.set()
     st2 = _poll(client, pid, j2)
     assert st2["status"] == "done"
-    # j1 was superseded before it could finish — it never flips to done
+    # j1 was superseded before it could publish — terminal, and named as such
     st1 = client.get(f"/api/projects/{pid}/render/{j1}").json()
-    assert st1["status"] in ("running", "queued")
+    assert st1["status"] == "superseded"
 
 
 def test_render_injects_default_renderer_family(tmp_path, monkeypatch):

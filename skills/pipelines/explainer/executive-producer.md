@@ -411,7 +411,7 @@ The EP doesn't replace any director skill — it wraps them. Each director skill
 [EP] Duration: 88.7s ✓ | A/V sync: within tolerance ✓ | Style: consistent ✓
 [EP] Budget: $0.52 / $0.64 approved ✓
 [EP] PIPELINE COMPLETE — 0 revisions, 0 send-backs
-[EP] Output: renders/output.mp4
+[EP] Output: renders/final.mp4
 ```
 
 ## Common Pitfalls

@@ -164,7 +164,7 @@ Call the `video_compose` tool with:
   "edit_decisions": <edit_decisions artifact>,
   "asset_manifest": <asset_manifest artifact>,
   "output_profile": "youtube_landscape",
-  "output_path": "renders/output.mp4",
+  "output_path": "renders/final.mp4",
   "options": {
     "subtitle_burn": true,
     "audio_normalize": true,
@@ -395,7 +395,7 @@ result = Transcriber().execute({
   "version": "1.0",
   "outputs": [
     {
-      "path": "renders/output.mp4",
+      "path": "renders/final.mp4",
       "format": "mp4",
       "codec": "h264",
       "resolution": "1920x1080",

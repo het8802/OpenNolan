@@ -1430,6 +1430,28 @@ class AgentRunner:
                 success=False,
                 error="no edit_decisions supplied and none saved on disk — build/save the timeline first")
 
+        # An INLINE doc is the one the publisher will commit to
+        # artifacts/edit_decisions.json on success, so validate it FIRST and fail the call
+        # rather than render a timeline that can never be persisted — that gap between
+        # "what was rendered" and "what the editor reads" is the desync (OPN-30). Strict:
+        # the artifact schema is already the contract AGENT_GUIDE requires the agent to
+        # write. A doc read from disk was validated by the write path already.
+        if args.get("edit_decisions") is not None:
+            try:
+                from schemas.artifacts import validate_artifact
+                validate_artifact("edit_decisions", inputs["edit_decisions"])
+            except Exception as exc:
+                # jsonschema's str() dumps the whole schema; the agent needs the failing
+                # path and the reason, on one line (the summary line is not JSON-escaped).
+                where = getattr(exc, "json_path", None)
+                why = getattr(exc, "message", None) or str(exc).split("\n")[0]
+                return self._render_tool_result(
+                    success=False,
+                    error=("edit_decisions failed schema validation, nothing was rendered and "
+                           f"nothing was written: {why}"
+                           + (f" (at {where})" if where else "")))
+            inputs["persist_edit_decisions"] = True
+
         loop = asyncio.get_event_loop()
         job_id = self.render_store.start_with_inputs(project_id, inputs)
         emit = self._emit.get(project_id)
@@ -1458,6 +1480,15 @@ class AgentRunner:
                     self.render_store.mark_consumed(job_id)
                     return self._render_tool_result(
                         success=False, job_id=job_id, error=st.get("error") or "render failed")
+                if status == "superseded":
+                    # Terminal, like done/failed — and consumed for the same reason: the
+                    # supersede is being reported HERE, so the next turn's resume note
+                    # must not report it a second time.
+                    self.render_store.mark_consumed(job_id)
+                    return self._render_tool_result(
+                        success=False, job_id=job_id,
+                        error=(f"render job {job_id} was superseded by a newer render "
+                               "(yours never published); nothing was written"))
                 if loop.time() > deadline:
                     # Do NOT cancel — the job keeps running on its thread; the next
                     # turn's resume note surfaces the finished output. Leave UNCONSUMED.
@@ -1527,7 +1558,8 @@ class AgentRunner:
                     self.render_store.mark_consumed(job_id)  # seen in-turn; don't re-surface next turn
                     return self._media_op_result(
                         success=True, tool=tool_name, job_id=job_id,
-                        output_path=st.get("output_path"), data=st.get("result_data"))
+                        output_path=st.get("output_path"), data=st.get("result_data"),
+                        warnings=st.get("warnings"))
                 if status == "failed":
                     self.render_store.mark_consumed(job_id)
                     return self._media_op_result(
@@ -1551,7 +1583,13 @@ class AgentRunner:
         and return the path the agent should reference. Thin wrapper over
         lib.project.place_asset (the single writer into the asset tree). Errors
         (bad kind, missing src) come back as a JSON {"error": ...} the agent can
-        recover from, not an exception that kills the turn."""
+        recover from, not an exception that kills the turn.
+
+        `final_render` REPLACES renders/final.mp4 (place_asset routes that one kind to
+        publish_final_render) instead of parking beside it as final.<hash>.mp4. It supplies
+        neither document — these bytes may be unrelated to anything on disk, so hashing the
+        disk doc would falsely certify them — which UNLINKS the receipt, leaving the result
+        honestly "not current" until a real render publishes one."""
         from lib.project import place_asset
 
         kind = (args.get("kind") or "").strip()
@@ -1575,8 +1613,13 @@ class AgentRunner:
         except OSError:
             move = False
 
+        # to_thread, not a direct call: for `final_render` the publisher blocks on
+        # project_lock for as long as a render holds it, and every other kind hashes the
+        # file — which for a 500 MB video is not something to do on the event loop. Blocking
+        # here would stall the SSE stream and the whole turn with it.
         try:
-            res = place_asset(self.projects_dir, project_id, kind, src, name, move=move)
+            res = await asyncio.to_thread(
+                place_asset, self.projects_dir, project_id, kind, src, name, move=move)
         except (ValueError, FileNotFoundError) as exc:
             return _text_result({"error": str(exc)})
 
@@ -1603,7 +1646,11 @@ class AgentRunner:
         if self.render_store is None:
             return None
         try:
-            job = self.render_store.active_job_for(project_id)
+            # A TERMINAL unconsumed agent job first: a superseded one is no longer the
+            # active job (a newer one displaced it), so active_job_for would return the
+            # displacer — an editor job, say — and this note would silently return None.
+            job = (self.render_store.latest_unconsumed_agent_job(project_id)
+                   or self.render_store.active_job_for(project_id))
         except Exception:
             return None
         if not job or job.get("consumed") or job.get("origin") not in ("agent", "agent_op"):
@@ -1623,6 +1670,11 @@ class AgentRunner:
             self.render_store.mark_consumed(job_id)
             return (f"[{tag}: {noun} job {job_id} FAILED: {job.get('error')}. "
                     f"Diagnose the cause and decide whether to {redo}.]")
+        if status == "superseded":
+            self.render_store.mark_consumed(job_id)
+            return (f"[{tag}: {noun} job {job_id} was SUPERSEDED by a newer one and never "
+                    f"published — nothing of yours was written. Check the current state "
+                    f"before you {redo}.]")
         # queued / running — surface but do NOT consume (so the 'done' note fires later)
         return (f"[{tag}: {noun} job {job_id} you started is still {status}. "
                 f"Its result will be available shortly; only call the tool again "

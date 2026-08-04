@@ -24,13 +24,17 @@ the filesystem alone can't answer:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import os
 import re
 import shutil
+import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, ContextManager, Optional
 
 from lib.atomic_io import atomic_write_json
 
@@ -311,10 +315,19 @@ def place_asset(
     the existing file (``deduped=True``); a name collision with DIFFERENT bytes
     gets a short content-hash suffix so nothing is ever clobbered.
 
+    ``final_render`` is the ONE exception and is delegated to
+    `publish_final_render`: never-clobber is right for source assets and wrong for
+    the single deliverable, where it left the stale previous cut sitting at
+    ``renders/final.mp4`` while a ``final.<hash>.mp4`` held the new one (OPN-30).
+    That kind therefore REPLACES, ignores ``name``, and takes the project lock.
+
     Returns ``{"path", "abs_path", "kind", "deduped"}`` where ``path`` is
     relative to the project dir (e.g. ``assets/images/foo.png``); join it to
     ``projects/<id>/`` for a repo-relative path usable in edit_decisions.
     """
+    if kind == "final_render":
+        return publish_final_render(projects_dir, project_id, src, move=move)
+
     src = Path(src)
     if not src.is_file():
         raise FileNotFoundError(f"source file not found: {src}")
@@ -351,3 +364,259 @@ def place_asset(
     rel = target.relative_to(project_dir(projects_dir, project_id))
     return {"path": str(rel), "abs_path": str(target), "kind": kind,
             "deduped": deduped}
+
+
+# --- publishing the deliverable (OPN-30) ----------------------------------
+#
+# `place_asset` above never clobbers, which is right for source assets and wrong
+# for the ONE assembled deliverable: a re-render left `renders/final.mp4` holding
+# the previous cut while the editor timeline showed the new one. Everything that
+# produces the deliverable now funnels through `publish_final_render`, which
+#
+#   1. forces the name             — one findable file, not final.<hash>.mp4
+#   2. holds a per-project lock    — renders share scratch dirs under renders/
+#   3. writes a RECEIPT last       — the commit marker binding the video to the
+#                                    document that produced it
+#
+# `final_render_status` is the one verifier (the assets listing and the QA gate
+# both call it), so nothing can disagree about whether the deliverable is current.
+# See docs/plans/opn-30-edit-decisions-render-desync/claude/architecture.md.
+
+FINAL_RENDER_NAME = "final.mp4"
+FINAL_RECEIPT_NAME = ".final_receipt.json"
+# The deliverable's PROJECT-RELATIVE path, as the UI and every tool result spell it.
+FINAL_RENDER_REL = f"{KIND_DIRS['final_render']}/{FINAL_RENDER_NAME}"
+
+_project_locks: dict[tuple[str, str], threading.RLock] = {}
+_project_locks_guard = threading.Lock()
+
+
+def project_lock(projects_dir: Path | str, project_id: str) -> threading.RLock:
+    """The per-project render/publish lock. Same project -> same lock object.
+
+    Keyed by the RESOLVED projects_dir as well as the id, so two checkouts that
+    happen to share a project id don't serialize against each other. Creation is
+    guarded so two first-callers can't mint two locks for one project.
+
+    Re-entrant on purpose: a render thread holds this for the whole render and
+    then calls `publish_final_render`, which takes it again.
+    """
+    key = (str(Path(projects_dir).resolve()), project_id)
+    with _project_locks_guard:
+        lock = _project_locks.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _project_locks[key] = lock
+        return lock
+
+
+def canonical_doc_hash(doc: Any) -> str:
+    """The ONE hash of an edit_decisions doc. Three canonicalisations would make
+    `current` meaningless, so publisher, listing and QA gate all call this."""
+    blob = json.dumps(doc, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+class RendersDirEscapes(ValueError):
+    """The project's renders/ dir resolves outside the project (a symlink)."""
+
+
+def renders_dir(projects_dir: Path | str, project_id: str) -> Path:
+    """The project's renders/ dir, RESOLVED, refusing one that leaves the project.
+
+    Every containment check downstream compares resolved paths, so a symlinked renders/
+    would defeat all of them at once: the resolved candidate fails a
+    "is it under renders/" test while the LEXICAL fallback follows the same symlink, and the
+    canonical write lands wherever the link points — outside the project entirely. There is
+    no safe target in that case, so refuse rather than write somewhere unexpected.
+    """
+    proj = project_dir(projects_dir, project_id).resolve()
+    real = (proj / KIND_DIRS["final_render"]).resolve()
+    if real.parent != proj:
+        raise RendersDirEscapes(
+            f"{project_id}: {KIND_DIRS['final_render']}/ resolves to {real}, outside the "
+            "project — refusing to write the deliverable through it"
+        )
+    return real
+
+
+def final_render_path(projects_dir: Path | str, project_id: str) -> Path:
+    return renders_dir(projects_dir, project_id) / FINAL_RENDER_NAME
+
+
+def final_receipt_path(projects_dir: Path | str, project_id: str) -> Path:
+    return renders_dir(projects_dir, project_id) / FINAL_RECEIPT_NAME
+
+
+def _edit_decisions_path(projects_dir: Path | str, project_id: str) -> Path:
+    # Built here rather than imported from server.editor: lib must not depend on server.
+    return project_dir(projects_dir, project_id) / "artifacts" / "edit_decisions.json"
+
+
+def final_render_status(projects_dir: Path | str, project_id: str) -> dict[str, Any]:
+    """Is ``renders/final.mp4`` the video of the live timeline? -> {current, reason}.
+
+    TWO checks, not one:
+
+        current == a receipt exists
+              AND receipt.doc_hash       == canonical_doc_hash(live edit_decisions)
+              AND receipt.video_size     == stat(final.mp4).st_size
+              AND receipt.video_mtime_ns == stat(final.mp4).st_mtime_ns
+
+    The document half alone would call new bytes current during the window between
+    the video replace and the receipt write (the OLD receipt still hashes to the
+    still-old live doc). The identity half also catches an outside writer replacing
+    final.mp4 behind the publisher's back.
+
+    ponytail: size + mtime_ns is a practical identity token, not proof of bytes — a
+    metadata-preserving `cp -p` of same-size content would still read current. That's
+    the right trade while the UI polls this every 4s; add a `video_sha256` to the
+    receipt if a real out-of-band writer ever shows up.
+    """
+    try:
+        video = final_render_path(projects_dir, project_id)
+        receipt_file = final_receipt_path(projects_dir, project_id)
+    except RendersDirEscapes as exc:
+        # Reported, not raised: this is called from the assets listing the UI polls.
+        return {"current": False, "reason": str(exc)}
+    if not video.is_file():
+        return {"current": False, "reason": f"no renders/{FINAL_RENDER_NAME} yet"}
+    if not receipt_file.is_file():
+        return {"current": False,
+                "reason": f"no render receipt — renders/{FINAL_RENDER_NAME} was not "
+                          "published by a render, so nothing ties it to a timeline"}
+    try:
+        receipt = json.loads(receipt_file.read_text())
+        stat = video.stat()
+    except (OSError, ValueError) as exc:
+        return {"current": False, "reason": f"unreadable receipt or render: {exc}"}
+    if (receipt.get("video_size") != stat.st_size
+            or receipt.get("video_mtime_ns") != stat.st_mtime_ns):
+        return {"current": False,
+                "reason": f"renders/{FINAL_RENDER_NAME} was replaced after its receipt "
+                          "was written — re-render to publish it properly"}
+
+    doc_file = _edit_decisions_path(projects_dir, project_id)
+    if not doc_file.is_file():
+        return {"current": False, "reason": "no artifacts/edit_decisions.json to compare against"}
+    try:
+        doc = json.loads(doc_file.read_text())
+    except (OSError, ValueError) as exc:
+        return {"current": False, "reason": f"unreadable edit_decisions.json: {exc}"}
+    if receipt.get("doc_hash") != canonical_doc_hash(doc):
+        return {"current": False,
+                "reason": "the timeline changed since this render — re-render"}
+    return {"current": True,
+            "reason": f"renders/{FINAL_RENDER_NAME} matches the live edit_decisions.json"}
+
+
+def publish_final_render(
+    projects_dir: Path | str,
+    project_id: str,
+    src: Path | str,
+    *,
+    receipt_doc: Optional[dict[str, Any]] = None,
+    persist_doc: Optional[dict[str, Any]] = None,
+    move: bool = False,
+    commit_guard: Optional[Callable[[], ContextManager[bool]]] = None,
+) -> dict[str, Any]:
+    """Publish ``src`` as the project's one deliverable, ``renders/final.mp4``.
+
+    Takes ``project_lock`` (re-entrant, so the render thread that already holds it
+    calls straight through) and delegates to `_publish_final_locked`.
+    """
+    with project_lock(projects_dir, project_id):
+        return _publish_final_locked(
+            projects_dir, project_id, src, receipt_doc=receipt_doc,
+            persist_doc=persist_doc, move=move, commit_guard=commit_guard,
+        )
+
+
+def _publish_final_locked(
+    projects_dir: Path | str,
+    project_id: str,
+    src: Path | str,
+    *,
+    receipt_doc: Optional[dict[str, Any]] = None,
+    persist_doc: Optional[dict[str, Any]] = None,
+    move: bool = False,
+    commit_guard: Optional[Callable[[], ContextManager[bool]]] = None,
+) -> dict[str, Any]:
+    """`publish_final_render` for a caller that ALREADY holds ``project_lock``.
+
+    Order is the design:
+
+      1. stage ``src`` into ``renders/.final.<uuid>.part.mp4`` — ``shutil.move`` when
+         ``move`` (a temp root can be another filesystem, where ``os.replace`` raises
+         EXDEV), else ``copy2``, preserving `place_asset`'s "only temp sources are
+         consumed" contract.
+      2. enter ``commit_guard`` — a render caller re-checks supersede here, holding its
+         own job lock across the check AND the replace so nothing can slip between them.
+      3. inside that guard: UNLINK the old receipt, then ``os.replace`` part ->
+         ``final.mp4`` (atomic, same directory). The unlink comes first so no failure can
+         leave the previous receipt describing the new bytes — `copy2` preserves the
+         source's mtime, so a same-size replacement could otherwise satisfy both halves of
+         `final_render_status` and read as current. It is inside the guard because a
+         REFUSED publish must leave the old video AND its receipt untouched.
+      4. ``persist_doc``, when given -> ``artifacts/edit_decisions.json``.
+      5. the RECEIPT, last, as the commit marker: ``receipt_doc`` given -> write
+         ``{doc_hash, video_size, video_mtime_ns}``; ``receipt_doc`` None -> nothing, so an
+         unreceipted publish (`store_asset`) cannot inherit provenance it has not earned.
+
+    Any interruption between steps 3 and 5 leaves NO receipt, so the result reads STALE
+    rather than falsely current. The honest limit: once step 3 lands, the previous good
+    final.mp4 is gone — what survives is the ability to tell.
+
+    Returns ``{"path", "abs_path", "kind", "deduped", "published"}`` (+ ``"reason"``
+    when ``published`` is False, i.e. the commit guard refused).
+    """
+    src = Path(src)
+    if not src.is_file():
+        raise FileNotFoundError(f"source file not found: {src}")
+
+    renders = renders_dir(projects_dir, project_id)
+    renders.mkdir(parents=True, exist_ok=True)
+    final = renders / FINAL_RENDER_NAME
+    part = renders / f".final.{uuid.uuid4().hex[:8]}.part.mp4"
+    receipt_file = renders / FINAL_RECEIPT_NAME
+    # The public path is the CONSTANT, never derived from the resolved one: relative_to
+    # would raise for a relative projects_dir (and for a symlinked project dir), and an
+    # in-project renders symlink would report its physical name instead of the
+    # renders/final.mp4 every caller and the UI are promised.
+    out = {"path": FINAL_RENDER_REL, "abs_path": str(final), "kind": "final_render",
+           "deduped": False, "published": True}
+
+    # Publishing the deliverable ONTO ITSELF must never move it out of the way: a
+    # commit_guard refusal would then leave the project with no deliverable at all,
+    # because the staging file is cleaned up on the way out.
+    if move and src.resolve() == final.resolve():
+        move = False
+
+    try:
+        if move:
+            shutil.move(str(src), str(part))
+        else:
+            shutil.copy2(str(src), str(part))
+        guard = commit_guard() if commit_guard is not None else contextlib.nullcontext(True)
+        with guard as may_commit:
+            if not may_commit:
+                return {**out, "published": False,
+                        "reason": "superseded by a newer render before publishing"}
+            receipt_file.unlink(missing_ok=True)   # no receipt may outlive the video it describes
+            os.replace(part, final)
+    finally:
+        # Covers the guard refusal, a staging failure, and a crash mid-publish. After a
+        # successful os.replace there is nothing left to remove.
+        part.unlink(missing_ok=True)
+
+    if persist_doc is not None:
+        atomic_write_json(_edit_decisions_path(projects_dir, project_id), persist_doc)
+
+    if receipt_doc is not None:
+        stat = final.stat()
+        atomic_write_json(receipt_file, {
+            "doc_hash": canonical_doc_hash(receipt_doc),
+            "video_size": stat.st_size,
+            "video_mtime_ns": stat.st_mtime_ns,
+        })
+    return out
