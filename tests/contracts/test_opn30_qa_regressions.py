@@ -240,7 +240,7 @@ def test_output_path_cannot_escape_through_a_symlinked_renders_directory(tmp_pat
     status = store.status(job_id)
     assert status["status"] == "failed"
     assert "outside the project" in status["error"]
-    assert not any(outside.iterdir())          # nothing written through the link
+    assert not any(outside.iterdir())  # nothing written through the link
     # The publisher and the read path refuse it too, rather than raising into the UI.
     with pytest.raises(project_mod.RendersDirEscapes):
         publish_final_render(projects, project_id, _mkfile(tmp_path, "v.mp4"), receipt_doc=DOC)
@@ -273,9 +273,7 @@ def test_internal_renders_symlink_does_not_change_the_public_deliverable_path(
     (root / "renders").symlink_to(storage, target_is_directory=True)
 
     try:
-        result = publish_final_render(
-            projects, project_id, _mkfile(tmp_path, "internal.mp4"), receipt_doc=DOC
-        )
+        result = publish_final_render(projects, project_id, _mkfile(tmp_path, "internal.mp4"), receipt_doc=DOC)
     except project_mod.RendersDirEscapes:
         return  # Rejecting every renders symlink is also a safe, canonical policy.
 
@@ -310,9 +308,7 @@ def test_symlinked_project_directory_is_a_supported_layout(tmp_path: Path) -> No
     (outside_project / "artifacts" / "edit_decisions.json").write_text(json.dumps(DOC))
     (projects / "qa").symlink_to(outside_project, target_is_directory=True)
 
-    result = publish_final_render(
-        projects, "qa", _mkfile(tmp_path, "project-link.mp4"), receipt_doc=DOC
-    )
+    result = publish_final_render(projects, "qa", _mkfile(tmp_path, "project-link.mp4"), receipt_doc=DOC)
 
     # The PUBLIC path is the canonical constant, never the physical/resolved one.
     assert result["path"] == "renders/final.mp4"
@@ -346,8 +342,7 @@ def test_symlinked_project_render_job_completes_and_reports_the_canonical_path(
     assert status["status"] == "done", status.get("error")
     assert status["output_path"] == "renders/final.mp4"
     # No .part.mp4 stranded by a late failure — that was the actual defect here.
-    assert sorted(p.name for p in (outside_project / "renders").iterdir()) == \
-        [FINAL_RECEIPT_NAME, "final.mp4"]
+    assert sorted(p.name for p in (outside_project / "renders").iterdir()) == [FINAL_RECEIPT_NAME, "final.mp4"]
 
 
 # AUTHOR-ADJUSTED (round 3). The TOCTOU is REAL and is NOT fixed; xfail rather than deleted,
@@ -359,8 +354,7 @@ def test_symlinked_project_render_job_completes_and_reports_the_canonical_path(
 # exclusive write access. Closing it properly means openat/O_NOFOLLOW directory handles
 # threaded through shutil.copy2, os.replace AND atomic_write_json — a filesystem-hardening
 # change with its own risk surface, which belongs in its own ticket, not in a desync fix.
-@pytest.mark.xfail(reason="accepted TOCTOU: needs O_NOFOLLOW dir handles; see annotation",
-                   strict=True)
+@pytest.mark.xfail(reason="accepted TOCTOU: needs O_NOFOLLOW dir handles; see annotation", strict=True)
 def test_renders_directory_swap_between_check_and_copy_cannot_escape(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -379,9 +373,7 @@ def test_renders_directory_swap_between_check_and_copy_cannot_escape(
 
     monkeypatch.setattr(project_mod.shutil, "copy2", swap_then_copy)
     with contextlib.suppress(project_mod.RendersDirEscapes):
-        publish_final_render(
-            projects, project_id, _mkfile(tmp_path, "race.mp4"), receipt_doc=DOC
-        )
+        publish_final_render(projects, project_id, _mkfile(tmp_path, "race.mp4"), receipt_doc=DOC)
 
     assert not any(outside.iterdir())
 
@@ -394,9 +386,7 @@ def test_windows_style_paths_fall_back_on_posix(tmp_path: Path, raw: str) -> Non
     projects, project_id, root = _project(tmp_path)
     store = RenderJobStore(projects)
 
-    assert store._normalize_output_path(project_id, raw, "final.mp4") == (
-        root.resolve() / "renders" / "final.mp4"
-    )
+    assert store._normalize_output_path(project_id, raw, "final.mp4") == (root.resolve() / "renders" / "final.mp4")
 
 
 def _mkfile(tmp_path: Path, name: str) -> Path:
@@ -424,15 +414,17 @@ def _overlay(box: dict) -> dict:
 # deep in the filtergraph. No repo playbook or skill passes either shape.
 def test_renderer_emits_one_alpha_suffix_and_refuses_a_second() -> None:
     error, drawtext, _warnings = VideoCompose()._build_drawtext_filter(
-        _overlay({"color": "#CC785C", "opacity": 0.9, "padding": 10}), 0, 1080, 1920)
+        _overlay({"color": "#CC785C", "opacity": 0.9, "padding": 10}), 0, 1080, 1920
+    )
     assert error is None
-    assert "boxcolor=#CC785C@0.9" in drawtext          # exactly ONE alpha, from box.opacity
+    assert "boxcolor=#CC785C@0.9" in drawtext  # exactly ONE alpha, from box.opacity
 
     error, drawtext, _warnings = VideoCompose()._build_drawtext_filter(
-        _overlay({"color": "red@0.3", "opacity": 0.9, "padding": 10}), 0, 1080, 1920)
+        _overlay({"color": "red@0.3", "opacity": 0.9, "padding": 10}), 0, 1080, 1920
+    )
     assert drawtext is None
-    assert "box.color" in error and "@alpha" in error   # named field, not an ffmpeg parse error
-    assert "box.opacity" in error                      # and what to use instead
+    assert "box.color" in error and "@alpha" in error  # named field, not an ffmpeg parse error
+    assert "box.opacity" in error  # and what to use instead
 
 
 @pytest.mark.parametrize("color", ["#CCC", "notacolor", "red@"])
@@ -490,8 +482,8 @@ def test_documented_qa_gate_uses_the_configured_projects_directory(tmp_path: Pat
 
     doc = QA_DIRECTOR.read_text()
     assert "app_paths.projects_dir()" in doc
-    assert "final_render_status('projects'" not in doc     # not the repo-relative guess
-    assert ".venv/bin/python" not in doc                   # AGENT_GUIDE.md:278
+    assert "final_render_status('projects'" not in doc  # not the repo-relative guess
+    assert ".venv/bin/python" not in doc  # AGENT_GUIDE.md:278
 
     result = subprocess.run(
         [

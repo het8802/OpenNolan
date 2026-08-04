@@ -64,9 +64,9 @@ def test_pipeline_detail_and_404(tmp_path):
 def test_list_projects_filters_junk(tmp_path):
     projects = tmp_path / "projects"
     create_project(projects, "Real One", PIPELINE)
-    (projects / "_analysis").mkdir(parents=True)        # scratch dir
-    (projects / ".DS_Store").write_text("noise")        # stray file
-    (projects / "legacy-no-manifest").mkdir()           # pre-manifest
+    (projects / "_analysis").mkdir(parents=True)  # scratch dir
+    (projects / ".DS_Store").write_text("noise")  # stray file
+    (projects / "legacy-no-manifest").mkdir()  # pre-manifest
 
     r = _client(tmp_path).get("/api/projects")
     assert r.status_code == 200
@@ -200,9 +200,9 @@ def test_list_assets_agent_renders_from_hf_renders(tmp_path):
     hf_renders = proj / "hf" / "renders"
     hf_renders.mkdir(parents=True)
     (hf_renders / "anim_intro.mp4").write_bytes(b"clip")
-    (hf_renders / "ov_caption.mov").write_bytes(b"overlay")   # .mov alpha overlay counts too
-    (hf_renders / "notes.txt").write_text("not a video")      # non-video is ignored
-    (hf_renders / ".hidden.mp4").write_bytes(b"dotfile")      # dotfiles ignored
+    (hf_renders / "ov_caption.mov").write_bytes(b"overlay")  # .mov alpha overlay counts too
+    (hf_renders / "notes.txt").write_text("not a video")  # non-video is ignored
+    (hf_renders / ".hidden.mp4").write_bytes(b"dotfile")  # dotfiles ignored
 
     # The editor's final output lives in renders/ — must NOT leak into agent_renders.
     # (create_project already made renders/, so don't re-create it.)
@@ -237,6 +237,7 @@ def test_list_assets_marks_the_current_deliverable(tmp_path):
     import json as _json
 
     from lib.project import publish_final_render
+
     projects = tmp_path / "projects"
     create_project(projects, "Cur Proj", PIPELINE)
     proj = projects / "cur-proj"
@@ -252,13 +253,12 @@ def test_list_assets_marks_the_current_deliverable(tmp_path):
     renders = client.get("/api/projects/cur-proj/assets").json()["renders"]
     assert [r["name"] for r in renders] == ["final.mp4", "overlay_raw.mp4"]  # deliverable first
     assert renders[0]["current"] is True
-    assert renders[1]["current"] is False        # never the deliverable, no receipt
+    assert renders[1]["current"] is False  # never the deliverable, no receipt
     # The receipt itself is a dotfile, so it cannot appear as a deliverable.
     assert all(not r["name"].startswith(".") for r in renders)
 
     # Edit the timeline without re-rendering -> the SAME file is no longer current.
-    (proj / "artifacts" / "edit_decisions.json").write_text(
-        _json.dumps({**doc, "cuts": [{"id": "c1"}]}))
+    (proj / "artifacts" / "edit_decisions.json").write_text(_json.dumps({**doc, "cuts": [{"id": "c1"}]}))
     renders = client.get("/api/projects/cur-proj/assets").json()["renders"]
     assert renders[0]["current"] is False
     assert "timeline changed" in renders[0]["reason"]
@@ -283,8 +283,8 @@ def test_render_cache_bust_token_distinguishes_same_second_replacements(tmp_path
     # dropped its low digits and the token in the URL did not equal the file's mtime.
     stat = final.stat()
     assert second == stat.st_mtime_ns // 1000
-    assert second != int(stat.st_mtime)                  # not whole seconds
-    assert second < 2 ** 53, "token must survive JSON -> JS as an exact integer"
+    assert second != int(stat.st_mtime)  # not whole seconds
+    assert second < 2**53, "token must survive JSON -> JS as an exact integer"
 
 
 def test_get_file_serves_hf_renders_clip(tmp_path):
@@ -295,8 +295,6 @@ def test_get_file_serves_hf_renders_clip(tmp_path):
     clip.parent.mkdir(parents=True)
     clip.write_bytes(b"\x00\x01bytes")
 
-    r = _client(tmp_path).get(
-        "/api/projects/serve-proj/file", params={"path": "hf/renders/anim.mp4"}
-    )
+    r = _client(tmp_path).get("/api/projects/serve-proj/file", params={"path": "hf/renders/anim.mp4"})
     assert r.status_code == 200
     assert r.content == b"\x00\x01bytes"

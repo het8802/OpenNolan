@@ -63,12 +63,9 @@ class RenderJobStore:
         all labelled "Final render")."""
         job_id = uuid.uuid4().hex[:12]
         with self._lock:
-            self._jobs[job_id] = {"job_id": job_id, "project_id": project_id,
-                                  "status": "queued", "origin": "editor"}
+            self._jobs[job_id] = {"job_id": job_id, "project_id": project_id, "status": "queued", "origin": "editor"}
             self._active_by_project[project_id] = job_id  # newest job wins
-        threading.Thread(
-            target=self._run, args=(job_id, project_id), daemon=True
-        ).start()
+        threading.Thread(target=self._run, args=(job_id, project_id), daemon=True).start()
         return job_id
 
     def start_with_inputs(self, project_id: str, inputs: dict[str, Any]) -> str:
@@ -83,12 +80,15 @@ class RenderJobStore:
         finished job on the user's next turn (see AgentRunner._render_resume_note)."""
         job_id = uuid.uuid4().hex[:12]
         with self._lock:
-            self._jobs[job_id] = {"job_id": job_id, "project_id": project_id,
-                                  "status": "queued", "origin": "agent", "consumed": False}
+            self._jobs[job_id] = {
+                "job_id": job_id,
+                "project_id": project_id,
+                "status": "queued",
+                "origin": "agent",
+                "consumed": False,
+            }
             self._active_by_project[project_id] = job_id  # newest job wins
-        threading.Thread(
-            target=self._run_with_inputs, args=(job_id, project_id, dict(inputs)), daemon=True
-        ).start()
+        threading.Thread(target=self._run_with_inputs, args=(job_id, project_id, dict(inputs)), daemon=True).start()
         return job_id
 
     def start_op(self, project_id: str, tool_name: str, tool_input: dict[str, Any]) -> str:
@@ -102,9 +102,14 @@ class RenderJobStore:
         (AgentRunner._render_resume_note)."""
         job_id = uuid.uuid4().hex[:12]
         with self._lock:
-            self._jobs[job_id] = {"job_id": job_id, "project_id": project_id,
-                                  "status": "queued", "origin": "agent_op",
-                                  "tool_name": tool_name, "consumed": False}
+            self._jobs[job_id] = {
+                "job_id": job_id,
+                "project_id": project_id,
+                "status": "queued",
+                "origin": "agent_op",
+                "tool_name": tool_name,
+                "consumed": False,
+            }
             self._active_by_project[project_id] = job_id  # newest job wins
         threading.Thread(
             target=self._run_op, args=(job_id, project_id, tool_name, dict(tool_input)), daemon=True
@@ -133,10 +138,12 @@ class RenderJobStore:
         it); mark_consumed keeps the note one-shot."""
         with self._lock:
             for job in reversed(list(self._jobs.values())):
-                if (job.get("project_id") == project_id
-                        and job.get("origin") in ("agent", "agent_op")
-                        and not job.get("consumed")
-                        and job.get("status") in TERMINAL_STATUSES):
+                if (
+                    job.get("project_id") == project_id
+                    and job.get("origin") in ("agent", "agent_op")
+                    and not job.get("consumed")
+                    and job.get("status") in TERMINAL_STATUSES
+                ):
                     return dict(job)
             return None
 
@@ -151,6 +158,7 @@ class RenderJobStore:
     def _video_compose(self) -> Any:
         if self._tool is None:
             from tools.video.video_compose import VideoCompose
+
             self._tool = VideoCompose()
         return self._tool
 
@@ -192,6 +200,7 @@ class RenderJobStore:
         don't resolve to a file (animated/not-yet-on-disk scenes) are left untouched so the
         proxy path's unresolved-hash branch still applies.
         """
+
         def absolute(ref: str) -> str:
             if not ref:
                 return ref
@@ -204,7 +213,8 @@ class RenderJobStore:
             src = c.get("source")
             new = absolute(src) if src else src
             if new != src:
-                c = dict(c, source=new); changed = True
+                c = dict(c, source=new)
+                changed = True
             cuts.append(c)
 
         overlays = edit_decisions.get("overlays")
@@ -215,7 +225,8 @@ class RenderJobStore:
                 aid = o.get("asset_id")
                 new = absolute(aid) if aid else aid
                 if new != aid:
-                    o = dict(o, asset_id=new); changed = True
+                    o = dict(o, asset_id=new)
+                    changed = True
                 new_overlays.append(o)
 
         # Structured audio stems (music bed / narration segments / sfx) are stored as
@@ -252,7 +263,8 @@ class RenderJobStore:
                     aid = (s or {}).get("asset_id")
                     r = absolute(aid) if aid else aid
                     if aid and r != aid:
-                        s = dict(s, asset_id=r); changed = True
+                        s = dict(s, asset_id=r)
+                        changed = True
                     segs.append(s)
                 a2["narration"] = dict(narr, segments=segs)
             sfx = a2.get("sfx")
@@ -262,7 +274,8 @@ class RenderJobStore:
                     aid = (s or {}).get("asset_id")
                     r = absolute(aid) if aid else aid
                     if aid and r != aid:
-                        s = dict(s, asset_id=r); changed = True
+                        s = dict(s, asset_id=r)
+                        changed = True
                     new_sfx.append(s)
                 a2["sfx"] = new_sfx
             new_audio = a2
@@ -325,20 +338,25 @@ class RenderJobStore:
         try:
             edit_decisions = read_edit_decisions(self._projects_dir, project_id)
             if not edit_decisions:
-                self._set(job_id, project_id, status="failed",
-                          error="no edit_decisions to render — save the timeline first")
+                self._set(
+                    job_id, project_id, status="failed", error="no edit_decisions to render — save the timeline first"
+                )
                 return
             asset_manifest = read_asset_manifest(self._projects_dir, project_id)
             renders = renders_dir(self._projects_dir, project_id)
             renders.mkdir(parents=True, exist_ok=True)
             self._execute_render(
-                job_id, project_id, edit_decisions, asset_manifest,
-                renders / FINAL_RENDER_NAME, renders / "proxies",
-                receipt_doc=edit_decisions, publish=True,
+                job_id,
+                project_id,
+                edit_decisions,
+                asset_manifest,
+                renders / FINAL_RENDER_NAME,
+                renders / "proxies",
+                receipt_doc=edit_decisions,
+                publish=True,
             )
         except Exception as exc:  # never let a render thread die silently
-            self._set(job_id, project_id, status="failed",
-                      error=f"{type(exc).__name__}: {exc}"[:2000])
+            self._set(job_id, project_id, status="failed", error=f"{type(exc).__name__}: {exc}"[:2000])
 
     def _run_with_inputs(self, job_id: str, project_id: str, inputs: dict[str, Any]) -> None:
         """Agent path: render CALLER-supplied inputs (with proposal_packet/hdr_policy).
@@ -357,33 +375,32 @@ class RenderJobStore:
         try:
             edit_decisions = inputs.get("edit_decisions")
             if not edit_decisions:
-                self._set(job_id, project_id, status="failed",
-                          error="edit_decisions required to render")
+                self._set(job_id, project_id, status="failed", error="edit_decisions required to render")
                 return
             asset_manifest = inputs.get("asset_manifest") or {"assets": []}
             renders = renders_dir(self._projects_dir, project_id)
             renders.mkdir(parents=True, exist_ok=True)
-            out_path = self._normalize_output_path(
-                project_id, inputs.get("output_path"), FINAL_RENDER_NAME
-            )
+            out_path = self._normalize_output_path(project_id, inputs.get("output_path"), FINAL_RENDER_NAME)
             publish = out_path == self._final_target(project_id)
             proxies_dir = inputs.get("proxies_dir") or str(renders / "proxies")
             self._execute_render(
-                job_id, project_id, edit_decisions, asset_manifest, out_path, proxies_dir,
+                job_id,
+                project_id,
+                edit_decisions,
+                asset_manifest,
+                out_path,
+                proxies_dir,
                 proposal_packet=inputs.get("proposal_packet"),
                 hdr_policy=inputs.get("hdr_policy"),
                 # The CALLER's doc, not the _resolve_sources copy _execute_render renders.
                 receipt_doc=edit_decisions if publish else None,
-                persist_doc=(edit_decisions if publish
-                             and inputs.get("persist_edit_decisions") else None),
+                persist_doc=(edit_decisions if publish and inputs.get("persist_edit_decisions") else None),
                 publish=publish,
             )
         except Exception as exc:
-            self._set(job_id, project_id, status="failed",
-                      error=f"{type(exc).__name__}: {exc}"[:2000])
+            self._set(job_id, project_id, status="failed", error=f"{type(exc).__name__}: {exc}"[:2000])
 
-    def _run_op(self, job_id: str, project_id: str, tool_name: str,
-                tool_input: dict[str, Any]) -> None:
+    def _run_op(self, job_id: str, project_id: str, tool_name: str, tool_input: dict[str, Any]) -> None:
         """Op path: run a registry tool (silence_cutter, motion_ops, ...) in-process on
         this daemon thread. A Stop/timeout leaves it running and the next turn surfaces
         the result — same survival guarantee as a render job. Records the produced file
@@ -392,25 +409,29 @@ class RenderJobStore:
         self._set(job_id, project_id, status="running")
         try:
             from tools.tool_registry import registry
+
             registry.ensure_discovered()
             tool = registry.get(tool_name)
             if tool is None:
-                self._set(job_id, project_id, status="failed",
-                          error=f"unknown tool {tool_name!r}")
+                self._set(job_id, project_id, status="failed", error=f"unknown tool {tool_name!r}")
                 return
             result = tool.execute(dict(tool_input))
             if getattr(result, "success", False):
                 data = getattr(result, "data", None) or {}
                 out = data.get("output") or data.get("output_path")
-                self._set(job_id, project_id, status="done",
-                          result_data=data, output_path=out,
-                          warnings=self._deliverable_write_warning(project_id, out))
+                self._set(
+                    job_id,
+                    project_id,
+                    status="done",
+                    result_data=data,
+                    output_path=out,
+                    warnings=self._deliverable_write_warning(project_id, out),
+                )
             else:
                 err = getattr(result, "error", None) or "tool failed"
                 self._set(job_id, project_id, status="failed", error=str(err)[:2000])
         except Exception as exc:
-            self._set(job_id, project_id, status="failed",
-                      error=f"{type(exc).__name__}: {exc}"[:2000])
+            self._set(job_id, project_id, status="failed", error=f"{type(exc).__name__}: {exc}"[:2000])
 
     def _deliverable_write_warning(self, project_id: str, out: Any) -> Optional[list[str]]:
         """Warn when a media op wrote straight into the top level of renders/.
@@ -428,16 +449,24 @@ class RenderJobStore:
                 return None
         except OSError:
             return None
-        note = (f"wrote {landed.name} into the project's renders/ folder, which holds the ONE "
-                "deliverable. Only a render publishes renders/final.mp4 (with a receipt); "
-                "anything else there shows in the editor as an earlier/stale render.")
+        note = (
+            f"wrote {landed.name} into the project's renders/ folder, which holds the ONE "
+            "deliverable. Only a render publishes renders/final.mp4 (with a receipt); "
+            "anything else there shows in the editor as an earlier/stale render."
+        )
         return [note]
 
     def _execute_render(
-        self, job_id: str, project_id: str,
-        edit_decisions: dict[str, Any], asset_manifest: dict[str, Any],
-        out_path: Path, proxies_dir: Path | str,
-        *, proposal_packet: Any = None, hdr_policy: Optional[str] = None,
+        self,
+        job_id: str,
+        project_id: str,
+        edit_decisions: dict[str, Any],
+        asset_manifest: dict[str, Any],
+        out_path: Path,
+        proxies_dir: Path | str,
+        *,
+        proposal_packet: Any = None,
+        hdr_policy: Optional[str] = None,
         receipt_doc: Optional[dict[str, Any]] = None,
         persist_doc: Optional[dict[str, Any]] = None,
         publish: bool = False,
@@ -458,16 +487,30 @@ class RenderJobStore:
                     self._mark_superseded_locked(job_id)
                     return
             self._render_locked(
-                job_id, project_id, edit_decisions, asset_manifest, out_path, proxies_dir,
-                proposal_packet=proposal_packet, hdr_policy=hdr_policy,
-                receipt_doc=receipt_doc, persist_doc=persist_doc, publish=publish,
+                job_id,
+                project_id,
+                edit_decisions,
+                asset_manifest,
+                out_path,
+                proxies_dir,
+                proposal_packet=proposal_packet,
+                hdr_policy=hdr_policy,
+                receipt_doc=receipt_doc,
+                persist_doc=persist_doc,
+                publish=publish,
             )
 
     def _render_locked(
-        self, job_id: str, project_id: str,
-        edit_decisions: dict[str, Any], asset_manifest: dict[str, Any],
-        out_path: Path, proxies_dir: Path | str,
-        *, proposal_packet: Any = None, hdr_policy: Optional[str] = None,
+        self,
+        job_id: str,
+        project_id: str,
+        edit_decisions: dict[str, Any],
+        asset_manifest: dict[str, Any],
+        out_path: Path,
+        proxies_dir: Path | str,
+        *,
+        proposal_packet: Any = None,
+        hdr_policy: Optional[str] = None,
         receipt_doc: Optional[dict[str, Any]] = None,
         persist_doc: Optional[dict[str, Any]] = None,
         publish: bool = False,
@@ -516,15 +559,18 @@ class RenderJobStore:
 
         if not (result.success and target.exists()):
             if publish:
-                target.unlink(missing_ok=True)   # never leave a .part behind
-            self._set(job_id, project_id, status="failed",
-                      error=(result.error or "render failed")[:2000])
+                target.unlink(missing_ok=True)  # never leave a .part behind
+            self._set(job_id, project_id, status="failed", error=(result.error or "render failed")[:2000])
             return
 
         if publish:
             published = publish_final_render(
-                self._projects_dir, project_id, target,
-                receipt_doc=receipt_doc, persist_doc=persist_doc, move=True,
+                self._projects_dir,
+                project_id,
+                target,
+                receipt_doc=receipt_doc,
+                persist_doc=persist_doc,
+                move=True,
                 commit_guard=lambda: self._commit_guard(project_id, job_id),
             )
             if not published["published"]:
@@ -542,11 +588,11 @@ class RenderJobStore:
         warnings = list(preview_warnings) + list(data.get("warnings") or [])
         if "n_scenes" in data:
             warnings.append(
-                f"{data.get('n_rendered', 0)} scene(s) re-rendered, "
-                f"{data.get('n_cached', 0)} reused from cache"
+                f"{data.get('n_rendered', 0)} scene(s) re-rendered, {data.get('n_cached', 0)} reused from cache"
             )
         self._set(
-            job_id, project_id,
+            job_id,
+            project_id,
             # A published render already won the commit guard, so its bytes ARE the
             # deliverable: record `done` even if a newer job became active in between,
             # or the job that actually published would report as superseded.
@@ -580,7 +626,7 @@ class RenderJobStore:
 
         Raises RendersDirEscapes when renders/ is a symlink out of the project: the
         fallback would follow that link too, so there is no safe path to return."""
-        renders = renders_dir(self._projects_dir, project_id)   # raises if it escapes
+        renders = renders_dir(self._projects_dir, project_id)  # raises if it escapes
         proj = renders.parent
         fallback = renders / fallback_name
         if not raw:
@@ -590,11 +636,11 @@ class RenderJobStore:
             cand = p
         else:
             parts = p.parts
-            if parts and parts[0] == "projects":          # repo-root-relative
+            if parts and parts[0] == "projects":  # repo-root-relative
                 cand = self._projects_dir / Path(*parts[1:]) if len(parts) > 1 else proj
-            elif parts and parts[0] == project_id:        # projects-dir-relative
+            elif parts and parts[0] == project_id:  # projects-dir-relative
                 cand = self._projects_dir / p
-            else:                                         # project-relative
+            else:  # project-relative
                 cand = proj / p
         try:
             cand = cand.resolve()

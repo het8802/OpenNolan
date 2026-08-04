@@ -84,12 +84,16 @@ def _wait_status(store, jid, status, *, timeout=5):
 
 
 def test_start_with_inputs_happy_path(tmp_path):
-    store = _store(tmp_path, FakeVC(data={
-        "n_scenes": 1, "n_rendered": 1, "n_cached": 0, "final_review_status": "pass"}))
-    jid = store.start_with_inputs("demo", {
-        "edit_decisions": {"renderer_family": "explainer-data", "cuts": []},
-        "asset_manifest": {"assets": []},
-    })
+    store = _store(
+        tmp_path, FakeVC(data={"n_scenes": 1, "n_rendered": 1, "n_cached": 0, "final_review_status": "pass"})
+    )
+    jid = store.start_with_inputs(
+        "demo",
+        {
+            "edit_decisions": {"renderer_family": "explainer-data", "cuts": []},
+            "asset_manifest": {"assets": []},
+        },
+    )
     st = _wait(store, jid)
     assert st["status"] == "done", st
     assert st["output_path"].startswith("renders/"), st["output_path"]
@@ -100,11 +104,14 @@ def test_start_with_inputs_happy_path(tmp_path):
 def test_forwards_proposal_packet_and_hdr_policy_only_when_present(tmp_path):
     vc = FakeVC()
     store = _store(tmp_path, vc)
-    jid = store.start_with_inputs("demo", {
-        "edit_decisions": {"renderer_family": "x", "cuts": []},
-        "proposal_packet": {"production_plan": {"render_runtime": "ffmpeg"}},
-        "hdr_policy": "preserve",
-    })
+    jid = store.start_with_inputs(
+        "demo",
+        {
+            "edit_decisions": {"renderer_family": "x", "cuts": []},
+            "proposal_packet": {"production_plan": {"render_runtime": "ffmpeg"}},
+            "hdr_policy": "preserve",
+        },
+    )
     _wait(store, jid)
     call = vc.calls[0]
     assert call["operation"] == "render_proxies"
@@ -133,9 +140,9 @@ def test_supersede_drops_first_result(tmp_path):
     store = _store(tmp_path, vc)
     ed = {"edit_decisions": {"renderer_family": "x", "cuts": []}}
     j1 = store.start_with_inputs("demo", ed)
-    _wait_status(store, j1, "running")            # j1 is now blocked inside execute()
-    j2 = store.start_with_inputs("demo", ed)      # supersedes j1 (newest wins)
-    gate.set()                                    # release both threads
+    _wait_status(store, j1, "running")  # j1 is now blocked inside execute()
+    j2 = store.start_with_inputs("demo", ed)  # supersedes j1 (newest wins)
+    gate.set()  # release both threads
     st2 = _wait(store, j2)
     assert st2["status"] == "done", st2
     # j1 lands in the TERMINAL "superseded" state rather than sitting at running forever
@@ -163,14 +170,17 @@ def test_normalize_output_path_is_confined_to_the_renders_subtree(tmp_path):
     store = _store(tmp_path)
     proj = (tmp_path / "projects" / "demo").resolve()
     norm = store._normalize_output_path
-    for hostile in ("assets/video/source.mp4", "artifacts/edit_decisions.json",
-                    "project.json", "hf/renders/scene1.mp4"):
+    for hostile in (
+        "assets/video/source.mp4",
+        "artifacts/edit_decisions.json",
+        "project.json",
+        "hf/renders/scene1.mp4",
+    ):
         assert norm("demo", hostile, "final.mp4") == proj / "renders" / "final.mp4", hostile
     # A DESCENDANT of renders/ is not safe either: renders/proxies/ is the content-keyed
     # per-scene cache, so an assembled reel dropped at a proxy's path would be trusted as
     # that scene's clip on the next render.
-    for managed in ("renders/proxies/scene.deadbeef.mp4", "renders/.final_review_frames/f0.mp4",
-                    "renders/sub/x.mp4"):
+    for managed in ("renders/proxies/scene.deadbeef.mp4", "renders/.final_review_frames/f0.mp4", "renders/sub/x.mp4"):
         assert norm("demo", managed, "final.mp4") == proj / "renders" / "final.mp4", managed
 
 
@@ -213,10 +223,9 @@ def test_persist_edit_decisions_commits_the_doc_only_when_asked(tmp_path):
     store = _store(tmp_path)
 
     _wait(store, store.start_with_inputs("demo", {"edit_decisions": ED}))
-    assert not doc_file.exists()          # no flag -> receipt only, disk untouched
+    assert not doc_file.exists()  # no flag -> receipt only, disk untouched
 
-    _wait(store, store.start_with_inputs(
-        "demo", {"edit_decisions": ED, "persist_edit_decisions": True}))
+    _wait(store, store.start_with_inputs("demo", {"edit_decisions": ED, "persist_edit_decisions": True}))
     assert json.loads(doc_file.read_text()) == ED
 
 
@@ -229,8 +238,7 @@ def test_non_final_output_path_writes_directly_with_no_receipt(tmp_path):
     final_bytes = (_renders(tmp_path) / "final.mp4").read_bytes()
     receipt_before = _receipt(tmp_path).read_bytes()
 
-    st = _wait(store, store.start_with_inputs(
-        "demo", {"edit_decisions": ED, "output_path": "renders/overlay_raw.mp4"}))
+    st = _wait(store, store.start_with_inputs("demo", {"edit_decisions": ED, "output_path": "renders/overlay_raw.mp4"}))
 
     assert st["status"] == "done" and st["output_path"] == "renders/overlay_raw.mp4"
     assert (_renders(tmp_path) / "overlay_raw.mp4").is_file()
@@ -244,8 +252,7 @@ def test_hostile_output_path_falls_back_and_leaves_the_target_alone(tmp_path):
     source.parent.mkdir(parents=True)
     source.write_bytes(b"precious-original-footage")
 
-    st = _wait(store, store.start_with_inputs(
-        "demo", {"edit_decisions": ED, "output_path": "assets/video/source.mp4"}))
+    st = _wait(store, store.start_with_inputs("demo", {"edit_decisions": ED, "output_path": "assets/video/source.mp4"}))
 
     assert st["output_path"] == "renders/final.mp4"
     assert source.read_bytes() == b"precious-original-footage"
@@ -261,9 +268,9 @@ def test_failed_render_leaves_the_previous_deliverable_intact(tmp_path):
     st = _wait(store, store.start_with_inputs("demo", {"edit_decisions": ED}))
 
     assert st["status"] == "failed"
-    assert (_renders(tmp_path) / "final.mp4").read_bytes() == good   # byte-for-byte
+    assert (_renders(tmp_path) / "final.mp4").read_bytes() == good  # byte-for-byte
     assert _receipt(tmp_path).read_bytes() == receipt_before
-    assert _parts(tmp_path) == []                                   # no litter
+    assert _parts(tmp_path) == []  # no litter
 
 
 def test_editor_render_publishes_canonically(tmp_path):
@@ -291,9 +298,9 @@ def test_a_superseded_job_never_invokes_the_renderer(tmp_path):
     vc = FakeVC(gate=gate)
     store = _store(tmp_path, vc)
     a = store.start_with_inputs("demo", {"edit_decisions": ED})
-    assert _wait_calls(vc, 1) == 1               # a is INSIDE execute(), holding the lock
+    assert _wait_calls(vc, 1) == 1  # a is INSIDE execute(), holding the lock
     b = store.start_with_inputs("demo", {"edit_decisions": ED})
-    c = store.start_with_inputs("demo", {"edit_decisions": ED})   # supersedes b
+    c = store.start_with_inputs("demo", {"edit_decisions": ED})  # supersedes b
     gate.set()
 
     assert _wait(store, c)["status"] == "done"
@@ -312,8 +319,8 @@ def test_a_job_superseded_mid_render_does_not_publish(tmp_path):
     vc = FakeVC(gate=gate)
     store = _store(tmp_path, vc)
     a = store.start_with_inputs("demo", {"edit_decisions": ED})
-    assert _wait_calls(vc, 1) == 1                                # A is mid-render
-    b = store.start_with_inputs("demo", {"edit_decisions": ED})   # A is now superseded
+    assert _wait_calls(vc, 1) == 1  # A is mid-render
+    b = store.start_with_inputs("demo", {"edit_decisions": ED})  # A is now superseded
     gate.set()
 
     assert _wait(store, b)["status"] == "done"
@@ -328,28 +335,36 @@ def test_latest_unconsumed_agent_job_finds_the_superseded_one(tmp_path):
     """active_job_for() cannot: by definition something newer displaced it. Without this
     the agent is never told, and its in-turn waiter just times out."""
     store = _store(tmp_path)
-    store._jobs["ja"] = {"job_id": "ja", "project_id": "demo", "origin": "agent",
-                         "consumed": False, "status": "superseded"}
-    store._jobs["jb"] = {"job_id": "jb", "project_id": "demo", "origin": "editor",
-                         "status": "done"}
+    store._jobs["ja"] = {
+        "job_id": "ja",
+        "project_id": "demo",
+        "origin": "agent",
+        "consumed": False,
+        "status": "superseded",
+    }
+    store._jobs["jb"] = {"job_id": "jb", "project_id": "demo", "origin": "editor", "status": "done"}
     store._active_by_project["demo"] = "jb"
 
     assert store.active_job_for("demo")["job_id"] == "jb"
     found = store.latest_unconsumed_agent_job("demo")
     assert found["job_id"] == "ja" and found["status"] == "superseded"
     store.mark_consumed("ja")
-    assert store.latest_unconsumed_agent_job("demo") is None      # one-shot
+    assert store.latest_unconsumed_agent_job("demo") is None  # one-shot
 
 
 def test_latest_unconsumed_agent_job_prefers_the_newest_and_skips_running(tmp_path):
     store = _store(tmp_path)
     for jid, status in (("j1", "done"), ("j2", "failed"), ("j3", "running")):
-        store._jobs[jid] = {"job_id": jid, "project_id": "demo", "origin": "agent",
-                            "consumed": False, "status": status}
-    assert store.latest_unconsumed_agent_job("demo")["job_id"] == "j2"   # newest TERMINAL
-    store._jobs["other"] = {"job_id": "other", "project_id": "elsewhere", "origin": "agent",
-                            "consumed": False, "status": "done"}
-    assert store.latest_unconsumed_agent_job("demo")["job_id"] == "j2"   # project-scoped
+        store._jobs[jid] = {"job_id": jid, "project_id": "demo", "origin": "agent", "consumed": False, "status": status}
+    assert store.latest_unconsumed_agent_job("demo")["job_id"] == "j2"  # newest TERMINAL
+    store._jobs["other"] = {
+        "job_id": "other",
+        "project_id": "elsewhere",
+        "origin": "agent",
+        "consumed": False,
+        "status": "done",
+    }
+    assert store.latest_unconsumed_agent_job("demo")["job_id"] == "j2"  # project-scoped
 
 
 def test_two_renders_of_one_project_share_a_stable_proxies_dir(tmp_path):
@@ -376,6 +391,7 @@ def test_active_job_for_and_mark_consumed(tmp_path):
 
 # --- start_op (generalized: run any registry tool on a job thread) --------
 
+
 class FakeOpTool:
     """Stub registry tool: returns success/failure without touching ffmpeg."""
 
@@ -396,14 +412,17 @@ def registry_sandbox():
     """Snapshot/restore the process-wide registry so a test can inject a fake tool and
     mark 'tools' as already-discovered (skips the heavy real import) without bleeding."""
     from tools.tool_registry import registry
+
     tools = dict(registry._tools)
     pkgs = set(registry._discovered_packages)
     registry._discovered_packages.add("tools")  # ensure_discovered() no-ops -> no real import
     try:
         yield registry
     finally:
-        registry._tools.clear(); registry._tools.update(tools)
-        registry._discovered_packages.clear(); registry._discovered_packages.update(pkgs)
+        registry._tools.clear()
+        registry._tools.update(tools)
+        registry._discovered_packages.clear()
+        registry._discovered_packages.update(pkgs)
 
 
 def test_start_op_runs_registry_tool_on_thread(tmp_path, registry_sandbox):

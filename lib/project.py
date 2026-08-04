@@ -54,8 +54,8 @@ KIND_DIRS: dict[str, str] = {
     "video": "assets/video",
     "audio": "assets/audio",
     "music": "assets/music",
-    "render": "hf/renders",      # intermediate per-scene clips (building blocks)
-    "final_render": "renders",   # the one assembled deliverable
+    "render": "hf/renders",  # intermediate per-scene clips (building blocks)
+    "final_render": "renders",  # the one assembled deliverable
 }
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -84,7 +84,7 @@ def sanitize_filename(filename: str) -> str:
     name = Path(filename).name
     if (
         not name
-        or not name.strip()        # whitespace-only
+        or not name.strip()  # whitespace-only
         or name in (".", "..")
         or "/" in name
         or "\\" in name
@@ -130,9 +130,7 @@ def create_project(
     mpath = manifest_path(projects_dir, project_id)
 
     if mpath.exists():
-        raise ProjectExistsError(
-            f"Project {project_id!r} already exists at {pdir}"
-        )
+        raise ProjectExistsError(f"Project {project_id!r} already exists at {pdir}")
 
     (pdir / "artifacts").mkdir(parents=True, exist_ok=True)
     for sub in ASSET_SUBDIRS:
@@ -151,9 +149,7 @@ def create_project(
     return manifest
 
 
-def read_project_manifest(
-    projects_dir: Path | str, project_id: str
-) -> Optional[dict[str, Any]]:
+def read_project_manifest(projects_dir: Path | str, project_id: str) -> Optional[dict[str, Any]]:
     """Return a project's manifest, or None if it isn't a real project."""
     mpath = manifest_path(projects_dir, project_id)
     if not mpath.exists():
@@ -201,9 +197,7 @@ def _infer_legacy_project(projects_dir: Path, project_id: str) -> Optional[dict[
     }
 
 
-def get_project_record(
-    projects_dir: Path | str, project_id: str
-) -> Optional[dict[str, Any]]:
+def get_project_record(projects_dir: Path | str, project_id: str) -> Optional[dict[str, Any]]:
     """The canonical 'is this a real project, and what is it' resolver.
 
     Returns the project.json manifest if present, else a synthesized manifest
@@ -239,9 +233,7 @@ def list_projects(projects_dir: Path | str) -> list[dict[str, Any]]:
     return out
 
 
-def get_project_pipeline_type(
-    projects_dir: Path | str, project_id: str
-) -> Optional[str]:
+def get_project_pipeline_type(projects_dir: Path | str, project_id: str) -> Optional[str]:
     """Resolve a project's pipeline_type.
 
     Prefers the manifest (works for an empty project with no checkpoints).
@@ -279,9 +271,7 @@ def asset_dir(projects_dir: Path | str, project_id: str, kind: str) -> Path:
     try:
         sub = KIND_DIRS[kind]
     except KeyError:
-        raise ValueError(
-            f"unknown asset kind {kind!r}; expected one of {sorted(KIND_DIRS)}"
-        )
+        raise ValueError(f"unknown asset kind {kind!r}; expected one of {sorted(KIND_DIRS)}")
     return project_dir(projects_dir, project_id) / sub
 
 
@@ -362,8 +352,7 @@ def place_asset(
         src.unlink()
 
     rel = target.relative_to(project_dir(projects_dir, project_id))
-    return {"path": str(rel), "abs_path": str(target), "kind": kind,
-            "deduped": deduped}
+    return {"path": str(rel), "abs_path": str(target), "kind": kind, "deduped": deduped}
 
 
 # --- publishing the deliverable (OPN-30) ----------------------------------
@@ -482,19 +471,22 @@ def final_render_status(projects_dir: Path | str, project_id: str) -> dict[str, 
     if not video.is_file():
         return {"current": False, "reason": f"no renders/{FINAL_RENDER_NAME} yet"}
     if not receipt_file.is_file():
-        return {"current": False,
-                "reason": f"no render receipt — renders/{FINAL_RENDER_NAME} was not "
-                          "published by a render, so nothing ties it to a timeline"}
+        return {
+            "current": False,
+            "reason": f"no render receipt — renders/{FINAL_RENDER_NAME} was not "
+            "published by a render, so nothing ties it to a timeline",
+        }
     try:
         receipt = json.loads(receipt_file.read_text())
         stat = video.stat()
     except (OSError, ValueError) as exc:
         return {"current": False, "reason": f"unreadable receipt or render: {exc}"}
-    if (receipt.get("video_size") != stat.st_size
-            or receipt.get("video_mtime_ns") != stat.st_mtime_ns):
-        return {"current": False,
-                "reason": f"renders/{FINAL_RENDER_NAME} was replaced after its receipt "
-                          "was written — re-render to publish it properly"}
+    if receipt.get("video_size") != stat.st_size or receipt.get("video_mtime_ns") != stat.st_mtime_ns:
+        return {
+            "current": False,
+            "reason": f"renders/{FINAL_RENDER_NAME} was replaced after its receipt "
+            "was written — re-render to publish it properly",
+        }
 
     doc_file = _edit_decisions_path(projects_dir, project_id)
     if not doc_file.is_file():
@@ -504,10 +496,8 @@ def final_render_status(projects_dir: Path | str, project_id: str) -> dict[str, 
     except (OSError, ValueError) as exc:
         return {"current": False, "reason": f"unreadable edit_decisions.json: {exc}"}
     if receipt.get("doc_hash") != canonical_doc_hash(doc):
-        return {"current": False,
-                "reason": "the timeline changed since this render — re-render"}
-    return {"current": True,
-            "reason": f"renders/{FINAL_RENDER_NAME} matches the live edit_decisions.json"}
+        return {"current": False, "reason": "the timeline changed since this render — re-render"}
+    return {"current": True, "reason": f"renders/{FINAL_RENDER_NAME} matches the live edit_decisions.json"}
 
 
 def publish_final_render(
@@ -527,8 +517,13 @@ def publish_final_render(
     """
     with project_lock(projects_dir, project_id):
         return _publish_final_locked(
-            projects_dir, project_id, src, receipt_doc=receipt_doc,
-            persist_doc=persist_doc, move=move, commit_guard=commit_guard,
+            projects_dir,
+            project_id,
+            src,
+            receipt_doc=receipt_doc,
+            persist_doc=persist_doc,
+            move=move,
+            commit_guard=commit_guard,
         )
 
 
@@ -583,8 +578,13 @@ def _publish_final_locked(
     # would raise for a relative projects_dir (and for a symlinked project dir), and an
     # in-project renders symlink would report its physical name instead of the
     # renders/final.mp4 every caller and the UI are promised.
-    out = {"path": FINAL_RENDER_REL, "abs_path": str(final), "kind": "final_render",
-           "deduped": False, "published": True}
+    out = {
+        "path": FINAL_RENDER_REL,
+        "abs_path": str(final),
+        "kind": "final_render",
+        "deduped": False,
+        "published": True,
+    }
 
     # Publishing the deliverable ONTO ITSELF must never move it out of the way: a
     # commit_guard refusal would then leave the project with no deliverable at all,
@@ -600,9 +600,8 @@ def _publish_final_locked(
         guard = commit_guard() if commit_guard is not None else contextlib.nullcontext(True)
         with guard as may_commit:
             if not may_commit:
-                return {**out, "published": False,
-                        "reason": "superseded by a newer render before publishing"}
-            receipt_file.unlink(missing_ok=True)   # no receipt may outlive the video it describes
+                return {**out, "published": False, "reason": "superseded by a newer render before publishing"}
+            receipt_file.unlink(missing_ok=True)  # no receipt may outlive the video it describes
             os.replace(part, final)
     finally:
         # Covers the guard refusal, a staging failure, and a crash mid-publish. After a
@@ -614,9 +613,12 @@ def _publish_final_locked(
 
     if receipt_doc is not None:
         stat = final.stat()
-        atomic_write_json(receipt_file, {
-            "doc_hash": canonical_doc_hash(receipt_doc),
-            "video_size": stat.st_size,
-            "video_mtime_ns": stat.st_mtime_ns,
-        })
+        atomic_write_json(
+            receipt_file,
+            {
+                "doc_hash": canonical_doc_hash(receipt_doc),
+                "video_size": stat.st_size,
+                "video_mtime_ns": stat.st_mtime_ns,
+            },
+        )
     return out

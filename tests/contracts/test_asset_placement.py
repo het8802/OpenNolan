@@ -109,7 +109,7 @@ def test_name_collision_different_content_is_not_clobbered(project, tmp_path):
     b = place_asset(projects, pid, "image", _mk(tmp_path, "card.png", b"second"))
 
     assert a["path"] == "assets/images/card.png"
-    assert b["path"] != a["path"]            # got a content-hash suffix
+    assert b["path"] != a["path"]  # got a content-hash suffix
     assert b["path"].startswith("assets/images/card.")
     assert len(list((projects / pid / "assets/images").iterdir())) == 2
 
@@ -208,15 +208,13 @@ def test_publish_replaces_instead_of_hash_suffixing(project, tmp_path):
     new one beside it, so the obvious file was the wrong one."""
     projects, pid = project
     publish_final_render(projects, pid, _mk(tmp_path, "a.mp4", b"first"), receipt_doc=DOC_A)
-    res = publish_final_render(projects, pid, _mk(tmp_path, "b.mp4", b"second-bytes"),
-                               receipt_doc=DOC_A)
+    res = publish_final_render(projects, pid, _mk(tmp_path, "b.mp4", b"second-bytes"), receipt_doc=DOC_A)
 
     assert res["path"] == "renders/final.mp4"
     assert res["published"] is True
     assert (_renders(projects, pid) / "final.mp4").read_bytes() == b"second-bytes"
     # Exactly the deliverable and its receipt — no final.<hash>.mp4 sibling, no .part left.
-    assert sorted(p.name for p in _renders(projects, pid).iterdir()) == \
-        [FINAL_RECEIPT_NAME, "final.mp4"]
+    assert sorted(p.name for p in _renders(projects, pid).iterdir()) == [FINAL_RECEIPT_NAME, "final.mp4"]
 
 
 def test_publish_copies_non_temp_source_but_moves_when_asked(project, tmp_path):
@@ -260,10 +258,9 @@ def test_receipt_doc_without_persist_doc_leaves_the_live_doc_alone(project, tmp_
     doc_file = _write_doc(projects, pid, DOC_B)
     before = doc_file.read_bytes()
 
-    publish_final_render(projects, pid, _mk(tmp_path, "v.mp4", b"vid"),
-                         receipt_doc=DOC_A, persist_doc=None)
+    publish_final_render(projects, pid, _mk(tmp_path, "v.mp4", b"vid"), receipt_doc=DOC_A, persist_doc=None)
 
-    assert doc_file.read_bytes() == before          # byte-identical: B survived
+    assert doc_file.read_bytes() == before  # byte-identical: B survived
     receipt = json.loads((_renders(projects, pid) / FINAL_RECEIPT_NAME).read_text())
     assert receipt["doc_hash"] == canonical_doc_hash(DOC_A)
     # A ≠ B, so the render is honestly reported as stale rather than falsely current.
@@ -273,8 +270,7 @@ def test_receipt_doc_without_persist_doc_leaves_the_live_doc_alone(project, tmp_
 def test_persist_doc_commits_the_doc_with_the_video(project, tmp_path):
     projects, pid = project
     _write_doc(projects, pid, DOC_A)
-    publish_final_render(projects, pid, _mk(tmp_path, "v.mp4", b"vid"),
-                         receipt_doc=DOC_B, persist_doc=DOC_B)
+    publish_final_render(projects, pid, _mk(tmp_path, "v.mp4", b"vid"), receipt_doc=DOC_B, persist_doc=DOC_B)
 
     on_disk = json.loads((projects / pid / "artifacts" / "edit_decisions.json").read_text())
     assert on_disk == DOC_B
@@ -288,8 +284,7 @@ def test_publish_without_receipt_doc_unlinks_the_receipt(project, tmp_path):
     receipt is removed."""
     projects, pid = project
     _write_doc(projects, pid, DOC_A)
-    publish_final_render(projects, pid, _mk(tmp_path, "a.mp4", b"1234"),
-                         receipt_doc=DOC_A, persist_doc=None)
+    publish_final_render(projects, pid, _mk(tmp_path, "a.mp4", b"1234"), receipt_doc=DOC_A, persist_doc=None)
     assert final_render_status(projects, pid)["current"] is True
     published = _renders(projects, pid) / "final.mp4"
     old = published.stat()
@@ -300,7 +295,7 @@ def test_publish_without_receipt_doc_unlinks_the_receipt(project, tmp_path):
     place_asset(projects, pid, "final_render", unrelated)
 
     assert published.read_bytes() == b"abcd"
-    assert published.stat().st_mtime_ns == old.st_mtime_ns   # identity check alone is fooled
+    assert published.stat().st_mtime_ns == old.st_mtime_ns  # identity check alone is fooled
     assert not (_renders(projects, pid) / FINAL_RECEIPT_NAME).exists()
     status = final_render_status(projects, pid)
     assert status["current"] is False and "receipt" in status["reason"]
@@ -311,8 +306,7 @@ def test_publisher_is_reentrant_for_the_render_thread(project, tmp_path):
     would self-deadlock right there."""
     projects, pid = project
     with project_lock(projects, pid):
-        res = publish_final_render(projects, pid, _mk(tmp_path, "v.mp4", b"vid"),
-                                   receipt_doc=DOC_A)
+        res = publish_final_render(projects, pid, _mk(tmp_path, "v.mp4", b"vid"), receipt_doc=DOC_A)
     assert res["published"] is True
 
 
@@ -324,15 +318,18 @@ def test_commit_guard_refusal_publishes_nothing(project, tmp_path):
     import contextlib
 
     res = publish_final_render(
-        projects, pid, _mk(tmp_path, "b.mp4", b"second"), receipt_doc=DOC_B,
-        persist_doc=DOC_B, commit_guard=lambda: contextlib.nullcontext(False),
+        projects,
+        pid,
+        _mk(tmp_path, "b.mp4", b"second"),
+        receipt_doc=DOC_B,
+        persist_doc=DOC_B,
+        commit_guard=lambda: contextlib.nullcontext(False),
     )
     assert res["published"] is False and "superseded" in res["reason"]
     assert (_renders(projects, pid) / "final.mp4").read_bytes() == b"first"
     receipt = json.loads((_renders(projects, pid) / FINAL_RECEIPT_NAME).read_text())
     assert receipt["doc_hash"] == canonical_doc_hash(DOC_A)
-    assert sorted(p.name for p in _renders(projects, pid).iterdir()) == \
-        [FINAL_RECEIPT_NAME, "final.mp4"]
+    assert sorted(p.name for p in _renders(projects, pid).iterdir()) == [FINAL_RECEIPT_NAME, "final.mp4"]
 
 
 def test_crash_between_video_and_receipt_reads_stale_not_current(project, tmp_path, monkeypatch):
@@ -341,8 +338,7 @@ def test_crash_between_video_and_receipt_reads_stale_not_current(project, tmp_pa
     bytes as current under the OLD receipt."""
     projects, pid = project
     _write_doc(projects, pid, DOC_A)
-    publish_final_render(projects, pid, _mk(tmp_path, "a.mp4", b"first"),
-                         receipt_doc=DOC_A, persist_doc=None)
+    publish_final_render(projects, pid, _mk(tmp_path, "a.mp4", b"first"), receipt_doc=DOC_A, persist_doc=None)
     assert final_render_status(projects, pid)["current"] is True
 
     real_write = project_mod.atomic_write_json
@@ -354,8 +350,7 @@ def test_crash_between_video_and_receipt_reads_stale_not_current(project, tmp_pa
 
     monkeypatch.setattr(project_mod, "atomic_write_json", fail_on_receipt)
     with pytest.raises(OSError):
-        publish_final_render(projects, pid, _mk(tmp_path, "b.mp4", b"second-cut"),
-                             receipt_doc=DOC_A, persist_doc=None)
+        publish_final_render(projects, pid, _mk(tmp_path, "b.mp4", b"second-cut"), receipt_doc=DOC_A, persist_doc=None)
 
     # New bytes, old receipt, and the doc hash still matches -> only the file-identity
     # half of the check catches this.
@@ -375,8 +370,7 @@ def test_concurrent_publishes_never_interleave(project, tmp_path):
         for _ in range(12):
             src = tmp_path / f"{payload.decode()}-{threading.get_ident()}.mp4"
             src.write_bytes(payload)
-            publish_final_render(projects, pid, src, receipt_doc=pairs[payload],
-                                 persist_doc=pairs[payload], move=True)
+            publish_final_render(projects, pid, src, receipt_doc=pairs[payload], persist_doc=pairs[payload], move=True)
 
     threads = [threading.Thread(target=go, args=(p,)) for p in pairs]
     for t in threads:
@@ -388,8 +382,7 @@ def test_concurrent_publishes_never_interleave(project, tmp_path):
     receipt = json.loads((_renders(projects, pid) / FINAL_RECEIPT_NAME).read_text())
     assert receipt["doc_hash"] == canonical_doc_hash(pairs[video])
     assert final_render_status(projects, pid)["current"] is True
-    assert sorted(p.name for p in _renders(projects, pid).iterdir()) == \
-        [FINAL_RECEIPT_NAME, "final.mp4"]
+    assert sorted(p.name for p in _renders(projects, pid).iterdir()) == [FINAL_RECEIPT_NAME, "final.mp4"]
 
 
 def test_project_lock_identity(tmp_path):
@@ -410,8 +403,7 @@ def test_canonical_doc_hash_is_key_order_independent():
 
 def test_final_render_status_reasons(project, tmp_path):
     projects, pid = project
-    assert final_render_status(projects, pid) == \
-        {"current": False, "reason": "no renders/final.mp4 yet"}
+    assert final_render_status(projects, pid) == {"current": False, "reason": "no renders/final.mp4 yet"}
 
     # A video with no receipt (an outside writer, or a store_asset publish).
     (_renders(projects, pid)).mkdir(parents=True, exist_ok=True)
