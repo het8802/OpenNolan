@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as api from './api.js'
 import { LineChart } from './components/LineChart.jsx'
-import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, IconMessage, ClaudeLogo, IconMovie, IconMic, IconStar, IconMusic, IconListDetails, IconFileText } from './components/icons.jsx'
+import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, IconMessage, ClaudeLogo, IconMovie, IconMic, IconStar, IconMusic, IconListDetails, IconFileText, IconChevron } from './components/icons.jsx'
 import Studio from './studio/Studio.jsx'
 import ChatPanel from './chat/ChatPanel.jsx'
 import CapabilitiesModal from './CapabilitiesModal.jsx'
@@ -60,14 +60,23 @@ export default function App() {
     return () => { alive = false; clearInterval(id) }
   }, [selected])
 
-  function showError(e) {
-    setToast({ kind: 'error', text: String(e.message || e) })
-    setTimeout(() => setToast(null), 5000)
+  // One toast channel with an enter AND an exit. The enter is pure CSS (@starting-style); the
+  // exit needs the node to survive one --dur-exit (140ms), so it goes through `leaving` first.
+  // Holding the timers in a ref is what that sequencing requires — and it also means a newer
+  // toast cancels the older toast's pending timers instead of inheriting them, so an `ok`
+  // toast's 3s timer can no longer cut a newer error message short.
+  const toastTimers = useRef([])
+  function flashToast(kind, text, ms) {
+    toastTimers.current.forEach(clearTimeout)
+    setToast({ kind, text, leaving: false })
+    toastTimers.current = [
+      setTimeout(() => setToast(t => (t ? { ...t, leaving: true } : t)), ms),
+      setTimeout(() => setToast(null), ms + 140),   // must match --dur-exit
+    ]
   }
-  function showOk(text) {
-    setToast({ kind: 'ok', text })
-    setTimeout(() => setToast(null), 3000)
-  }
+  useEffect(() => () => toastTimers.current.forEach(clearTimeout), [])
+  function showError(e) { flashToast('error', String(e.message || e), 5000) }
+  function showOk(text) { flashToast('ok', text, 3000) }
 
   function refreshProjects() {
     return api.getProjects().then(d => setProjects(d.projects || [])).catch(showError)
@@ -105,7 +114,7 @@ export default function App() {
           }}
         />
         {connectModal}
-        {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+        {toast && <div className={`toast ${toast.kind}${toast.leaving ? ' leaving' : ''}`}>{toast.text}</div>}
         <UpdateBanner />
       </div>
     )
@@ -117,7 +126,7 @@ export default function App() {
         <Studio projectId={selected} state={state} onClose={() => setEditing(false)} chat={chat}
           auth={auth.status} onReconnect={() => setShowConnect(true)} />
         {connectModal}
-        {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+        {toast && <div className={`toast ${toast.kind}${toast.leaving ? ' leaving' : ''}`}>{toast.text}</div>}
         <UpdateBanner />
       </div>
     )
@@ -147,7 +156,7 @@ export default function App() {
         />
       </main>
       {connectModal}
-      {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+      {toast && <div className={`toast ${toast.kind}${toast.leaving ? ' leaving' : ''}`}>{toast.text}</div>}
       <UpdateBanner />
     </div>
   )
@@ -180,7 +189,7 @@ function Dashboard({ pipelines, styles = [], projects, onOpen, onCreate, auth, o
   return (
     <div className="dashboard">
       <header className="dash-header">
-        <div className="brand"><span className="dot" /> OpenNolan <span className="muted">· Mission Control</span></div>
+        <div className="brand"><span className="dot" /> OpenNolan</div>
         <div className="dash-sub">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
         {auth && connected && (
           <button
@@ -335,7 +344,7 @@ function FeedbackModal({ onClose }) {
             </label>
             <div className="modal-actions">
               <button type="button" className="modal-cancel" onClick={onClose}>Cancel</button>
-              <button type="submit" disabled={busy || !message.trim()}>{busy ? 'Sending…' : 'Send'}</button>
+              <button type="submit" className="btn-primary" disabled={busy || !message.trim()}>{busy ? 'Sending…' : 'Send'}</button>
             </div>
           </form>
         )}
@@ -460,7 +469,7 @@ function EnvModal({ onClose }) {
         <div className="env-actions">
           {saved && <span className="env-saved"><IconCheck /> {saved}</span>}
           <button className="modal-cancel" onClick={onClose}>Close</button>
-          <button onClick={save} disabled={busy || !vars}>{busy ? 'Saving…' : 'Save to .env'}</button>
+          <button className="btn-primary" onClick={save} disabled={busy || !vars}>{busy ? 'Saving…' : 'Save to .env'}</button>
         </div>
       </div>
     </div>
@@ -526,7 +535,7 @@ function CreateModal({ pipelines, styles = [], onClose, onCreate }) {
         {err && <div className="modal-err">⚠ {err}</div>}
         <div className="modal-actions">
           <button type="button" className="modal-cancel" onClick={onClose}>Cancel</button>
-          <button type="submit" disabled={busy || !name.trim()}>{busy ? 'Creating…' : 'Create'}</button>
+          <button type="submit" className="btn-primary" disabled={busy || !name.trim()}>{busy ? 'Creating…' : 'Create'}</button>
         </div>
       </form>
     </div>
@@ -694,8 +703,9 @@ function StageRow({ s, onOpen }) {
         <span className="step-name">{s.stage}</span>
         {arts.length > 0 && <span className="step-count">{arts.length}</span>}
         <span className="step-status">{STATUS_LABEL[s.status] || s.status}</span>
-        {s.status === 'in_progress' && <span className="pulse" />}
-        {hasDetail && <span className="step-caret">{open ? '▾' : '▸'}</span>}
+        {/* No second in-progress indicator: `.step.in_progress .bullet` already carries a
+            ringed bullet 20px to the left, and this one was an infinite animation. */}
+        {hasDetail && <span className="step-caret"><IconChevron size={12} /></span>}
       </button>
       {open && (
         <div className="step-detail">

@@ -91,7 +91,7 @@ export default function CapabilityInstall({
       </div>
       {status === 'installing' && (
         <>
-          <div className="cap-bar"><i style={{ width: `${pct}%` }} /></div>
+          <div className="cap-bar"><i style={{ transform: `scaleX(${pct / 100})` }} /></div>
           <div className="cap-latest" title={latest}>{latest}</div>
         </>
       )}

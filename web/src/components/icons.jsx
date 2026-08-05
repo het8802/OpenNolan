@@ -13,6 +13,10 @@ export const IconKey = (p) => <Svg {...p}><circle cx="7.5" cy="15.5" r="4.5" /><
 export const IconEye = (p) => <Svg {...p}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></Svg>
 export const IconEyeOff = (p) => <Svg {...p}><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 8 10 8a18 18 0 0 1-2.16 3.19" /><path d="M6.6 6.6A18 18 0 0 0 2 12s3.5 8 10 8a9.3 9.3 0 0 0 5.4-1.6" /><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M2 2l20 20" /></Svg>
 export const IconCheck = (p) => <Svg {...p}><path d="M20 6 9 17l-5-5" /></Svg>
+// One disclosure chevron for every expand/collapse. It points RIGHT at rest and is rotated
+// by CSS when open, so there is a single glyph instead of a ▸/▾ font-glyph swap (whose weight
+// and baseline vary by platform). Rotation is pointer-only — see .tc-caret / .step-caret.
+export const IconChevron = (p) => <Svg {...p}><path d="m9 6 6 6-6 6" /></Svg>
 export const IconX = (p) => <Svg {...p}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></Svg>
 // Classic undo/redo: a horizontal arrow that curves back (Lucide undo-2 / redo-2).
 export const IconUndo = (p) => <Svg {...p}><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11" /></Svg>

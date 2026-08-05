@@ -252,8 +252,11 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
 
   // Hand the agent our LATEST edits: flush a pending autosave before its turn starts, so it reads the
   // timeline we actually see (not a stale disk copy). Wrap only `send`; everything else passes through.
+  // FORWARD EVERY ARGUMENT (...rest carries the @-mention sidecar). A one-parameter wrapper here
+  // would silently drop mentions in the EDITOR while they kept working on the dashboard — the same
+  // component, one surface quietly broken.
   const chatForPanel = useMemo(() => (
-    chat ? { ...chat, send: async (text) => { await flushAutosave(); return chat.send(text) } } : chat
+    chat ? { ...chat, send: async (text, ...rest) => { await flushAutosave(); return chat.send(text, ...rest) } } : chat
   ), [chat, flushAutosave])
 
   const render = useCallback(async () => {
@@ -441,10 +444,16 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
     const startX = e.clientX, startY = e.clientY
     const startW = panels.inspectorW, startH = panels.timelineH, startAW = panels.agentW
     const bodyH = e.currentTarget.closest('.st-body')?.clientHeight || 800
+    // Hold the resize cursor and kill text selection for the whole document until pointerup —
+    // the same trick the scrub fields use (body.st-scrubbing). Without it a fast drag off the
+    // 6px handle flickers the cursor and rubber-band-selects the panels either side.
+    const dragClass = axis === 'y' ? 'st-dragging-row' : 'st-dragging-col'
+    document.body.classList.add(dragClass)
     const teardown = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', teardown)
       window.removeEventListener('pointercancel', teardown)
+      document.body.classList.remove(dragClass)
       panelDrag.current = null
     }
     const onMove = (ev) => {
@@ -670,15 +679,19 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
           onPreviewMode={changePreviewMode} onAddText={onAddText} onCanvas={onCanvas}
           recording={recording} onToggleRecord={onToggleRecord}
         />
-      </div>
-
-      {!ffmpeg && (
-        <div className="st-banner">
-          This timeline’s runtime is <b>{doc.render_runtime}</b>. The studio editor targets the
-          FFmpeg render path — keyframe/overlay previews reflect FFmpeg behavior.
+        {/* Banner + notice OVERLAY the content below the bar (.st-alerts is absolutely
+            positioned at the bar's bottom edge). They used to sit in flow here, so every save
+            and every agent turn shoved the preview canvas and the whole timeline down ~28px. */}
+        <div className="st-alerts">
+          {!ffmpeg && (
+            <div className="st-banner">
+              This timeline’s runtime is <b>{doc.render_runtime}</b>. The studio editor targets the
+              FFmpeg render path — keyframe/overlay previews reflect FFmpeg behavior.
+            </div>
+          )}
+          {notice && <div className={`st-notice ${notice.kind}`}>{notice.msg}</div>}
         </div>
-      )}
-      {notice && <div className={`st-notice ${notice.kind}`}>{notice.msg}</div>}
+      </div>
 
       <div className="st-body">
         <div className="st-body-top">

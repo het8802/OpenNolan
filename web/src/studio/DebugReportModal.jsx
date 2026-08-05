@@ -104,7 +104,7 @@ export default function DebugReportModal({ session, onClose }) {
             ) : (
               <div className="modal-actions">
                 <button type="button" className="modal-cancel" onClick={() => setConfirmDiscard(true)} disabled={busy}>Discard</button>
-                <button type="submit" disabled={busy}>{busy ? 'Sending…' : 'Send report'}</button>
+                <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Sending…' : 'Send report'}</button>
               </div>
             )}
           </form>

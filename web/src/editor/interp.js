@@ -190,6 +190,16 @@ export function removeKeyframe(doc, index, kfIndex) {
   return setOverlayKeyframes(doc, index, ov.keyframes.filter((_, i) => i !== kfIndex))
 }
 
+/**
+ * The canvas a BRAND-NEW project declares. The product is vertical-first, so new work
+ * STATES 9:16 in the document rather than inheriting a default — that is what keeps the
+ * preview and the renderer reading the same number instead of two fallbacks that merely
+ * happen to be equal (see LEGACY_CANVAS). Kept in step with `CANVAS_PRESETS[0]` in
+ * ../studio/model.js so the toolbar picker shows a named preset, not "custom"; guarded by
+ * a test in model.test.js.
+ */
+const NEW_PROJECT_CANVAS = { width: 1080, height: 1920, fps: 30 }
+
 /** A minimal valid edit_decisions for a fresh manual project (passes the schema's required set). */
 export function scaffoldEditDecisions({ runtime = 'ffmpeg', source = 'clip.mp4', duration = 5 } = {}) {
   return {
@@ -199,6 +209,9 @@ export function scaffoldEditDecisions({ runtime = 'ffmpeg', source = 'clip.mp4',
     // gate — set it so a fresh manual project can render without a cryptic block.
     renderer_family: 'social-reel',
     cuts: [{ id: 'c1', source, in_seconds: 0, out_seconds: duration }],
+    // Declare the canvas instead of leaning on canvasOf's landscape fallback: an explicit
+    // compose_target is the ONE value both the preview and video_compose read.
+    metadata: { compose_target: { ...NEW_PROJECT_CANVAS } },
   }
 }
 
@@ -570,13 +583,32 @@ export function setCanvas(doc, { width, height, fps } = {}) {
   return { ...doc, metadata: meta }
 }
 
-/** Read the effective output canvas. Mirrors the renderer's fallback (1920x1080@30). */
+/**
+ * What a LEGACY document with no `metadata.compose_target` means. Landscape, deliberately.
+ *
+ * ⚠ THIS NUMBER HAS A TWIN: `_resolve_canvas` in tools/video/video_compose.py (the
+ * `target_w, target_h, target_fps = 1920, 1080, 30.0` line). Preview == export for a
+ * canvas-less document rests on the two agreeing, and nothing enforces it — so if you
+ * ever change one, change the other in the same commit. Do NOT flip this to vertical to
+ * "make the app 9:16": overlay/clip positions in old documents are stored in CANVAS
+ * pixels, so reinterpreting their canvas silently moves them. New projects get 9:16 by
+ * declaring it (NEW_PROJECT_CANVAS), not by moving this floor.
+ */
+const LEGACY_CANVAS = { width: 1920, height: 1080, fps: 30 }
+
+/**
+ * Read the effective output canvas. Mirrors the renderer's fallback (1920x1080@30).
+ *
+ * Per FIELD, not per object: `setCanvas` merges, so `{fps: 24}` alone is a reachable
+ * `compose_target` and must keep the document's width/height. Returns a fresh object every
+ * call — never the shared LEGACY_CANVAS ref, which callers could mutate.
+ */
 export function canvasOf(doc) {
   const ct = doc?.metadata?.compose_target || {}
   return {
-    width: Number(ct.width) || 1920,
-    height: Number(ct.height) || 1080,
-    fps: Number(ct.fps) || 30,
+    width: Number(ct.width) || LEGACY_CANVAS.width,
+    height: Number(ct.height) || LEGACY_CANVAS.height,
+    fps: Number(ct.fps) || LEGACY_CANVAS.fps,
   }
 }
 

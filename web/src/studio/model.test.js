@@ -12,7 +12,7 @@ import {
   clipFitSize, clipBox, clipDefaultPosition, clipAnchorXY, clipPositionXY,
   isScaleObject, scaleAxes, summarizeDocChange,
 } from './model.js'
-import { sanitizeOverlay } from '../editor/interp.js'
+import { sanitizeOverlay, scaffoldEditDecisions, canvasOf } from '../editor/interp.js'
 
 describe('vocabulary constants stay render-faithful', () => {
   it('TRANSITIONS only lists names the FFmpeg xfade path renders (+ hard cut)', () => {
@@ -35,6 +35,15 @@ describe('vocabulary constants stay render-faithful', () => {
       expect(Number.isInteger(p.height) && p.height % 2 === 0).toBe(true)
       expect(p.label).toBeTruthy()
     }
+  })
+  // OPN-39: scaffoldEditDecisions hardcodes the new-project canvas, and the toolbar picker
+  // matches the doc canvas against CANVAS_PRESETS by width/height. If the two drift, a
+  // brand-new project opens showing the picker's "custom" entry instead of a named preset —
+  // visible but easy to miss. Fail here instead.
+  it('CANVAS_PRESETS[0] is the canvas a new project scaffolds with', () => {
+    const scaffolded = canvasOf(scaffoldEditDecisions())
+    expect(CANVAS_PRESETS[0].width).toBe(scaffolded.width)
+    expect(CANVAS_PRESETS[0].height).toBe(scaffolded.height)
   })
   it('TEXT_ANCHORS match the drawtext-accepted nine-anchor grid', () => {
     expect(TEXT_ANCHORS).toHaveLength(9)

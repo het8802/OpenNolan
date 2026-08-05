@@ -11,12 +11,20 @@
   const fill = document.getElementById('fill');
   const pctEl = document.getElementById('pct');
 
+  // Auto-follow ONLY while the reader is parked at the bottom. During a long or failed install
+  // the log's whole purpose is diagnosis, and unconditionally yanking someone off the line they
+  // are reading defeats it. Same threshold as the chat transcript (web/src/chat/ChatPanel.jsx).
+  let stick = true;
+  log.addEventListener('scroll', () => {
+    stick = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+  });
+
   function line(text, cls) {
     const d = document.createElement('div');
     if (cls) d.className = cls;
     d.textContent = text;
     log.appendChild(d);
-    log.scrollTop = log.scrollHeight;
+    if (stick) log.scrollTop = log.scrollHeight;   // instant, never smooth
     // Mirror the newest technical line into the small detail slot so movement is visible even
     // when the log is scrolled or the eye is on the stage/bar.
     if (!failed) detail.textContent = text.length > 90 ? text.slice(0, 90) + '…' : text;
@@ -27,7 +35,7 @@
   // install (uv / npm ci) still reads as alive. Never move backwards, never pass ceil.
   let display = 0, ceil = 0, haveStep = false, failed = false;
   function render() {
-    fill.style.width = display.toFixed(1) + '%';
+    fill.style.transform = 'scaleX(' + (display / 100).toFixed(4) + ')';
     pctEl.textContent = Math.floor(display) + '%';
   }
 
@@ -62,7 +70,7 @@
       pctEl.textContent = '';
       fill.classList.remove('indet');
       fill.classList.add('err');
-      fill.style.width = '100%';
+      fill.style.transform = 'scaleX(1)';
       line(m, 'err');
     });
   } else {

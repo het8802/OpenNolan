@@ -223,11 +223,13 @@ export const saveThread = (id, tid, body) =>
 
 // Stream an agent turn. /chat is POST, so we read the SSE body off fetch
 // (EventSource can't POST). Yields one parsed event object per `data:` line.
-export async function* chatStream(id, message, thread_id, signal, model) {
+export async function* chatStream(id, message, thread_id, signal, model, mentions) {
   const resp = await fetch(`/api/projects/${id}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, thread_id, model }),
+    // `mentions` is the @-mention sidecar: the composer never encodes a reference into the
+    // prose, so the server resolves these paths rather than parsing the message.
+    body: JSON.stringify({ message, thread_id, model, mentions: mentions || [] }),
     signal,
   })
   if (!resp.ok) {

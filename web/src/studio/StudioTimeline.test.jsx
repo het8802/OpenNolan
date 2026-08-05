@@ -319,9 +319,14 @@ describe('asset drag-and-drop onto the timeline', () => {
 })
 
 describe('ruler + playhead', () => {
-  it('positions the playhead at LANE_PAD + playhead*zoom', () => {
+  // The derived placement is still LANE_PAD + playhead*zoom, but it is applied as a
+  // TRANSFORM, not as `left`: the playhead moves every animation frame during playback and
+  // scrub, and `left` forces layout each time. LANE_PAD stays on `left` as the static origin.
+  it('positions the playhead at LANE_PAD + playhead*zoom, via transform', () => {
     const { container } = renderTimeline(fullDoc, 5)
-    expect(container.querySelector('.st-playhead').style.left).toBe(`${LANE_PAD + 2 * ZOOM}px`)
+    const ph = container.querySelector('.st-playhead')
+    expect(ph.style.left).toBe(`${LANE_PAD}px`)
+    expect(ph.style.transform).toBe(`translateX(${2 * ZOOM}px)`)
   })
   it('shows the total duration and a ruler of ticks', () => {
     const { container } = renderTimeline(fullDoc, 5)

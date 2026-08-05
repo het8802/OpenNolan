@@ -11,49 +11,68 @@
   <style>
     :root { color-scheme: light; }
     * { margin: 0; box-sizing: border-box; }
+    /* This window is a standalone file:// page under a strict CSP, so it cannot import the
+       app's stylesheet. The values below are COPIED from web/src/styles.css :root — keep them
+       identical. They used to be near-misses (#FBF7F0 vs #faf7f2, #d97757 vs #c8643c), which
+       made the first screen a user ever sees hand off to a visibly different brand. */
     body {
-      font-family: -apple-system, 'Inter', system-ui, sans-serif;
-      background: #FBF7F0; color: #2b2b2b;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #faf7f2; color: #2b2722;          /* --bg / --ink */
       height: 100vh; display: flex; flex-direction: column;
       padding: 30px 34px 28px;
     }
-    h1 { font-size: 19px; font-weight: 650; letter-spacing: -.01em; }
-    p.sub { margin-top: 6px; color: #7a7266; font-size: 13px; line-height: 1.5; }
+    h1 { font-size: 20px; font-weight: 650; letter-spacing: -.01em; }
+    p.sub { margin-top: 6px; color: #6f665c; font-size: 13px; line-height: 1.5; }  /* --ink-dim, 5.267:1 */
 
     /* The prominent, human-readable current step — this is what the eye reads, so the box below
        is never "just a blank rectangle". Always shows something, from the first frame. */
-    .stage { margin: 22px 0 10px; font-size: 14.5px; font-weight: 600; color: #2b2b2b;
+    .stage { margin: 22px 0 10px; font-size: 14px; font-weight: 600; color: #2b2722;
              letter-spacing: -.005em; min-height: 20px; }
 
-    .bar { height: 6px; border-radius: 6px; background: #ece3d6; overflow: hidden; }
-    .bar > i { display: block; height: 100%; border-radius: 6px; background: #d97757;
-               width: 0%; transition: width .35s ease; position: relative; overflow: hidden; }
-    /* A moving sheen says "still working" even when the width is barely moving (uv / npm ci are
-       silent for minutes; real progress boundaries are sparse). */
-    .bar > i::after { content: ''; position: absolute; inset: 0;
-                      background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent);
-                      animation: sheen 1.6s ease-in-out infinite; }
-    @keyframes sheen { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-    /* Until the first real step frame arrives, show the indeterminate slide. */
-    .bar > i.indet { width: 40%; transition: none; animation: slide 1.3s ease-in-out infinite; }
-    .bar > i.indet::after { content: none; }
-    @keyframes slide { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
-    .bar > i.err { background: #c0392b; }
-    .bar > i.err::after { content: none; }
+    .bar { height: 6px; border-radius: 6px; background: #ece5db; overflow: hidden;  /* --line */
+           position: relative; }
+    /* The fill is scaled, not resized: `width` is not a composited property and this bar
+       updates every 200ms for minutes while the installer saturates the CPU. */
+    .bar > i { display: block; height: 100%; width: 100%; border-radius: 6px;
+               background: #c8643c;                  /* --accent */
+               transform: scaleX(0); transform-origin: left center;
+               transition: transform .25s linear; }
+    /* A moving sheen says "still working" even when progress is barely moving (uv / npm ci are
+       silent for minutes; real boundaries are sparse). It lives on the TRACK, not on the fill,
+       so scaling the fill cannot squash it. `linear` because constant motion that eases at both
+       ends reads as stuck — the opposite of the intended signal. */
+    .bar::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+                  background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent);
+                  animation: sheen 1.6s linear infinite; }
+    @keyframes sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+    /* Until the first real step frame arrives, show the indeterminate slide. translateX, not
+       margin-left: margin animates layout on every frame, forever. */
+    .bar > i.indet { width: 40%; transition: none; animation: slide 1.3s linear infinite; }
+    @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+    /* One moving thing at a time: while the slide runs, the track sheen is off. */
+    .bar:has(> i.indet)::after { content: none; }
+    .bar > i.err { background: #b8503f; }            /* --red */
+    .bar:has(> i.err)::after { content: none; }
 
-    .meta { margin: 9px 0 14px; font-size: 11.5px; color: #9a9184;
-            display: flex; justify-content: space-between; gap: 12px; }
-    #pct { font-variant-numeric: tabular-nums; color: #7a7266; font-weight: 600; }
-
-    .logcap { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
-              color: #b3ab9d; margin-bottom: 6px; }
-    #log {
-      flex: 1; overflow-y: auto; background: #fff; border: 1px solid #ece3d6; border-radius: 8px;
-      padding: 12px 14px; font-family: 'SF Mono', 'JetBrains Mono', monospace; font-size: 11px;
-      line-height: 1.65; color: #6b6357; white-space: pre-wrap; word-break: break-word;
+    @media (prefers-reduced-motion: reduce) {
+      .bar::after { content: none; }
+      .bar > i.indet { animation: none; width: 100%; transform: scaleX(.35); }
+      .bar > i { transition: none; }
     }
-    #log .err { color: #c0392b; }
-    #log:empty::before { content: 'Waiting for the installer…'; color: #c3bcae; }
+
+    .meta { margin: 9px 0 14px; font-size: 12px; color: #6f665c;   /* was #9a9184 at 2.95:1 */
+            display: flex; justify-content: space-between; gap: 12px; }
+    #pct { font-variant-numeric: tabular-nums; color: #6f665c; font-weight: 600; }
+
+    .logcap { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+              color: #6f665c; margin-bottom: 6px; }                /* was #b3ab9d at 2.15:1 */
+    #log {
+      flex: 1; overflow-y: auto; background: #fffdf9; border: 1px solid #ece5db; border-radius: 8px;
+      padding: 12px 14px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px;
+      line-height: 1.65; color: #4a443c; white-space: pre-wrap; word-break: break-word;
+    }
+    #log .err { color: #96382a; }                    /* --red-ink, 6.220:1 on the log surface */
+    #log:empty::before { content: 'Waiting for the installer…'; color: #8a8178; }
   </style>
 </head>
 <body>

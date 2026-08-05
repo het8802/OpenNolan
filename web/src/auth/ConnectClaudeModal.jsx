@@ -114,7 +114,7 @@ export default function ConnectClaudeModal({ onClose, onConnected, initialStatus
                 onChange={e => setApiKey(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') connectKey() }}
               />
-              <button onClick={connectKey} disabled={busy || !apiKey.trim()}>
+              <button className="btn-primary" onClick={connectKey} disabled={busy || !apiKey.trim()}>
                 <IconKey size={15} /> {busy ? 'Verifying…' : 'Verify & connect'}
               </button>
               <button type="button" className="linkish auth-alt" onClick={() => { setErr(null); setMode('claude') }}>

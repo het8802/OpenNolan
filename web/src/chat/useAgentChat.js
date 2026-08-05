@@ -110,9 +110,16 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
     return () => clearTimeout(t)
   }, [messages, projectId, activeThread, persistThread])
 
-  const send = useCallback(async (text) => {
+  /**
+   * Send a turn. Returns TRUE when the message reached the agent (including a turn the user
+   * then stopped — it was delivered) and FALSE when it did not, so the caller can hold on to
+   * anything it would otherwise have discarded. ChatPanel needs this: on a rejected send it
+   * keeps the @-mention sidecar alive alongside the restored draft, or the retry would send
+   * a visible token with no structured reference behind it.
+   */
+  const send = useCallback(async (text, mentions) => {
     const message = (text || input).trim()
-    if (!message || !projectId || busy) return
+    if (!message || !projectId || busy) return false
     setInput('')
     setMessages(m => [...m, { role: 'user', text: message }])
     setBusy(true)
@@ -127,8 +134,9 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
     }
     const controller = new AbortController()
     abortRef.current = controller
+    let delivered = false
     try {
-      for await (const evt of api.chatStream(projectId, message, tid, controller.signal, model)) {
+      for await (const evt of api.chatStream(projectId, message, tid, controller.signal, model, mentions)) {
         if (evt.type === 'assistant') {
           setMessages(m => {
             const last = m[m.length - 1]
@@ -179,13 +187,25 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
           setMessages(m => [...m, { role: 'error', text: evt.detail }])
         }
       }
+      delivered = true
     } catch (e) {
       if (e.name === 'AbortError' || controller.signal.aborted) {
         setRenderingStage(null)
         setMessages(m => [...m, { role: 'note', text: '■ Stopped. Your next message resumes this session with its context.' }])
+        // A stop is not a failure: the agent received the message (and its sidecar) before
+        // the user interrupted it, so there is nothing for the caller to hold on to.
+        delivered = true
       } else {
         const text = String(e.message || e)
         setMessages(m => [...m, { role: 'error', text }])
+        // GIVE THE DRAFT BACK. `input` was cleared before the request, so a failed send used to
+        // destroy what the user typed with no way to recover it but retyping. That already bit
+        // the auth-503-at-request-start case, and OPN-27 adds a second reachable 4xx (a rejected
+        // mention). The optimistic user bubble and the error line stay — the transcript reads
+        // "you said X, it failed" — and the composer refills so they can fix and resend.
+        // Only when the composer is still empty: the user may have started typing the next
+        // message while this turn was in flight, and clobbering that would be the same bug again.
+        setInput(cur => (cur ? cur : message))
         // A 503 "auth not configured" (or any auth-shaped failure) at request start never reaches
         // the SSE stream — re-check auth so the reconnect box surfaces promptly instead of lagging
         // the 20s poll.
@@ -197,6 +217,7 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
       // Persist the conversation (messages + session_id) so the thread is revivable.
       if (tid) setTimeout(() => persistThread(tid), 0)
     }
+    return delivered
   }, [input, projectId, busy, renderingStage, activeThread, model, deriveTitle, persistThread])
 
   const stop = useCallback(async () => {
@@ -284,6 +305,9 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
   useEffect(() => () => { abortRef.current?.abort() }, [])
 
   return {
+    // The hook already scopes everything to this project; handing it back lets ChatPanel
+    // fetch its own mention candidates without either call site threading it through JSX.
+    projectId,
     messages, input, setInput, busy,
     pendingConfirm, pendingQuestion, pendingKeyRequest, pendingCapability, renderingStage, toolResults,
     threads, activeThread, model, setModel,

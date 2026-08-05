@@ -497,9 +497,9 @@ export default function StudioPreview({
           )}
           {/* WYSIWYG overlay layer (canvas coordinates → frame px) */}
           {scale > 0 && <div className="st-ov-layer">{visibleOverlays.map(renderOverlay)}</div>}
-          {!playing && sourceRef != null && (
-            <button className="st-stage-play" onClick={() => onPlayingChange(true)} aria-label="Play">▶</button>
-          )}
+          {/* No duplicate centre play button. RULES.md names the timeline toolbar (.st-tl-head)
+              as transport home, and clicking the clip box already toggles play. The old 64px
+              overlay also unmounted itself on click, dropping keyboard focus to the document. */}
         </div>
       ) : renderPath ? (
         <video
