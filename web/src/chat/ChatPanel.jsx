@@ -3,17 +3,26 @@
 // (Studio) so the agent window is identical in both places. `className` lets the editor restyle
 // it inside a resizable panel without forking the markup.
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { marked } from 'marked'
 import { TOOL_ICON, formatToolInput, AGENT_MODELS, DEFAULT_MODEL } from './chatUtils.js'
-import { ClaudeLogo, IconAlert, IconKey, IconEye, IconEyeOff, IconBrain, IconTool, IconMovie, IconChevron } from '../components/icons.jsx'
+import {
+  flattenCandidates, mentionQuery, rankCandidates, applyMention, pruneMentions, MENTION_GROUPS,
+} from './mentions.js'
+import * as api from '../api.js'
+import { ClaudeLogo, IconAlert, IconKey, IconEye, IconEyeOff, IconBrain, IconTool, IconMovie, IconChevron, IconFolder } from '../components/icons.jsx'
 import CapabilityInstall from '../CapabilityInstall.jsx'
+
+// Group heading + icon for a mention candidate's bucket. Icons, never emoji (RULES.md).
+const GROUP_LABEL = Object.fromEntries(MENTION_GROUPS.map(g => [g.key, g.label]))
+const GROUP_ICON = { assets: IconFolder, agent: IconBrain, renders: IconMovie }
 
 // Configure marked for safe, compact output
 marked.setOptions({ breaks: true, gfm: true })
 
 export default function ChatPanel({ chat, disabled = false, className = '', auth, onReconnect }) {
   const {
+    projectId,
     messages, input, setInput, busy,
     pendingConfirm, pendingQuestion, pendingKeyRequest, pendingCapability, renderingStage, toolResults,
     threads, activeThread, model = DEFAULT_MODEL, setModel,
@@ -33,6 +42,80 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
   const showCost = auth?.method === 'api_key'
 
   const [atBottom, setAtBottom] = useState(true)
+
+  // ── `@` asset mentions (OPN-27) ────────────────────────────────────────────────────
+  // The textarea stays plain text. What the user PICKS is kept alongside as structured
+  // refs and posted as a `mentions[]` sidecar, because the server — not the agent — has
+  // to turn a project-relative path into a verified absolute one (the agent's cwd is the
+  // code root). Nothing ever re-parses the prose.
+  const [candidates, setCandidates] = useState([])
+  const [caret, setCaret] = useState(0)
+  const [active, setActive] = useState(0)
+  const [dismissed, setDismissed] = useState(false)  // Escape closes until the query changes
+  const [refs, setRefs] = useState([])               // the sidecar, pruned as the draft is edited
+  const pendingCaret = useRef(null)
+
+  const range = useMemo(() => mentionQuery(input, caret), [input, caret])
+  const results = useMemo(
+    () => (range ? rankCandidates(candidates, range.query) : []),
+    [range, candidates],
+  )
+  // Zero results closes the menu, so Enter is never dead. Busy/disabled never opens it.
+  const menuOpen = !!range && results.length > 0 && !dismissed && !busy && !disabled
+
+  const loadCandidates = useCallback(() => {
+    if (!projectId) { setCandidates([]); return }
+    // Show the cached list while this is in flight — assets the agent wrote mid-turn show
+    // up on the next open without the composer polling.
+    api.listAssets(projectId).then(a => setCandidates(flattenCandidates(a))).catch(() => {})
+  }, [projectId])
+
+  useEffect(() => { loadCandidates() }, [loadCandidates])
+  // Refresh when a query opens (null -> non-null), not on every keystroke.
+  const queryActive = range != null
+  useEffect(() => { if (queryActive) loadCandidates() }, [queryActive, loadCandidates])
+  // A new query starts at the top and clears a previous Escape.
+  const queryText = range?.query ?? null
+  useEffect(() => { setActive(0); setDismissed(false) }, [queryText])
+
+  // Restore the caret after an insertion (React re-renders from `input`, losing it).
+  useEffect(() => {
+    if (pendingCaret.current == null) return
+    const pos = pendingCaret.current
+    pendingCaret.current = null
+    taRef.current?.setSelectionRange(pos, pos)
+    setCaret(pos)
+  }, [input])
+
+  function onComposerChange(e) {
+    const text = e.target.value
+    setCaret(e.target.selectionStart ?? text.length)
+    setInput(text)
+    setRefs(r => (r.length ? pruneMentions(r, text) : r))
+  }
+
+  function chooseMention(candidate) {
+    if (!candidate || !range) return
+    const out = applyMention(input, range, candidate.path)
+    pendingCaret.current = out.caret
+    setInput(out.text)
+    setDismissed(true)                                  // closed until the next `@`
+    setRefs(r => (r.some(m => m.token === out.mention.token) ? r : [...r, out.mention]))
+    taRef.current?.focus()
+  }
+
+  // Only references whose token is still a whole word in the draft travel with the turn.
+  async function submitTurn() {
+    const sending = pruneMentions(refs, input)
+    // Do NOT drop the sidecar before we know the turn landed. `send` restores the draft on a
+    // rejected request; if the references went with it, the retry would post a visible token
+    // with nothing structured behind it and the agent would get no resolved path.
+    if (!(await send(null, sending))) return
+    // Delivered: retire exactly what went out, not everything. Clearing wholesale would also
+    // discard anything selected after this turn began.
+    const sent = new Set(sending.map(m => m.token))
+    setRefs(cur => cur.filter(m => !sent.has(m.token)))
+  }
 
   // Auto-scroll to the newest message, but ONLY if the user hasn't scrolled up to read
   // history. Scrolling up parks them there until they return to the bottom.
@@ -129,18 +212,68 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
           </button>
         </div>
       )}
-      <form className="composer" onSubmit={e => { e.preventDefault(); send() }}>
+      <form className="composer" onSubmit={e => { e.preventDefault(); submitTurn() }}>
+        {menuOpen && (
+          <ul className="mention-menu" id="mention-menu" role="listbox" aria-label="Project assets">
+            {results.map((c, i) => {
+              const Icon = GROUP_ICON[c.group] || IconFolder
+              const heading = c.group !== results[i - 1]?.group ? GROUP_LABEL[c.group] : null
+              return (
+                <li key={c.path} className="mention-row">
+                  {/* A run-length heading over the RANKED order — it labels provenance
+                      without reordering anything the ranking decided. */}
+                  {heading && <div className="mention-group" aria-hidden="true">{heading}</div>}
+                  <div
+                    id={`mention-opt-${i}`}
+                    role="option"
+                    aria-selected={i === active}
+                    className={`mention-item${i === active ? ' active' : ''}`}
+                    // pointer-DOWN, prevented: a blur would close the menu before a click lands.
+                    onMouseDown={e => { e.preventDefault(); chooseMention(c) }}
+                    onMouseEnter={() => setActive(i)}
+                  >
+                    <Icon size={14} />
+                    <span className="mention-text">
+                      <span className="mention-name">{c.name}</span>
+                      <span className="mention-path">{c.path}</span>
+                    </span>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
         <textarea
           ref={taRef}
           className="composer-input"
           rows={1}
-          placeholder={busy ? 'Agent is working…' : 'Message the agent…  (Enter to send, Shift+Enter for newline)'}
+          placeholder={busy ? 'Agent is working…' : 'Message the agent…  (@ to attach an asset, Enter to send)'}
           value={input}
-          onChange={e => setInput(e.target.value)}
+          role="combobox"
+          aria-expanded={menuOpen}
+          aria-controls="mention-menu"
+          aria-autocomplete="list"
+          aria-activedescendant={menuOpen ? `mention-opt-${active}` : undefined}
+          onChange={onComposerChange}
+          onSelect={e => setCaret(e.target.selectionStart ?? 0)}
           onKeyDown={e => {
+            // The menu intercepts ONLY while it has results. Shift+Enter falls through to a
+            // newline in both states and never selects.
+            if (menuOpen) {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault(); setActive(i => (i + 1) % results.length); return
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault(); setActive(i => (i - 1 + results.length) % results.length); return
+              }
+              if (e.key === 'Escape') { e.preventDefault(); setDismissed(true); return }
+              if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+                e.preventDefault(); chooseMention(results[active]); return
+              }
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
-              send()
+              submitTurn()
             }
           }}
           disabled={disabled || busy}

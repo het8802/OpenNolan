@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ntpath
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Optional
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -54,6 +55,159 @@ def _classify(rel_parts: tuple[str, ...], ext: str) -> Optional[str]:
     if ext in AUDIO_EXTS:
         return "music" if "music" in rel_parts else "audio"
     return None
+
+
+# ── @-mention resolution (OPN-27) ────────────────────────────────────────────────────
+# The chat composer sends the assets a user picked as a structured `mentions[]` sidecar; we
+# turn each project-relative path into a VERIFIED ABSOLUTE one for the agent. It cannot do
+# this itself: its cwd is the read-only code root (server/agent_runner.py) and the
+# "use absolute paths" instruction only rides the FIRST-turn preamble.
+#
+# Lives here, not in server/editor.py, for two reasons: the eligibility rules it mirrors are
+# the ones `list_assets` applies just below, and app.py already imports server.editor — the
+# other direction would be a cycle. Deliberately NOT `editor.resolve_source_path`, whose
+# candidate order is repo-root-FIRST and whose containment also accepts the shared repo
+# asset library, so `assets/sfx/x.wav` would silently resolve to the REPO file.
+
+# Root -> the extensions that root's bucket actually lists. PER ROOT, never a union:
+# renders/ and hf/renders/ list only video, so a union would let a tampered
+# `renders/evil.png` pass SHAPE and get reported as a harmless "not found" instead of a 422.
+_MENTION_ROOTS: tuple[tuple[str, bool, frozenset[str]], ...] = (
+    # (prefix, recursive, allowed extensions)
+    ("assets", True, frozenset(IMAGE_EXTS | VIDEO_EXTS | AUDIO_EXTS)),
+    ("hf/renders", True, frozenset(VIDEO_EXTS)),
+    ("renders", False, frozenset(VIDEO_EXTS)),  # DIRECT children only
+)
+
+
+def mention_shape_error(rel: Any) -> Optional[str]:
+    """Why `rel` could never have come from the mention menu, or None if it could.
+
+    SHAPE is decidable from the string alone — no filesystem touch. A violation means a
+    client bug or a tampered request, so the caller answers 422 and never starts a turn.
+    Anything that is merely *absent* is a STATE problem and degrades instead (see
+    `resolve_mentions`).
+    """
+    if not isinstance(rel, str) or not rel.strip():
+        return "must be a non-empty string"
+
+    # ⚠ MUST BE EXPRESSIBLE AS A FILESYSTEM PATH AT ALL, and this has to be decided HERE.
+    # A string the OS cannot encode raises ValueError (not OSError) from the eventual stat,
+    # which `resolve_mentions` deliberately does not catch — so without this check the
+    # endpoint answers 500 instead of the contract's 422. Two distinct causes, both
+    # unreachable from the menu and therefore both tampering:
+    #   · a NUL code point — os.fsencode accepts it, the syscall rejects it;
+    #   · a LONE SURROGATE outside the surrogateescape window (U+D800-U+DC7F, U+DD00-U+DFFF)
+    #     — os.fsencode itself rejects it. U+DC80-U+DCFF are legal: they round-trip to raw
+    #     bytes 0x80-0xFF, which is how Python represents undecodable filenames.
+    # Other control characters (\x01, \n, ...) are LEGAL in POSIX filenames and are left to
+    # degrade as ordinary STATE misses — rejecting them here would be over-reach.
+    if "\0" in rel:
+        return "must not contain a NUL character"
+    try:
+        os.fsencode(rel)
+    except (UnicodeEncodeError, ValueError):
+        return "must be encodable as a filesystem path"
+
+    if rel.startswith("/") or ntpath.isabs(rel) or PurePosixPath(rel).is_absolute():
+        return "must be project-relative, not absolute"
+
+    # ⚠ CHECK THE RAW SEGMENTS, BEFORE PurePosixPath. PurePosixPath NORMALIZES a literal
+    # "." segment and a doubled slash away — PurePosixPath("assets/./video/x.mp4").parts is
+    # ("assets", "video", "x.mp4") — so testing its .parts silently blesses a path the menu
+    # could never produce, and the turn would run. The dot-segment rule has to be enforced
+    # on the string the client actually sent.
+    raw_segments = rel.split("/")
+    if any(seg == ".." for seg in raw_segments):
+        return "must not contain a '..' segment"
+    if any(seg == "" for seg in raw_segments):
+        return "must not contain an empty path segment"
+    # Any dot-prefixed segment, at any depth — this also catches a bare ".". The listing
+    # endpoint only filters a dot LEAF, so the composer drops these client-side too; this is
+    # the server half of that pair.
+    if any(seg.startswith(".") for seg in raw_segments):
+        return "must not contain a hidden (dot-prefixed) path segment"
+
+    # Only now is normalization a no-op, so .parts is safe to reason about.
+    p = PurePosixPath(rel)
+    parts = p.parts
+    ext = p.suffix.lower()
+    for prefix, recursive, allowed in _MENTION_ROOTS:
+        pre = PurePosixPath(prefix).parts
+        if parts[: len(pre)] != pre:
+            continue
+        rest = parts[len(pre) :]
+        if not rest:
+            return f"{prefix}/ needs a file name"
+        if not recursive and len(rest) != 1:
+            return f"must be a direct child of {prefix}/"
+        if ext not in allowed:
+            return f"{prefix}/ only lists {', '.join(sorted(allowed))}"
+        return None
+    roots = ", ".join(f"{r[0]}/" for r in _MENTION_ROOTS)
+    return f"must start with one of: {roots}"
+
+
+def resolve_mentions(project_dir: Path, mentions: list[Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """(resolved, shape_errors) for a request's mention sidecar.
+
+    `shape_errors` non-empty ⇒ the caller MUST 422 without calling the runner.
+
+    Otherwise every mention is returned in first-appearance order, de-duplicated, each with
+    an `abs` path or None. None means a STATE failure — the file vanished, is not a regular
+    file, or resolves (through a symlink) outside the project. Those are races we cause
+    ourselves: the agent rewrites `hf/renders/*` during its own turns, so a valid pick can
+    go stale mid-sentence. Refusing the turn there would cost the user their message, so it
+    degrades to "not found" and the turn proceeds.
+    """
+    errors: list[str] = []
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for m in mentions or []:
+        rel = m.path if isinstance(m, MentionRef) else (m or {}).get("path")
+        err = mention_shape_error(rel)
+        if err:
+            errors.append(f"{rel!r}: {err}")
+            continue
+        if rel not in seen:
+            seen.add(rel)
+            ordered.append(rel)
+    if errors:
+        return [], errors
+
+    root = project_dir.resolve()
+    resolved: list[dict[str, Any]] = []
+    for rel in ordered:
+        abs_path: Optional[str] = None
+        try:
+            # resolve() FOLLOWS symlinks, and list_assets' is_file() check does too — so a
+            # symlink inside assets/ pointing out of the project is menu-reachable. Re-check
+            # containment on the REAL path and never emit one that escaped.
+            real = (root / rel).resolve()
+            if real.is_file() and (real == root or root in real.parents):
+                abs_path = str(real)
+        except OSError:
+            abs_path = None
+        resolved.append({"path": rel, "abs": abs_path})
+    return resolved, []
+
+
+def message_with_mentions(message: str, resolved: list[dict[str, Any]]) -> str:
+    """The prompt the runner receives: the user's prose, then a resolution block.
+
+    Returns the SAME string object when there is nothing to add — every turn without a
+    mention (which is every turn today) must be byte-for-byte what it is now.
+    """
+    if not resolved:
+        return message
+    lines = ["[MENTIONED PROJECT ASSETS — resolved by the server, do not re-derive:"]
+    for r in resolved:
+        lines.append(
+            f" - {r['path']}\n   {r['abs']}"
+            if r["abs"]
+            else f" - {r['path']}\n   NOT FOUND in this project — ask the user which file they meant"
+        )
+    return f"{message}\n\n" + "\n".join(lines) + "]"
 
 
 def _browse_hidden(rel: Path) -> bool:
@@ -111,10 +265,24 @@ class CreateProjectRequest(BaseModel):
     style: Optional[str] = None  # None/empty -> the agent picks a style
 
 
+class MentionRef(BaseModel):
+    """One asset the user picked from the composer's `@` menu.
+
+    `path` is project-relative and authoritative — the prose is never re-parsed, so a file
+    name may contain anything (spaces, brackets) without breaking the reference. `token` is
+    only what the user sees in the draft; the server ignores it.
+    """
+
+    path: str
+    token: Optional[str] = None
+
+
 class ChatRequest(BaseModel):
     message: str
     thread_id: Optional[str] = None
     model: Optional[str] = None  # UI-selected agent model (validated against AGENT_MODELS)
+    # Optional with a default: an older client that sends no sidecar is unaffected.
+    mentions: list[MentionRef] = []
 
 
 class ThreadCreate(BaseModel):
@@ -920,6 +1088,16 @@ def create_app(
         """
         if get_project_record(pdir, project_id) is None:
             raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        # SHAPE-check the @-mention sidecar BEFORE anything else: the menu can only ever
+        # produce a valid path, so a violation is a client bug or a tampered request and
+        # should fail loudly and identically whatever the auth state. STATE failures (the
+        # file vanished) are handled below and deliberately do NOT block the turn.
+        resolved, shape_errors = resolve_mentions(pdir / project_id, body.mentions)
+        if shape_errors:
+            raise HTTPException(
+                status_code=422,
+                detail="invalid asset mention — " + "; ".join(shape_errors),
+            )
         if not auth_configured():
             raise HTTPException(
                 status_code=503,
@@ -971,7 +1149,9 @@ def create_app(
 
         async def drive() -> None:
             try:
-                await runner.run_turn(project_id, body.message, on_event=emit)
+                # Same object when there are no mentions, so every existing turn is
+                # byte-for-byte unchanged.
+                await runner.run_turn(project_id, message_with_mentions(body.message, resolved), on_event=emit)
             except Exception as exc:  # surface runner failure as an SSE event
                 detail = str(exc)[:500]
                 if auth_mod.classify_auth_error(detail):

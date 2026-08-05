@@ -208,7 +208,9 @@ select { cursor: pointer; }
   box-shadow: var(--shadow-1); cursor: pointer; }
 .jump-latest:hover { color: var(--ink); border-color: var(--ink-dim); }
 
-.composer { display: flex; gap: var(--space-2); margin-top: var(--space-2); flex-shrink: 0; align-items: flex-end; }
+/* position: relative anchors the `@` mention menu, which pops ABOVE the composer. */
+.composer { display: flex; gap: var(--space-2); margin-top: var(--space-2); flex-shrink: 0;
+  align-items: flex-end; position: relative; }
 .composer-input {
   flex: 1; min-width: 0; resize: none; max-height: 220px; min-height: 2.2rem;
   line-height: 1.45; font-family: inherit; overflow-y: auto;
@@ -222,6 +224,38 @@ select { cursor: pointer; }
   padding-left: var(--space-2);
 }
 .composer-bar .model-select:hover:not(:disabled) { border-color: var(--line); background-color: var(--field); }
+
+/* ── `@` asset mention menu (OPN-27) ──────────────────────────────────────────
+   Chat namespace, not `st-`: this is the shared composer, not the studio. Anchored to
+   .composer and opening upward, so a long list never pushes the textarea off screen. */
+.mention-menu {
+  position: absolute; bottom: calc(100% + var(--space-1)); left: 0; right: 0; z-index: 30;
+  max-height: 260px; overflow-y: auto; margin: 0; padding: var(--space-1) 0;
+  list-style: none; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-2);
+}
+.mention-group {
+  padding: var(--space-1) var(--space-3) var(--space-05);
+  font-size: var(--text-2xs); font-weight: 650; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--ink-dim);
+}
+.mention-item {
+  display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  padding: var(--space-1) var(--space-3); cursor: pointer;
+  color: var(--ink); font-size: var(--text-sm); line-height: var(--lh-tight);
+  transition: background-color var(--dur-hover) var(--ease-out);
+}
+.mention-item svg { flex: none; color: var(--ink-dim); }
+.mention-item.active { background: var(--accent-soft); }
+.mention-item.active .mention-path { color: var(--accent-ink); }
+.mention-text { min-width: 0; display: flex; flex-direction: column; }
+.mention-name { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The path is what actually gets sent, so it stays visible — two same-named files in
+   different buckets are only distinguishable by it. */
+.mention-path {
+  font-size: var(--text-xs); color: var(--ink-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
+}
 
 /* Question card (agent's clarifying question — its own block above the composer) */
 .question-card {

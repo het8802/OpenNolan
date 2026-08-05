@@ -252,8 +252,11 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
 
   // Hand the agent our LATEST edits: flush a pending autosave before its turn starts, so it reads the
   // timeline we actually see (not a stale disk copy). Wrap only `send`; everything else passes through.
+  // FORWARD EVERY ARGUMENT (...rest carries the @-mention sidecar). A one-parameter wrapper here
+  // would silently drop mentions in the EDITOR while they kept working on the dashboard — the same
+  // component, one surface quietly broken.
   const chatForPanel = useMemo(() => (
-    chat ? { ...chat, send: async (text) => { await flushAutosave(); return chat.send(text) } } : chat
+    chat ? { ...chat, send: async (text, ...rest) => { await flushAutosave(); return chat.send(text, ...rest) } } : chat
   ), [chat, flushAutosave])
 
   const render = useCallback(async () => {

@@ -4,6 +4,7 @@
 // renders the whole editor against a mocked API and asserts it mounts + loads.
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
+import { useState } from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import * as api from '../api.js'
 import Studio from './Studio.jsx'
@@ -129,5 +130,41 @@ describe('editor / agent-edit safety', () => {
     rerender(<Studio projectId="p1" state={{ name: 'demo-project' }} onClose={() => {}} chat={mockChat({ busy: false })} />)
     expect(await screen.findByText(/updated by the agent/)).toBeInTheDocument()
     expect(screen.queryByText(/Reopen the editor/i)).toBeNull() // the old bad-UX warning is gone
+  })
+})
+
+// OPN-27: the editor wraps `chat.send` to flush a pending autosave first. That wrapper used to
+// take ONE parameter, which would have dropped the @-mention sidecar in the editor while it kept
+// working on the dashboard — same component, one surface quietly broken. Pin the forwarding.
+describe('editor / agent @-mention sidecar', () => {
+  it('forwards the mention sidecar through the pre-agent autosave flush', async () => {
+    api.listAssets.mockResolvedValue({
+      kinds: { images: [], video: [{ path: 'assets/video/hook.mp4', name: 'hook.mp4' }], audio: [], music: [] },
+      renders: [], agent_renders: [],
+    })
+    // ChatPanel is controlled by the bundle, so the harness has to own `input` the way
+    // useAgentChat does — a bare spy would never re-render and the menu would never open.
+    const send = vi.fn()
+    function Harness() {
+      const [input, setInput] = useState('')
+      return (
+        <Studio projectId="p1" state={{ name: 'demo-project' }} onClose={() => {}}
+          chat={mockChat({ projectId: 'p1', input, setInput, send })} />
+      )
+    }
+    render(<Harness />)
+    await screen.findByText('demo-project')
+
+    const ta = screen.getByPlaceholderText(/Message the agent/)
+    fireEvent.change(ta, { target: { value: 'use @hoo', selectionStart: 8 } })
+    await screen.findByRole('listbox')
+    fireEvent.keyDown(ta, { key: 'Enter' })                 // insert the mention
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull())
+    fireEvent.keyDown(ta, { key: 'Enter' })                 // send
+
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    expect(send.mock.calls[0][1]).toEqual([
+      { token: '@assets/video/hook.mp4', path: 'assets/video/hook.mp4' },
+    ])
   })
 })

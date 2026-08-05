@@ -107,6 +107,22 @@ describe('scaffoldEditDecisions', () => {
       expect(typeof c.out_seconds).toBe('number')
     }
   })
+
+  // OPN-39: a new project DECLARES 9:16 instead of inheriting canvasOf's landscape
+  // fallback, so the preview and video_compose read one value rather than two literals
+  // that merely agree. The legacy fallback is pinned separately, below.
+  it('declares a 9:16 canvas so a new project never relies on the fallback', () => {
+    expect(canvasOf(scaffoldEditDecisions())).toEqual({ width: 1080, height: 1920, fps: 30 })
+    expect(scaffoldEditDecisions().metadata.compose_target)
+      .toEqual({ width: 1080, height: 1920, fps: 30 })
+  })
+
+  it('hands out a fresh compose_target per call (no shared mutable canvas)', () => {
+    const a = scaffoldEditDecisions(), b = scaffoldEditDecisions()
+    expect(a.metadata.compose_target).not.toBe(b.metadata.compose_target)
+    a.metadata.compose_target.width = 1
+    expect(b.metadata.compose_target.width).toBe(1080)
+  })
 })
 
 describe('cutAtTime (project time → cut + source time)', () => {
@@ -315,11 +331,26 @@ describe('structural mutators (studio editor)', () => {
     expect(withOv.overlays[0].INVALID).toBeUndefined()
     expect(removeOverlay(withOv, 0).overlays).toHaveLength(0)
   })
+  // ⚠ DO NOT "fix" this to 9:16. It pins what a LEGACY document with no compose_target
+  // means, and its twin is `_resolve_canvas` in tools/video/video_compose.py (the
+  // `1920, 1080, 30.0` line). Move one without the other and every canvas-less project
+  // previews at one ratio and exports at another, silently. New projects are vertical
+  // because scaffoldEditDecisions DECLARES it — not because this floor moved.
   it('setCanvas merges compose_target; canvasOf falls back to 1920x1080@30', () => {
     expect(canvasOf({})).toEqual({ width: 1920, height: 1080, fps: 30 })
     const d = setCanvas(doc(), { width: 1080, height: 1920 })
     expect(d.metadata.compose_target).toEqual({ width: 1080, height: 1920 })
     expect(canvasOf(setCanvas(d, { fps: 24 }))).toEqual({ width: 1080, height: 1920, fps: 24 })
+  })
+  // canvasOf defaults per FIELD, not per object: setCanvas merges, so a partial target is
+  // reachable and must not drag the missing dimensions back to the legacy floor.
+  it('canvasOf fills in missing compose_target fields individually, not as a block', () => {
+    expect(canvasOf({ metadata: { compose_target: { fps: 24 } } }))
+      .toEqual({ width: 1920, height: 1080, fps: 24 })
+    expect(canvasOf({ metadata: { compose_target: { width: 1080 } } }))
+      .toEqual({ width: 1080, height: 1080, fps: 30 })
+    expect(canvasOf(setCanvas(scaffoldEditDecisions(), { fps: 24 })))
+      .toEqual({ width: 1080, height: 1920, fps: 24 })
   })
 })
 
