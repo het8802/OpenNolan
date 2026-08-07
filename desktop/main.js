@@ -159,6 +159,15 @@ function nodeBin() {
   return dir ? path.join(dir, 'bin', 'node') : null;
 }
 
+// The CORE Python wheels vendored inside the app (scripts/vendor-wheels.mjs -> Resources/wheels), or
+// null in dev / in a build made before they were bundled — then provision.py installs from pypi.org
+// exactly as it does today.
+function wheelsDir() {
+  if (!app.isPackaged) return null;
+  const dir = path.join(process.resourcesPath, 'wheels');
+  return fs.existsSync(dir) ? dir : null;
+}
+
 // Which Python runs the BACKEND. Explicit override wins. Packaged: the provisioned venv python if it
 // exists (ensureProvisioned() guarantees this before startBackend), else the bundled base as a
 // bootstrap fallback. Dev: repo .venv, then PATH — unchanged.
@@ -303,6 +312,10 @@ function provisionEnv() {
     OPENNOLAN_PYTHON: bundledPython(), // the base interpreter the venv is built from
     OPENNOLAN_UV: uvBin(),
   };
+  // Offline core install: the wheels for requirements-ui.txt + requirements.txt ship inside the app,
+  // so first launch needs no pypi.org at all. Dev leaves this unset -> provision.py installs online.
+  const wd = wheelsDir();
+  if (wd) env.OPENNOLAN_WHEELS = wd;
   // Composition tier (OPN-3): point provision.py at the bundled node + put its bin on PATH so the
   // sibling npm/npx resolve. Dev leaves these unset (provision.py falls back to a PATH node).
   const nb = nodeBin();

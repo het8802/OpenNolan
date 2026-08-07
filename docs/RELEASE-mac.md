@@ -116,6 +116,9 @@ Requires an **Apple Developer account** ($99/yr) and a **Developer ID Applicatio
   the `.zip`, and `latest-mac.yml` (the update feed electron-updater reads).
 - The `zip` target is required even though users install the `.dmg` — Squirrel.Mac/electron-updater
   update from the zip. Do not drop it.
+- **Publish as a NORMAL release — never tick "Set as a pre-release".** `allowPrerelease` is deliberately
+  unset in `main.js:initAutoUpdate()`, so electron-updater ignores prereleases: tagging one silently
+  turns auto-update off for every existing user, no matter how correct `latest-mac.yml` is.
 - Auto-update artifacts must be **signed** (electron-updater verifies the signature on macOS), so
   auto-update only works on notarized builds. `main.js:initAutoUpdate()` runs only when `app.isPackaged`.
 - Website "Download for Mac" links at the GitHub Release `.dmg`.

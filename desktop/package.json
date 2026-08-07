@@ -10,7 +10,7 @@
     "start": "electron .",
     "dev": "ELECTRON_DEV=1 electron .",
     "test:smoke": "playwright test",
-    "fetch-runtime": "node ../scripts/fetch-python.mjs && node ../scripts/fetch-uv.mjs && node ../scripts/fetch-node.mjs",
+    "fetch-runtime": "node ../scripts/fetch-python.mjs && node ../scripts/fetch-uv.mjs && node ../scripts/fetch-node.mjs && node ../scripts/vendor-wheels.mjs",
     "dist": "npm run fetch-runtime && npm --prefix ../web run build && electron-builder --mac --arm64 --config.mac.notarize=true",
     "dist:dir": "npm run fetch-runtime && npm --prefix ../web run build && electron-builder --mac --arm64 --dir"
   },
@@ -65,6 +65,7 @@
           "!fetch-python.mjs",
           "!fetch-uv.mjs",
           "!fetch-node.mjs",
+          "!vendor-wheels.mjs",
           "!generate_educational_sfx.py"
         ]
       },
@@ -145,6 +146,10 @@
       {
         "from": "resources/node",
         "to": "node"
+      },
+      {
+        "from": "resources/wheels",
+        "to": "wheels"
       }
     ],
     "mac": {
@@ -158,6 +163,7 @@
           ]
         }
       ],
+      "minimumSystemVersion": "14.0",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",

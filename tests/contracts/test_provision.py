@@ -123,6 +123,56 @@ def test_core_venv_seeds_pip_from_the_bundled_wheel(monkeypatch, tmp_path):
     assert any(c[-2:] == ["-m", "ensurepip"] for c in cmds)
 
 
+def test_core_install_uses_the_bundled_wheels_offline(monkeypatch, tmp_path):
+    """First launch must not reach pypi.org: scripts/vendor-wheels.mjs ships the core wheels inside the
+    app and main.js points OPENNOLAN_WHEELS at them. `--no-cache` is LOAD-BEARING — `uv --offline`
+    disables the network but NOT ~/.cache/uv, so without it a wheel we forgot to vendor still installs
+    on a warm cache (the developer's) and the omission first surfaces on a stranger's Mac."""
+    code = tmp_path / "code"
+    code.mkdir()
+    (code / "requirements.txt").write_text("fastapi\n")
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(code))
+    monkeypatch.setenv("OPENNOLAN_WHEELS", str(wheels))
+    monkeypatch.setattr(provision, "_uv", lambda: "/fake/uv")
+    monkeypatch.setattr(provision, "provision_ffmpeg", lambda *a, **k: None)
+    cmds: list[list[str]] = []
+
+    def fake_run(cmd, progress=None, env=None):
+        cmds.append(cmd)
+        if "venv" in cmd:
+            (provision.app_paths.runtime_dir() / "venv.building" / "bin").mkdir(parents=True)
+
+    monkeypatch.setattr(provision, "_run", fake_run)
+    provision.provision_core()
+    install = next(c for c in cmds if "install" in c)
+    assert "--offline" in install and "--no-cache" in install
+    assert install[install.index("--find-links") + 1] == str(wheels)
+
+
+def test_capability_packs_stay_online_even_with_bundled_wheels(monkeypatch, tmp_path):
+    """The packs (torch/onnxruntime, GBs) are deliberately NOT vendored, and they share _pip_install —
+    so the offline flags are opt-in per call. Applying them unconditionally would make every pack
+    install resolve against the core wheels dir and fail."""
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    monkeypatch.setenv("OPENNOLAN_WHEELS", str(wheels))
+    monkeypatch.setattr(provision, "_uv", lambda: "/fake/uv")
+    cmds: list[list[str]] = []
+    monkeypatch.setattr(provision, "_run", lambda cmd, progress=None, env=None: cmds.append(cmd))
+    provision._pip_install(provision.venv_python(), ["torch"], None)
+    assert not any(f in cmds[0] for f in ("--offline", "--no-cache", "--find-links"))
+
+
+def test_wheels_dir_is_none_unless_the_path_really_exists(monkeypatch):
+    # Dev (unset) and an older packaged build (var set, dir absent) both fall back to the online install.
+    monkeypatch.delenv("OPENNOLAN_WHEELS", raising=False)
+    assert provision._wheels_dir() is None
+    monkeypatch.setenv("OPENNOLAN_WHEELS", "/nope/wheels")
+    assert provision._wheels_dir() is None
+
+
 # ── composition tier (OPN-3: Node + Remotion + HyperFrames) ────────────────────
 
 def _fake_node(monkeypatch, version="v22.5.0"):

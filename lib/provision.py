@@ -350,6 +350,15 @@ def _uv() -> Optional[str]:
     return shutil.which("uv")
 
 
+def _wheels_dir() -> Optional[Path]:
+    """Locate the CORE wheels vendored inside the app (OPENNOLAN_WHEELS, set by main.js -> the packaged
+    Resources/wheels, built by scripts/vendor-wheels.mjs). None in dev -> install online, unchanged."""
+    env = os.environ.get("OPENNOLAN_WHEELS")
+    if env and Path(env).exists():
+        return Path(env)
+    return None
+
+
 def _run(cmd: list[str], progress: Optional[ProgressCb], env: Optional[dict] = None) -> None:
     """Run a subprocess, streaming stdout+stderr line-by-line to `progress`. Raises on non-zero exit
     with the tail of that output ATTACHED. uv exits 2 for EVERY failure mode (usage error, unreachable
@@ -381,14 +390,28 @@ def _run(cmd: list[str], progress: Optional[ProgressCb], env: Optional[dict] = N
         raise RuntimeError(msg)
 
 
-def _pip_install(target_python: Path, args: list[str], progress: Optional[ProgressCb]) -> None:
+def _pip_install(target_python: Path, args: list[str], progress: Optional[ProgressCb],
+                 offline: bool = False) -> None:
     """Install into `target_python`'s environment. Prefer uv (fast); fall back to that python's pip.
-    Wheels ONLY (--only-binary=:all:) — a user has no compiler, so a source build = a dead first-run."""
+    Wheels ONLY (--only-binary=:all:) — a user has no compiler, so a source build = a dead first-run.
+
+    `offline=True` (the CORE install only) installs from the wheels vendored inside the app instead of
+    pypi.org. It is opt-in because the capability packs share this function and are deliberately still
+    online — torch is not something we ship. `--no-cache` is LOAD-BEARING: `uv --offline` only disables
+    the network, not uv's on-disk cache, so without it a wheel we forgot to vendor would still install
+    on any machine with a warm ~/.cache/uv (the developer's) and the omission would first surface on a
+    stranger's Mac. That is the exact bug class this exists to kill."""
     uv = _uv()
+    wheels = _wheels_dir() if offline else None
     if uv:
-        _run([uv, "pip", "install", "--python", str(target_python), "--only-binary=:all:", *args], progress)
+        local = ["--offline", "--no-cache", "--find-links", str(wheels)] if wheels else []
+        _run([uv, "pip", "install", "--python", str(target_python), "--only-binary=:all:", *local, *args],
+             progress)
     else:
-        _run([str(target_python), "-m", "pip", "install", "--only-binary=:all:", *args], progress)
+        # No bundled/PATH uv (dev, or a broken bundle). pip's spelling of the same three flags — a
+        # missing wheel must fail here, never silently fall through to the network.
+        local = ["--no-index", "--no-cache-dir", "--find-links", str(wheels)] if wheels else []
+        _run([str(target_python), "-m", "pip", "install", "--only-binary=:all:", *local, *args], progress)
 
 
 # ── core provisioning ──────────────────────────────────────────────────────────
@@ -420,7 +443,8 @@ def provision_core(progress: Optional[ProgressCb] = None, step: Optional[StepCb]
     else:
         _run([base_python(), "-m", "venv", str(building)], progress)  # stdlib venv seeds pip itself
 
-    # 2) install the core requirement files (wheels only)
+    # 2) install the core requirement files — from the wheels vendored inside the app when there are
+    #    any (offline=True; see _pip_install + scripts/vendor-wheels.mjs). Dev installs online.
     req_args: list[str] = []
     for req in CORE_REQUIREMENTS:
         rp = app_paths.code_root() / req
@@ -429,7 +453,7 @@ def provision_core(progress: Optional[ProgressCb] = None, step: Optional[StepCb]
     if not req_args:
         raise RuntimeError("no core requirement files found under code_root()")
     _step(step, 3, 55, "Installing Python packages…")
-    _pip_install(building_python, req_args, progress)
+    _pip_install(building_python, req_args, progress, offline=True)
 
     # 3) verify the backend's hard deps actually import before we trust this venv
     _step(step, 55, 58, "Verifying installation…")
