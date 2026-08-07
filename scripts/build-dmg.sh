@@ -7,13 +7,20 @@
 #
 #   • Detaches stale OpenNolan disk-image mounts left behind by a failed prior run.
 #   • Auto-detects a Developer ID cert: present -> signed + notarized; absent -> unsigned local build.
-#   • Verifies the finished .dmg (hdiutil verify) and prints exactly where it landed + how to test it.
+#   • Notarizes + staples the .dmg itself (electron-builder only does the .app — see notarize_dmg).
+#   • Gates on the real Gatekeeper checks (spctl + stapler validate), not just an image checksum.
+#   • Prints exactly where it landed + how to test it.
 #
 # Usage:
 #   scripts/build-dmg.sh              build the .dmg (signed if a cert is present, else unsigned)
 #   scripts/build-dmg.sh --unsigned   force an unsigned local build even if a cert exists
 #   scripts/build-dmg.sh --dir        fast path: unpacked .app only, skip the .dmg (uses dist:dir)
-#   scripts/build-dmg.sh --publish     signed build + upload to the GitHub Releases auto-update feed
+#   scripts/build-dmg.sh --publish    the full release: signed + notarized, then uploads the .dmg
+#                                     (human download) alongside electron-builder's .zip +
+#                                     latest-mac.yml (the auto-update feed). Needs GH_TOKEN.
+#
+# A signed build always talks to Apple twice (once for the .app, once for the .dmg) and uploads
+# ~1 GB each time. For a quick local check use --dir or --unsigned; neither contacts Apple.
 #
 # Signing / notarization env (release machine only) — see docs/RELEASE-mac.md for the full list:
 #   CSC_NAME, or CSC_LINK + CSC_KEY_PASSWORD          (Developer ID identity)
@@ -86,13 +93,37 @@ if [[ $SIGNED == 0 ]]; then
   export CSC_IDENTITY_AUTO_DISCOVERY=false   # tell electron-builder to skip signing + notarization
 fi
 
+# --- notarization credentials -------------------------------------------------
+# BOTH the .app (electron-builder, via mac.notarize) and the .dmg (notarize_dmg below) need
+# these. Resolved here, up front, so a missing credential fails in two seconds instead of
+# after a 20-minute build. Supports either auth method from docs/RELEASE-mac.md.
+NOTARY_ARGS=()
+if [[ $SIGNED == 1 ]]; then
+  if [[ -n "${APPLE_API_KEY:-}" && -n "${APPLE_API_KEY_ID:-}" && -n "${APPLE_API_ISSUER:-}" ]]; then
+    [[ -f "$APPLE_API_KEY" ]] || die "APPLE_API_KEY points at a missing file: $APPLE_API_KEY"
+    NOTARY_ARGS=(--key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER")
+    info "notarization: App Store Connect API key ($APPLE_API_KEY_ID)"
+  elif [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
+    NOTARY_ARGS=(--apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID")
+    info "notarization: Apple ID app-specific password ($APPLE_ID)"
+  else
+    die "signed build, but no notary credentials in the environment.
+    Set APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER (recommended), or
+        APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID.   See docs/RELEASE-mac.md.
+    For a local test build that skips Apple entirely, use: $0 --unsigned  (or --dir)"
+  fi
+fi
+
 # --- publish preflight (auto-update needs a signed build + real repo in build.publish) ---
 if [[ $PUBLISH == 1 ]]; then
   [[ $SIGNED == 1 ]] || die "--publish requires a signed build (electron-updater verifies signatures on macOS)"
   if grep -q "OWNER_PLACEHOLDER\|REPO_PLACEHOLDER" "$DESKTOP/package.json"; then
     die "build.publish in desktop/package.json still has OWNER_PLACEHOLDER/REPO_PLACEHOLDER — set the real GitHub owner/repo first"
   fi
-  [[ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]] || warn "no GH_TOKEN/GITHUB_TOKEN set — electron-builder may not be able to upload the release"
+  # A die, not a warn: with no token electron-builder silently publishes nothing, and the
+  # `gh release upload` at the end has no release to attach the .dmg to.
+  [[ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]] || die "no GH_TOKEN/GITHUB_TOKEN set — nothing would be uploaded. Try: gh auth switch --user <owner> && export GH_TOKEN=\$(gh auth token)"
+  command -v gh >/dev/null || die "gh not found — needed to upload the .dmg to the release (brew install gh)"
 fi
 
 # --- DMG builder --------------------------------------------------------------
@@ -141,16 +172,37 @@ build_dmg() {
   hdiutil create -srcfolder "$stage" -volname "$DMG_VOLNAME" -format UDZO -o "$out" -quiet \
     || die "hdiutil create -srcfolder failed (see df -h for disk space)"
 
-  # sign the finished .dmg when a Developer ID is available. NOTE: notarizing the
-  # DMG itself is a separate release-machine step (xcrun notarytool submit + staple);
-  # electron-builder's old dmg target did that automatically — the new path does not,
-  # so a public release must notarize+staple the .dmg. See docs/RELEASE-mac.md.
+  # Sign the finished .dmg — a prerequisite for notarizing it (notarize_dmg, below).
   if [[ $SIGNED == 1 ]]; then
     id="$(security find-identity -v -p codesigning 2>/dev/null | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
-    if [[ -n "$id" ]]; then codesign --sign "$id" "$out" || warn "could not codesign the .dmg"; fi
+    # A die, not a warn: an unsigned .dmg cannot be notarized, so continuing just moves the
+    # failure to a more confusing place. CSC_LINK alone doesn't help HERE — this step signs
+    # from the keychain, so import the .p12 (security import) or set CSC_NAME.
+    [[ -n "$id" ]] || die "no 'Developer ID Application' identity in the keychain to sign the .dmg with"
+    # --timestamp is explicit on purpose: Apple REJECTS notarization of a signature that has
+    # no secure timestamp. codesign's default is not guaranteed to include one.
+    codesign --sign "$id" --timestamp "$out" || die "could not codesign the .dmg"
   fi
 
   rm -rf "$(dirname "$stage")"
+}
+
+# --- notarize + staple the DMG -------------------------------------------------
+# A notarization ticket is per-ARTIFACT. electron-builder already notarized and stapled the
+# .app, but the .dmg wrapping it is a separate file Apple has never seen — and the .dmg is
+# what the browser marks with com.apple.quarantine and what Gatekeeper assesses first, at
+# mount time, before the app inside is ever reached. So it needs its own ticket.
+# Staple BEFORE any upload: stapling embeds the ticket by rewriting the file.
+notarize_dmg() {
+  local dmg="$1"
+  step "Notarizing the DMG with Apple (uploads $(du -sh "$dmg" | cut -f1); usually a few minutes)"
+  # --wait blocks until Apple returns a verdict and exits non-zero if it is not "Accepted".
+  xcrun notarytool submit "$dmg" "${NOTARY_ARGS[@]}" --wait \
+    || die "notarization was rejected. For the per-file reason, re-run with the submission id above:
+    xcrun notarytool log <submission-id> <same credential flags>"
+  info "stapling the ticket into the .dmg…"
+  xcrun stapler staple "$dmg" \
+    || die "stapling failed — the ticket exists on Apple's servers but is not embedded in the .dmg"
 }
 
 # --- build ---
@@ -182,12 +234,30 @@ step "Packaging DMG (hdiutil create -srcfolder — bypasses the convert step tha
 build_dmg "$APP" "$DMG"
 info "verifying image integrity…"
 hdiutil verify "$DMG" >/dev/null && info "checksum valid"
+
+if [[ $SIGNED == 1 ]]; then
+  notarize_dmg "$DMG"
+  step "Verifying Gatekeeper acceptance"
+  # `hdiutil verify` above only checks the image CHECKSUM (are the bits intact) — it says
+  # nothing about signing or notarization. These two are the real gate: exactly what macOS
+  # does to a freshly-downloaded .dmg. Hard failures — never ship a .dmg that fails here.
+  spctl -a -vv --type install "$DMG" \
+    || die "Gatekeeper REJECTED the .dmg (expected: 'accepted' / 'source=Notarized Developer ID')"
+  xcrun stapler validate "$DMG" || die "the .dmg has no stapled notarization ticket"
+fi
+
 printf '\n%s\n' "${GRN}${BOLD}✅ DMG ready:${RST} $DMG  ($(du -sh "$DMG" | cut -f1))"
 if [[ $SIGNED == 1 ]]; then
-  info "the app inside is signed; the .dmg is signed too."
-  warn "the .dmg is NOT yet notarized/stapled — for a public release run: xcrun notarytool submit \"$DMG\" ... && xcrun stapler staple \"$DMG\" (see docs/RELEASE-mac.md)"
+  info "${GRN}signed + notarized + stapled${RST} — the .app and the .dmg both. Gatekeeper-clean."
   if [[ $PUBLISH == 1 ]]; then
-    warn "electron-builder uploaded the zip + latest-mac.yml (auto-update feed), but NOT this .dmg — upload it to the release yourself: gh release upload v$VERSION \"$DMG\""
+    step "Uploading the DMG to the v$VERSION release"
+    # electron-builder's publish already pushed the .zip + latest-mac.yml (the auto-update feed
+    # the running app reads — users never see those). The .dmg is the human-facing download and
+    # is NOT part of its publish set, because we build it ourselves. --clobber makes re-runs safe.
+    gh release upload "v$VERSION" "$DMG" --clobber \
+      || die "upload failed. If that was a 403, the active gh account cannot write to the repo:
+    gh auth switch --user <owner> && export GH_TOKEN=\$(gh auth token)"
+    info "${GRN}published on v$VERSION:${RST} .dmg (download) + .zip + latest-mac.yml (auto-update)"
   fi
 else
   cat <<EOF

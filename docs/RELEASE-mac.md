@@ -39,22 +39,50 @@ uvicorn child, and runs the bundled interpreter, only when `app.isPackaged`. Dev
 
 **Signing + notarization are electron-builder built-ins — no custom hooks.** electron-builder's
 `@electron/osx-sign` pass recurses the whole app and re-signs every nested Mach-O (including
-`Resources/python/*`) with your Developer ID + hardened runtime + the inherit entitlements; `mac.notarize:true`
-then notarizes the `.app` and staples both the app and the `.dmg`. With **no** Developer ID identity in the
-keychain, electron-builder skips signing AND notarization and produces an **unsigned** `.app` (fine for local
-testing, not for distribution).
+`Resources/python/*`) with your Developer ID + hardened runtime + the inherit entitlements; `mac.notarize`
+then notarizes the `.app` and staples it. With **no** Developer ID identity in the keychain,
+electron-builder skips signing AND notarization and produces an **unsigned** `.app` (fine for local
+testing, not for distribution). The `.dmg` is notarized separately — see `notarize_dmg` in
+`scripts/build-dmg.sh`.
+
+### Two traps in `build.mac` (both have already cost a build)
+
+1. **`"notarize": false` is the committed default**, so no stray local build uploads to Apple.
+   `npm run dist` re-enables it with `--config.mac.notarize=true`. It must stay a real JSON
+   **boolean**: app-builder-lib gates on `notarizeOptions === false` (`MacTargetHelper.js:258`),
+   and a CLI-passed string `"false"` is truthy and would **not** skip.
+2. **No comment keys.** `scheme.json` sets `additionalProperties: false` on `MacConfiguration`, so
+   any `_comment`-style key fails validation with the near-useless `configuration.mac should be one
+   of these: null`. Explanations go in this doc, not in `package.json`. To find the real offender:
+
+   ```bash
+   node -e "const s=require('app-builder-lib/scheme.json'),a=new (require('ajv'))({allErrors:true,strict:false}),v=a.compile(s);
+   v(require('./package.json').build)||console.log(v.errors.filter(e=>e.keyword==='additionalProperties'))" # run in desktop/
+   ```
 
 ## Build
 
-```bash
-# unsigned local smoke build (no certs needed) — produces an unpacked .app under desktop/dist/mac-arm64
-npm --prefix desktop install
-npm --prefix desktop run dist:dir
+**`scripts/build-dmg.sh` is the entry point** — the raw `npm` scripts below produce the `.app` + `.zip`
+but no `.dmg` (`mac.target` is `zip` only; see the DMG-builder comment in that script for why).
 
-# full signed + notarized dmg (needs the env vars below)
-npm --prefix desktop run dist
+```bash
+# fast local smoke build — unpacked .app only, never contacts Apple
+scripts/build-dmg.sh --dir
+
+# signed + notarized .dmg, not published (Apple round-trip: ~1 GB up, twice)
+scripts/build-dmg.sh
+
+# THE RELEASE: signed + notarized .app AND .dmg, Gatekeeper-verified, all three
+# artifacts uploaded (.dmg for humans, .zip + latest-mac.yml for auto-update)
+gh auth switch --user het8802 && export GH_TOKEN=$(gh auth token)
+scripts/build-dmg.sh --publish
 ```
-`dist`/`dist:dir` first run `fetch-python.mjs` (interpreter) and the web build, then electron-builder.
+`--publish` fails fast in preflight if the notary credentials, the signing identity, or `GH_TOKEN`
+are missing, rather than after a 20-minute build. Bump `desktop/package.json` `version` first — the
+release it targets is `v{version}`.
+
+Underneath, `dist`/`dist:dir` first run `fetch-python.mjs` (interpreter) and the web build, then
+electron-builder.
 
 ## Signing + notarization env (release machine only)
 
@@ -94,30 +122,48 @@ Requires an **Apple Developer account** ($99/yr) and a **Developer ID Applicatio
 
 ## Verify a real build
 
+`scripts/build-dmg.sh` now runs the last two itself and **dies** if either fails, so a .dmg that
+reaches a user is Gatekeeper-clean by construction. The first two are still useful by hand:
+
 ```bash
 codesign -dvvv --entitlements - "OpenNolan.app/Contents/Resources/python/bin/python3"   # TeamIdentifier set, flags=0x10000(runtime)
 codesign --verify --deep --strict "OpenNolan.app"
-spctl -a -vv --type install OpenNolan.dmg                                                # "accepted / Notarized Developer ID"
-xcrun stapler validate OpenNolan.dmg
+spctl -a -vv --type install OpenNolan.dmg      # automated: "accepted / Notarized Developer ID"
+xcrun stapler validate OpenNolan.dmg           # automated
 ```
 
-## Known gaps (not done in Lane D)
+To feel what a downloader feels (quarantine is what makes Gatekeeper strict):
 
-- **Agent work-root:** the FastAPI editor path works packaged (`projects_dir` is injected). But the
-  headless **agent** subprocess runs with `cwd = code_root` (read-only bundle) and its prompt still tells
-  it to write to bare-relative `projects/...`. `scripts/update_stage.py` was fixed to resolve
-  `app_paths.projects_dir()`, but the agent-prompt/other-relative-write paths still need a writable
-  work-root (symlink farm, or absolute paths in the prompt). This is the one remaining blocker before the
-  agent works in a packaged app. Tracked for the next lane.
-- **Node / HyperFrames / Remotion renders:** the Node runtime + `mmdc` are NOT bundled yet, so agent
-  compositions that need them won't render in the packaged app until the composition tier is added (Lane E).
-- **Icon:** no `build/icon.icns` yet — the app uses the default Electron icon. Add a 1024px `.icns`
-  (a genuine ship-blocker for a public download; electron-builder auto-picks up `build/icon.icns`).
-- **Publish placeholders:** `build.publish` ships `OWNER_PLACEHOLDER/REPO_PLACEHOLDER`, baked into
-  `app-update.yml` at pack time. Replace with the real GitHub owner/repo before ANY distributed build,
-  or every launch's update check 404s (harmless now — logged + caught, not a crash).
-- **CI:** `.github/workflows/release-mac.yml` is a skeleton — it needs the repo secrets + icon before it
-  runs green. Until then, release with `npm --prefix desktop run dist -- --publish always` on your Mac.
+```bash
+xattr -w com.apple.quarantine "0081;00000000;Safari;" OpenNolan.dmg && open OpenNolan.dmg
+```
+
+## Known gaps
+
+**Closed since Lane D:** the agent work-root (OPN-4 — `agent_add_dirs()` passes the writable
+projects dir to the SDK, `build_sandbox` admits it); the bundled Node runtime + composition
+engines (OPN-3, `desktop/resources/node`); `build/icon.icns`; the `build.publish` placeholders;
+and .dmg notarization + stapling + upload (now automated in `scripts/build-dmg.sh`).
+
+Still open:
+
+- **ffmpeg is unpinned — the sharpest one.** `lib/provision.py:475` points at a
+  `/redirect/latest/` URL with `FFMPEG_SHA256 = ""`, so the download is **unverified** and each
+  user's first run fetches whatever `latest` is that day. Two people installing the *same* .dmg a
+  month apart get different binaries. Fill the hashes with
+  `python scripts/provision.py --print-ffmpeg-sha` against a versioned URL, then pin both.
+  Also a single-host runtime dependency: if it's down, provisioning degrades to a 503 on
+  scrub/export rather than failing loudly.
+- **uv is unpinned:** `scripts/fetch-uv.mjs:32` resolves `releases/latest` at build time, so two
+  builds of the same commit can bundle different uv versions. (Python and Node are pinned + sha'd
+  out-of-band — match that.)
+- **CI:** `.github/workflows/release-mac.yml` does not work. It only runs `npm run dist`, never
+  `scripts/build-dmg.sh`, so it produces no .dmg at all — and then fails on `ls desktop/dist/*.dmg`.
+  It also has no equivalent of the script's signing gate, so with absent/expired secrets
+  electron-builder skips signing, exits 0, and it would publish an **unsigned** release as green.
+  Release from a Mac with `scripts/build-dmg.sh --publish` until this calls the script and hard-fails
+  on missing secrets.
+- **Bundle size:** users download ~1 GB. Trim non-runtime `assets/` + `tools/` from `extraResources`.
 - **First-run provisioning (Lane E — DONE):** on first packaged launch, `main.js` shows a setup window
   and runs `scripts/provision.py --core` with the bundled interpreter, which uses the bundled `uv` to
   build a venv at `OPENNOLAN_HOME/runtime/venv`, install the core deps (`requirements-ui.txt` +
