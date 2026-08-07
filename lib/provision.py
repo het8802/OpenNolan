@@ -34,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+from collections import deque
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -45,6 +46,12 @@ MANIFEST_SCHEMA = 1
 CORE_REQUIREMENTS = ("requirements-ui.txt", "requirements.txt")
 
 ProgressCb = Callable[[str], None]
+
+# How much of a failed command's output rides along on the RuntimeError, and the hard cap on the
+# whole message — it ends up in a native dialog and a mailto body, neither of which tolerates a
+# multi-kilobyte traceback line.
+_RUN_TAIL_LINES = 15
+_RUN_ERR_CHARS = 2000
 
 # Determinate setup progress: (pct, end_pct, label). `pct` is where this step STARTS on the
 # 0-100 scale of the CURRENT provision run; `end_pct` is where it will land when the step
@@ -344,7 +351,11 @@ def _uv() -> Optional[str]:
 
 
 def _run(cmd: list[str], progress: Optional[ProgressCb], env: Optional[dict] = None) -> None:
-    """Run a subprocess, streaming stdout+stderr line-by-line to `progress`. Raises on non-zero exit."""
+    """Run a subprocess, streaming stdout+stderr line-by-line to `progress`. Raises on non-zero exit
+    with the tail of that output ATTACHED. uv exits 2 for EVERY failure mode (usage error, unreachable
+    index, bad --python, unwritable target), so a bare "command failed (2)" carries no cause — that is
+    literally all we got from a beta tester's dead first run. `progress` is not enough: it goes to the
+    setup window, while the exception is what reaches the dialog, the email and analytics."""
     if progress:
         progress(f"$ {' '.join(cmd)}")
     proc = subprocess.Popen(
@@ -352,12 +363,22 @@ def _run(cmd: list[str], progress: Optional[ProgressCb], env: Optional[dict] = N
         env={**os.environ, **(env or {})},
     )
     assert proc.stdout is not None
+    tail: deque[str] = deque(maxlen=_RUN_TAIL_LINES)
     for line in proc.stdout:
+        line = line.rstrip()
+        tail.append(line)
         if progress:
-            progress(line.rstrip())
+            progress(line)
     code = proc.wait()
     if code != 0:
-        raise RuntimeError(f"command failed ({code}): {' '.join(cmd)}")
+        msg = f"command failed ({code}): {' '.join(cmd)}"
+        detail = "\n".join(tail)
+        room = _RUN_ERR_CHARS - len(msg)
+        if detail and room > 2:
+            # Keep the END of the output — the cause is the last line, and one traceback line can be
+            # kilobytes on its own. The command always survives; it is the smaller half.
+            msg += "\n" + (detail if len(detail) < room else "…" + detail[-(room - 2):])
+        raise RuntimeError(msg)
 
 
 def _pip_install(target_python: Path, args: list[str], progress: Optional[ProgressCb]) -> None:
@@ -383,16 +404,21 @@ def provision_core(progress: Optional[ProgressCb] = None, step: Optional[StepCb]
         progress(f"Setting up OpenNolan runtime in {rt} …")
 
     # 1) fresh venv in a temp location (so a crash never leaves a half-venv at the real path).
-    #    `--seed` installs pip/setuptools into the venv — `uv venv` OMITS pip by default, which left
-    #    the runtime with no `python -m pip` for lazy capability-pack installs that shell out to pip.
+    #    The venv needs pip: `uv venv` OMITS it, and lazy capability-pack installs shell out to
+    #    `python -m pip`. We used to ask uv for it with `--seed`, but that RESOLVES PIP FROM PYPI —
+    #    proven by the versions: --seed installs pip 26.2.1 while the bundled interpreter already
+    #    carries ensurepip/_bundled/pip-25.0.1-py3-none-any.whl. That was a network round-trip on
+    #    the critical path of first launch, and it is the exact call that died for a beta tester.
+    #    `ensurepip` just unzips the wheel that ships inside the interpreter — fully offline.
     _step(step, 0, 3, "Creating Python environment…")
     shutil.rmtree(building, ignore_errors=True)
     uv = _uv()
-    if uv:
-        _run([uv, "venv", "--seed", "--python", base_python(), str(building)], progress)
-    else:
-        _run([base_python(), "-m", "venv", str(building)], progress)
     building_python = building / "bin" / "python"
+    if uv:
+        _run([uv, "venv", "--python", base_python(), str(building)], progress)
+        _run([str(building_python), "-m", "ensurepip"], progress)
+    else:
+        _run([base_python(), "-m", "venv", str(building)], progress)  # stdlib venv seeds pip itself
 
     # 2) install the core requirement files (wheels only)
     req_args: list[str] = []
@@ -521,10 +547,17 @@ def provision_ffmpeg(progress: Optional[ProgressCb] = None, step: Optional[StepC
     for i, (name, url) in enumerate(names):
         f0, f1 = s0 + i * per, s0 + (i + 1) * per
         dest = bd / name
-        if dest.exists():
-            _step(step, f1, f1, f"{name} already present.")
-            continue
         expected = (FFMPEG_SHA256.get(name) or "").strip().lower()
+        if dest.exists():
+            # A pin has to apply RETROACTIVELY. This check used to run BEFORE the sha was read, so a
+            # binary downloaded during the unpinned era (or a truncated/corrupt write) stayed trusted
+            # forever and no later pin could ever reach it. Unpinned: keep today's behaviour.
+            if not expected or _sha256_file(dest).lower() == expected:
+                _step(step, f1, f1, f"{name} already present.")
+                continue
+            if progress:
+                progress(f"[warn] existing {name} fails the sha256 pin — re-downloading.")
+            dest.unlink(missing_ok=True)
         attempts = 2 if expected else 1  # a pin lets us retry a corrupt/partial download once
         for attempt in range(1, attempts + 1):
             if progress:

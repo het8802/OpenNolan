@@ -8,6 +8,7 @@ registry, atomic manifest writes, and the endpoint contracts (mocking the heavy 
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -71,6 +72,55 @@ def test_venv_ok_true_only_when_manifest_matches(monkeypatch, tmp_path):
 def test_provision_pack_rejects_unknown():
     with pytest.raises(ValueError):
         provision.provision_pack("nope")
+
+
+# ── failure legibility (_run) ─────────────────────────────────────────────────
+
+def test_run_attaches_command_output_to_the_error():
+    # A beta tester's first launch died with a bare "command failed (2)" and we could not diagnose it:
+    # uv exits 2 for EVERY failure mode, so the cause has to ride along on the exception itself.
+    with pytest.raises(RuntimeError) as ei:
+        provision._run([sys.executable, "-c", "import sys; print('the real reason'); sys.exit(2)"], None)
+    msg = str(ei.value)
+    assert "command failed (2)" in msg
+    assert "the real reason" in msg
+
+
+def test_run_error_is_capped_but_keeps_the_tail():
+    # The message lands in a native dialog and a mailto body; one traceback line can be kilobytes.
+    with pytest.raises(RuntimeError) as ei:
+        provision._run([sys.executable, "-c",
+                        "import sys; print('x' * 9000); print('LAST LINE'); sys.exit(1)"], None)
+    msg = str(ei.value)
+    assert len(msg) <= provision._RUN_ERR_CHARS
+    assert "LAST LINE" in msg  # the END of the output survives — that's where the cause is
+
+
+# ── offline pip (ensurepip, not `uv venv --seed`) ─────────────────────────────
+
+def test_core_venv_seeds_pip_from_the_bundled_wheel(monkeypatch, tmp_path):
+    """`uv venv --seed` RESOLVES PIP FROM PYPI (it installs 26.2.1 while the bundled interpreter
+    carries ensurepip/_bundled/pip-25.0.1) — a network hop on the critical path of first launch, and
+    the exact call that failed for a beta tester. ensurepip unzips the bundled wheel instead."""
+    code = tmp_path / "code"
+    code.mkdir()
+    (code / "requirements.txt").write_text("fastapi\n")
+    monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(code))
+    monkeypatch.setattr(provision, "_uv", lambda: "/fake/uv")
+    monkeypatch.setattr(provision, "_pip_install", lambda *a, **k: None)
+    monkeypatch.setattr(provision, "provision_ffmpeg", lambda *a, **k: None)
+    cmds: list[list[str]] = []
+
+    def fake_run(cmd, progress=None, env=None):
+        cmds.append(cmd)
+        if "venv" in cmd:  # the real uv would create it; os.replace() below needs it to exist
+            (provision.app_paths.runtime_dir() / "venv.building" / "bin").mkdir(parents=True)
+
+    monkeypatch.setattr(provision, "_run", fake_run)
+    provision.provision_core()
+    venv_cmd = next(c for c in cmds if "venv" in c)
+    assert "--seed" not in venv_cmd  # --seed = a PyPI round-trip we no longer make
+    assert any(c[-2:] == ["-m", "ensurepip"] for c in cmds)
 
 
 # ── composition tier (OPN-3: Node + Remotion + HyperFrames) ────────────────────
@@ -217,6 +267,41 @@ def test_ffmpeg_sha_mismatch_never_trusts_binary(monkeypatch):
     with pytest.raises(RuntimeError, match="sha256 mismatch"):
         provision.provision_ffmpeg()
     assert not (provision.bin_dir() / "ffmpeg").exists()  # mismatched binary removed, not trusted
+
+
+def test_ffmpeg_pin_applies_to_a_binary_already_on_disk(monkeypatch):
+    # The `dest.exists() -> continue` shortcut used to run BEFORE the sha was read, so a binary
+    # downloaded during the unpinned era stayed trusted forever and a later pin never reached it.
+    import hashlib
+    monkeypatch.setattr(provision.shutil, "which", lambda _x: None)  # force the download path
+    provision.bin_dir().mkdir(parents=True, exist_ok=True)
+    for name in provision.FFMPEG_URLS:
+        (provision.bin_dir() / name).write_bytes(b"stale-unpinned-binary")
+    monkeypatch.setitem(provision.FFMPEG_SHA256, "ffmpeg", hashlib.sha256(b"good").hexdigest())
+    monkeypatch.setitem(provision.FFMPEG_SHA256, "ffprobe", hashlib.sha256(b"good").hexdigest())
+    monkeypatch.setattr(provision, "_download_binary",
+                        lambda url, dest, on_bytes=None: dest.write_bytes(b"good"))
+    monkeypatch.setattr(provision, "_run", lambda *a, **k: None)  # the `-version` probe can't exec a stub
+    provision.provision_ffmpeg()
+    for name in provision.FFMPEG_URLS:
+        assert (provision.bin_dir() / name).read_bytes() == b"good"  # re-downloaded, not trusted
+
+
+def test_ffmpeg_existing_binary_kept_when_it_matches_or_is_unpinned(monkeypatch):
+    import hashlib
+    monkeypatch.setattr(provision.shutil, "which", lambda _x: None)
+    provision.bin_dir().mkdir(parents=True, exist_ok=True)
+    for name in provision.FFMPEG_URLS:
+        (provision.bin_dir() / name).write_bytes(b"good")
+    monkeypatch.setitem(provision.FFMPEG_SHA256, "ffmpeg", hashlib.sha256(b"good").hexdigest())
+    monkeypatch.setitem(provision.FFMPEG_SHA256, "ffprobe", "")  # unpinned -> keep today's behaviour
+
+    def boom(url, dest, on_bytes=None):
+        raise AssertionError("must not re-download a binary that already satisfies the pin")
+
+    monkeypatch.setattr(provision, "_download_binary", boom)
+    monkeypatch.setattr(provision, "_run", lambda *a, **k: None)  # the `-version` probe can't exec a stub
+    provision.provision_ffmpeg()
 
 
 def test_print_ffmpeg_shas(monkeypatch):

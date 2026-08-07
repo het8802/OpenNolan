@@ -13,7 +13,17 @@ extend-exclude = [
 [format]
 # Legacy renderer files. Format them in a dedicated mechanical change; mixing
 # that churn into a behavior fix makes review and rollback unsafe.
-exclude = ["tools/video/video_compose.py", "tests/tools/test_hdr_detection.py"]
+#
+# The provisioning pair joins the list for the same reason: both are hand-wrapped
+# throughout and `ruff format --check` fails on them at HEAD, so the fast gate
+# blocks the moment anyone touches them. Reformatting is ~100 lines of churn
+# around a 4-hunk behavior fix. Do it as its own commit.
+exclude = [
+  "tools/video/video_compose.py",
+  "tests/tools/test_hdr_detection.py",
+  "lib/provision.py",
+  "tests/contracts/test_provision.py",
+]
 
 [lint]
 # Start with correctness rules that can be enabled on the existing repository
