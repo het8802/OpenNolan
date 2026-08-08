@@ -90,6 +90,27 @@ HTML5 DnD — `dataTransfer` type `application/x-opennolan-asset`, dropped via `
 - We want an aesthetic UI, so don't add unnecessary emojis to the UI. Use aesthetic icons instead.
 - The programmer creating this software (the one prompting you) is new to this world of video editing. He doesn't have much experience on how ffmpeg works, how is HDR different from SDR, what are the different codecs. However, they are willing to spend time with someone to explain them about all these things in the world of videos.
 - We need to improve the observability in the app for the developer, whether it be tracing the ai agent working on the video or whether it be the editing tools used by the user in edit window. the overall app needs more observability for the developer.
+- **Every new feature and every new failure path ships with analytics.** Not as a follow-up —
+in the same change. Nobody is going to file a bug report; the events are how we learn which
+features earn their place, which get found but abandoned, and what breaks for users we never
+hear from. A feature with no event is a feature we cannot decide anything about.
+  - **Declare it before you emit it.** Add the event to the right family file in
+  `schemas/analytics/` (`_envelope.json` holds the shared ids). The gate **fails closed** —
+  an undeclared event, an undeclared property, or an enum value outside its declared
+  vocabulary is DROPPED, and `scripts/analytics_manifest.py` will show it missing.
+  - **Every event names the decision it drives.** If you cannot write "this number tells me
+  whether to build/keep/delete X", it is a log line, not an event. Log it locally instead.
+  - **Never free text.** A message, a filename, a project or style name is USER DATA — it
+  belongs in the local log, never on the wire. Ship a closed enum, a bucketed number, or a
+  hash of the shape. `desktop_error` and the client error reporter both do this: send
+  `exception_class` / `top_frame` / `stack_hash`, keep the raw text local.
+  - **Respect the upload budget.** It is enforced per source, not aspirational (see
+  `BUDGET_*` in `server/analytics.py`). Default to a per-session rollup; only the families
+  already allowed to upload per-interaction may do so. If a new event does not fit, roll it
+  up rather than raising the ceiling.
+  - Failure paths matter more than happy paths here — `*_failed`, a non-2xx, a swallowed
+  `catch`, a retry. A silently swallowed error is exactly the thing a user will never tell
+  us about. See `docs/analytics-dashboard-guide.md` for what the numbers are read against.
 - This is a public repo so make sure not to leave any PII data of the user tracked by git. The code will be pushed to a public repo and hence only what's required should be commited.
 - Remember that since this is an editing tool, the user can drop in any kind of media, so our code should be prepared for that.
 
