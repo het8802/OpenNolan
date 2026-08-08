@@ -33,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from collections import deque
@@ -60,6 +61,12 @@ _RUN_ERR_CHARS = 2000
 # first launch with a progress bar that never moves and nothing to report. Bounded, it fails in 30s with
 # a message, and provision_core's best-effort catch degrades to "ffmpeg skipped — retry from Settings".
 _DOWNLOAD_TIMEOUT = 30
+
+# Total wall-clock budget for ONE binary. _DOWNLOAD_TIMEOUT bounds each socket operation, not the
+# transfer: a host that trickles a few bytes just inside every 30s window never times out per read
+# and never finishes either, so first launch still hangs on a bar that crawls. ~50 MB, so 5 minutes
+# is generous even on a bad connection; blowing it fails the same legible way a stall does.
+_DOWNLOAD_DEADLINE = 300
 
 # Determinate setup progress: (pct, end_pct, label). `pct` is where this step STARTS on the
 # 0-100 scale of the CURRENT provision run; `end_pct` is where it will land when the step
@@ -806,12 +813,15 @@ def _download_binary(url: str, dest: Path, on_bytes: Optional[Callable[[int, Opt
             except (TypeError, ValueError):
                 total = None
             read = 0
+            deadline = time.monotonic() + _DOWNLOAD_DEADLINE
             while True:
                 chunk = resp.read(1 << 20)
                 if not chunk:
                     break
                 out.write(chunk)
                 read += len(chunk)
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"exceeded the {_DOWNLOAD_DEADLINE}s total download budget")
                 if on_bytes:
                     on_bytes(read, total)
     except (TimeoutError, urllib.error.URLError) as exc:

@@ -312,6 +312,10 @@ function provisionEnv() {
     OPENNOLAN_PYTHON: bundledPython(), // the base interpreter the venv is built from
     OPENNOLAN_UV: uvBin(),
   };
+  // The packaged-app signal for lib/app_paths.is_packaged(). It CANNOT be OPENNOLAN_CODE_ROOT (set
+  // just above in dev too — provision.py needs code_root() to find its requirement files whatever the
+  // packaging), so it gets its own var, set only in the .app.
+  if (app.isPackaged) env.OPENNOLAN_PACKAGED = '1';
   // Offline core install: the wheels for requirements-ui.txt + requirements.txt ship inside the app,
   // so first launch needs no pypi.org at all. Dev leaves this unset -> provision.py installs online.
   const wd = wheelsDir();
@@ -644,6 +648,7 @@ function startBackend(port) {
     const home = process.env.OPENNOLAN_HOME || app.getPath('userData');
     runtimeEnv.OPENNOLAN_HOME = home;
     runtimeEnv.OPENNOLAN_CODE_ROOT = CODE_ROOT;
+    runtimeEnv.OPENNOLAN_PACKAGED = '1';   // is_packaged() gate — same signal provisionEnv() sets
     runtimeEnv.OPENNOLAN_PROJECTS_DIR = process.env.OPENNOLAN_PROJECTS_DIR || path.join(home, 'projects');
     runtimeEnv.OPENNOLAN_UV = uvBin();       // so the backend can install capability packs on demand
     // Composition tier (OPN-3): the bundled node runs Remotion/HyperFrames; expose it + its bin dir so

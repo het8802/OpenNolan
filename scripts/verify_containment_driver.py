@@ -15,7 +15,8 @@ This is the same tool-subprocess env path the agent's jobs use.
 Expected environment (set by verify_containment.sh):
     HOME                 -> empty throwaway dir (the tripwire)
     OPENNOLAN_HOME       -> persistent verify dir (venv/models live here across runs)
-    OPENNOLAN_CODE_ROOT  -> repo/bundle root (forces is_packaged() -> routing ON)
+    OPENNOLAN_CODE_ROOT  -> repo/bundle root (where lib.* is imported from)
+    OPENNOLAN_PACKAGED   -> 1 (forces is_packaged() -> routing ON)
 
 Exit codes:
     0  PASS          at least one job ran and $HOME gained no files
@@ -87,7 +88,7 @@ def main() -> int:
 
     base = app_paths.route_caches()
     if base is None:
-        print("INCONCLUSIVE: cache routing is gated OFF (set OPENNOLAN_CODE_ROOT or OPENNOLAN_ROUTE_CACHES=1)")
+        print("INCONCLUSIVE: cache routing is gated OFF (set OPENNOLAN_PACKAGED=1 or OPENNOLAN_ROUTE_CACHES=1)")
         return INCONCLUSIVE
     print(f"routing ON — cache base: {base}")
 

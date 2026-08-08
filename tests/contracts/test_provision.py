@@ -143,6 +143,7 @@ def test_core_install_uses_the_bundled_wheels_offline(monkeypatch, tmp_path):
     wheels = tmp_path / "wheels"
     wheels.mkdir()
     monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(code))
+    monkeypatch.setenv("OPENNOLAN_PACKAGED", "1")
     monkeypatch.setenv("OPENNOLAN_WHEELS", str(wheels))
     monkeypatch.setattr(provision, "_uv", lambda: "/fake/uv")
     monkeypatch.setattr(provision, "provision_ffmpeg", lambda *a, **k: None)
@@ -190,11 +191,17 @@ def test_offline_install_without_wheels_fails_instead_of_going_online(monkeypatc
 
 def test_dev_core_install_asks_for_online_explicitly(monkeypatch, tmp_path):
     """Dev (unpackaged, no vendored wheels) still installs from pypi.org — but because provision_core
-    PASSES offline=False, not because the offline path quietly degraded when the dir was absent."""
+    PASSES offline=False, not because the offline path quietly degraded when the dir was absent.
+
+    REGRESSION: dev is detected by OPENNOLAN_PACKAGED being unset, NOT by OPENNOLAN_CODE_ROOT — which
+    desktop/main.js provisionEnv() sets unconditionally (provision.py needs code_root() to find these
+    very requirement files). So this test sets CODE_ROOT exactly the way a dev run really has it; when
+    is_packaged() read that var, a dev provision demanded the app's wheels and died before pip ran."""
     code = tmp_path / "code"
     code.mkdir()
     (code / "requirements.txt").write_text("fastapi\n")
-    monkeypatch.delenv("OPENNOLAN_CODE_ROOT", raising=False)  # unpackaged
+    monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(code))  # provisionEnv() sets this in dev too
+    monkeypatch.delenv("OPENNOLAN_PACKAGED", raising=False)  # unpackaged
     monkeypatch.delenv("OPENNOLAN_WHEELS", raising=False)
     monkeypatch.setattr(provision.app_paths, "code_root", lambda: code)
     monkeypatch.setattr(provision, "_uv", lambda: "/fake/uv")
@@ -431,6 +438,33 @@ def test_download_is_bounded_and_a_stall_is_legible(monkeypatch, tmp_path):
     assert seen["timeout"] == provision._DOWNLOAD_TIMEOUT
     assert isinstance(err.value.__cause__, TimeoutError)
     assert not (tmp_path / "ffmpeg.download").exists()  # no partial file left for the next run to trust
+
+
+def test_download_has_a_total_deadline_not_just_a_per_read_timeout(monkeypatch, tmp_path):
+    """A per-socket timeout can't catch a transfer that trickles: every read returns inside 30s, so
+    nothing ever times out and first launch hangs on a bar that crawls forever. The wall-clock budget
+    fails it the same legible way a stall does."""
+
+    class TricklingResponse:
+        headers = {"Content-Length": "999999999"}
+
+        def read(self, _n):
+            clock[0] += 60  # each read is slow but never hits _DOWNLOAD_TIMEOUT
+            return b"x"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    clock = [0.0]
+    monkeypatch.setattr(provision.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(provision.urllib.request, "urlopen", lambda url, timeout=None: TricklingResponse())
+    with pytest.raises(RuntimeError, match="total download budget"):
+        provision._download_binary(provision.FFMPEG_URLS["ffmpeg"], tmp_path / "ffmpeg")
+    assert clock[0] <= provision._DOWNLOAD_DEADLINE + 60  # aborted at the budget, not much later
+    assert not (tmp_path / "ffmpeg.download").exists()  # no partial file left behind
 
 
 def test_print_ffmpeg_shas(monkeypatch):

@@ -31,6 +31,7 @@ def _clean_env(monkeypatch):
         "OPENNOLAN_ENV_FILE",
         "OPENNOLAN_RUNTIME_DIR",
         "OPENNOLAN_CACHE_DIR",
+        "OPENNOLAN_PACKAGED",
     ):
         monkeypatch.delenv(var, raising=False)
     yield
@@ -116,6 +117,7 @@ _ROUTE_VARS = (
     "PIP_CACHE_DIR",
     "XDG_CACHE_HOME",
     "TMPDIR",
+    "OPENNOLAN_PACKAGED",
 )
 
 
@@ -171,8 +173,8 @@ def test_route_caches_noop_in_dev(route_env):
     assert not route_env.exists()  # no dirs created
 
 
-def test_route_caches_on_when_packaged(route_env, tmp_path):
-    os.environ["OPENNOLAN_CODE_ROOT"] = str(tmp_path / "bundle")
+def test_route_caches_on_when_packaged(route_env):
+    os.environ["OPENNOLAN_PACKAGED"] = "1"
     assert app_paths.route_caches() == route_env
 
 
@@ -181,8 +183,8 @@ def test_route_caches_explicit_opt_in_dev(route_env):
     assert app_paths.route_caches() == route_env
 
 
-def test_route_caches_explicit_off_wins_when_packaged(route_env, tmp_path):
-    os.environ["OPENNOLAN_CODE_ROOT"] = str(tmp_path / "bundle")
+def test_route_caches_explicit_off_wins_when_packaged(route_env):
+    os.environ["OPENNOLAN_PACKAGED"] = "1"
     os.environ["OPENNOLAN_ROUTE_CACHES"] = "0"
     before = dict(os.environ)
     assert app_paths.route_caches() is None
