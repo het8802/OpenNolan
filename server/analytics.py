@@ -22,6 +22,7 @@ Design contract (from docs/plans/publish-mac-app.md, must-fix gaps):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -739,6 +740,39 @@ def _token_safe(value: str) -> str:
     return cleaned or "unknown"
 
 
+_EXC_CLASS_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]{0,63}Error)\b")
+# basename:line only. A full frame is `/Users/<name>/…/Studio.jsx:842:11`, i.e. the OS username.
+_FRAME_RE = re.compile(r"([^/\\\s()]+):(\d+):\d+\)?\s*$")
+
+
+def _exception_class(message: Any) -> str:
+    """The class name only — `TypeError`, never the message that follows it.
+
+    Run through _token_safe for the reason _fingerprint documents: a value outside
+    _BOUNDED_TOKEN's charset is dropped SILENTLY, so an inbox looks healthy and groups
+    nothing."""
+    m = _EXC_CLASS_RE.match(str(message or "").strip())
+    return _token_safe(m.group(1) if m else "Error")
+
+
+def _top_frame(stack: Any) -> Optional[str]:
+    """`basename:line` from the topmost real frame. Mirrors `topFrame` in desktop/main.js."""
+    for line in str(stack or "").split("\n"):
+        m = _FRAME_RE.search(line.rstrip())
+        if m:
+            return _token_safe(f"{m.group(1)}:{m.group(2)}")[:120]
+    return None
+
+
+def _stack_hash(stack: Any, message: Any = "") -> str:
+    """Group on the SHAPE, not the text. Message bodies embed ids and paths, so hashing them
+    would give every occurrence its own group — the opposite of what a crash inbox is for.
+    Mirrors `stackHash` in desktop/main.js so one crash groups the same from either process."""
+    raw = str(stack or "") or str(message or "")
+    shape = "|".join(re.sub(r":\d+:\d+", "", _PATH_RE.sub("[path]", line)) for line in raw.split("\n")[:8])
+    return hashlib.sha256(shape.encode("utf-8", "replace")).hexdigest()[:16]
+
+
 class _ClientError(Exception):
     """A JS (React) or Electron error re-homed into PostHog Error Tracking next to backend
     exceptions, so there's ONE crash inbox. ponytail: the Python traceback is this one-frame shim;
@@ -751,8 +785,18 @@ def capture_client_error(
     stack: Optional[str] = None,
     context: Optional[dict[str, Any]] = None,
 ) -> None:
-    """Report a frontend/Electron error to PostHog (no-op when disabled). Paths are redacted from
-    the message + stack; free-text context values are scrubbed like any event props."""
+    """Report a frontend/Electron error to PostHog (no-op when disabled).
+
+    NOTHING FREE-TEXT LEAVES THIS FUNCTION. An error message is user data: a rejected API
+    detail or a promise reason routinely embeds the project name, a filename or something the
+    user typed, and path redaction alone does not touch any of that. Only the bounded triple
+    goes out — `exception_class`, `top_frame` (basename:line), `stack_hash` (the SHAPE) —
+    which is the same contract `desktop_error` uses at `desktop/main.js:361-384`, and the same
+    reasoning `error_reported`'s `fingerprint` already documents in the taxonomy.
+
+    The raw message and stack stay LOCAL, on the backend log, where they are as useful for
+    debugging as they ever were. The renderer POSTs them to 127.0.0.1; the boundary that
+    matters is this one, on the way to PostHog."""
     client = _get_client()
     if client is None:
         return
@@ -763,12 +807,22 @@ def capture_client_error(
     props.setdefault("session_id", current_session_id())
     props["source"] = str(source)[:80]
     props["platform"] = "client"
-    if stack:
-        props["client_stack"] = _PATH_RE.sub("[path]", str(stack))[:8000]
-    safe = _PATH_RE.sub("[path]", str(message))[:300]
+    klass = _exception_class(message)
+    frame = _top_frame(stack)
+    props["exception_class"] = klass
+    if frame:
+        props["top_frame"] = frame
+    props["stack_hash"] = _stack_hash(stack, message)
+    # Local only — deliberately NOT a property. This is the copy a developer actually reads,
+    # and it never leaves the machine.
+    print(
+        f"[client-error] {source} {klass} @ {frame or '?'} :: {_PATH_RE.sub('[path]', str(message))[:300]}",
+        file=sys.stderr,
+    )
     try:
         # Raise + catch so the exception carries a valid (if shim-only) traceback for the SDK.
-        raise _ClientError(f"[{source}] {safe}")
+        # The text is the GROUPING KEY, so it is the bounded triple and never the message.
+        raise _ClientError(f"[{source}] {klass} @ {frame or '?'}")
     except _ClientError as exc:
         try:
             client.capture_exception(exc, distinct_id=install_id, properties=props)

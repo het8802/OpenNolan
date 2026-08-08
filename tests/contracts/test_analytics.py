@@ -9,6 +9,7 @@ Analytics is hard-disabled under pytest, so tests that exercise the enabled path
 
 from __future__ import annotations
 
+import json
 import sys
 import types
 
@@ -255,17 +256,46 @@ def test_capture_client_error_reports_scrubbed(monkeypatch):
 
     analytics.capture_client_error(
         "renderer",
-        "boom at /Users/het/app.js",
-        stack="Error: boom\n at /Users/het/app.js:10",
+        "TypeError: boom at /Users/het/app.js",
+        stack="TypeError: boom\n at /Users/het/app.js:10:3",
         context={"api_key": "sk-leak", "line": 10},
     )
     cap = analytics._get_client().captures[0]
     assert isinstance(cap["exc"], analytics._ClientError)
-    assert "[path]" in str(cap["exc"]) and "/Users/het" not in str(cap["exc"])  # message path-redacted
     props = cap["properties"]
     assert props["source"] == "renderer" and props["platform"] == "client"
-    assert "/Users/het" not in props["client_stack"]  # stack path-redacted
     assert props["api_key"] == "[redacted]" and props["line"] == 10  # context scrubbed like any props
+    # The bounded triple replaces the free text — same contract desktop_error uses.
+    assert props["exception_class"] == "TypeError"
+    assert props["top_frame"] == "app.js:10"
+    assert len(props["stack_hash"]) == 16
+    assert "client_stack" not in props  # the 8000-char stack no longer leaves the machine
+
+
+def test_client_error_never_ships_user_text(monkeypatch):
+    """A message is USER DATA. A rejected API detail or a promise reason routinely embeds the
+    project name, a filename, or something the user typed — and path redaction does not touch
+    any of it. This is the renderer twin of the desktop_error leak; it reached PostHog verbatim
+    until the bounded triple replaced it."""
+    _inject_fake_posthog(monkeypatch)
+    monkeypatch.setattr(analytics, "_under_pytest", lambda: False)
+    settings.set_value("analytics_disabled", False)
+    analytics.reset()
+
+    secret = "Q4-Launch-Teaser-ACME-confidential"
+    analytics.capture_client_error(
+        "unhandledrejection",
+        f'Error: request failed: {{"detail":"project \'{secret}\' is locked by another user"}}',
+        stack=f"Error: request failed\n at loadProject (/Users/het/proj/{secret}/Studio.jsx:88:12)",
+        context={"status": 409},
+    )
+    cap = analytics._get_client().captures[0]
+    blob = json.dumps(cap["properties"], default=str) + str(cap["exc"])
+    assert secret not in blob, f"user text reached the wire: {blob[:400]}"
+    assert "locked by another user" not in blob  # nor any other free-text fragment
+    # ...while still grouping usefully.
+    assert cap["properties"]["exception_class"] == "Error"
+    assert cap["properties"]["top_frame"] == "Studio.jsx:88"
 
 
 def test_before_send_redacts_username_in_exception_frames():
