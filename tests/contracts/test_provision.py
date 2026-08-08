@@ -354,6 +354,24 @@ def test_ffmpeg_existing_binary_kept_when_it_matches_or_is_unpinned(monkeypatch)
     provision.provision_ffmpeg()
 
 
+def test_download_is_bounded_and_a_stall_is_legible(monkeypatch, tmp_path):
+    """urlopen() with no timeout waits forever, so a host that accepts the connection and then goes
+    quiet hangs first launch on a bar that never moves. Bounded + wrapped: the error names the file
+    and the host, so the failure dialog/mailto carries a cause (same reason _run attaches its tail)."""
+    seen: dict = {}
+
+    def fake_urlopen(url, timeout=None):
+        seen["timeout"] = timeout
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(provision.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError, match="downloading ffmpeg from") as err:
+        provision._download_binary(provision.FFMPEG_URLS["ffmpeg"], tmp_path / "ffmpeg")
+    assert seen["timeout"] == provision._DOWNLOAD_TIMEOUT
+    assert isinstance(err.value.__cause__, TimeoutError)
+    assert not (tmp_path / "ffmpeg.download").exists()  # no partial file left for the next run to trust
+
+
 def test_print_ffmpeg_shas(monkeypatch):
     import hashlib
     monkeypatch.setattr(provision, "_download_binary", lambda url, dest, on_bytes=None: dest.write_bytes(b"abc"))

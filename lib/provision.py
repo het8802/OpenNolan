@@ -33,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 from collections import deque
 from pathlib import Path
@@ -52,6 +53,13 @@ ProgressCb = Callable[[str], None]
 # multi-kilobyte traceback line.
 _RUN_TAIL_LINES = 15
 _RUN_ERR_CHARS = 2000
+
+# Per-socket-operation timeout for the ffmpeg downloads — the ONE network hop left on the path to a
+# usable editor. `urlopen()` with no timeout blocks forever, so a host that accepts the connection and
+# then goes quiet (a captive portal, a dead mirror, a corporate proxy that swallows the response) hangs
+# first launch with a progress bar that never moves and nothing to report. Bounded, it fails in 30s with
+# a message, and provision_core's best-effort catch degrades to "ffmpeg skipped — retry from Settings".
+_DOWNLOAD_TIMEOUT = 30
 
 # Determinate setup progress: (pct, end_pct, label). `pct` is where this step STARTS on the
 # 0-100 scale of the CURRENT provision run; `end_pct` is where it will land when the step
@@ -749,22 +757,32 @@ def _download_binary(url: str, dest: Path,
     """Download url to dest. Handles a .zip (extract the single binary) or a raw binary.
     `on_bytes(read, total_or_None)` fires per chunk so callers can surface real download progress."""
     tmp = dest.with_suffix(".download")
-    with urllib.request.urlopen(url) as resp, open(tmp, "wb") as out:  # noqa: S310 (pinned/config'd URL)
-        total: Optional[int] = None
-        try:
-            cl = resp.headers.get("Content-Length")
-            total = int(cl) if cl else None
-        except (TypeError, ValueError):
-            total = None
-        read = 0
-        while True:
-            chunk = resp.read(1 << 20)
-            if not chunk:
-                break
-            out.write(chunk)
-            read += len(chunk)
-            if on_bytes:
-                on_bytes(read, total)
+    try:
+        with (
+            urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as resp,  # noqa: S310 (config'd URL)
+            open(tmp, "wb") as out,
+        ):
+            total: Optional[int] = None
+            try:
+                cl = resp.headers.get("Content-Length")
+                total = int(cl) if cl else None
+            except (TypeError, ValueError):
+                total = None
+            read = 0
+            while True:
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                out.write(chunk)
+                read += len(chunk)
+                if on_bytes:
+                    on_bytes(read, total)
+    except (TimeoutError, urllib.error.URLError) as exc:
+        # A connect-phase timeout arrives WRAPPED in URLError; a read-phase one is raised bare. Either
+        # way a raw "timed out" in the failure dialog names neither the file nor the host, which is the
+        # same illegible dead end as the bare "command failed (2)" _run() exists to prevent.
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"downloading {dest.name} from {url} failed: {getattr(exc, 'reason', exc)}") from exc
     # zip? extract the member matching the target name; else it's the raw binary. Extraction goes
     # through a temp file + os.replace so a kill mid-extract (setup-window cancel) can never leave
     # a truncated binary at dest — dest.exists() is trusted as "complete" on the next run.
