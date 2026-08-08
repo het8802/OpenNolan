@@ -99,18 +99,26 @@ def main() -> int:
 
     ran = 0
     if _ffmpeg_fixture(["-f", "lavfi", "-i", "testsrc=size=320x240:rate=1", "-frames:v", "1"], png):
+
         def _bg():
             from tools.enhancement.bg_remove import BgRemove
+
             return BgRemove()
-        ran += _run_job("bg_remove (rembg → U2NET_HOME)", _bg,
-                        {"input_path": str(png), "output_path": str(jobs_dir / "frame_nobg.png")})
+
+        ran += _run_job(
+            "bg_remove (rembg → U2NET_HOME)",
+            _bg,
+            {"input_path": str(png), "output_path": str(jobs_dir / "frame_nobg.png")},
+        )
 
     if _ffmpeg_fixture(["-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-ar", "16000"], wav):
+
         def _tr():
             from tools.analysis.transcriber import Transcriber
+
             return Transcriber()
-        ran += _run_job("transcriber (faster-whisper → HF_HOME)", _tr,
-                        {"input_path": str(wav), "model_size": "tiny"})
+
+        ran += _run_job("transcriber (faster-whisper → HF_HOME)", _tr, {"input_path": str(wav), "model_size": "tiny"})
 
     leaked = sorted(p for p in fake_home.rglob("*") if p.is_file() or p.is_symlink())
     if leaked:

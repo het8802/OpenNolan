@@ -20,6 +20,7 @@ from styles.playbook_loader import PACKAGED_PLAYBOOKS, list_playbooks
 
 # --- packaged detection ----------------------------------------------------
 
+
 def test_is_packaged_reads_code_root(monkeypatch):
     monkeypatch.delenv("OPENNOLAN_CODE_ROOT", raising=False)
     assert app_paths.is_packaged() is False
@@ -29,11 +30,12 @@ def test_is_packaged_reads_code_root(monkeypatch):
 
 # --- pipelines -------------------------------------------------------------
 
+
 def test_pipelines_unrestricted_in_dev(monkeypatch):
     monkeypatch.delenv("OPENNOLAN_CODE_ROOT", raising=False)
     names = list_pipelines()
     assert "instagram-fast-reel" in names
-    assert "talking-head" in names       # dev sees the whole catalogue
+    assert "talking-head" in names  # dev sees the whole catalogue
     assert len(names) > 1
 
 
@@ -48,6 +50,7 @@ def test_pipelines_explicit_packaged_override():
 
 
 # --- styles ----------------------------------------------------------------
+
 
 def test_styles_unrestricted_in_dev(monkeypatch):
     monkeypatch.delenv("OPENNOLAN_CODE_ROOT", raising=False)
@@ -73,6 +76,7 @@ def test_keeper_styles_are_the_two_pipeline_playbooks():
     # Guard the intent: the two keepers ARE the recommended playbooks in the
     # single packaged pipeline's manifest.
     from lib.pipeline_loader import load_pipeline
+
     manifest = load_pipeline("instagram-fast-reel")
     recommended = set(manifest["compatible_playbooks"]["recommended"])
     assert set(PACKAGED_PLAYBOOKS) == recommended

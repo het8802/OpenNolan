@@ -25,8 +25,12 @@ _REPO_ROOT = Path(app_paths.__file__).resolve().parent.parent
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
     for var in (
-        "OPENNOLAN_HOME", "OPENNOLAN_CODE_ROOT", "OPENNOLAN_PROJECTS_DIR",
-        "OPENNOLAN_ENV_FILE", "OPENNOLAN_RUNTIME_DIR", "OPENNOLAN_CACHE_DIR",
+        "OPENNOLAN_HOME",
+        "OPENNOLAN_CODE_ROOT",
+        "OPENNOLAN_PROJECTS_DIR",
+        "OPENNOLAN_ENV_FILE",
+        "OPENNOLAN_RUNTIME_DIR",
+        "OPENNOLAN_CACHE_DIR",
     ):
         monkeypatch.delenv(var, raising=False)
     yield
@@ -71,6 +75,7 @@ def test_env_config_env_path_tracks_home(monkeypatch, tmp_path):
     # env_config binds ENV_PATH at import; re-import under a set HOME to prove it follows app_paths.
     monkeypatch.setenv("OPENNOLAN_HOME", str(tmp_path))
     from server import env_config
+
     importlib.reload(env_config)
     try:
         assert env_config.ENV_PATH == tmp_path / ".env"
@@ -81,12 +86,14 @@ def test_env_config_env_path_tracks_home(monkeypatch, tmp_path):
 
 def test_agent_runner_defaults_projects_under_repo_root(tmp_path):
     from server.agent_runner import AgentRunner
+
     runner = AgentRunner(repo_root=tmp_path, client_factory=lambda pid: None)
     assert runner.projects_dir == tmp_path / "projects"
 
 
 def test_agent_runner_honors_injected_projects_dir(tmp_path):
     from server.agent_runner import AgentRunner
+
     injected = tmp_path / "app-support" / "projects"
     runner = AgentRunner(repo_root=tmp_path, projects_dir=injected, client_factory=lambda pid: None)
     assert runner.projects_dir == injected
@@ -99,9 +106,16 @@ def test_agent_runner_honors_injected_projects_dir(tmp_path):
 # Every var route_caches may touch. The fixture pops them all so tests are
 # hermetic even in dev shells that preset TMPDIR / XDG_CACHE_HOME.
 _ROUTE_VARS = (
-    "OPENNOLAN_ROUTE_CACHES", "OPENNOLAN_CACHES_ROUTED", "OPENNOLAN_CACHE_DIR",
-    "HF_HOME", "TORCH_HOME", "U2NET_HOME", "NPM_CONFIG_CACHE", "PIP_CACHE_DIR",
-    "XDG_CACHE_HOME", "TMPDIR",
+    "OPENNOLAN_ROUTE_CACHES",
+    "OPENNOLAN_CACHES_ROUTED",
+    "OPENNOLAN_CACHE_DIR",
+    "HF_HOME",
+    "TORCH_HOME",
+    "U2NET_HOME",
+    "NPM_CONFIG_CACHE",
+    "PIP_CACHE_DIR",
+    "XDG_CACHE_HOME",
+    "TMPDIR",
 )
 
 
@@ -125,11 +139,23 @@ def route_env(tmp_path):
     tempfile.tempdir = saved_tempdir
 
 
-@pytest.mark.parametrize("raw,expected", [
-    (None, None), ("", None), ("   ", None),
-    ("1", True), ("true", True), ("YES", True), ("On", True),
-    ("0", False), ("false", False), ("no", False), ("off", False), ("garbage", False),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (None, None),
+        ("", None),
+        ("   ", None),
+        ("1", True),
+        ("true", True),
+        ("YES", True),
+        ("On", True),
+        ("0", False),
+        ("false", False),
+        ("no", False),
+        ("off", False),
+        ("garbage", False),
+    ],
+)
 def test_env_flag_tristate(monkeypatch, raw, expected):
     if raw is None:
         monkeypatch.delenv("OPN_TEST_FLAG", raising=False)
@@ -141,8 +167,8 @@ def test_env_flag_tristate(monkeypatch, raw, expected):
 def test_route_caches_noop_in_dev(route_env):
     before = dict(os.environ)
     assert app_paths.route_caches() is None
-    assert dict(os.environ) == before          # env byte-identical, TMPDIR untouched
-    assert not route_env.exists()              # no dirs created
+    assert dict(os.environ) == before  # env byte-identical, TMPDIR untouched
+    assert not route_env.exists()  # no dirs created
 
 
 def test_route_caches_on_when_packaged(route_env, tmp_path):
@@ -195,9 +221,9 @@ def test_route_caches_setdefault_vs_tmpdir_override(route_env, tmp_path):
     os.environ["TMPDIR"] = "/var/folders/launchd-preset"
     os.environ["OPENNOLAN_ROUTE_CACHES"] = "1"
     base = app_paths.route_caches()
-    assert os.environ["HF_HOME"] == str(custom_hf)            # setdefault respected
-    assert os.environ["TMPDIR"] == str(base / "scratch")      # TMPDIR overridden anyway
-    assert not (base / "huggingface").exists()                # we don't mkdir the user's dirs
+    assert os.environ["HF_HOME"] == str(custom_hf)  # setdefault respected
+    assert os.environ["TMPDIR"] == str(base / "scratch")  # TMPDIR overridden anyway
+    assert not (base / "huggingface").exists()  # we don't mkdir the user's dirs
 
 
 def test_route_caches_retargets_tempfile(route_env):
@@ -211,14 +237,14 @@ def test_route_caches_idempotent(route_env):
     app_paths.route_caches()
     first = dict(os.environ)
     app_paths.route_caches()
-    assert dict(os.environ) == first          # no re-nesting, nothing drifts
+    assert dict(os.environ) == first  # no re-nesting, nothing drifts
 
 
 def test_route_caches_mkdir_failure_raises(route_env, tmp_path):
     (tmp_path / "cache").write_text("not a directory")
     os.environ["OPENNOLAN_ROUTE_CACHES"] = "1"
     with pytest.raises(OSError):
-        app_paths.route_caches()              # fail loud by design
+        app_paths.route_caches()  # fail loud by design
 
 
 def test_route_caches_env_inherited_by_subprocess(route_env):
@@ -226,7 +252,9 @@ def test_route_caches_env_inherited_by_subprocess(route_env):
     base = app_paths.route_caches()
     out = subprocess.run(
         [sys.executable, "-c", "import os; print(os.environ['HF_HOME'])"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     assert out.stdout.strip() == str(base / "huggingface")
 
@@ -245,7 +273,8 @@ def _backdate(path: Path, days: float) -> None:
 def test_sweep_scratch_removes_stale_keeps_fresh(tmp_path):
     scratch = _make_scratch(tmp_path)
     stale, fresh = scratch / "stale.mp4", scratch / "fresh.mp4"
-    stale.write_text("x"); fresh.write_text("y")
+    stale.write_text("x")
+    fresh.write_text("y")
     _backdate(stale, 8)
     app_paths.sweep_scratch(tmp_path)
     assert not stale.exists()
@@ -260,8 +289,8 @@ def test_sweep_scratch_prunes_empty_dirs(tmp_path):
     old_file.write_text("x")
     _backdate(old_file, 8)
     app_paths.sweep_scratch(tmp_path)
-    assert not (scratch / "a").exists()       # emptied chain pruned bottom-up
-    assert scratch.is_dir()                   # the scratch root itself survives
+    assert not (scratch / "a").exists()  # emptied chain pruned bottom-up
+    assert scratch.is_dir()  # the scratch root itself survives
 
 
 def test_sweep_scratch_never_removes_dir_with_fresh_file(tmp_path):
@@ -270,11 +299,11 @@ def test_sweep_scratch_never_removes_dir_with_fresh_file(tmp_path):
     d.mkdir()
     fresh = d / "in_use.wav"
     fresh.write_text("x")
-    _backdate(d, 30)                          # stale-looking DIR, fresh child
+    _backdate(d, 30)  # stale-looking DIR, fresh child
     app_paths.sweep_scratch(tmp_path)
     assert fresh.exists()
     assert d.is_dir()
 
 
 def test_sweep_scratch_missing_dir_noop(tmp_path):
-    app_paths.sweep_scratch(tmp_path)         # no scratch/ at all — must not raise
+    app_paths.sweep_scratch(tmp_path)  # no scratch/ at all — must not raise
