@@ -16,11 +16,13 @@
 // --python-version MUST track fetch-python.mjs's PY_VERSION: a wheel's `cp312` tag is the ABI of the
 // interpreter we bundle. Resolve on a 3.13 build machine without it and you vendor cp313 wheels that
 // cannot install into the bundled 3.12 venv — a green build that fails on every user's machine.
-// --python-platform is deliberately NOT pinned: a `macosx_14_0` wheel (numpy has one) requires macOS
-// 14+, so declaring an 11.0 target EXCLUDES it and the resolver silently downgrades. The build
-// machine is already arm64 macOS, which is the only target (arm64 ONLY for v1, like Python + Node).
-// Minimum macOS is 14.0 (desktop/package.json build.mac.minimumSystemVersion) — that is what lets us
-// ship current wheels instead of bounding requirements to accommodate macOS 12-13.
+// --python-platform is deliberately NOT pinned: the build machine is already arm64 macOS, which is the
+// only target (arm64 ONLY for v1, like Python + Node), and pinning a platform would drop the wheels the
+// resolver offers for newer ones. We vendor EVERY wheel a package resolved to, so a package with both a
+// `macosx_11_0` and a `macosx_14_0` build (numpy) ships both and uv picks per machine at install time.
+// The set's native arm64 floor is macOS 11.0; the app's declared floor is 12.0
+// (desktop/package.json build.mac.minimumSystemVersion), so every supported Mac has an installable
+// wheel and no requirement needs bounding backwards.
 //
 // The wheels dir IS the lock: under `--offline --no-cache --find-links` the resolver can only install
 // what we shipped, which pins the transitive deps too. Idempotent: MANIFEST.json carries a stamp over
