@@ -24,6 +24,7 @@ def _home(monkeypatch, tmp_path):
 
 # ── status / doctor ──────────────────────────────────────────────────────────
 
+
 def test_fresh_home_reports_unprovisioned():
     assert provision.venv_ok() is False
     assert provision.core_ok() is False
@@ -49,8 +50,14 @@ def test_pack_registry_wellformed():
 
 
 def test_manifest_atomic_roundtrip(tmp_path):
-    provision._write_manifest({"schema": provision.MANIFEST_SCHEMA, "base_python": "Python 3.12.13",
-                               "core_installed": True, "packs": ["beat-sync"]})
+    provision._write_manifest(
+        {
+            "schema": provision.MANIFEST_SCHEMA,
+            "base_python": "Python 3.12.13",
+            "core_installed": True,
+            "packs": ["beat-sync"],
+        }
+    )
     assert provision._read_manifest()["packs"] == ["beat-sync"]
     assert list((tmp_path / "runtime").glob(".manifest.*")) == []  # no temp files left
 
@@ -61,8 +68,9 @@ def test_venv_ok_true_only_when_manifest_matches(monkeypatch, tmp_path):
     vp.parent.mkdir(parents=True, exist_ok=True)
     vp.write_text("")  # placeholder file at the venv python path
     monkeypatch.setattr(provision, "_base_python_id", lambda: "Python 3.12.13")
-    provision._write_manifest({"schema": provision.MANIFEST_SCHEMA, "base_python": "Python 3.12.13",
-                               "core_installed": True, "packs": []})
+    provision._write_manifest(
+        {"schema": provision.MANIFEST_SCHEMA, "base_python": "Python 3.12.13", "core_installed": True, "packs": []}
+    )
     assert provision.venv_ok() is True and provision.core_ok() is True
     # a base-python drift (e.g. app update bumped Python) invalidates it -> rebuild
     monkeypatch.setattr(provision, "_base_python_id", lambda: "Python 3.13.0")
@@ -75,6 +83,7 @@ def test_provision_pack_rejects_unknown():
 
 
 # ── failure legibility (_run) ─────────────────────────────────────────────────
+
 
 def test_run_attaches_command_output_to_the_error():
     # A beta tester's first launch died with a bare "command failed (2)" and we could not diagnose it:
@@ -89,14 +98,14 @@ def test_run_attaches_command_output_to_the_error():
 def test_run_error_is_capped_but_keeps_the_tail():
     # The message lands in a native dialog and a mailto body; one traceback line can be kilobytes.
     with pytest.raises(RuntimeError) as ei:
-        provision._run([sys.executable, "-c",
-                        "import sys; print('x' * 9000); print('LAST LINE'); sys.exit(1)"], None)
+        provision._run([sys.executable, "-c", "import sys; print('x' * 9000); print('LAST LINE'); sys.exit(1)"], None)
     msg = str(ei.value)
     assert len(msg) <= provision._RUN_ERR_CHARS
     assert "LAST LINE" in msg  # the END of the output survives — that's where the cause is
 
 
 # ── offline pip (ensurepip, not `uv venv --seed`) ─────────────────────────────
+
 
 def test_core_venv_seeds_pip_from_the_bundled_wheel(monkeypatch, tmp_path):
     """`uv venv --seed` RESOLVES PIP FROM PYPI (it installs 26.2.1 while the bundled interpreter
@@ -213,6 +222,7 @@ def test_wheels_dir_is_none_unless_the_path_really_exists(monkeypatch):
 
 # ── composition tier (OPN-3: Node + Remotion + HyperFrames) ────────────────────
 
+
 def _fake_node(monkeypatch, version="v22.5.0"):
     monkeypatch.setattr(provision, "node_bin", lambda: "/fake/node")
     monkeypatch.setattr(provision, "_node_id", lambda: version)
@@ -251,8 +261,9 @@ def test_composition_ok_requires_all_parts_and_node_match(monkeypatch):
     _fake_engines_on_disk()
     assert provision.remotion_ok() and provision.hyperframes_ok()
     assert provision.composition_ok() is False  # engines on disk but manifest not stamped yet
-    provision._write_manifest({"schema": provision.MANIFEST_SCHEMA, "composition_installed": True,
-                               "node_version": "v22.5.0"})
+    provision._write_manifest(
+        {"schema": provision.MANIFEST_SCHEMA, "composition_installed": True, "node_version": "v22.5.0"}
+    )
     assert provision.composition_ok() is True
     # Node-version drift (an app update bumped Node) invalidates -> rebuild, like base_python drift
     monkeypatch.setattr(provision, "_node_id", lambda: "v24.0.0")
@@ -262,8 +273,9 @@ def test_composition_ok_requires_all_parts_and_node_match(monkeypatch):
 def test_force_provision_hides_composition(monkeypatch):
     _fake_node(monkeypatch)
     _fake_engines_on_disk()
-    provision._write_manifest({"schema": provision.MANIFEST_SCHEMA, "composition_installed": True,
-                               "node_version": "v22.5.0"})
+    provision._write_manifest(
+        {"schema": provision.MANIFEST_SCHEMA, "composition_installed": True, "node_version": "v22.5.0"}
+    )
     monkeypatch.setenv("OPENNOLAN_FORCE_PROVISION", "1")
     assert provision.node_ok() is False and provision.composition_ok() is False
 
@@ -283,8 +295,7 @@ def test_provision_composition_records_manifest(monkeypatch, tmp_path):
     (code / "composition" / "hyperframes" / "package.json").write_text("{}")
     monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(code))
     installed: list[str] = []
-    monkeypatch.setattr(provision, "_install_engine",
-                        lambda name, src, prog, **kw: installed.append(name))
+    monkeypatch.setattr(provision, "_install_engine", lambda name, src, prog, **kw: installed.append(name))
     monkeypatch.setattr(provision, "_ensure_browsers", lambda prog: None)
     provision.provision_composition()
     assert installed == ["remotion", "hyperframes"]  # both engines, Remotion first
@@ -330,13 +341,24 @@ def test_install_engine_atomic_on_failure(monkeypatch, tmp_path):
 
 def test_core_rebuild_preserves_composition_keys(monkeypatch, tmp_path):
     # a core rebuild (python drift) must NOT wipe an already-installed composition tier
-    provision._write_manifest({"schema": provision.MANIFEST_SCHEMA, "base_python": "Python 3.12.13",
-                               "core_installed": True, "packs": ["beat-sync"],
-                               "node_version": "v22.5.0", "composition_installed": True})
+    provision._write_manifest(
+        {
+            "schema": provision.MANIFEST_SCHEMA,
+            "base_python": "Python 3.12.13",
+            "core_installed": True,
+            "packs": ["beat-sync"],
+            "node_version": "v22.5.0",
+            "composition_installed": True,
+        }
+    )
     # exercise just the manifest-preservation tail of provision_core without a real venv build
     m = provision._read_manifest()
-    new_manifest = {"schema": provision.MANIFEST_SCHEMA, "base_python": "Python 3.13.0",
-                    "core_installed": True, "packs": m.get("packs") or []}
+    new_manifest = {
+        "schema": provision.MANIFEST_SCHEMA,
+        "base_python": "Python 3.13.0",
+        "core_installed": True,
+        "packs": m.get("packs") or [],
+    }
     for k in ("node_version", "composition_installed"):
         if k in m:
             new_manifest[k] = m[k]
@@ -347,11 +369,11 @@ def test_core_rebuild_preserves_composition_keys(monkeypatch, tmp_path):
 
 # ── ffmpeg pinning (OPN-3) ──────────────────────────────────────────────────────
 
+
 def test_ffmpeg_sha_mismatch_never_trusts_binary(monkeypatch):
     monkeypatch.setattr(provision.shutil, "which", lambda _x: None)  # force the download path
     monkeypatch.setitem(provision.FFMPEG_SHA256, "ffmpeg", "de" * 32)  # a pin that won't match
-    monkeypatch.setattr(provision, "_download_binary",
-                        lambda url, dest, on_bytes=None: dest.write_bytes(b"not-ffmpeg"))
+    monkeypatch.setattr(provision, "_download_binary", lambda url, dest, on_bytes=None: dest.write_bytes(b"not-ffmpeg"))
     with pytest.raises(RuntimeError, match="sha256 mismatch"):
         provision.provision_ffmpeg()
     assert not (provision.bin_dir() / "ffmpeg").exists()  # mismatched binary removed, not trusted
@@ -361,14 +383,14 @@ def test_ffmpeg_pin_applies_to_a_binary_already_on_disk(monkeypatch):
     # The `dest.exists() -> continue` shortcut used to run BEFORE the sha was read, so a binary
     # downloaded during the unpinned era stayed trusted forever and a later pin never reached it.
     import hashlib
+
     monkeypatch.setattr(provision.shutil, "which", lambda _x: None)  # force the download path
     provision.bin_dir().mkdir(parents=True, exist_ok=True)
     for name in provision.FFMPEG_URLS:
         (provision.bin_dir() / name).write_bytes(b"stale-unpinned-binary")
     monkeypatch.setitem(provision.FFMPEG_SHA256, "ffmpeg", hashlib.sha256(b"good").hexdigest())
     monkeypatch.setitem(provision.FFMPEG_SHA256, "ffprobe", hashlib.sha256(b"good").hexdigest())
-    monkeypatch.setattr(provision, "_download_binary",
-                        lambda url, dest, on_bytes=None: dest.write_bytes(b"good"))
+    monkeypatch.setattr(provision, "_download_binary", lambda url, dest, on_bytes=None: dest.write_bytes(b"good"))
     monkeypatch.setattr(provision, "_run", lambda *a, **k: None)  # the `-version` probe can't exec a stub
     provision.provision_ffmpeg()
     for name in provision.FFMPEG_URLS:
@@ -377,6 +399,7 @@ def test_ffmpeg_pin_applies_to_a_binary_already_on_disk(monkeypatch):
 
 def test_ffmpeg_existing_binary_kept_when_it_matches_or_is_unpinned(monkeypatch):
     import hashlib
+
     monkeypatch.setattr(provision.shutil, "which", lambda _x: None)
     provision.bin_dir().mkdir(parents=True, exist_ok=True)
     for name in provision.FFMPEG_URLS:
@@ -412,6 +435,7 @@ def test_download_is_bounded_and_a_stall_is_legible(monkeypatch, tmp_path):
 
 def test_print_ffmpeg_shas(monkeypatch):
     import hashlib
+
     monkeypatch.setattr(provision, "_download_binary", lambda url, dest, on_bytes=None: dest.write_bytes(b"abc"))
     out = provision.print_ffmpeg_shas()
     assert set(out) == {"ffmpeg", "ffprobe"}
@@ -420,12 +444,14 @@ def test_print_ffmpeg_shas(monkeypatch):
 
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
+
 def _client(tmp_path):
     import tempfile
 
     from fastapi.testclient import TestClient
 
     from server.app import create_app
+
     return TestClient(create_app(projects_dir=tempfile.mkdtemp()))
 
 
@@ -450,6 +476,7 @@ def test_provision_composition_endpoint_streams(monkeypatch, tmp_path):
         if progress:
             progress("installing video engines…")
             progress("done")
+
     monkeypatch.setattr(provision, "provision_composition", fake_composition)
 
     with _client(tmp_path).stream("POST", "/api/provision/composition") as r:
@@ -466,6 +493,7 @@ def test_provision_endpoint_streams(monkeypatch, tmp_path):
         if progress:
             progress(f"installing {name}…")
             progress("done")
+
     monkeypatch.setattr(provision, "provision_pack", fake_pack)
 
     with _client(tmp_path).stream("POST", "/api/provision/beat-sync") as r:

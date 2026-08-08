@@ -73,6 +73,7 @@ def _step(step: Optional[StepCb], pct: float, end: float, label: str) -> None:
     if step:
         step(pct, end, label)
 
+
 # ── composition tier (OPN-3: Node + Remotion + HyperFrames) ───────────────────
 # The two JS composition engines the agent renders with, plus their prerequisite Node runtime.
 # Node ships as a bundled, signed binary (like the interpreter — main.js sets OPENNOLAN_NODE); the
@@ -122,6 +123,7 @@ PACKS: dict[str, dict] = {
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 
+
 def venv_dir() -> Path:
     return app_paths.runtime_dir() / "venv"
 
@@ -142,6 +144,7 @@ def manifest_path() -> Path:
 # The npm engines install into the writable runtime (the app bundle is read-only). We COPY the
 # read-only composer/package sources out of code_root() into these dirs, then `npm ci` there, so
 # source + node_modules stay colocated (Remotion resolves its own project) and everything is writable.
+
 
 def composition_dir() -> Path:
     return app_paths.runtime_dir() / "composition"
@@ -208,6 +211,7 @@ def _base_python_id() -> str:
 
 # ── manifest (atomic) ──────────────────────────────────────────────────────────
 
+
 def _read_manifest() -> dict:
     p = manifest_path()
     if not p.exists():
@@ -239,6 +243,7 @@ def _write_manifest(data: dict) -> None:
 
 # ── status / doctor ─────────────────────────────────────────────────────────────
 
+
 def forced() -> bool:
     return os.environ.get("OPENNOLAN_FORCE_PROVISION", "").lower() in ("1", "true", "yes")
 
@@ -265,10 +270,12 @@ def ffmpeg_ok() -> bool:
 
     def _have(name: str) -> bool:
         return shutil.which(name) is not None or (bin_dir() / name).exists()
+
     return _have("ffmpeg") and _have("ffprobe")
 
 
 # ── composition status (OPN-3) ──────────────────────────────────────────────────
+
 
 def _node_id() -> str:
     """A stable id for the Node runtime so a version bump on app-update invalidates the install."""
@@ -350,6 +357,7 @@ def doctor() -> dict:
 
 # ── installer plumbing ───────────────────────────────────────────────────────────
 
+
 def _uv() -> Optional[str]:
     """Locate uv: the bundled binary (OPENNOLAN_UV, set by main.js), then PATH. None -> use venv pip."""
     env = os.environ.get("OPENNOLAN_UV")
@@ -377,7 +385,10 @@ def _run(cmd: list[str], progress: Optional[ProgressCb], env: Optional[dict] = N
     if progress:
         progress(f"$ {' '.join(cmd)}")
     proc = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
         env={**os.environ, **(env or {})},
     )
     assert proc.stdout is not None
@@ -395,12 +406,11 @@ def _run(cmd: list[str], progress: Optional[ProgressCb], env: Optional[dict] = N
         if detail and room > 2:
             # Keep the END of the output — the cause is the last line, and one traceback line can be
             # kilobytes on its own. The command always survives; it is the smaller half.
-            msg += "\n" + (detail if len(detail) < room else "…" + detail[-(room - 2):])
+            msg += "\n" + (detail if len(detail) < room else "…" + detail[-(room - 2) :])
         raise RuntimeError(msg)
 
 
-def _pip_install(target_python: Path, args: list[str], progress: Optional[ProgressCb],
-                 offline: bool = False) -> None:
+def _pip_install(target_python: Path, args: list[str], progress: Optional[ProgressCb], offline: bool = False) -> None:
     """Install into `target_python`'s environment. Prefer uv (fast); fall back to that python's pip.
     Wheels ONLY (--only-binary=:all:) — a user has no compiler, so a source build = a dead first-run.
 
@@ -422,11 +432,11 @@ def _pip_install(target_python: Path, args: list[str], progress: Optional[Progre
         raise RuntimeError(
             "offline install requested but the bundled Python wheels are missing "
             f"(OPENNOLAN_WHEELS={os.environ.get('OPENNOLAN_WHEELS') or 'unset'}) — this app bundle is "
-            "incomplete. Reinstall OpenNolan, or rebuild it with `node scripts/vendor-wheels.mjs`.")
+            "incomplete. Reinstall OpenNolan, or rebuild it with `node scripts/vendor-wheels.mjs`."
+        )
     if uv:
         local = ["--offline", "--no-cache", "--find-links", str(wheels)] if wheels else []
-        _run([uv, "pip", "install", "--python", str(target_python), "--only-binary=:all:", *local, *args],
-             progress)
+        _run([uv, "pip", "install", "--python", str(target_python), "--only-binary=:all:", *local, *args], progress)
     else:
         # No bundled/PATH uv (dev, or a broken bundle). pip's spelling of the same three flags — a
         # missing wheel must fail here, never silently fall through to the network.
@@ -435,6 +445,7 @@ def _pip_install(target_python: Path, args: list[str], progress: Optional[Progre
 
 
 # ── core provisioning ──────────────────────────────────────────────────────────
+
 
 def provision_core(progress: Optional[ProgressCb] = None, step: Optional[StepCb] = None) -> None:
     """Build the managed venv and install core deps + ffmpeg. Atomic + idempotent."""
@@ -546,9 +557,11 @@ def provision_pack(name: str, progress: Optional[ProgressCb] = None) -> None:
 # against the versioned url you intend to ship, then paste the hashes here (and pin the url).
 FFMPEG_URLS = {
     "ffmpeg": os.environ.get(
-        "OPENNOLAN_FFMPEG_URL", "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffmpeg.zip"),
+        "OPENNOLAN_FFMPEG_URL", "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffmpeg.zip"
+    ),
     "ffprobe": os.environ.get(
-        "OPENNOLAN_FFPROBE_URL", "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffprobe.zip"),
+        "OPENNOLAN_FFPROBE_URL", "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffprobe.zip"
+    ),
 }
 # sha256 of the EXTRACTED binary (not the zip). Empty string = unpinned (dev only, warns). Fill before release.
 FFMPEG_SHA256 = {
@@ -559,6 +572,7 @@ FFMPEG_SHA256 = {
 
 def _sha256_file(path: Path) -> str:
     import hashlib
+
     h = hashlib.sha256()
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
@@ -566,8 +580,9 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def provision_ffmpeg(progress: Optional[ProgressCb] = None, step: Optional[StepCb] = None,
-                     span: tuple[float, float] = (0.0, 100.0)) -> None:
+def provision_ffmpeg(
+    progress: Optional[ProgressCb] = None, step: Optional[StepCb] = None, span: tuple[float, float] = (0.0, 100.0)
+) -> None:
     """Ensure ffmpeg + ffprobe are available. Dev: a PATH ffmpeg is used as-is. Packaged clean Mac:
     download a static arm64 build into runtime/bin, then dequarantine + ad-hoc sign so a notarized,
     hardened app can spawn it. main.js prepends runtime/bin to the child PATH so shutil.which finds it.
@@ -612,8 +627,7 @@ def provision_ffmpeg(progress: Optional[ProgressCb] = None, step: Optional[StepC
             # Real byte progress, throttled to ~0.5% increments so we don't flood the NDJSON pipe.
             last_emit = [f0]
 
-            def on_bytes(read: int, total: Optional[int],
-                         _f0=f0, _f1=f1, _name=name, _last=last_emit) -> None:
+            def on_bytes(read: int, total: Optional[int], _f0=f0, _f1=f1, _name=name, _last=last_emit) -> None:
                 if not step or not total:
                     return
                 pct = _f0 + (read / total) * (_f1 - _f0)
@@ -635,7 +649,8 @@ def provision_ffmpeg(progress: Optional[ProgressCb] = None, step: Optional[StepC
             dest.unlink(missing_ok=True)  # never trust a mismatched binary
             if attempt == attempts:
                 raise RuntimeError(
-                    f"{name} sha256 mismatch: expected {expected[:12]}…, got {actual[:12]}… (pin/url out of sync?)")
+                    f"{name} sha256 mismatch: expected {expected[:12]}…, got {actual[:12]}… (pin/url out of sync?)"
+                )
             if progress:
                 progress(f"[warn] {name} sha mismatch — re-downloading")
         dest.chmod(0o755)
@@ -672,19 +687,28 @@ def print_ffmpeg_shas(progress: Optional[ProgressCb] = None) -> dict:
 
 # ── composition provisioning (OPN-3) ────────────────────────────────────────────
 
+
 def _npm_ci(project: Path, progress: Optional[ProgressCb]) -> None:
     """Deterministic install of a project's committed lockfile into <project>/node_modules. Wheels-equivalent:
     npm ci fails (rather than mutating the lockfile) if package.json and the lock disagree."""
     npm = npm_bin()
     if not npm:
         raise RuntimeError(f"npm not found (bundled Node missing?) — need Node >= {NODE_FLOOR_MAJOR}")
-    _run([npm, "ci", "--no-audit", "--no-fund", "--prefix", str(project)], progress,
-         env={"npm_config_update_notifier": "false", "CI": "1"})
+    _run(
+        [npm, "ci", "--no-audit", "--no-fund", "--prefix", str(project)],
+        progress,
+        env={"npm_config_update_notifier": "false", "CI": "1"},
+    )
 
 
-def _install_engine(name: str, src: Path, progress: Optional[ProgressCb],
-                    step: Optional[StepCb] = None, span: tuple[float, float] = (0.0, 100.0),
-                    label: Optional[str] = None) -> Path:
+def _install_engine(
+    name: str,
+    src: Path,
+    progress: Optional[ProgressCb],
+    step: Optional[StepCb] = None,
+    span: tuple[float, float] = (0.0, 100.0),
+    label: Optional[str] = None,
+) -> Path:
     """Copy a READ-ONLY engine source out of the bundle into the WRITABLE runtime, then npm ci. Atomic:
     build in <name>.building and os.replace() into place, so a crash never leaves a half-install."""
     s0, s1 = span
@@ -766,8 +790,7 @@ def provision_composition(progress: Optional[ProgressCb] = None, step: Optional[
         progress("Video engines ready.")
 
 
-def _download_binary(url: str, dest: Path,
-                     on_bytes: Optional[Callable[[int, Optional[int]], None]] = None) -> None:
+def _download_binary(url: str, dest: Path, on_bytes: Optional[Callable[[int, Optional[int]], None]] = None) -> None:
     """Download url to dest. Handles a .zip (extract the single binary) or a raw binary.
     `on_bytes(read, total_or_None)` fires per chunk so callers can surface real download progress."""
     tmp = dest.with_suffix(".download")
@@ -801,6 +824,7 @@ def _download_binary(url: str, dest: Path,
     # through a temp file + os.replace so a kill mid-extract (setup-window cancel) can never leave
     # a truncated binary at dest — dest.exists() is trusted as "complete" on the next run.
     import zipfile
+
     if zipfile.is_zipfile(tmp):
         extracted = dest.with_suffix(".extract")
         with zipfile.ZipFile(tmp) as zf:
