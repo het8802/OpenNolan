@@ -1,0 +1,226 @@
+{
+  "$comment": "Analytics taxonomy \u2014 editor family. Merged with its siblings by server/analytics.taxonomy(); see _envelope.json.",
+  "events": {
+    "editor_session_summary": {
+      "$comment": "Exactly one per editor session, flushed on pagehide. Per-interaction commits are counted into it, never uploaded: a 20-minute session is 50-300 commits.",
+      "question": "Which editor features are used, and were they even reachable?",
+      "properties": {
+        "features": "O",
+        "features_used": "A",
+        "duration_s": "N",
+        "commits": "N",
+        "undos": "N",
+        "redos": "N",
+        "saves": "N",
+        "renders": "N",
+        "n_cuts": "N",
+        "n_overlays": "N",
+        "action_digest": "A",
+        "digest_count_total": "N",
+        "digest_truncated": "F",
+        "project_id": "I",
+        "noop_commits": "N",
+        "preview_switches_source": "N",
+        "preview_switches_render": "N"
+      }
+    },
+    "editor_action_blocked": {
+      "$comment": "ONE hook inside `flash` covers every guardrail in the editor, but ONLY when the call site supplies a `code`: a progress toast uses kind 'warn' too ('Rendering...'), and an unconditional hook would manufacture a blocked event out of normal progress.",
+      "question": "Where does user intent hit a wall? Fix the state or the copy.",
+      "properties": {
+        "reason": "E",
+        "attempts": "N"
+      }
+    },
+    "editor_save_finished": {
+      "$comment": "FAILURES upload at 100%; successes are counted into editor_session_summary. Autosave fires 20-200x/session, so per-save upload is banned. RULES.md says a Save must never 422 \u2014 a rejected save is the contract alarm.",
+      "question": "Is the shared doc safely persisted? Fix races before features.",
+      "properties": {
+        "kind": "E",
+        "outcome": "E",
+        "duration_ms": "N"
+      }
+    },
+    "editor_load_failed": {
+      "question": "Why can a project not be edited?",
+      "properties": {
+        "phase": "E",
+        "class": "E",
+        "recovered": "F"
+      }
+    },
+    "canvas_changed": {
+      "$comment": "The canvas RATIO, never the raw dimensions \u2014 a bounded vocabulary is what makes 'does anyone leave 9:16' a countable question.",
+      "question": "Does anyone leave 9:16? If not, delete the picker (RULES.md is vertical-only).",
+      "properties": {
+        "from": "E",
+        "to": "E"
+      }
+    },
+    "dirty_work_abandoned": {
+      "$comment": "Reachable because autosave is SUSPENDED around agent turns. This is the data-loss alarm.",
+      "question": "Is unsaved work being lost?",
+      "properties": {
+        "commits_since_save": "N",
+        "exit_reason": "E"
+      }
+    },
+    "feature_first_use": {
+      "$comment": "The ONE per-commit upload that earns its place: bounded to at most once per feature per install by a persisted seen-set, then zero forever.",
+      "question": "Time-to-discovery per feature. A long lag means UI work, not more features.",
+      "properties": {
+        "feature_id": "E",
+        "discovery_source": "E"
+      }
+    },
+    "agent_output_adopted": {
+      "$comment": "summarizeDocChange returns changed KEY NAMES, never values.",
+      "question": "Does the user KEEP what the agent did? The best agent-quality signal the editor has.",
+      "properties": {
+        "had_local_edits": "F",
+        "cuts_delta": "N",
+        "overlays_delta": "N",
+        "fields_changed": "N",
+        "local_commits_during_turn": "N"
+      }
+    },
+    "agent_adopt_failed": {
+      "$comment": "Replaces two bare `.catch(() => {})`. Today a turn can change disk while the live editor silently fails to adopt it \u2014 the one corruption path in the shared-doc design.",
+      "question": "Is the screen silently diverging from disk?",
+      "critical": true,
+      "properties": {
+        "phase": "E",
+        "class": "E"
+      }
+    },
+    "user_visible_failure": {
+      "$comment": "One central place every red toast passes through. Toasts-per-session is the honest quality metric. The toast TEXT never ships \u2014 it interpolates file names, agent errors and API messages.",
+      "question": "How many times per session does this app visibly fail a user?",
+      "critical": true,
+      "properties": {
+        "where": "E",
+        "recovered": "F"
+      }
+    },
+    "debug_report_outcome": {
+      "question": "Do bug reports carry evidence?",
+      "properties": {
+        "phase": "E",
+        "event_count": "B"
+      }
+    },
+    "schema_write_rejected": {
+      "$comment": "RULES.md says a Save must never 422, so this is the CONTRACT ALARM. `origin` can only ever be 'editor': the agent writes edit_decisions.json directly, so agent-authored invalid docs never reach this route. The jsonschema message quotes the OFFENDING VALUE \u2014 a source path, a caption, a project name \u2014 so only the shape of the failure travels.",
+      "question": "Does the schema contract hold? If not, fix the sanitizer.",
+      "critical": true,
+      "properties": {
+        "object_kind": "E",
+        "failure_field": "E",
+        "origin": "E"
+      }
+    }
+  },
+  "enums": {
+    "editor_action_blocked.reason": [
+      "last_cut",
+      "invalid_playhead",
+      "agent_busy",
+      "unknown"
+    ],
+    "editor_save_finished.kind": [
+      "manual",
+      "autosave"
+    ],
+    "editor_save_finished.outcome": [
+      "success",
+      "rejected",
+      "blocked_agent",
+      "network"
+    ],
+    "editor_load_failed.phase": [
+      "doc",
+      "assets"
+    ],
+    "class": [
+      "404",
+      "schema",
+      "decode",
+      "network"
+    ],
+    "canvas_changed.from": [
+      "9:16",
+      "16:9",
+      "1:1",
+      "4:5",
+      "other",
+      "unknown"
+    ],
+    "canvas_changed.to": [
+      "9:16",
+      "16:9",
+      "1:1",
+      "4:5",
+      "other",
+      "unknown"
+    ],
+    "dirty_work_abandoned.exit_reason": [
+      "back",
+      "window_close",
+      "crash"
+    ],
+    "discovery_source": [
+      "timeline",
+      "inspector",
+      "canvas",
+      "agent"
+    ],
+    "agent_adopt_failed.phase": [
+      "doc_fetch",
+      "assets_fetch"
+    ],
+    "user_visible_failure.where": [
+      "save",
+      "render",
+      "upload",
+      "preview",
+      "agent",
+      "unknown"
+    ],
+    "debug_report_outcome.phase": [
+      "record_started",
+      "record_stopped"
+    ],
+    "feature_id": [
+      "editor.cut_trim",
+      "editor.cut_reorder",
+      "editor.split",
+      "editor.duplicate",
+      "editor.delete",
+      "editor.transition",
+      "editor.speed",
+      "editor.clip_transform",
+      "editor.crop",
+      "editor.keyframes",
+      "editor.overlay_timeline",
+      "editor.audio_ops",
+      "editor.add_clip",
+      "editor.add_overlay",
+      "editor.canvas",
+      "editor.background",
+      "editor.undo",
+      "editor.redo"
+    ],
+    "object_kind": [
+      "document",
+      "cut",
+      "overlay",
+      "audio"
+    ],
+    "schema_write_rejected.origin": [
+      "editor"
+    ]
+  },
+  "open_vocabularies": {
+    "failure_field": "An edit_decisions FIELD NAME, matched against a closed list at the emit site; anything unrecognised collapses to 'unknown' rather than echoing a token the user typed."
+  }
+}

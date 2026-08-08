@@ -27,12 +27,7 @@ PACKAGED_PLAYBOOKS: tuple[str, ...] = (
     "anthropic-editorial-animated",
     "greg-isenberg-product-explainer",
 )
-SCHEMA_PATH = (
-    Path(__file__).resolve().parent.parent
-    / "schemas"
-    / "styles"
-    / "playbook.schema.json"
-)
+SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schemas" / "styles" / "playbook.schema.json"
 
 
 def _load_playbook_schema() -> dict:
@@ -78,6 +73,16 @@ def validate_playbook(playbook: dict) -> None:
     jsonschema.validate(instance=playbook, schema=schema)
 
 
+def builtin_playbooks() -> set[str]:
+    """Only the playbooks that SHIP with the app — never the user's own.
+
+    `list_playbooks()` deliberately appends `user_styles/` whatever `packaged` says (that flag
+    only trims the shipped catalogue), so it is the wrong question to ask when you need "is
+    this name ours". Analytics asks exactly that: a user names a style after a client or an
+    unreleased campaign, and that name must never leave the machine."""
+    return {p.stem for p in STYLES_DIR.glob("*.yaml") if p.stem != "__pycache__"}
+
+
 def list_playbooks(
     styles_dir: Optional[Path] = None,
     *,
@@ -90,11 +95,7 @@ def list_playbooks(
     (``app_paths.is_packaged()``) — pass it explicitly in tests.
     """
     styles_dir = styles_dir or STYLES_DIR
-    names = [
-        p.stem
-        for p in styles_dir.glob("*.yaml")
-        if p.stem != "__pycache__"
-    ]
+    names = [p.stem for p in styles_dir.glob("*.yaml") if p.stem != "__pycache__"]
     if packaged is None:
         packaged = app_paths.is_packaged()
     if packaged:
@@ -113,6 +114,7 @@ def list_playbooks(
 # ---------------------------------------------------------------------------
 # Color math helpers (pure Python, no external deps)
 # ---------------------------------------------------------------------------
+
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     """Convert hex color string to (R, G, B) tuple (0-255)."""
@@ -201,20 +203,20 @@ def _hsl_to_hex(h: float, s: float, l: float) -> str:
 _CVD_CONFUSION_PAIRS: dict[str, list[tuple[tuple[int, int], tuple[int, int]]]] = {
     # Deuteranopia: red-green confusion (most common, ~6% of males)
     "deuteranopia": [
-        ((0, 30), (90, 150)),      # Red vs green
-        ((30, 60), (90, 130)),     # Orange vs green
-        ((330, 360), (90, 150)),   # Magenta-red vs green
+        ((0, 30), (90, 150)),  # Red vs green
+        ((30, 60), (90, 130)),  # Orange vs green
+        ((330, 360), (90, 150)),  # Magenta-red vs green
     ],
     # Protanopia: red-green confusion (shifted, ~1% of males)
     "protanopia": [
-        ((0, 40), (80, 140)),      # Red-orange vs green
-        ((340, 360), (80, 140)),   # Red vs green
-        ((0, 20), (170, 200)),     # Red vs cyan
+        ((0, 40), (80, 140)),  # Red-orange vs green
+        ((340, 360), (80, 140)),  # Red vs green
+        ((0, 20), (170, 200)),  # Red vs cyan
     ],
     # Tritanopia: blue-yellow confusion (~0.01%)
     "tritanopia": [
-        ((200, 270), (50, 100)),   # Blue vs yellow-green
-        ((220, 260), (40, 80)),    # Blue vs yellow
+        ((200, 270), (50, 100)),  # Blue vs yellow-green
+        ((220, 260), (40, 80)),  # Blue vs yellow
         ((170, 210), (300, 340)),  # Cyan vs pink
     ],
 }
@@ -232,6 +234,7 @@ def _hue_in_range(hue: float, hue_range: tuple[int, int]) -> bool:
 # ---------------------------------------------------------------------------
 # D3.5.5 — Color palette intelligence
 # ---------------------------------------------------------------------------
+
 
 def validate_contrast(fg_hex: str, bg_hex: str) -> dict:
     """Calculate WCAG 2.1 contrast ratio between foreground and background.
@@ -311,16 +314,17 @@ def check_color_blind_safety(colors: list[str]) -> dict:
                     b_in_a = _hue_in_range(c2["hue"], range_a)
                     if (a_in_a and b_in_b) or (a_in_b and b_in_a):
                         results["safe"] = False
-                        results["issues"].append({
-                            "type": cvd_type,
-                            "color_a": c1["hex"],
-                            "color_b": c2["hex"],
-                            "severity": "warning",
-                            "message": (
-                                f"{c1['hex']} and {c2['hex']} may be "
-                                f"indistinguishable for {cvd_type} viewers"
-                            ),
-                        })
+                        results["issues"].append(
+                            {
+                                "type": cvd_type,
+                                "color_a": c1["hex"],
+                                "color_b": c2["hex"],
+                                "severity": "warning",
+                                "message": (
+                                    f"{c1['hex']} and {c2['hex']} may be indistinguishable for {cvd_type} viewers"
+                                ),
+                            }
+                        )
 
     return results
 
@@ -346,37 +350,45 @@ def validate_palette(playbook: dict) -> list[dict]:
     # Check main text on background
     result = validate_contrast(text, bg)
     if not result["normal_text"]["AA"]:
-        issues.append({
-            "pair": f"text ({text}) on background ({bg})",
-            "ratio": result["ratio"],
-            "severity": "error",
-            "message": f"Fails WCAG AA for normal text (ratio {result['ratio']}:1, need 4.5:1)",
-        })
+        issues.append(
+            {
+                "pair": f"text ({text}) on background ({bg})",
+                "ratio": result["ratio"],
+                "severity": "error",
+                "message": f"Fails WCAG AA for normal text (ratio {result['ratio']}:1, need 4.5:1)",
+            }
+        )
     elif not result["normal_text"]["AAA"]:
-        issues.append({
-            "pair": f"text ({text}) on background ({bg})",
-            "ratio": result["ratio"],
-            "severity": "info",
-            "message": f"Passes AA but not AAA for normal text (ratio {result['ratio']}:1)",
-        })
+        issues.append(
+            {
+                "pair": f"text ({text}) on background ({bg})",
+                "ratio": result["ratio"],
+                "severity": "info",
+                "message": f"Passes AA but not AAA for normal text (ratio {result['ratio']}:1)",
+            }
+        )
 
     # Check muted text on background
     if muted:
         result = validate_contrast(muted, bg)
         if not result["large_text"]["AA"]:
-            issues.append({
-                "pair": f"muted ({muted}) on background ({bg})",
-                "ratio": result["ratio"],
-                "severity": "error",
-                "message": f"Muted text fails AA even for large text (ratio {result['ratio']}:1)",
-            })
+            issues.append(
+                {
+                    "pair": f"muted ({muted}) on background ({bg})",
+                    "ratio": result["ratio"],
+                    "severity": "error",
+                    "message": f"Muted text fails AA even for large text (ratio {result['ratio']}:1)",
+                }
+            )
         elif not result["normal_text"]["AA"]:
-            issues.append({
-                "pair": f"muted ({muted}) on background ({bg})",
-                "ratio": result["ratio"],
-                "severity": "warning",
-                "message": f"Muted text fails AA for normal text (ratio {result['ratio']}:1, OK for large)",
-            })
+            issues.append(
+                {
+                    "pair": f"muted ({muted}) on background ({bg})",
+                    "ratio": result["ratio"],
+                    "severity": "warning",
+                    "message": f"Muted text fails AA for normal text (ratio {result['ratio']}:1, OK for large)",
+                }
+            )
 
     # Check overlay text/bg pairs
     overlays = playbook.get("overlays", {})
@@ -391,33 +403,34 @@ def validate_palette(playbook: dict) -> list[dict]:
                 o_text = _composite_alpha(o_text, bg)
             result = validate_contrast(o_text, o_bg)
             if not result["normal_text"]["AA"]:
-                issues.append({
-                    "pair": f"overlay.{overlay_name}: text ({o_text}) on bg ({o_bg})",
-                    "ratio": result["ratio"],
-                    "severity": "error",
-                    "message": (
-                        f"Overlay '{overlay_name}' fails WCAG AA "
-                        f"(ratio {result['ratio']}:1)"
-                    ),
-                })
+                issues.append(
+                    {
+                        "pair": f"overlay.{overlay_name}: text ({o_text}) on bg ({o_bg})",
+                        "ratio": result["ratio"],
+                        "severity": "error",
+                        "message": (f"Overlay '{overlay_name}' fails WCAG AA (ratio {result['ratio']}:1)"),
+                    }
+                )
 
     # Color-blind safety on primary + accent + chart_palette
     all_colors = []
     all_colors.extend(palette.get("primary", []))
     all_colors.extend(palette.get("accent", []))
-    chart_palette = playbook.get("visual_language", {}).get(
-        "color_palette", {}
-    ).get("chart_palette") or playbook.get("chart_palette", [])
+    chart_palette = playbook.get("visual_language", {}).get("color_palette", {}).get("chart_palette") or playbook.get(
+        "chart_palette", []
+    )
     all_colors.extend(chart_palette)
 
     if len(all_colors) >= 2:
         cvd_result = check_color_blind_safety(all_colors)
         for cvd_issue in cvd_result.get("issues", []):
-            issues.append({
-                "pair": f"{cvd_issue['color_a']} / {cvd_issue['color_b']}",
-                "severity": "warning",
-                "message": cvd_issue["message"],
-            })
+            issues.append(
+                {
+                    "pair": f"{cvd_issue['color_a']} / {cvd_issue['color_b']}",
+                    "severity": "warning",
+                    "message": cvd_issue["message"],
+                }
+            )
 
     return issues
 
@@ -469,9 +482,7 @@ TYPE_SCALE_RATIOS: dict[str, float] = {
 }
 
 
-def compute_type_scale(
-    base_size: int, ratio: str = "major_third"
-) -> dict:
+def compute_type_scale(base_size: int, ratio: str = "major_third") -> dict:
     """Generate a modular type scale from a base size and ratio.
 
     Produces sizes for caption, body, subheading, heading, display levels.
@@ -492,8 +503,7 @@ def compute_type_scale(
             r = float(ratio)
         except ValueError:
             raise ValueError(
-                f"Unknown type scale ratio: {ratio!r}. "
-                f"Choose from: {', '.join(TYPE_SCALE_RATIOS.keys())} or a number."
+                f"Unknown type scale ratio: {ratio!r}. Choose from: {', '.join(TYPE_SCALE_RATIOS.keys())} or a number."
             )
 
     scale = {
@@ -504,8 +514,8 @@ def compute_type_scale(
             "caption": round(base_size / r),
             "body": base_size,
             "subheading": round(base_size * r),
-            "heading": round(base_size * r ** 2),
-            "display": round(base_size * r ** 3),
+            "heading": round(base_size * r**2),
+            "display": round(base_size * r**3),
         },
     }
     return scale
@@ -541,52 +551,56 @@ def validate_type_hierarchy(playbook: dict) -> list[dict]:
     head_w = role_weights.get("headings", 700)
     body_w = role_weights.get("body", 400)
     if head_w <= body_w:
-        issues.append({
-            "roles": "headings vs body",
-            "severity": "warning",
-            "message": (
-                f"Heading weight ({head_w}) should be greater than "
-                f"body weight ({body_w}) for clear hierarchy"
-            ),
-        })
+        issues.append(
+            {
+                "roles": "headings vs body",
+                "severity": "warning",
+                "message": (
+                    f"Heading weight ({head_w}) should be greater than body weight ({body_w}) for clear hierarchy"
+                ),
+            }
+        )
 
     # Check that stat_card multiplier > 1.0 (should be larger than body)
     stat_mult = role_multipliers.get("stat_card", 1.0)
     if stat_mult <= 1.0:
-        issues.append({
-            "roles": "stat_card",
-            "severity": "warning",
-            "message": (
-                f"stat_card size_multiplier ({stat_mult}) should be > 1.0 "
-                f"for visual prominence"
-            ),
-        })
+        issues.append(
+            {
+                "roles": "stat_card",
+                "severity": "warning",
+                "message": (f"stat_card size_multiplier ({stat_mult}) should be > 1.0 for visual prominence"),
+            }
+        )
 
     # Check weight differentiation between heading and body is sufficient
     if head_w - body_w < 200:
-        issues.append({
-            "roles": "headings vs body",
-            "severity": "info",
-            "message": (
-                f"Weight difference between headings ({head_w}) and "
-                f"body ({body_w}) is only {head_w - body_w}. "
-                f"Consider >= 200 difference for clear visual separation."
-            ),
-        })
+        issues.append(
+            {
+                "roles": "headings vs body",
+                "severity": "info",
+                "message": (
+                    f"Weight difference between headings ({head_w}) and "
+                    f"body ({body_w}) is only {head_w - body_w}. "
+                    f"Consider >= 200 difference for clear visual separation."
+                ),
+            }
+        )
 
     # Check scale_system if present
     scale_system = typography.get("scale_system")
     if scale_system and scale_system in TYPE_SCALE_RATIOS:
         ratio = TYPE_SCALE_RATIOS[scale_system]
         if ratio < 1.1:
-            issues.append({
-                "roles": "scale_system",
-                "severity": "info",
-                "message": (
-                    f"Scale ratio '{scale_system}' ({ratio}) is very tight. "
-                    f"Consider a larger ratio for video content."
-                ),
-            })
+            issues.append(
+                {
+                    "roles": "scale_system",
+                    "severity": "info",
+                    "message": (
+                        f"Scale ratio '{scale_system}' ({ratio}) is very tight. "
+                        f"Consider a larger ratio for video content."
+                    ),
+                }
+            )
 
     return issues
 
@@ -784,10 +798,12 @@ def validate_accessibility(playbook: dict) -> dict:
     # --- Contrast checks (reuse validate_palette) ---
     palette_issues = validate_palette(playbook)
     for pi in palette_issues:
-        issues.append({
-            "category": "contrast" if "ratio" in pi else "color_blind",
-            **pi,
-        })
+        issues.append(
+            {
+                "category": "contrast" if "ratio" in pi else "color_blind",
+                **pi,
+            }
+        )
 
     # --- Font size checks ---
     typography = playbook.get("typography", {})
@@ -800,26 +816,28 @@ def validate_accessibility(playbook: dict) -> dict:
         scale = compute_type_scale(MIN_VIDEO_BODY_SIZE_PX, scale_system)
         sizes = scale["sizes"]
         if sizes["caption"] < 16:
-            issues.append({
-                "category": "font_size",
-                "severity": "warning",
-                "message": (
-                    f"Caption size ({sizes['caption']}px) is below 16px. "
-                    f"May be unreadable on mobile video."
-                ),
-            })
+            issues.append(
+                {
+                    "category": "font_size",
+                    "severity": "warning",
+                    "message": (
+                        f"Caption size ({sizes['caption']}px) is below 16px. May be unreadable on mobile video."
+                    ),
+                }
+            )
     else:
         # No scale system — just check multiplier conventions
         stat_mult = typography.get("stat_card", {}).get("size_multiplier", 1.0)
         if stat_mult < 2.0:
-            issues.append({
-                "category": "font_size",
-                "severity": "info",
-                "message": (
-                    f"stat_card size_multiplier ({stat_mult}) is modest. "
-                    f"Consider >= 2.0x for video stat cards."
-                ),
-            })
+            issues.append(
+                {
+                    "category": "font_size",
+                    "severity": "info",
+                    "message": (
+                        f"stat_card size_multiplier ({stat_mult}) is modest. Consider >= 2.0x for video stat cards."
+                    ),
+                }
+            )
 
     # --- Type hierarchy checks ---
     hierarchy_issues = validate_type_hierarchy(playbook)
@@ -832,11 +850,13 @@ def validate_accessibility(playbook: dict) -> dict:
         cvd_result = check_color_blind_safety(chart_palette)
         if not cvd_result["safe"]:
             for ci in cvd_result["issues"]:
-                issues.append({
-                    "category": "color_blind",
-                    "severity": "warning",
-                    "message": ci["message"],
-                })
+                issues.append(
+                    {
+                        "category": "color_blind",
+                        "severity": "warning",
+                        "message": ci["message"],
+                    }
+                )
 
     # --- Weight matrix checks ---
     weight_matrix = typography.get("weight_matrix", {})
@@ -846,14 +866,16 @@ def validate_accessibility(playbook: dict) -> dict:
         for role in expected_order:
             w = weight_matrix.get(role)
             if w is not None and w > prev_weight:
-                issues.append({
-                    "category": "typography",
-                    "severity": "warning",
-                    "message": (
-                        f"Weight matrix: '{role}' weight ({w}) should not "
-                        f"exceed the weight of higher-priority roles."
-                    ),
-                })
+                issues.append(
+                    {
+                        "category": "typography",
+                        "severity": "warning",
+                        "message": (
+                            f"Weight matrix: '{role}' weight ({w}) should not "
+                            f"exceed the weight of higher-priority roles."
+                        ),
+                    }
+                )
             if w is not None:
                 prev_weight = w
 

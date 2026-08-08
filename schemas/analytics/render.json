@@ -1,0 +1,213 @@
+{
+  "$comment": "Analytics taxonomy \u2014 render family. Merged with its siblings by server/analytics.taxonomy(); see _envelope.json.",
+  "events": {
+    "render_queued": {
+      "$comment": "The EXPORT DENOMINATOR. Must be uploaded: the two early failures in _run/_run_with_inputs never reach _render_locked, so a later boundary would inflate success.",
+      "question": "How many render attempts intended to publish?",
+      "properties": {
+        "publish_intent": "F",
+        "origin": "E"
+      }
+    },
+    "render_started": {
+      "question": "How long do renders sit in the queue?",
+      "properties": {
+        "publish_intent": "F",
+        "origin": "E",
+        "queue_ms": "N"
+      }
+    },
+    "render_finished": {
+      "question": "Does rendering deliver?",
+      "properties": {
+        "status": "E",
+        "origin": "E",
+        "publish_intent": "F",
+        "total_ms": "N",
+        "failure_class": "E",
+        "final_review_status": "E",
+        "n_scenes": "N",
+        "n_cached": "N",
+        "n_rendered": "N"
+      }
+    },
+    "render_superseded": {
+      "$comment": "NEVER counted as a failure. Written around _set, whose supersede guard would drop exactly this update.",
+      "question": "Are users spamming Render?",
+      "critical": true,
+      "properties": {
+        "stage": "E",
+        "origin": "E",
+        "publish_intent": "F"
+      }
+    },
+    "render_summary": {
+      "$comment": "video_compose computes n_scenes/n_cached/n_rendered as NUMBERS and render_jobs used to flatten them into a WARNING STRING and discard them. They now travel as a TYPED field \u2014 never parsed back out of the text.",
+      "question": "Is 'edit live, render rarely' real? Fix the cache key if it is not.",
+      "properties": {
+        "n_scenes": "N",
+        "n_cached": "N",
+        "n_rendered": "N",
+        "cache_hit_rate": "N",
+        "hdr_policy": "E",
+        "hdr_decision": "E",
+        "origin": "E",
+        "publish_intent": "F"
+      }
+    },
+    "render_failed": {
+      "$comment": "SENS \u2014 result.error embeds absolute paths. It is classified to an enum FIRST; the string never ships. Distinct from render_finished{status}: `status` says whether rendering delivered, this says which stage and which class, which is what becomes next week's work.",
+      "question": "The failure taxonomy. Fix the top class weekly.",
+      "critical": true,
+      "properties": {
+        "stage": "E",
+        "failure_class": "E",
+        "ffmpeg_exit_bucket": "B",
+        "retryable": "F",
+        "origin": "E",
+        "publish_intent": "F"
+      }
+    },
+    "proxy_cache_miss_reason": {
+      "$comment": "Absent-not-guessed when the tool did not report a reason: a wrong cache-miss reason is worse than a missing one, because it names the wrong invalidation rule to repair.",
+      "question": "Counting hits gives the rate; counting REASONS says which invalidation rule to repair.",
+      "properties": {
+        "reason": "E",
+        "count": "N",
+        "origin": "E",
+        "publish_intent": "F"
+      }
+    },
+    "comp_rerender_triggered": {
+      "$comment": "RULES.md: only composition clips require a re-render, and only the CHANGED one. An aggregate cache rate cannot verify that promise.",
+      "question": "The boundary between cheap FFmpeg arrangement and expensive runtime re-render.",
+      "properties": {
+        "runtime": "E",
+        "n_comps": "N",
+        "reason": "E",
+        "origin": "E",
+        "publish_intent": "F"
+      }
+    },
+    "publish_partial": {
+      "$comment": "The dangerous case the export hook CANNOT see: if publish_final_render raises AFTER os.replace but during persist_doc or the receipt write, control never reaches the export hook \u2014 it unwinds to the outer catches, and lib/project.py says the new bytes are then DELIBERATELY stale. The phase comes from the traceback's FUNCTION NAMES, never the message, which embeds absolute paths.",
+      "question": "A commit-path regression that silently orphans the deliverable. This is an alarm.",
+      "critical": true,
+      "properties": {
+        "phase": "E",
+        "origin": "E",
+        "publish_intent": "F"
+      }
+    },
+    "media_op_finished": {
+      "question": "Which heavy ops earn their keep? ~40 tools/video/* modules exist.",
+      "properties": {
+        "tool_id": "E",
+        "status": "E",
+        "wall_s": "B",
+        "produced_asset": "F",
+        "origin": "E",
+        "publish_intent": "F"
+      }
+    },
+    "audio_output_health": {
+      "$comment": "One ebur128 pass over the PUBLISHED file. Buckets only \u2014 never audio, and never an exact dBFS, which combined with an exact duration and size is a fingerprint. Loudness is negative and bucket labels are non-negative by shape, so the value is shifted into a positive scale rather than inventing a second label grammar.",
+      "question": "Is the deliverable AUDIBLE? A successful MP4 with inaudible or clipped audio is a failed product.",
+      "properties": {
+        "peak_dbfs_bucket": "B",
+        "integrated_lufs_bucket": "B",
+        "origin": "E",
+        "publish_intent": "F"
+      }
+    },
+    "audio_stem_shape": {
+      "$comment": "audio.music is `oneOf object|array` \u2014 a recent, expensive and barely-validated surface.",
+      "question": "Is the audio-stem work actually used? Justify it or shrink it.",
+      "properties": {
+        "n_music_regions": "N",
+        "narration_mode": "E",
+        "n_sfx": "N",
+        "origin": "E",
+        "publish_intent": "F"
+      }
+    }
+  },
+  "enums": {
+    "render_finished.status": [
+      "done",
+      "failed"
+    ],
+    "render_superseded.stage": [
+      "queued",
+      "running"
+    ],
+    "hdr_policy": [
+      "preserve",
+      "tonemap",
+      "sdr",
+      "auto",
+      "unknown"
+    ],
+    "hdr_decision": [
+      "preserve",
+      "tonemap",
+      "sdr",
+      "auto",
+      "unknown"
+    ],
+    "render_failed.stage": [
+      "input",
+      "assemble",
+      "publish",
+      "render",
+      "review"
+    ],
+    "ffmpeg_exit_bucket": [
+      "0",
+      "1-127",
+      "128+"
+    ],
+    "proxy_cache_miss_reason.reason": [
+      "first_render",
+      "source_hash",
+      "scene_spec",
+      "runtime",
+      "renderer_family",
+      "canvas",
+      "crop",
+      "missing_clip",
+      "corrupt_record"
+    ],
+    "comp_rerender_triggered.runtime": [
+      "remotion",
+      "hyperframes",
+      "ffmpeg",
+      "unknown"
+    ],
+    "comp_rerender_triggered.reason": [
+      "first_render",
+      "source_hash",
+      "scene_spec",
+      "runtime",
+      "renderer_family",
+      "canvas",
+      "crop",
+      "missing_clip",
+      "corrupt_record"
+    ],
+    "publish_partial.phase": [
+      "video_replaced_no_receipt",
+      "persist_failed",
+      "receipt_failed"
+    ],
+    "media_op_finished.status": [
+      "done",
+      "failed"
+    ],
+    "narration_mode": [
+      "replace",
+      "layer",
+      "none"
+    ]
+  }
+}

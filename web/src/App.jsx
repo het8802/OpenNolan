@@ -10,7 +10,22 @@ import { FolderNav, useFolderBrowse, uploadKindFor, uploadDirLabel } from './com
 import AssetModal from './components/AssetModal.jsx'
 import { useAgentChat } from './chat/useAgentChat.js'
 import { useAuth } from './auth/useAuth.js'
+import { track } from './analytics/track.js'
 import ConnectClaudeModal from './auth/ConnectClaudeModal.jsx'
+
+// Ages ship as ORDERED BUCKETS, never a timestamp: an exact creation time plus geo plus a file
+// size is the fingerprinting combination, and "did they come back to an old project" is a bucket
+// question. Labels must match server/analytics._BUCKET_LABEL or the validator drops them.
+function ageBucket(iso) {
+  if (!iso) return null
+  const days = (Date.now() - Date.parse(iso)) / 86400000
+  if (!Number.isFinite(days)) return null
+  if (days < 1) return '0-1'
+  if (days < 7) return '1-7'
+  if (days < 30) return '7-30'
+  if (days < 90) return '30-90'
+  return '90+'
+}
 
 const STATUS_LABEL = {
   pending: 'pending',
@@ -31,6 +46,7 @@ export default function App() {
   const [uploadTick, setUploadTick] = useState(0)             // bump to refresh asset listing
   const [editing, setEditing] = useState(false)               // manual editor open (full-screen)
   const [showConnect, setShowConnect] = useState(false)        // "Sign in with Claude" modal open
+  const justCreated = useRef(null)                             // separates a first open from a return visit
 
   // Anthropic account auth — one instance for the whole app (sign-in CTA, top-right re-auth,
   // in-chat reconnect box). The backend is the source of truth; refresh() re-checks on demand.
@@ -75,6 +91,17 @@ export default function App() {
     ]
   }
   useEffect(() => () => toastTimers.current.forEach(clearTimeout), [])
+
+  // #15 — on the false->true TRANSITION. NOT inside the `showConnect && (...)` render
+  // expression below: React renders more than once per state change, so that would count
+  // renders instead of prompts.
+  useEffect(() => {
+    if (!showConnect) return
+    track('auth_prompt_shown', {
+      reason: auth.status?.needs_reauth ? 'needs_reauth' : (auth.status?.authenticated ? 'chat_503' : 'first_run'),
+      entrypoint: editing ? 'editor' : (selected ? 'project' : 'settings'),
+    })
+  }, [showConnect])
   function showError(e) { flashToast('error', String(e.message || e), 5000) }
   function showOk(text) { flashToast('ok', text, 3000) }
 
@@ -85,6 +112,13 @@ export default function App() {
   // Open a project; the chat hook revives its most recent conversation from disk.
   function openProject(id) {
     setSelected(id)
+    // The user ACTION. Deliberately not the 4s refreshProjects poll above (banned hook
+    // class 5) — a poll would report an "open" every four seconds for an idle window.
+    const p = projects.find(x => x.id === id)
+    track('project_opened', {
+      entrypoint: id === justCreated.current ? 'just_created' : 'dashboard',
+      age_days: ageBucket(p?.created_at),
+    })
   }
 
   // One connect/reconnect modal, shared across every view (dashboard, editor, project).
@@ -109,6 +143,7 @@ export default function App() {
           onCreate={async (name, pipeline, style) => {
             const m = await api.createProject(name, pipeline, style)
             await refreshProjects()
+            justCreated.current = m.project_id
             setSelected(m.project_id)   // chat hook starts a fresh conversation for the new project
             showOk(`Created "${m.name}"`)
           }}
@@ -136,7 +171,10 @@ export default function App() {
     <div className="app">
       <ProjectBar
         state={state} projects={projects} selected={selected}
-        onEdit={() => setEditing(true)}
+        onEdit={() => {
+          track('editor_opened', { source: 'project_bar' })
+          setEditing(true)
+        }}
         onBack={() => { setSelected(null); setEditing(false) }}
       />
       <main className="grid">
@@ -1289,7 +1327,21 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
   useEffect(() => {
     if (!selected) { setData(null); return }
     let alive = true
-    const tick = () => api.listAssets(selected).then(d => alive && setData(d)).catch(() => {})
+    // #97 — from the CONSUMER, on the `current` flag flipping true->false. NOT from
+    // lib/project.py's final_render_status: that runs inside list_assets, which THIS poll hits
+    // every 4s (banned hook class 5), and it lives in lib/. The transition is the event; the
+    // poll is only how we notice it.
+    let wasCurrent = null
+    const tick = () => api.listAssets(selected).then(d => {
+      if (!alive) return
+      const final = (d?.renders || []).find(r => r.name === 'final.mp4')
+      const nowCurrent = final ? !!final.current : null
+      if (wasCurrent === true && nowCurrent === false) {
+        track('export_became_stale', { cause: final?.reason === 'receipt_missing' ? 'receipt_missing' : 'human_edit' })
+      }
+      wasCurrent = nowCurrent
+      setData(d)
+    }).catch(() => {})
     tick()
     const id = setInterval(tick, 4000)
     return () => { alive = false; clearInterval(id) }
@@ -1339,12 +1391,14 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
                   {/* key on path+mtime so a re-render (or a poll that first caught the
                       file mid-write) remounts the <video> and re-fetches the final bytes. */}
                   <video key={`${r.path}:${r.mtime}`} controls
+                    onPlay={() => track('export_artifact_opened', { surface: 'render_preview', current: !!r.current })}
                     src={api.fileUrl(selected, r.path, r.mtime)} />
                   <div className="render-actions">
                     <button className="render-expand" onClick={() => setViewer({ items: renderItems, index: i })}>
                       ⛶ Full screen
                     </button>
-                    <a className="render-dl" href={api.fileUrl(selected, r.path, r.mtime)} download={r.name}>
+                    <a className="render-dl" href={api.fileUrl(selected, r.path, r.mtime)} download={r.name}
+                      onClick={() => track('export_downloaded', { current: !!r.current })}>
                       ⤓ {r.name}
                     </a>
                   </div>

@@ -35,24 +35,37 @@ def _isolate(monkeypatch):
 
 # ── classification ──────────────────────────────────────────────────────────
 
+
 def test_classify_auth_error_positive():
     for t in [
-        "Error 401 Unauthorized", "HTTP 403 Forbidden", "OAuth token has expired",
-        "invalid_grant", "authentication_error: invalid x-api-key",
-        "Invalid API key provided", "credit balance is too low", "Please run /login",
+        "Error 401 Unauthorized",
+        "HTTP 403 Forbidden",
+        "OAuth token has expired",
+        "invalid_grant",
+        "authentication_error: invalid x-api-key",
+        "Invalid API key provided",
+        "credit balance is too low",
+        "Please run /login",
     ]:
         assert auth.classify_auth_error(t), t
 
 
 def test_classify_auth_error_negative():
     for t in [
-        "ffmpeg exited with code 234", "file not found", "connection reset by peer",
-        "listening on port 4013", "timed out after 30s", "render failed", "", None,
+        "ffmpeg exited with code 234",
+        "file not found",
+        "connection reset by peer",
+        "listening on port 4013",
+        "timed out after 30s",
+        "render failed",
+        "",
+        None,
     ]:
         assert not auth.classify_auth_error(t), t
 
 
 # ── PKCE / start_oauth ────────────────────────────────────────────────────────
+
 
 def test_http_json_sends_non_default_user_agent(monkeypatch):
     """console.anthropic.com's Cloudflare 403s the default Python-urllib User-Agent ('Error 1010:
@@ -62,10 +75,13 @@ def test_http_json_sends_non_default_user_agent(monkeypatch):
 
     class _Resp:
         status = 200
+
         def read(self):
             return b"{}"
+
         def __enter__(self):
             return self
+
         def __exit__(self, *a):
             return False
 
@@ -95,12 +111,12 @@ def test_start_oauth_builds_authorize_url_with_valid_pkce():
     assert q["state"] == [out["state"]]
     # the challenge must be the S256 of the stored verifier
     verifier = auth._pending[out["state"]]["verifier"]
-    expected = base64.urlsafe_b64encode(
-        hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    expected = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     assert q["code_challenge"] == [expected]
 
 
 # ── finish_oauth (token exchange) ───────────────────────────────────────────────
+
 
 def _stub_persistence(monkeypatch):
     """Route .env writes + settings into in-memory dicts."""
@@ -115,9 +131,14 @@ def _stub_persistence(monkeypatch):
 
 def test_finish_oauth_exchanges_and_persists(monkeypatch):
     writes, saved = _stub_persistence(monkeypatch)
-    monkeypatch.setattr(auth, "_http_json",
-                        lambda url, method="GET", **kw: (200, {"access_token": "oauth-xyz",
-                                                               "refresh_token": "r-1", "expires_in": 3600}))
+    monkeypatch.setattr(
+        auth,
+        "_http_json",
+        lambda url, method="GET", **kw: (
+            200,
+            {"access_token": "oauth-xyz", "refresh_token": "r-1", "expires_in": 3600},
+        ),
+    )
     started = auth.start_oauth()
     result = auth.finish_oauth(f"the-code#{started['state']}")
     assert os.environ[auth.OAUTH_TOKEN_ENV] == "oauth-xyz"
@@ -136,14 +157,16 @@ def test_finish_oauth_unknown_state_raises():
 
 def test_finish_oauth_rejects_token_error(monkeypatch):
     _stub_persistence(monkeypatch)
-    monkeypatch.setattr(auth, "_http_json",
-                        lambda url, method="GET", **kw: (400, {"error": {"message": "invalid_grant"}}))
+    monkeypatch.setattr(
+        auth, "_http_json", lambda url, method="GET", **kw: (400, {"error": {"message": "invalid_grant"}})
+    )
     started = auth.start_oauth()
     with pytest.raises(auth.AuthError):
         auth.finish_oauth(f"bad#{started['state']}")
 
 
 # ── API-key fallback ─────────────────────────────────────────────────────────
+
 
 def test_set_api_key_validates_then_persists(monkeypatch):
     writes, saved = _stub_persistence(monkeypatch)
@@ -167,6 +190,7 @@ def test_set_api_key_requires_a_value():
 
 
 # ── expiry + status ──────────────────────────────────────────────────────────
+
 
 def test_is_expired():
     assert auth._is_expired(None) is False
@@ -195,8 +219,9 @@ def test_status_detects_method_and_precedence(monkeypatch):
 def test_status_flags_needs_reauth_on_recorded_error(monkeypatch):
     monkeypatch.setenv(auth.OAUTH_TOKEN_ENV, "oauth-x")
     monkeypatch.setattr(auth, "_cli_available", lambda: False)
-    monkeypatch.setattr(auth.settings, "get",
-                        lambda key, default=None: {"detail": "401"} if key == "claude_auth_error" else None)
+    monkeypatch.setattr(
+        auth.settings, "get", lambda key, default=None: {"detail": "401"} if key == "claude_auth_error" else None
+    )
     s = auth.status()
     assert s["authenticated"] is True and s["needs_reauth"] is True and s["error"] == "401"
 
@@ -208,19 +233,29 @@ def test_status_does_not_nag_on_clock_expiry_alone(monkeypatch):
     monkeypatch.setenv(auth.OAUTH_TOKEN_ENV, "oauth-x")
     monkeypatch.setattr(auth, "_cli_available", lambda: False)
     monkeypatch.setattr(auth, "_maybe_refresh", lambda: None)  # refresh can't save it (rotated token)
-    monkeypatch.setattr(auth.settings, "get",
-                        lambda key, default=None: {"expires_at": past} if key == "claude_auth" else None)
+    monkeypatch.setattr(
+        auth.settings, "get", lambda key, default=None: {"expires_at": past} if key == "claude_auth" else None
+    )
     s = auth.status()
     assert s["expired"] is True and s["needs_reauth"] is False
 
 
 # ── endpoints ──────────────────────────────────────────────────────────────
 
+
 def test_auth_status_endpoint(tmp_path, monkeypatch):
-    monkeypatch.setattr("server.auth.status", lambda: {
-        "authenticated": True, "method": "oauth", "needs_reauth": False,
-        "expired": False, "expires_at": None, "obtained_at": None, "error": None,
-    })
+    monkeypatch.setattr(
+        "server.auth.status",
+        lambda: {
+            "authenticated": True,
+            "method": "oauth",
+            "needs_reauth": False,
+            "expired": False,
+            "expires_at": None,
+            "obtained_at": None,
+            "error": None,
+        },
+    )
     client = TestClient(create_app(projects_dir=tmp_path / "projects"))
     resp = client.get("/api/auth/status")
     assert resp.status_code == 200
@@ -229,10 +264,18 @@ def test_auth_status_endpoint(tmp_path, monkeypatch):
 
 
 def test_auth_api_key_endpoint_ok(tmp_path, monkeypatch):
-    monkeypatch.setattr("server.auth.set_api_key", lambda key, app_state=None: {
-        "authenticated": True, "method": "api_key", "needs_reauth": False,
-        "expired": False, "expires_at": None, "obtained_at": None, "error": None,
-    })
+    monkeypatch.setattr(
+        "server.auth.set_api_key",
+        lambda key, app_state=None: {
+            "authenticated": True,
+            "method": "api_key",
+            "needs_reauth": False,
+            "expired": False,
+            "expires_at": None,
+            "obtained_at": None,
+            "error": None,
+        },
+    )
     client = TestClient(create_app(projects_dir=tmp_path / "projects"))
     resp = client.post("/api/auth/api-key", json={"api_key": "sk-ant-x"})
     assert resp.status_code == 200 and resp.json()["method"] == "api_key"
@@ -241,6 +284,7 @@ def test_auth_api_key_endpoint_ok(tmp_path, monkeypatch):
 def test_auth_api_key_endpoint_rejects_bad_key(tmp_path, monkeypatch):
     def boom(key, app_state=None):
         raise auth.AuthError("Anthropic rejected that API key.")
+
     monkeypatch.setattr("server.auth.set_api_key", boom)
     client = TestClient(create_app(projects_dir=tmp_path / "projects"))
     resp = client.post("/api/auth/api-key", json={"api_key": "bad"})
@@ -269,15 +313,20 @@ def test_chat_result_auth_error_surfaces_auth_error_event(tmp_path, monkeypatch)
     monkeypatch.setattr("server.auth.clear_auth_error", lambda: None)
 
     class _FakeRunner:
-        async def run_turn(self, project_id, message, on_event=None):
-            await on_event({"type": "result", "is_error": True,
-                            "result": "authentication_error: OAuth token has expired"})
+        async def run_turn(self, project_id, message, on_event=None, session_id=None):
+            await on_event(
+                {"type": "result", "is_error": True, "result": "authentication_error: OAuth token has expired"}
+            )
 
     create_project(tmp_path / "projects", "Sky", "animated-explainer")
     app = create_app(
         projects_dir=tmp_path / "projects",
-        capabilities_provider=lambda: {"composition_runtimes": {}, "capabilities": [],
-                                       "setup_offers": [], "runtime_warnings": []},
+        capabilities_provider=lambda: {
+            "composition_runtimes": {},
+            "capabilities": [],
+            "setup_offers": [],
+            "runtime_warnings": [],
+        },
         agent_runner=_FakeRunner(),
     )
     resp = TestClient(app).post("/api/projects/sky/chat", json={"message": "hi"})

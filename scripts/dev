@@ -434,6 +434,18 @@ def run_app(*, ttl_seconds: int | None, dry_run: bool) -> dict[str, Any]:
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     environment = os.environ.copy()
     environment.setdefault("OPENNOLAN_HOME", str(ROOT / ".local"))
+    # F1: a worktree whose OPENNOLAN_HOME has no .env resolves the HARDCODED PRODUCTION token
+    # from BOTH reporters, and this guard was set only by `test`/`smoke` — never by `run`, the
+    # one command a developer actually uses all day. With it on, a missing POSTHOG_KEY disables
+    # analytics instead of silently writing to the real project. An explicit POSTHOG_KEY (the
+    # normal case: .local/.env) is unaffected — the guard only governs the ABSENCE of a key.
+    #
+    # NOT setdefault: both reporters read "" as FALSE, so an empty
+    # OPENNOLAN_ANALYTICS_NO_DEFAULT_KEY (a blank shell export, or a bare `NAME=` line in
+    # .env.worktree) would satisfy setdefault, leave the guard off, and reopen the production
+    # leak. Blank is treated as unset; only an explicit 0/false disables the guard.
+    if (environment.get("OPENNOLAN_ANALYTICS_NO_DEFAULT_KEY") or "").strip() == "":
+        environment["OPENNOLAN_ANALYTICS_NO_DEFAULT_KEY"] = "1"
     started_at = datetime.now(UTC).isoformat()
     with log_path.open("a", encoding="utf-8") as log:
         log.write(f"\n[{started_at}] starting {' '.join(command)}\n")
@@ -635,6 +647,50 @@ def _test_commands(tier: str) -> list[list[str]]:
     return []
 
 
+# The DEV project's public write key. `phc_s9P9…` is PRODUCTION and must never be reachable
+# from a harness — see _enable_analytics below, which refuses it outright.
+_PRODUCTION_KEY_PREFIX = "phc_s9P9"
+_EXPECTED_HOST = "https://us.i.posthog.com"
+
+
+class AnalyticsRefused(RuntimeError):
+    """The harness would have written somewhere it must never write."""
+
+
+def _enable_analytics(environment: dict[str, str], scratch: Path) -> dict[str, str]:
+    """Open the three gates that keep smoke away from PostHog — deliberately, in order.
+
+    All three exist on purpose, and the plan is explicit that opening them is a decision:
+
+      1. the scratch home is seeded {"analytics_disabled": true};
+      2. _test_environment strips every *_KEY, POSTHOG_KEY included;
+      3. the scratch home has no .env, so there is no key to resolve.
+
+    OPENNOLAN_ANALYTICS_NO_DEFAULT_KEY stays SET. It only guards the ABSENCE of a key, so it
+    cannot stop an explicit production token — this function does that, in both processes.
+    """
+    key = (os.environ.get("OPENNOLAN_SMOKE_POSTHOG_KEY") or "").strip()
+    if not key:
+        # Case (a): no key => zero events, and no production write. NOT a silent skip — the
+        # caller is told which variable is missing.
+        return environment
+    if key.startswith(_PRODUCTION_KEY_PREFIX):
+        # Case (c). This is the one that matters: a harness that can reach production once
+        # will reach it again, at a worse moment.
+        raise AnalyticsRefused(
+            "OPENNOLAN_SMOKE_POSTHOG_KEY is the PRODUCTION project token. The smoke harness "
+            "must never write to production — use the dev project's key."
+        )
+    host = (os.environ.get("POSTHOG_HOST") or _EXPECTED_HOST).strip()
+    if host != _EXPECTED_HOST:
+        raise AnalyticsRefused(f"unexpected POSTHOG_HOST {host!r}; expected {_EXPECTED_HOST}")
+    environment["POSTHOG_KEY"] = key
+    environment["POSTHOG_HOST"] = host
+    # Gate 1: the seeded opt-out has to come back off, or the key changes nothing.
+    (scratch / "settings.json").write_text('{"analytics_disabled": false}\n', encoding="utf-8")
+    return environment
+
+
 def _test_environment(scratch: Path) -> dict[str, str]:
     _load_worktree_env()
     environment = os.environ.copy()
@@ -666,6 +722,12 @@ def _test_environment(scratch: Path) -> dict[str, str]:
             # Every relevant path is already explicit. Keep process-wide cache
             # routing off so tests that exercise route_caches() can own/reset it.
             "OPENNOLAN_ROUTE_CACHES": "0",
+            # The scratch home has no .env, so a missing POSTHOG_KEY would fall back to the
+            # HARDCODED PRODUCTION key. Harmless while analytics_disabled below is set, but
+            # the moment anyone turns analytics on in this harness (which plan §12D asks for)
+            # it would write to the real project. Refuse the fallback instead of relying on
+            # the opt-out staying put.
+            "OPENNOLAN_ANALYTICS_NO_DEFAULT_KEY": "1",
             "TMPDIR": str(scratch / "tmp"),
         }
     )
@@ -1052,7 +1114,7 @@ def reap(*, dry_run: bool) -> dict[str, Any]:
     }
 
 
-def smoke(*, dry_run: bool) -> dict[str, Any]:
+def smoke(*, dry_run: bool, analytics: bool = False) -> dict[str, Any]:
     command = ["npm", "--prefix", "desktop", "run", "test:smoke"]
     _load_worktree_env()
     worktree_backend, worktree_frontend = _ports()
@@ -1078,6 +1140,30 @@ def smoke(*, dry_run: bool) -> dict[str, Any]:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     scratch = ROOT / ".local" / "test-results" / f"smoke-{stamp}"
     environment = _test_environment(scratch)
+    if analytics:
+        try:
+            environment = _enable_analytics(environment, scratch)
+        except AnalyticsRefused as exc:
+            return {
+                "command": "smoke",
+                "ok": False,
+                "dry_run": dry_run,
+                "ports": ports,
+                "actions": [],
+                "error": str(exc),
+            }
+        if "POSTHOG_KEY" not in environment:
+            # NOT an exit-0 skip. A required verification that reports success having verified
+            # nothing is worse than one that fails.
+            return {
+                "command": "smoke",
+                "ok": False,
+                "dry_run": dry_run,
+                "ports": ports,
+                "actions": [],
+                "error": "analytics-ON smoke needs OPENNOLAN_SMOKE_POSTHOG_KEY (the DEV project "
+                "token). Refusing to run: a pass here would verify nothing.",
+            }
     environment["OPENNOLAN_BACKEND_PORT"] = str(smoke_backend)
     environment["OPENNOLAN_FRONTEND_PORT"] = str(smoke_frontend)
     environment["OPENNOLAN_TEST_RESULTS"] = str(scratch)
@@ -1896,6 +1982,12 @@ def main(argv: list[str] | None = None) -> int:
     test_parser.add_argument("--max-spend", type=float)
     test_parser.add_argument("--merge-base")
     smoke_parser = subparsers.add_parser("smoke", help="run the Playwright app smoke")
+    smoke_parser.add_argument(
+        "--analytics",
+        action="store_true",
+        help="run with analytics ON against the DEV project (needs OPENNOLAN_SMOKE_POSTHOG_KEY). "
+        "Refuses the production token and any unexpected host.",
+    )
     smoke_parser.add_argument("--json", action="store_true", dest="as_json")
     smoke_parser.add_argument("--dry-run", action="store_true")
     review_parser = subparsers.add_parser("review", help="request, publish, or verify cross-provider review")
@@ -1947,7 +2039,7 @@ def main(argv: list[str] | None = None) -> int:
             merge_base=args.merge_base,
         )
     elif args.command == "smoke":
-        report = smoke(dry_run=args.dry_run)
+        report = smoke(dry_run=args.dry_run, analytics=getattr(args, "analytics", False))
     elif args.command == "review":
         if args.review_action == "request":
             report = request_review(args.sha, args.author_provider, dry_run=args.dry_run)

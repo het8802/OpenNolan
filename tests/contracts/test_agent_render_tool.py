@@ -55,7 +55,7 @@ class FakeStore:
         self.started.append((project_id, inputs))
         return self.job_id
 
-    def start_op(self, project_id, tool_name, tool_input):
+    def start_op(self, project_id, tool_name, tool_input, *, session_id=None, turn_id=None):
         self.started.append((project_id, tool_name, tool_input))
         return self.job_id
 
@@ -700,7 +700,7 @@ def test_runner_shares_render_store_with_editor(tmp_path, monkeypatch):
             captured["render_store"] = render_store
             captured["projects_dir"] = projects_dir
 
-        async def run_turn(self, project_id, message, on_event=None):
+        async def run_turn(self, project_id, message, on_event=None, session_id=None):
             if on_event is not None:
                 await on_event({"type": "result", "is_error": False})
 

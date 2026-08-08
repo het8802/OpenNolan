@@ -1,17 +1,75 @@
 // Thin client for the Mission Control read/write API.
 
+import { track } from './analytics/track.js'
+
+// #106 http_error — the CLIENT-side choke point, which catches exactly the 4xx that reach a
+// user. Every FastAPI HTTPException bypasses the backend's global exception handler, so this
+// whole surface is invisible from the server side: a 422 the UI swallows is a UX bug nobody
+// can see. Counted into a per-session ROLLUP, never uploaded per request.
+//
+// The route TEMPLATE, never the concrete path: `/api/projects/q4-launch-teaser/assets` is the
+// project slug, i.e. the name the user typed.
+const httpErrors = { count: 0, byStatus: {}, byRoute: {} }
+
+export function httpErrorRollup() { return httpErrors }
+
+// `:id`, NOT `{id}`, and capped at 64 — because this string becomes a KEY inside the nested
+// by_route map, and analytics._BOUNDED_TOKEN (the check that stops a nested map being keyed by
+// free text) admits ^[A-Za-z0-9_.:/+-]{1,64}$. Braces are outside that class and 80 > 64, so
+// every by_route map this used to build was silently dropped and the property never once
+// arrived — measured live over 7 http_error events. `:` is already in the class, so the bound
+// stays exactly as tight as it was.
+function routeTemplate(url) {
+  try {
+    return new URL(url, 'http://x').pathname
+      .replace(/\/api\/projects\/[^/]+/, '/api/projects/:id')
+      .replace(/\/[0-9a-f-]{8,}(?=\/|$)/gi, '/:id')
+      .slice(0, 64)
+  } catch { return 'unknown' }
+}
+
+function httpClass(status) {
+  if (status === 422 || status === 400) return 'validation'
+  if (status === 404) return 'not_found'
+  if (status === 409) return 'conflict'
+  if (status === 503) return 'unavailable'
+  return status === 403 ? 'path_guard' : 'other'
+}
+
 async function json(resp) {
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}))
+    httpErrors.count += 1
+    httpErrors.byStatus[String(resp.status)] = (httpErrors.byStatus[String(resp.status)] || 0) + 1
+    const route = routeTemplate(resp.url || '')
+    httpErrors.byRoute[route] = (httpErrors.byRoute[route] || 0) + 1
     throw new Error(body.detail || `${resp.status} ${resp.statusText}`)
   }
   return resp.json()
 }
 
+// #107 network_operation_failed — NOT inside json(): json() only runs when the fetch RESOLVES,
+// so offline / dns / tls / reset reject before a response exists and 5 of the 7 declared
+// classes were unobservable there. Every caller is `fetch(...).then(json)`, so this wraps the
+// rejection side that json() can never see.
+export function withNetworkTelemetry(promise, operation) {
+  return promise.catch((err) => {
+    const m = String((err && err.message) || err).toLowerCase()
+    if (!/failed to fetch|networkerror|load failed|econnrefused|err_/.test(m)) throw err
+    let cls = 'offline'
+    if (m.includes('dns') || m.includes('name_not_resolved')) cls = 'dns'
+    else if (m.includes('timed out') || m.includes('timeout')) cls = 'timeout'
+    else if (m.includes('ssl') || m.includes('cert') || m.includes('tls')) cls = 'tls'
+    else if (m.includes('reset') || m.includes('closed')) cls = 'reset'
+    track('network_operation_failed', { operation, class: cls, recovered: false })
+    throw err
+  })
+}
+
 export const getPipelines = () => fetch('/api/pipelines').then(json)
 // Visual style playbooks (built-in + user-created) for the New Project picker.
 export const getStyles = () => fetch('/api/styles').then(json)
-export const getProjects = () => fetch('/api/projects').then(json)
+export const getProjects = () => withNetworkTelemetry(fetch('/api/projects').then(json), 'asset_api')
 
 // BYOK: read the local .env (curated variable menu + current values) and save edits back.
 export const getEnv = () => fetch('/api/env').then(json)
@@ -22,7 +80,7 @@ export const saveEnv = (vars) =>
     body: JSON.stringify({ vars }),
   }).then(json)
 // Anthropic account auth ("Sign in with Claude" OAuth + API-key fallback).
-export const getAuthStatus = () => fetch('/api/auth/status').then(json)
+export const getAuthStatus = () => withNetworkTelemetry(fetch('/api/auth/status').then(json), 'auth')
 export const startOAuth = () => fetch('/api/auth/oauth/start', { method: 'POST' }).then(json)
 export const finishOAuth = (code) =>
   fetch('/api/auth/oauth/finish', {

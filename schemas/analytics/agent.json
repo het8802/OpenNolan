@@ -1,0 +1,312 @@
+{
+  "$comment": "Analytics taxonomy \u2014 agent family. Merged with its siblings by server/analytics.taxonomy(); see _envelope.json.",
+  "events": {
+    "agent_turn_started": {
+      "question": "What context starts a turn?",
+      "properties": {
+        "model": "E",
+        "entrypoint": "E",
+        "thread_kind": "E",
+        "input_chars": "N",
+        "is_fresh_client": "F"
+      }
+    },
+    "agent_turn_completed": {
+      "$comment": "Emitted from run_turn's `finally`, so a CRASHED turn still reports. Fields the raise left unset carry defaults.",
+      "question": "Did the turn work, what did it cost, and what did it change?",
+      "properties": {
+        "is_error": "F",
+        "sdk_turns": "N",
+        "cost_usd": "N",
+        "wall_s": "N",
+        "stop_reason": "E",
+        "tool_calls": "N",
+        "tool_errors": "N",
+        "orphan_starts": "N",
+        "orphan_results": "N",
+        "duplicate_results": "N",
+        "doc_changed": "F",
+        "cuts_delta": "N",
+        "overlays_delta": "N",
+        "audio_delta": "N",
+        "artifacts_delta": "N"
+      }
+    },
+    "agent_turn_failed": {
+      "question": "Why do turns fail?",
+      "properties": {
+        "phase": "E",
+        "failure_class": "E",
+        "retryable": "F"
+      }
+    },
+    "agent_tool_failed": {
+      "$comment": "100% of tool FAILURES upload; successes are counted into agent_tool_rollup.",
+      "question": "Which of OUR tools does the agent fail with?",
+      "properties": {
+        "tool_id": "E",
+        "family": "E",
+        "outcome": "E",
+        "duration_ms": "N",
+        "failure_class": "E"
+      }
+    },
+    "agent_tool_rollup": {
+      "$comment": "One per turn. Percentiles are computed in the local reducer so per-tool latency survives without per-call uploads.",
+      "question": "What is the agent's tool reach and cost?",
+      "properties": {
+        "tools": "O",
+        "unique_tools": "N",
+        "calls": "N",
+        "errors": "N",
+        "bash_calls": "N"
+      }
+    },
+    "agent_session_died": {
+      "question": "How often does the SDK session break, and is resume reliable?",
+      "properties": {
+        "had_result_error": "F",
+        "will_resume": "F"
+      }
+    },
+    "agent_interrupted": {
+      "$comment": "The strongest agent-failure signal there is. `tool_in_flight` is the tool id we classify, or a stable hash of one we do not \u2014 an unknown tool name is externally authored.",
+      "question": "What is the agent DOING when users give up?",
+      "properties": {
+        "tool_in_flight": "E"
+      }
+    },
+    "tool_permission_decided": {
+      "$comment": "DENY and CONFIRM branches only. Hooking right after decide_tool would fire for every SAFE_TOOLS/WRITE_TOOLS allow too: a 4-turn x 20-tool session adds ~80 events and breaches the hard cap. Ordinary allows are counted in agent_tool_rollup instead.",
+      "question": "Is the sandbox blocking real work? Loosen a boundary, or keep it.",
+      "properties": {
+        "tool_id": "E",
+        "action": "E",
+        "reason_class": "E",
+        "root_family": "E"
+      }
+    },
+    "agent_confirm_resolved": {
+      "question": "If approval runs above 95%, stop asking and auto-allow the pattern.",
+      "properties": {
+        "tool_id": "E",
+        "reason_class": "E",
+        "approved": "F",
+        "wait_s": "B",
+        "timed_out": "F"
+      }
+    },
+    "unrecognized_tool_requested": {
+      "$comment": "NOT `tool_not_found`: this is a conservative fall-through for anything outside SAFE_TOOLS/WRITE_TOOLS/AskUserQuestion/mcp__mc__/Bash, so it includes valid-but-unclassified SDK and MCP tools and does NOT prove registry absence.",
+      "question": "Did the agent reach for something we do not classify? Classify it, or build it.",
+      "critical": true,
+      "properties": {
+        "attempted": "E"
+      }
+    },
+    "capability_missing": {
+      "$comment": "AFTER the unknown-pack guard, so `pack` is provably a member of our own PACKS registry rather than a string the agent invented.",
+      "question": "The agent DECLARED a missing capability \u2014 bundle it or cut the feature.",
+      "critical": true,
+      "properties": {
+        "pack": "E",
+        "reason_class": "E",
+        "installed_before": "F"
+      }
+    },
+    "capability_request_resolved": {
+      "question": "Will users install 2.6 GB mid-turn? If refusal >50%, bundle it or cut it.",
+      "critical": true,
+      "properties": {
+        "pack": "E",
+        "outcome": "E",
+        "wait_s": "B"
+      }
+    },
+    "api_key_missing": {
+      "$comment": "The provider FAMILY, never the env-var name or value. _scrub would not save us: it tests the KEY name, so 'ANTHROPIC_API_KEY' rides through unredacted (verified).",
+      "question": "Which paid provider did the agent want?",
+      "critical": true,
+      "properties": {
+        "provider_family": "E",
+        "already_in_byok": "F"
+      }
+    },
+    "api_key_request_resolved": {
+      "question": "Will users actually pay?",
+      "critical": true,
+      "properties": {
+        "provider_family": "E",
+        "provided": "F",
+        "wait_s": "B"
+      }
+    },
+    "agent_routed_around_us": {
+      "$comment": "The detector is a PURE function, so the capture lives at the caller.",
+      "question": "The agent hand-rolled what we have a tool for \u2014 OUR tool's interface or docs failed.",
+      "critical": true,
+      "properties": {
+        "marker": "E",
+        "steered_to": "E"
+      }
+    },
+    "agent_rendered_via_bash": {
+      "question": "Same as agent_routed_around_us, for render.",
+      "critical": true,
+      "properties": {}
+    },
+    "agent_ffmpeg_freehand": {
+      "$comment": "The FAMILY is classified locally; the command NEVER uploads \u2014 it carries paths and content.",
+      "question": "Raw ffmpeg is a missing tool, named. Top-3 build channel.",
+      "critical": true,
+      "properties": {
+        "filter_family": "E"
+      }
+    },
+    "agent_store_asset": {
+      "$comment": "kind='final_render' publishes with receipt_doc=None, so it produces a real final.mp4 that NEVER fires export_completed \u2014 open question 1 for the human.",
+      "question": "Does the agent generate, or only arrange?",
+      "properties": {
+        "kind": "E",
+        "ok": "F",
+        "was_final_render": "F",
+        "unreceipted_final_artifact": "F"
+      }
+    },
+    "agent_continuity": {
+      "$comment": "23 rows across both phase-1 docs collapse into this one counter. These are REGRESSION ALARMS on hard-won fixes (the drain off-by-one), not product intelligence.",
+      "question": "Is a fixed bug still fixed?",
+      "properties": {
+        "event": "E",
+        "n_drained": "N",
+        "mid_thread": "F"
+      }
+    },
+    "asset_mention_menu": {
+      "$comment": "On SELECT and on the query closing with zero results \u2014 NEVER at the useMemo whose deps are [input, caret], which is per keystroke. Both phase-1 docs got this wrong. `query_chars` is one of the three verified scrub-safe *_chars names.",
+      "question": "Users looked for an asset that is not there \u2014 smarter search, or the missing asset class?",
+      "properties": {
+        "result_count": "B",
+        "query_chars": "N",
+        "outcome": "E",
+        "input_method": "E"
+      }
+    }
+  },
+  "enums": {
+    "thread_kind": [
+      "new",
+      "resumed"
+    ],
+    "family": [
+      "opennolan",
+      "shell",
+      "file",
+      "web",
+      "orchestration",
+      "other"
+    ],
+    "agent_turn_failed.phase": [
+      "query",
+      "stream",
+      "tool",
+      "result",
+      "session"
+    ],
+    "agent_turn_failed.failure_class": [
+      "auth",
+      "budget",
+      "transport",
+      "cancelled",
+      "sdk",
+      "unknown"
+    ],
+    "agent_tool_failed.outcome": [
+      "returned_error",
+      "no_result",
+      "cancelled",
+      "timeout"
+    ],
+    "model": [
+      "claude-opus-4-8",
+      "claude-sonnet-5",
+      "claude-haiku-4-5-20251001"
+    ],
+    "tool_permission_decided.action": [
+      "confirm",
+      "deny"
+    ],
+    "reason_class": [
+      "unrecognized",
+      "destructive",
+      "path_escape",
+      "render_route",
+      "heavy_media_route",
+      "tool_reported_missing"
+    ],
+    "root_family": [
+      "home",
+      "system",
+      "tmp",
+      "other"
+    ],
+    "pack": [
+      "transcription",
+      "vision",
+      "bg-removal",
+      "beat-sync",
+      "tts"
+    ],
+    "capability_request_resolved.outcome": [
+      "installed",
+      "declined"
+    ],
+    "agent_routed_around_us.marker": [
+      "silence_cutter",
+      "motion_ops",
+      "auto_reframe",
+      "object_cutout",
+      "other"
+    ],
+    "steered_to": [
+      "run_media_op",
+      "render"
+    ],
+    "filter_family": [
+      "overlay",
+      "scale",
+      "concat",
+      "atempo",
+      "zscale",
+      "drawtext",
+      "crop",
+      "xfade",
+      "other"
+    ],
+    "agent_store_asset.kind": [
+      "final_render",
+      "video",
+      "image",
+      "audio",
+      "music",
+      "other"
+    ],
+    "agent_continuity.event": [
+      "unsolicited_drained"
+    ],
+    "asset_mention_menu.outcome": [
+      "selected",
+      "dismissed"
+    ],
+    "input_method": [
+      "keyboard",
+      "mouse"
+    ]
+  },
+  "open_vocabularies": {
+    "stop_reason": "Set by the Claude Agent SDK's ResultMessage; no user input path.",
+    "tool_id": "SDK tool names plus our own mcp__mc__ prefix. RESIDUAL RISK: if a user-registered MCP server ever ships, its tool names would become externally authored and this entry must be revisited. No such surface exists today.",
+    "attempted": "A tool id we classify, or a stable sha256 prefix of one we do not \u2014 an unknown tool name is externally authored (an MCP server we did not write), so it is hashed at the emit site rather than admitted as a vocabulary.",
+    "tool_in_flight": "Same treatment as `attempted`: classified or hashed at the emit site."
+  }
+}

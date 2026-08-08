@@ -1,0 +1,101 @@
+{
+  "$comment": "Analytics taxonomy \u2014 export family. Merged with its siblings by server/analytics.taxonomy(); see _envelope.json.",
+  "events": {
+    "export_completed": {
+      "$comment": "THE North Star. Hooked at render_jobs.py where origin+job_id are in scope; DEFINED by the receipt write completing in lib/project.py \u2014 hook line is not definition line. `ordinal`/`first_export` are deliberately absent: the only local counter is the in-memory job dict, which empties on a backend restart, and both are exact at query time from min(timestamp) per install_id.",
+      "question": "Did a user actually produce a finished video?",
+      "critical": true,
+      "properties": {
+        "origin": "E",
+        "output_mb": "B",
+        "n_cuts": "B",
+        "n_overlays": "B",
+        "has_music": "F",
+        "has_narration": "F",
+        "has_sfx": "F",
+        "final_review_status": "E",
+        "total_ms": "N",
+        "n_scenes": "N",
+        "n_cached": "N",
+        "n_rendered": "N",
+        "publish_intent": "F"
+      }
+    },
+    "export_failed": {
+      "question": "What blocks activation?",
+      "critical": true,
+      "properties": {
+        "stage": "E",
+        "failure_class": "E",
+        "origin": "E",
+        "elapsed_ms": "N",
+        "publish_intent": "F"
+      }
+    },
+    "export_artifact_opened": {
+      "question": "Do users review the finished work, or hand it off unwatched?",
+      "properties": {
+        "surface": "E",
+        "current": "F",
+        "first_export": "F"
+      }
+    },
+    "export_downloaded": {
+      "$comment": "The <a download> had NO handler at all \u2014 this row required adding one.",
+      "question": "Did the artifact actually leave the app?",
+      "properties": {
+        "output_mb": "B",
+        "current": "F",
+        "first_export": "F"
+      }
+    },
+    "export_became_stale": {
+      "$comment": "Emitted from the CONSUMER on the current true->false transition, not from lib/project.py's final_render_status \u2014 that runs inside list_assets, which the UI polls every 4s, and it is in lib/.",
+      "question": "How often do users edit after exporting? Decides re-export cues.",
+      "properties": {
+        "cause": "E"
+      }
+    },
+    "export_aborted_before_job": {
+      "question": "Why does export intent never become computation?",
+      "properties": {
+        "reason": "E",
+        "elapsed_ms": "N"
+      }
+    },
+    "export_timed_out_in_ui": {
+      "question": "Does the UI give up while the work continues? Stream progress instead of polling.",
+      "properties": {
+        "polls": "N",
+        "backend_terminal_later": "E"
+      }
+    }
+  },
+  "enums": {
+    "export_failed.stage": [
+      "input",
+      "assemble",
+      "publish",
+      "render",
+      "review"
+    ],
+    "export_artifact_opened.surface": [
+      "render_preview"
+    ],
+    "export_became_stale.cause": [
+      "human_edit",
+      "receipt_missing"
+    ],
+    "export_aborted_before_job.reason": [
+      "save_failed",
+      "agent_busy"
+    ],
+    "backend_terminal_later": [
+      "done",
+      "failed",
+      "superseded",
+      "still_running",
+      "unknown"
+    ]
+  }
+}

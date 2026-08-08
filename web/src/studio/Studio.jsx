@@ -19,6 +19,8 @@ import StudioPreview from './StudioPreview.jsx'
 import ChatPanel from '../chat/ChatPanel.jsx'
 import DebugReportModal from './DebugReportModal.jsx'
 import dbg from '../debug/recorder.js'
+import { track, flush } from '../analytics/track.js'
+import * as rollup from '../analytics/rollup.js'
 
 const POLL_MS = 500
 const POLL_MAX = 600 // ~5 min ceiling
@@ -31,6 +33,28 @@ const TIMELINE_MIN = 150     // collapse threshold for the timeline height
 const TIMELINE_MAX_FRAC = 0.6 // timeline may take at most 60% of the body (keeps preview visible)
 const AGENT_MIN = 260       // collapse threshold for the agent panel: drag narrower than this → hide
 const AGENT_MAX = 520
+
+// A BOUNDED class from a fetch/HTTP error. The message itself never ships: it interpolates
+// project paths, backend detail strings and agent output.
+// The canvas RATIO, never the raw dimensions: a bounded vocabulary is what makes "does anyone
+// leave 9:16" a countable question.
+function aspectOf(w, h) {
+  if (!w || !h) return 'unknown'
+  const r = w / h
+  if (Math.abs(r - 9 / 16) < 0.02) return '9:16'
+  if (Math.abs(r - 16 / 9) < 0.02) return '16:9'
+  if (Math.abs(r - 1) < 0.02) return '1:1'
+  if (Math.abs(r - 4 / 5) < 0.02) return '4:5'
+  return 'other'
+}
+
+function loadFailureClass(e) {
+  const m = String((e && e.message) || e || '')
+  if (/\b404\b|not found/i.test(m)) return '404'
+  if (/\b422\b|schema|invalid/i.test(m)) return 'schema'
+  if (/decode|codec|unsupported/i.test(m)) return 'decode'
+  return 'network'
+}
 
 export default function Studio({ projectId, state, onClose, chat, auth, onReconnect }) {
   const [doc, setDoc] = useState(null)
@@ -93,8 +117,13 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
   const canvas = useMemo(() => interp.canvasOf(doc), [doc])
   const ffmpeg = isFfmpeg(doc)
 
-  const flash = useCallback((kind, msg) => {
+  // ONE hook covers every guardrail (`warn`) and every red toast (`err`) in the editor —
+  // the catalog's #67 and #108. `code` is the bounded classification; the toast TEXT never
+  // ships, because it interpolates file names, agent errors and API messages.
+  const flash = useCallback((kind, msg, code) => {
     setNotice({ kind, msg })
+    if (kind === 'warn' && code) track('editor_action_blocked', { reason: code })
+    else if (kind === 'err') track('user_visible_failure', { where: code || 'unknown', recovered: false })
     if (kind === 'ok') setTimeout(() => setNotice(n => (n && n.msg === msg ? null : n)), 2600)
   }, [])
 
@@ -107,7 +136,41 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
     setPlaying(!playing)
   }, [playing, playhead, doc])
   const seekFromUser = useCallback((t) => { dbg.event('ui.seek', { t: Math.round(t * 1000) / 1000 }); setPlaying(false); setPlayhead(t) }, [])
-  const changePreviewMode = useCallback((m) => { dbg.event('ui.previewMode', { mode: m }); setPlaying(false); setPreviewMode(m) }, [])
+  const previewSwitches = useRef({ source: 0, render: 0 })
+  const turnStartCommits = useRef(0)   // #58's local_commits_during_turn
+  // #34, as a per-session ROLLUP. 10 adds is 10 uploads and the catalog allows only 6 families
+  // to upload per-interaction — this is none of them. The asset_id ARRAY is what keeps row 37's
+  // `imported ⋈ added_in_editor on asset_id` join intact at zero extra events.
+  const adds = useRef({ ids: [], kinds: {}, methods: {} })
+  const recordAdd = useCallback((path, kind, method) => {
+    const a = adds.current
+    const id = assetIds.current[path]
+    if (id && a.ids.length < 100 && !a.ids.includes(id)) a.ids.push(id)
+    a.kinds[kind] = (a.kinds[kind] || 0) + 1
+    a.methods[method] = (a.methods[method] || 0) + 1
+  }, [])
+  const assetIds = useRef({})          // project path -> opaque asset_id, from the asset manifest
+  // Keyed on `assets`, so it covers ALL THREE setAssets() callers (first load, post-upload, and
+  // the post-turn reconcile) rather than only the one someone remembers to touch. This map used
+  // to be declared and never written, so recordAdd()'s lookup always missed and
+  // asset_added_to_doc shipped asset_ids=[] on every session — verified on the wire. Only ids the
+  // BACKEND persisted at ingest land here; a manually dropped file has none and is simply absent.
+  useEffect(() => {
+    const map = {}
+    for (const list of Object.values(assets?.kinds || {})) {
+      for (const f of list || []) if (f?.path && f?.asset_id) map[f.path] = f.asset_id
+    }
+    assetIds.current = map
+  }, [assets])
+  const changePreviewMode = useCallback((m) => {
+    dbg.event('ui.previewMode', { mode: m })
+    // COUNTED, not uploaded per switch (the catalog allows only 6 families to upload
+    // per-interaction and this is none of them). A direct measurement of RULES.md's
+    // "edit live, render rarely": if users keep flipping to `render`, the live preview is
+    // failing its promise — and a count answers that as well as 6 separate events would.
+    if (previewSwitches.current[m] != null) previewSwitches.current[m] += 1
+    setPlaying(false); setPreviewMode(m)
+  }, [])
 
   // Dev observability: re-arm the session recorder if a session was left running before a reload
   // (survives an accidental ⌘R). The toggle lives in the toolbar; see web/src/debug/recorder.js.
@@ -117,8 +180,10 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
   const onToggleRecord = useCallback(() => {
     const session = dbg.toggle({ projectId, canvas: `${canvas.width}×${canvas.height}` })
     if (dbg.isRecording()) {
+      track('debug_report_outcome', { phase: 'record_started' })
       flash('ok', 'Debug recording on — reproduce the bug, then press stop to send it.')
     } else if (session) {
+      track('debug_report_outcome', { phase: 'record_stopped' })
       // Stopped: make sure the final batch is persisted, THEN offer to send the session.
       Promise.resolve(dbg.flushed()).finally(() => setDebugReport({ session }))
     }
@@ -129,16 +194,22 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
     let alive = true
     setLoading(true); setLoadErr('')
     api.getEditDecisions(projectId)
-      .then(({ content }) => {
+      .then(({ content, analytics_id }) => {
         if (!alive) return
+        analyticsProjectId.current = analytics_id || null
         const d = content || interp.scaffoldEditDecisions({})
         docRef.current = d; setDoc(d); savedRef.current = JSON.stringify(d); setDirty(!content)
         const first = (d.cuts || [])[0]
         if (first) setSelection({ kind: 'cut', id: first.id })
       })
-      .catch(e => { if (alive) setLoadErr(String(e.message || e)) })
+      .catch(e => {
+        if (!alive) return
+        setLoadErr(String(e.message || e))
+        track('editor_load_failed', { phase: 'doc', class: loadFailureClass(e), recovered: false })
+      })
       .finally(() => { if (alive) setLoading(false) })
-    api.listAssets(projectId).then(a => { if (alive) setAssets(a) }).catch(() => {})
+    api.listAssets(projectId).then(a => { if (alive) setAssets(a) })
+      .catch(e => { if (alive) track('editor_load_failed', { phase: 'assets', class: loadFailureClass(e), recovered: true }) })
     return () => { alive = false }
   }, [projectId])
 
@@ -163,11 +234,97 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
   // from their closures (event handlers always see the last committed state).
   const setDocBoth = useCallback((nd) => { docRef.current = nd; setDoc(nd) }, [])
 
+  // ── editor telemetry ──────────────────────────────────────────────────────
+  // Counters only, flushed ONCE per editor session. A 20-minute session is 50-300 commits;
+  // per-commit uploads would breach the session event ceiling on their own, and nothing here
+  // ever runs inside the rAF tick (that would make the thing being measured worse).
+  // `pastActions` shadows the `past` doc stack so an undo can be attributed to the feature it
+  // undid — keep the two pushed and popped together.
+  const editSession = useRef(rollup.newSession(Date.now()))
+  const pastActions = useRef([])
+  const futureActions = useRef([])
+  const actionSeq = useRef(0)
+  const pendingAction = useRef(null) // a drag opened at pointerdown, not yet proven effective
+  // The RANDOM persisted project id from the backend, never the slug — the slug is the name
+  // the user typed, and the ratified envelope forbids putting it on the wire.
+  const analyticsProjectId = useRef(null)
+  const summarySent = useRef(false)
+  useEffect(() => {
+    // TWO endings, because the common one is not a page teardown at all. Closing the editor
+    // sets `editing=false` in App.jsx, which UNMOUNTS this component while the document lives
+    // on — so `pagehide` never fires and, hooked there alone, this event never left the app
+    // once. Unmount is the editor session's real end; pagehide covers the teardown where
+    // React runs no cleanup (window close, reload, app quit).
+    const flushSummary = (beacon) => {
+      const d = docRef.current
+      // An editor the user OPENED and did nothing in is a real session and a real zero-use
+      // denominator — dropping it would leave only users who did something and inflate every
+      // adoption rate. The gate is therefore "did the editor actually open", i.e. the doc
+      // loaded; that also excludes StrictMode's mount → unmount → mount rehearsal in dev,
+      // whose cleanup runs before the fetch resolves.
+      if (summarySent.current || !d) return
+      summarySent.current = true
+      // The data-loss alarm. Reachable because autosave is SUSPENDED around agent turns, so
+      // "dirty at teardown" is a real state and not a theoretical one.
+      if (dirtyRef.current) {
+        track('dirty_work_abandoned', {
+          commits_since_save: editSession.current.commits,
+          exit_reason: beacon ? 'window_close' : 'back',
+        })
+      }
+      track('editor_session_summary', {
+        ...rollup.summarize(editSession.current, {
+          now: Date.now(),
+          nCuts: (d?.cuts || []).length,
+          nOverlays: (d?.overlays || []).length,
+        }),
+        project_id: analyticsProjectId.current,
+        // #72, counted rather than uploaded per switch. A direct measurement of RULES.md's
+        // "edit live, render rarely": a high render count means the live preview is failing.
+        preview_switches_source: previewSwitches.current.source,
+        preview_switches_render: previewSwitches.current.render,
+      })
+      if (adds.current.ids.length || Object.keys(adds.current.kinds).length) {
+        track('asset_added_to_doc', {
+          asset_ids: adds.current.ids,
+          adds: Object.values(adds.current.kinds).reduce((s, n) => s + n, 0),
+          by_kind: adds.current.kinds,
+          by_method: adds.current.methods,
+          project_id: analyticsProjectId.current,
+        })
+      }
+      // Flush HERE, not just from track.js's own pagehide hook: that one is registered at app
+      // start, so it runs BEFORE this handler and would drain an empty queue, leaving the
+      // summary to die with the document. sendBeacon only at teardown — on unmount the page
+      // is alive and a normal fetch is both more reliable and observable.
+      flush(beacon)
+    }
+    const onPageHide = () => flushSummary(true)
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      window.removeEventListener('pagehide', onPageHide)
+      flushSummary(false)
+    }
+  }, [])
+
   // Push the current doc onto the undo stack WITHOUT changing it — called once at the start
   // of a coalesced drag so an entire trim drag collapses to a single undo step.
-  const snapshot = useCallback(() => {
+  // A drag is ONE undo step, so its snapshot is also its commit — `live` runs per frame and
+  // must never be counted. Callers that know which feature they are opening pass its id;
+  // `onScrubBegin` is wired straight to a child as a prop and may be handed an event object,
+  // so anything that is not a known feature id is ignored rather than trusted.
+  const snapshot = useCallback((featureId) => {
+    const id = rollup.isFeatureId(featureId) ? featureId : null
+    const actionId = id ? `a${++actionSeq.current}` : null
+    // OPEN the action here; do NOT count it yet. pointerdown fires on a bare click too, so
+    // recording at this point credits a feature the user only touched — inflating adoption
+    // and discovery for exactly the low-volume features those numbers are meant to judge.
+    // `live` closes it on the first mutation that actually changes the doc.
+    pendingAction.current = id ? { actionId, featureId: id } : null
     setPast(p => [...p, docRef.current].slice(-100))
+    pastActions.current = [...pastActions.current, actionId].slice(-100)
     setFuture([])
+    futureActions.current = []
   }, [])
 
   // Live update, NO history push (per-frame during a coalesced drag). Emits a throttled
@@ -176,6 +333,12 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
     const prev = docRef.current
     const nd = typeof next === 'function' ? next(prev) : next
     if (nd === prev) return
+    // The first EFFECTIVE frame of a drag is what makes the snapshot a real edit. Referential
+    // no-ops returned above never get here, so a click-without-movement counts nothing.
+    if (pendingAction.current) {
+      rollup.recordCommit(editSession.current, pendingAction.current)
+      pendingAction.current = null
+    }
     dbg.event('edit.live', summarizeDocChange(prev, nd))
     setDocBoth(nd); setDirty(true)
   }, [setDocBoth])
@@ -183,20 +346,47 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
   // Discrete edit = snapshot + apply (one undo step). Referential no-op = no history. Emits
   // `edit.commit` with a diff summary — the semantic record of EVERY discrete edit (trim/split/
   // delete/reorder/add/overlay/text/settings/keyframes/canvas/audio) for the debug session trace.
-  const commit = useCallback((next) => {
+  // `featureId` names WHICH feature fired, from the closed enum in analytics/rollup.js: the
+  // mutator alone cannot say, because `next` is opaque and the inspector funnels a dozen
+  // different fields through one updateCut/updateOverlay. `action_id` is what makes the undo
+  // rate correct — without it undo → redo → undo counts twice against one action and the rate
+  // can exceed 100%.
+  // #66. Bounded by construction: a persisted seen-set means at most one upload per feature
+  // per install, then zero forever. localStorage, not state — it must survive the reload.
+  const noteFirstUse = useCallback((featureId) => {
+    if (!featureId) return
+    try {
+      const KEY = 'on.features.seen.v1'
+      const seen = JSON.parse(localStorage.getItem(KEY) || '[]')
+      if (seen.includes(featureId)) return
+      localStorage.setItem(KEY, JSON.stringify([...seen, featureId].slice(-64)))
+      track('feature_first_use', { feature_id: featureId, discovery_source: 'timeline' })
+    } catch { /* private mode / quota — losing a discovery event must never break an edit */ }
+  }, [])
+
+  const commit = useCallback((next, featureId) => {
     const prev = docRef.current
     const nd = typeof next === 'function' ? next(prev) : next
     if (nd === prev) return
     dbg.event('edit.commit', summarizeDocChange(prev, nd))
+    const actionId = `a${++actionSeq.current}`
+    rollup.recordCommit(editSession.current, { actionId, featureId })
+    noteFirstUse(featureId)
     setPast(p => [...p, prev].slice(-100))
+    pastActions.current = [...pastActions.current, actionId].slice(-100)
     setFuture([])
+    futureActions.current = []
     setDocBoth(nd); setDirty(true)
-  }, [setDocBoth])
+  }, [setDocBoth, noteFirstUse])
 
   const undo = useCallback(() => {
     if (!past.length) return
     const prev = past[past.length - 1]
     dbg.event('edit.undo', summarizeDocChange(docRef.current, prev))
+    const actionId = pastActions.current[pastActions.current.length - 1]
+    rollup.recordUndo(editSession.current, actionId)
+    pastActions.current = pastActions.current.slice(0, -1)
+    futureActions.current = [actionId, ...futureActions.current]
     setPast(past.slice(0, -1))
     setFuture([docRef.current, ...future])
     setDocBoth(prev); setDirty(true)
@@ -206,6 +396,10 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
     if (!future.length) return
     const nxt = future[0]
     dbg.event('edit.redo', summarizeDocChange(docRef.current, nxt))
+    const actionId = futureActions.current[0]
+    rollup.recordRedo(editSession.current, actionId)
+    futureActions.current = futureActions.current.slice(1)
+    pastActions.current = [...pastActions.current, actionId].slice(-100)
     setFuture(future.slice(1))
     setPast([...past, docRef.current])
     setDocBoth(nxt); setDirty(true)
@@ -220,19 +414,27 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
     if (!d) return null
     if (agentBusyRef.current || reconcilingRef.current) {
       dbg.event('ui.save', { silent: !!silent, result: 'blocked-agent' })
-      if (!silent) flash('warn', 'Agent is editing — your changes will save the moment its turn ends')
+      track('editor_save_finished', { kind: silent ? 'autosave' : 'manual', outcome: 'blocked_agent' })
+      if (!silent) flash('warn', 'Agent is editing — your changes will save the moment its turn ends', 'agent_busy')
       return null
     }
     try {
       await api.saveEditDecisions(projectId, d)
       savedRef.current = JSON.stringify(d)
       setDirty(false)
+      rollup.recordSave(editSession.current) // counted into the summary; autosave fires 20-200×/session
       dbg.event('ui.save', { silent: !!silent, result: 'ok' })
       if (!silent) flash('ok', 'Saved')
       return d
     } catch (e) {
       dbg.event('ui.save', { silent: !!silent, result: 'rejected', error: String(e.message || e).slice(0, 200) })
-      if (!silent) flash('err', `Save rejected: ${String(e.message || e)}`)
+      // RULES.md says a Save must never 422 — a rejected save is the contract alarm, so it
+      // uploads at 100% even though successes are only counted into the session summary.
+      track('editor_save_finished', {
+        kind: silent ? 'autosave' : 'manual',
+        outcome: /network|fetch|load failed/i.test(String(e.message || e)) ? 'network' : 'rejected',
+      })
+      if (!silent) flash('err', `Save rejected: ${String(e.message || e)}`, 'save')
       return null
     }
   }, [projectId, flash])
@@ -263,8 +465,13 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
     if (rendering) return
     dbg.event('ui.render', { phase: 'start' })
     const saved = await save()
-    if (!saved) { dbg.event('ui.render', { phase: 'abort', reason: 'save-failed' }); return }
+    if (!saved) {
+      dbg.event('ui.render', { phase: 'abort', reason: 'save-failed' })
+      track('export_aborted_before_job', { reason: 'save_failed' })
+      return
+    }
     setRendering(true)
+    rollup.recordRender(editSession.current)
     flash('warn', 'Rendering… (only changed scenes re-render)')
     const myJob = ++jobRef.current
     try {
@@ -282,13 +489,14 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
           flash('ok', w ? `Rendered — ${w}` : 'Rendered')
           return
         }
-        if (st.status === 'failed') { dbg.event('ui.render', { phase: 'failed', error: st.error || 'unknown' }); flash('err', `Render failed: ${st.error || 'unknown'}`); return }
+        if (st.status === 'failed') { dbg.event('ui.render', { phase: 'failed', error: st.error || 'unknown' }); flash('err', `Render failed: ${st.error || 'unknown'}`, 'render'); return }
       }
       dbg.event('ui.render', { phase: 'timeout' })
-      flash('err', 'Render timed out')
+      track('export_timed_out_in_ui', { polls: POLL_MAX, backend_terminal_later: 'still_running' })
+      flash('err', 'Render timed out', 'render')
     } catch (e) {
       dbg.event('ui.render', { phase: 'error', error: String(e.message || e).slice(0, 200) })
-      flash('err', `Render error: ${String(e.message || e)}`)
+      flash('err', `Render error: ${String(e.message || e)}`, 'render')
     } finally {
       if (jobRef.current === myJob) setRendering(false)
     }
@@ -305,12 +513,15 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
   useEffect(() => {
     const was = agentBusyRef.current
     agentBusyRef.current = chatBusy
+    if (chatBusy && !was) turnStartCommits.current = editSession.current.commits
     if (!(was && !chatBusy) || !projectId) return // only act on a turn that just ended
     let alive = true
     reconcilingRef.current = true
+    const commitsAtTurnStart = { current: turnStartCommits.current }
     // The agent may have rendered new HyperFrames clips into hf/renders this turn — refresh the
     // Assets tabs (incl. the Renders tab) so they show up without reopening the project.
-    api.listAssets(projectId).then(a => { if (alive) setAssets(a) }).catch(() => {})
+    api.listAssets(projectId).then(a => { if (alive) setAssets(a) })
+      .catch(e => { if (alive) track('agent_adopt_failed', { phase: 'assets_fetch', class: loadFailureClass(e) }) })
     api.getEditDecisions(projectId)
       .then(({ content }) => {
         if (!alive || !content) return
@@ -318,11 +529,27 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
         if (incoming === savedRef.current) return // disk matches our last save — nothing changed
         const hadLocal = dirtyRef.current
         dbg.event('agent.adopt', { hadLocalEdits: hadLocal, ...summarizeDocChange(docRef.current, content) })
-        if (hadLocal) { setPast(p => [...p, docRef.current].slice(-100)); setFuture([]) } // keep ⌘Z to user's version
+        // keep ⌘Z to user's version. pastActions stays in lockstep with `past` (null = no
+        // feature: this entry is the agent's write, not a user action).
+        if (hadLocal) {
+          setPast(p => [...p, docRef.current].slice(-100))
+          pastActions.current = [...pastActions.current, null].slice(-100)
+          setFuture([]); futureActions.current = []
+        }
         docRef.current = content; setDoc(content); savedRef.current = incoming; setDirty(false)
         flash('ok', hadLocal ? 'Timeline updated by the agent — ⌘Z to restore your version' : 'Timeline updated by the agent')
+        // #58 — the best agent-quality signal the editor has: did the user KEEP what the
+        // agent did? summarizeDocChange returns changed KEY NAMES, never values.
+        const delta = summarizeDocChange(docRef.current, content)
+        track('agent_output_adopted', {
+          had_local_edits: hadLocal,
+          cuts_delta: (content?.cuts || []).length - ((docRef.current?.cuts) || []).length,
+          overlays_delta: (content?.overlays || []).length - ((docRef.current?.overlays) || []).length,
+          fields_changed: Array.isArray(delta?.changed) ? delta.changed.length : 0,
+          local_commits_during_turn: editSession.current.commits - commitsAtTurnStart.current,
+        })
       })
-      .catch(() => {})
+      .catch(e => { track('agent_adopt_failed', { phase: 'doc_fetch', class: loadFailureClass(e) }) })
       .finally(() => { reconcilingRef.current = false })
     return () => { alive = false }
   }, [chatBusy, projectId, flash])
@@ -343,7 +570,7 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
     const meta = src ? sourceMetas[src] : null
     live(d => interp.trimCut(d, cutId, patch, { sourceDuration: meta?.duration ?? undefined }))
   }, [sourceMetas, live])
-  const onTrimBegin = useCallback(() => snapshot(), [snapshot])
+  const onTrimBegin = useCallback(() => snapshot('editor.cut_trim'), [snapshot])
 
   // Split acts on WHATEVER is selected at the playhead — the selected overlay / music region /
   // narration segment, else the main cut under the playhead. Each pure mutator returns the same
@@ -364,43 +591,44 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
         nd = interp.splitNarration(before, sel.index, playhead)
         hint = 'Move the playhead inside the narration segment to split it'
       } else {
-        flash('warn', 'A sound effect is a single cue — there’s nothing to split'); return
+        flash('warn', 'A sound effect is a single cue — there’s nothing to split', 'invalid_playhead'); return
       }
     } else {
       nd = interp.splitCutAtPlayhead(before, playhead)
     }
-    if (nd === before) { flash('warn', hint); return }
-    commit(nd)
+    if (nd === before) { flash('warn', hint, 'invalid_playhead'); return }
+    commit(nd, 'editor.split')
   }, [selection, playhead, commit, flash])
 
   const onDelete = useCallback(() => {
     if (selCut) {
-      if ((doc?.cuts || []).length <= 1) { flash('warn', 'Can’t delete the last clip'); return }
-      commit(d => interp.removeCut(d, selCut.id))
+      if ((doc?.cuts || []).length <= 1) { flash('warn', 'Can’t delete the last clip', 'last_cut'); return }
+      commit(d => interp.removeCut(d, selCut.id), 'editor.delete')
       setSelection(null)
     } else if (selOverlayIndex >= 0) {
-      commit(d => interp.removeOverlay(d, selOverlayIndex))
+      commit(d => interp.removeOverlay(d, selOverlayIndex), 'editor.delete')
       setSelection(null)
     } else if (selAudio) {
-      if (selAudio.audioKind === 'music') commit(d => interp.removeMusic(d, selAudio.index))
-      else if (selAudio.audioKind === 'narration') commit(d => interp.removeNarration(d, selAudio.index))
-      else commit(d => interp.removeSfx(d, selAudio.index))
+      if (selAudio.audioKind === 'music') commit(d => interp.removeMusic(d, selAudio.index), 'editor.delete')
+      else if (selAudio.audioKind === 'narration') commit(d => interp.removeNarration(d, selAudio.index), 'editor.delete')
+      else commit(d => interp.removeSfx(d, selAudio.index), 'editor.delete')
       setSelection(null)
     }
   }, [selCut, selOverlayIndex, selAudio, doc, commit, flash])
 
   const onDuplicate = useCallback(() => {
     if (!selCut) return
-    commit(d => interp.duplicateCut(d, selCut.id))
+    commit(d => interp.duplicateCut(d, selCut.id), 'editor.duplicate')
   }, [selCut, commit])
 
   const onReorder = useCallback((from, to) => {
-    commit(d => interp.reorderCut(d, from, to))
+    commit(d => interp.reorderCut(d, from, to), 'editor.cut_reorder')
   }, [commit])
 
   // Assets-tab adds (feat 4) + drag-drop (atTime present on a drop): each kind drops in the
   // way that fits it. Click → at the playhead; drag-drop → at the dropped project time.
   const onAddClip = useCallback((path, atTime) => {
+    recordAdd(path, 'video_main', atTime != null ? 'timeline_drop' : 'asset_click')
     const meta = sourceMetas[path]
     const out = meta?.duration ? Math.min(meta.duration, 8) : 5
     let atIndex
@@ -408,26 +636,26 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
       const h = interp.cutAtTime(docRef.current, atTime) // insert before/after the cut under the drop
       if (h) atIndex = atTime >= h.start + interp.cutDuration(h.cut) / 2 ? h.index + 1 : h.index
     }
-    commit(d => interp.addCut(d, { source: path, in_seconds: 0, out_seconds: out }, atIndex))
+    commit(d => interp.addCut(d, { source: path, in_seconds: 0, out_seconds: out }, atIndex), 'editor.add_clip')
   }, [commit, sourceMetas])
-  const onSetMusic = useCallback((path) => { commit(d => interp.setMusic(d, path)); flash('ok', 'Music set') }, [commit, flash])
+  const onSetMusic = useCallback((path) => { recordAdd(path, 'music', 'asset_click'); commit(d => interp.setMusic(d, path), 'editor.audio_ops'); flash('ok', 'Music set') }, [commit, flash])
   // Drop a music asset onto the timeline: the FIRST bed spans the whole timeline (background music);
   // a subsequent drop adds a bounded region at the drop time (its length from the asset duration).
   const onAddMusic = useCallback((path, atTime) => {
-    if (interp.musicRegions(docRef.current).length === 0) { commit(d => interp.setMusic(d, path)); flash('ok', 'Music set'); return }
+    if (interp.musicRegions(docRef.current).length === 0) { commit(d => interp.setMusic(d, path), 'editor.audio_ops'); flash('ok', 'Music set'); return }
     const start = atTime != null ? Math.max(0, atTime) : playhead
     const meta = sourceMetas[path]
     const end = start + (meta?.duration ? Math.min(meta.duration, 30) : 12)
-    commit(d => interp.addMusic(d, path, { start, end })); flash('ok', 'Music region added')
+    commit(d => interp.addMusic(d, path, { start, end }), 'editor.audio_ops'); flash('ok', 'Music region added')
   }, [commit, flash, playhead, sourceMetas])
-  const onAddSfx = useCallback((path, atTime) => { commit(d => interp.addSfx(d, path, atTime != null ? atTime : playhead)) }, [commit, playhead])
+  const onAddSfx = useCallback((path, atTime) => { recordAdd(path, 'sfx', atTime != null ? 'timeline_drop' : 'asset_click'); commit(d => interp.addSfx(d, path, atTime != null ? atTime : playhead), 'editor.audio_ops') }, [commit, playhead])
 
   // Edit the selected audio item (music bed / narration segment / sfx) from the properties panel.
   const onUpdateAudio = useCallback((patch) => {
     if (!selAudio) return
-    if (selAudio.audioKind === 'music') commit(d => interp.updateMusic(d, selAudio.index, patch))
-    else if (selAudio.audioKind === 'narration') commit(d => interp.updateNarration(d, selAudio.index, patch))
-    else commit(d => interp.updateSfx(d, selAudio.index, patch))
+    if (selAudio.audioKind === 'music') commit(d => interp.updateMusic(d, selAudio.index, patch), 'editor.audio_ops')
+    else if (selAudio.audioKind === 'narration') commit(d => interp.updateNarration(d, selAudio.index, patch), 'editor.audio_ops')
+    else commit(d => interp.updateSfx(d, selAudio.index, patch), 'editor.audio_ops')
   }, [selAudio, commit])
   // Per-frame variant used while DRAGGING a scrub field (no history; onScrubBegin snapshotted once).
   const onLiveUpdateAudio = useCallback((patch) => {
@@ -486,7 +714,7 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
     const start = Math.min(playhead, Math.max(0, interp.timelineDuration(doc) - 1))
     const end = start + 2.5
     const at = (doc?.overlays || []).length
-    commit(d => interp.addOverlay(d, newTextOverlay({ start, end, track: interp.placeOverlayTrack(d, start, end, 0) })))
+    commit(d => interp.addOverlay(d, newTextOverlay({ start, end, track: interp.placeOverlayTrack(d, start, end, 0) })), 'editor.add_overlay')
     setSelection({ kind: 'overlay', index: at })
   }, [playhead, doc, commit])
 
@@ -494,7 +722,7 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
     const start = atTime != null ? Math.max(0, atTime) : Math.min(playhead, Math.max(0, interp.timelineDuration(doc) - 1))
     const end = start + 3
     const at = (doc?.overlays || []).length
-    commit(d => interp.addOverlay(d, newImageOverlay({ assetId, start, end, canvas: interp.canvasOf(d), track: interp.placeOverlayTrack(d, start, end, track) })))
+    commit(d => interp.addOverlay(d, newImageOverlay({ assetId, start, end, canvas: interp.canvasOf(d), track: interp.placeOverlayTrack(d, start, end, track) })), 'editor.add_overlay')
     setSelection({ kind: 'overlay', index: at })
   }, [playhead, doc, commit])
 
@@ -504,7 +732,7 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
     const len = meta?.duration ? Math.min(meta.duration, 6) : 4
     const end = start + len
     const at = (doc?.overlays || []).length
-    commit(d => interp.addOverlay(d, newVideoOverlay({ assetId, start, end, canvas: interp.canvasOf(d), track: interp.placeOverlayTrack(d, start, end, track) })))
+    commit(d => interp.addOverlay(d, newVideoOverlay({ assetId, start, end, canvas: interp.canvasOf(d), track: interp.placeOverlayTrack(d, start, end, track) })), 'editor.add_overlay')
     setSelection({ kind: 'overlay', index: at })
   }, [playhead, doc, commit, sourceMetas])
 
@@ -536,7 +764,7 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
   // undo step; the per-frame move/trim go through `live` (no history).
   const onOverlayMove = useCallback((index, patch) => live(d => interp.moveOverlay(d, index, patch)), [live])
   const onOverlayTrim = useCallback((index, patch) => live(d => interp.trimOverlay(d, index, patch)), [live])
-  const onOverlayDragBegin = useCallback(() => snapshot(), [snapshot])
+  const onOverlayDragBegin = useCallback(() => snapshot('editor.overlay_timeline'), [snapshot])
   // On drag-end: float the just-moved/trimmed overlay off any new same-track overlap. `live` (no
   // new history) folds it into the one undo step the drag's start-of-move snapshot already opened.
   const onOverlayResolve = useCallback((index) => live(d => interp.resolveOverlayOverlap(d, index)), [live])
@@ -545,7 +773,7 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
   // onAudioDragBegin snapshots once at pointerdown so the whole drag is ONE undo step; per-frame
   // moves/trims/level-changes go through `live` (no history). These target an explicit index (the
   // block being dragged), unlike the properties-panel onUpdateAudio which edits the selection.
-  const onAudioDragBegin = useCallback(() => snapshot(), [snapshot])
+  const onAudioDragBegin = useCallback(() => snapshot('editor.audio_ops'), [snapshot])
   const onMoveSfx = useCallback((index, start) => live(d => interp.updateSfx(d, index, { start_seconds: start })), [live])
   const onMoveNarration = useCallback((index, start) => live(d => interp.moveNarration(d, index, start)), [live])
   const onTrimNarration = useCallback((index, patch) => live(d => interp.updateNarration(d, index, patch)), [live])
@@ -576,7 +804,7 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
   }), [live])
 
   // Project background (metadata.background) — one commit per change.
-  const onSetBackground = useCallback((bg) => commit(d => interp.setBackground(d, bg)), [commit])
+  const onSetBackground = useCallback((bg) => commit(d => interp.setBackground(d, bg), 'editor.background'), [commit])
 
   // Upload an asset from the editor's Assets panel (same as the pipeline page) → re-list so it shows.
   const refreshAssets = useCallback(() => {
@@ -585,7 +813,7 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
   const onUploadAsset = useCallback(async (kind, file) => {
     if (!file) return
     try { await api.uploadAsset(projectId, kind, file); refreshAssets(); dbg.event('ui.uploadAsset', { kind, name: file.name, bytes: file.size }); flash('ok', `Uploaded ${file.name}`) }
-    catch (e) { dbg.event('ui.uploadAsset', { kind, name: file?.name, result: 'failed', error: String(e.message || e).slice(0, 200) }); flash('err', `Upload failed: ${String(e.message || e)}`) }
+    catch (e) { dbg.event('ui.uploadAsset', { kind, name: file?.name, result: 'failed', error: String(e.message || e).slice(0, 200) }); flash('err', `Upload failed: ${String(e.message || e)}`, 'upload') }
   }, [projectId, refreshAssets, flash])
 
   // Quietly self-heal an agent-authored image/video overlay whose position is a string anchor
@@ -594,19 +822,25 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
   const onNormalizeOverlay = useCallback((index, patch) => live(d => interp.updateOverlay(d, index, patch)), [live])
 
   const onCanvas = useCallback(({ width, height }) => {
-    commit(d => interp.setCanvas(d, { width, height }))
+    const prev = interp.canvasOf(docRef.current)
+    // Does anyone leave 9:16? If not, the picker is a deletion candidate (RULES.md is
+    // vertical-only). A ratio, never the raw dimensions, so this stays a bounded vocabulary.
+    track('canvas_changed', { from: aspectOf(prev?.width, prev?.height), to: aspectOf(width, height) })
+    commit(d => interp.setCanvas(d, { width, height }), 'editor.canvas')
   }, [commit])
 
-  const onUpdateCut = useCallback((cutId, patch) => commit(d => interp.updateCut(d, cutId, patch)), [commit])
-  const onUpdateOverlay = useCallback((index, patch) => commit(d => interp.updateOverlay(d, index, patch)), [commit])
+  const onUpdateCut = useCallback((cutId, patch) =>
+    commit(d => interp.updateCut(d, cutId, patch), rollup.featureForPatch(patch, 'editor.cut_trim')), [commit])
+  const onUpdateOverlay = useCallback((index, patch) =>
+    commit(d => interp.updateOverlay(d, index, patch), rollup.featureForPatch(patch, 'editor.clip_transform')), [commit])
   // Live (no-history) variants for scrub-field DRAGS — `onScrubBegin` (= snapshot) opens ONE undo
   // step at the start of the drag, then each frame applies through `live`. Typing / arrow keys still
   // go through the commit handlers above (one undo step each).
   const onLiveUpdateCut = useCallback((cutId, patch) => live(d => interp.updateCut(d, cutId, patch)), [live])
   const onLiveUpdateOverlay = useCallback((index, patch) => live(d => interp.updateOverlay(d, index, patch)), [live])
-  const onSetKeyframes = useCallback((index, kfs) => commit(d => interp.setOverlayKeyframes(d, index, kfs)), [commit])
-  const onUpsertKeyframe = useCallback((index, kf) => commit(d => interp.upsertKeyframe(d, index, kf)), [commit])
-  const onRemoveKeyframe = useCallback((index, ki) => commit(d => interp.removeKeyframe(d, index, ki)), [commit])
+  const onSetKeyframes = useCallback((index, kfs) => commit(d => interp.setOverlayKeyframes(d, index, kfs), 'editor.keyframes'), [commit])
+  const onUpsertKeyframe = useCallback((index, kf) => commit(d => interp.upsertKeyframe(d, index, kf), 'editor.keyframes'), [commit])
+  const onRemoveKeyframe = useCallback((index, ki) => commit(d => interp.removeKeyframe(d, index, ki), 'editor.keyframes'), [commit])
 
   // Clear a selection that went out of range (e.g. after undo/redo/delete) so the inspector
   // doesn't edit a phantom index (which would no-op-but-dirty the doc).
@@ -714,7 +948,7 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
             playing={playing} selection={selection} sourceMetas={sourceMetas} hidden={hiddenTracks}
             onScrub={setPlayhead} onPlayingChange={setPlaying}
             onSelectOverlay={onSelectOverlay} onOverlayPosition={onOverlayPosition} onOverlayDragBegin={onOverlayDragBegin}
-            onClipPosition={onClipPosition} onClipDragBegin={snapshot}
+            onClipPosition={onClipPosition} onClipDragBegin={() => snapshot('editor.clip_transform')}
           />
           {panels.inspectorOpen ? (
             <>

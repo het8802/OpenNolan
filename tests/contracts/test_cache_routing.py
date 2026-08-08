@@ -21,9 +21,16 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from lib import app_paths  # noqa: E402
 
 _ROUTE_VARS = (
-    "OPENNOLAN_ROUTE_CACHES", "OPENNOLAN_CACHES_ROUTED", "OPENNOLAN_CACHE_DIR",
-    "HF_HOME", "TORCH_HOME", "U2NET_HOME", "NPM_CONFIG_CACHE", "PIP_CACHE_DIR",
-    "XDG_CACHE_HOME", "TMPDIR",
+    "OPENNOLAN_ROUTE_CACHES",
+    "OPENNOLAN_CACHES_ROUTED",
+    "OPENNOLAN_CACHE_DIR",
+    "HF_HOME",
+    "TORCH_HOME",
+    "U2NET_HOME",
+    "NPM_CONFIG_CACHE",
+    "PIP_CACHE_DIR",
+    "XDG_CACHE_HOME",
+    "TMPDIR",
 )
 
 
@@ -40,7 +47,7 @@ def route_env(tmp_path):
     for var in _ROUTE_VARS:
         os.environ.pop(var, None)
     os.environ["OPENNOLAN_HOME"] = str(tmp_path)
-    yield tmp_path / "cache"
+    yield tmp_path / "appcache"
     os.environ.clear()
     os.environ.update(saved_env)
     tempfile.tempdir = saved_tempdir
@@ -56,12 +63,15 @@ def test_provision_main_routes_caches(tmp_path):
     env["OPENNOLAN_HOME"] = str(tmp_path)
     out = subprocess.run(
         [sys.executable, str(PROJECT_ROOT / "scripts" / "provision.py"), "--doctor"],
-        env=env, capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(PROJECT_ROOT),
     )
     assert out.returncode == 0, out.stderr
-    assert (tmp_path / "cache" / "huggingface").is_dir()
-    assert (tmp_path / "cache" / "npm").is_dir()
-    assert (tmp_path / "cache" / "scratch").is_dir()
+    assert (tmp_path / "appcache" / "huggingface").is_dir()
+    assert (tmp_path / "appcache" / "npm").is_dir()
+    assert (tmp_path / "appcache" / "scratch").is_dir()
 
 
 def test_provision_main_respects_gate_off(tmp_path):
@@ -69,10 +79,13 @@ def test_provision_main_respects_gate_off(tmp_path):
     env["OPENNOLAN_HOME"] = str(tmp_path)  # dev: no gate vars set
     out = subprocess.run(
         [sys.executable, str(PROJECT_ROOT / "scripts" / "provision.py"), "--doctor"],
-        env=env, capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(PROJECT_ROOT),
     )
     assert out.returncode == 0, out.stderr
-    assert not (tmp_path / "cache").exists()
+    assert not (tmp_path / "appcache").exists()
 
 
 def test_create_app_calls_route_caches(route_env):

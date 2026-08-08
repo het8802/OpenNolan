@@ -1,0 +1,66 @@
+{
+  "$comment": "Analytics taxonomy \u2014 preview family. Merged with its siblings by server/analytics.taxonomy(); see _envelope.json.",
+  "events": {
+    "preview_health": {
+      "$comment": "ACCUMULATED in a ref and emitted ONCE on unmount. A capture() inside the rAF tick (syncAudioEls / syncOverlayVideos) runs 60x/s \u2014 it would blow the session budget AND degrade the very smoothness it exists to measure. Percentiles are computed in the local reducer, so the latency distribution survives the ceiling with zero per-seek uploads. dropped_frames comes from getVideoPlaybackQuality(), which replaces a hand-rolled cadence estimate.",
+      "question": "Is scrubbing smooth on OTHER people's machines? The core interaction outranks any feature.",
+      "properties": {
+        "seeks": "N",
+        "p50_seek_ms": "N",
+        "p95_seek_ms": "N",
+        "incomplete_seeks": "N",
+        "stalls": "N",
+        "waiting": "N",
+        "decoded_frames": "N",
+        "dropped_frames": "N"
+      }
+    },
+    "preview_failure": {
+      "$comment": "Only 3 of the 8 lifecycle names in the existing dbg fan-out are failures. Those upload at 100%; the rest are counted into preview_health.",
+      "question": "Which playback paths break? Proxy and format work.",
+      "critical": true,
+      "properties": {
+        "class": "E",
+        "media_kind": "E",
+        "source_codec": "E",
+        "ready_state": "E",
+        "recovered": "F"
+      }
+    },
+    "preview_export_divergence": {
+      "$comment": "RULES.md makes 'preview == export' a contract AND records a real violation of it (a source-px crop applied to a canvas-sized proxy -> ffmpeg exit 234). Compared as PRESENCE, never values: a divergence is 'the assemble dropped something the canvas showed', and the values are the user's composition.",
+      "question": "The app's stated north star is currently unverifiable. Make it verifiable.",
+      "properties": {
+        "field": "E",
+        "magnitude_bucket": "B",
+        "origin": "E",
+        "publish_intent": "F"
+      }
+    }
+  },
+  "enums": {
+    "preview_failure.class": [
+      "metadata",
+      "decode",
+      "stall"
+    ],
+    "media_kind": [
+      "video",
+      "image",
+      "audio"
+    ],
+    "ready_state": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+    ],
+    "preview_export_divergence.field": [
+      "overlay_geometry",
+      "crop",
+      "scale",
+      "audio_mix"
+    ]
+  }
+}

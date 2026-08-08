@@ -12,6 +12,7 @@ import * as api from '../api.js'
 import * as interp from '../editor/interp.js'
 import { fmtTime, previewAudioTracks, overlayType, isImageSource, clipBox, clipPositionXY, ffBoxBackground } from './model.js'
 import dbg from '../debug/recorder.js'
+import { track } from '../analytics/track.js'
 
 const OV_DRAG_THRESHOLD = 3 // px before a press on a canvas overlay becomes a position drag
 
@@ -78,6 +79,14 @@ function syncOverlayVideos(els, overlays, t, { play }) {
       if (el.readyState >= 1 && Math.abs(el.currentTime - target) > 0.05) { try { el.currentTime = target } catch { /* not ready */ } }
     }
   }
+}
+
+/** p50/p95/max computed in the LOCAL reducer, so a latency distribution survives the ceiling
+ *  without a single per-seek upload. */
+function pct(values, q) {
+  if (!values.length) return null
+  const s = [...values].sort((a, b) => a - b)
+  return Math.round(s[Math.min(s.length - 1, Math.floor(q * s.length))])
 }
 
 export default function StudioPreview({
@@ -153,6 +162,28 @@ export default function StudioPreview({
 
   // Paused-scrub seek: the DESIRED source time for the persistent <video>, plus a guard-ref so the
   // chaser can tell whether it's allowed to run without re-subscribing.
+  // #80 — accumulated in a REF and emitted ONCE, never from the rAF tick. A capture() inside
+  // syncAudioEls / syncOverlayVideos runs 60x/s, so it would both blow the session budget and
+  // degrade the very smoothness it exists to measure.
+  const health = useRef({ seeks: 0, seekMs: [], incomplete: 0, stalls: 0, waiting: 0, failures: 0 })
+  useEffect(() => () => {
+    const h = health.current
+    if (!h.seeks && !h.stalls && !h.waiting && !h.failures) return
+    const el = srcRef.current
+    const q = el?.getVideoPlaybackQuality?.()
+    track('preview_health', {
+      seeks: h.seeks,
+      p50_seek_ms: pct(h.seekMs, 0.5),
+      p95_seek_ms: pct(h.seekMs, 0.95),
+      incomplete_seeks: h.seeks - h.seekMs.length,
+      stalls: h.stalls,
+      waiting: h.waiting,
+      // The browser's own numbers, which replace a hand-rolled cadence estimate.
+      decoded_frames: q?.totalVideoFrames ?? null,
+      dropped_frames: q?.droppedVideoFrames ?? null,
+    })
+  }, [])
+
   const seekTargetRef = useRef(null)
   const modeRef = useRef({ playing, previewMode, isImg })
   modeRef.current = { playing, previewMode, isImg }
@@ -173,6 +204,8 @@ export default function StudioPreview({
     if (v.readyState < 1 || v.seeking) return // not ready, or a seek is in flight → its `seeked` re-chases
     if (Math.abs(v.currentTime - target) > 0.05) {
       dbg.event('preview.seekReq', { to: Math.round(target * 1000) / 1000, cur: Math.round(v.currentTime * 1000) / 1000, fired: true, readyState: v.readyState })
+      health.current.seeks += 1
+      health.current.pendingSeekAt = performance.now()
       try { v.currentTime = target } catch { /* not ready */ }
     }
   }, [])
@@ -201,6 +234,24 @@ export default function StudioPreview({
     const handlers = names.map((name) => {
       const h = () => {
         dbg.event(`preview.video.${name}`, { cur: Math.round(v.currentTime * 1000) / 1000, readyState: v.readyState, seeking: v.seeking })
+        if (name === 'seeked' && health.current.pendingSeekAt != null) {
+          health.current.seekMs.push(performance.now() - health.current.pendingSeekAt)
+          health.current.pendingSeekAt = null
+        }
+        if (name === 'stalled') health.current.stalls += 1
+        if (name === 'waiting') health.current.waiting += 1
+        if (name === 'error' || name === 'stalled') {
+          // Only 3 of the 8 lifecycle names are failures. These upload at 100%; the rest are
+          // counted into the rollup, because "how many seeks" is a number and "playback broke"
+          // is an incident.
+          health.current.failures += 1
+          track('preview_failure', {
+            class: name === 'error' ? 'decode' : 'stall',
+            media_kind: isImg ? 'image' : 'video',
+            ready_state: String(v.readyState),
+            recovered: false,
+          })
+        }
         if (RECHASE.has(name)) chaseSeek()
       }
       v.addEventListener(name, h)

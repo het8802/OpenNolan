@@ -1,0 +1,153 @@
+{
+  "$comment": "Analytics taxonomy \u2014 project family. Merged with its siblings by server/analytics.taxonomy(); see _envelope.json.",
+  "events": {
+    "project_created": {
+      "question": "Which pipelines and styles get chosen?",
+      "properties": {
+        "pipeline_type": "E",
+        "style": "E"
+      }
+    },
+    "project_opened": {
+      "$comment": "The user ACTION (openProject), NOT the 4s refreshProjects poll \u2014 a poll would report an open every four seconds for an idle window (banned hook class 5).",
+      "question": "Do users return to old projects, or is a project a one-shot?",
+      "properties": {
+        "entrypoint": "E",
+        "age_days": "B"
+      }
+    },
+    "editor_opened": {
+      "question": "Agent-first or editor-first? Decides where the UI budget goes.",
+      "properties": {
+        "source": "E",
+        "n_cuts": "B",
+        "n_overlays": "B",
+        "duration_s": "B"
+      }
+    },
+    "project_create_failed": {
+      "question": "Why does creation fail?",
+      "properties": {
+        "failure_class": "E"
+      }
+    },
+    "thread_lifecycle": {
+      "question": "Are multiple chat threads actually used? Keep or delete the thread UI.",
+      "properties": {
+        "action": "E",
+        "n_threads": "N",
+        "session_resumed": "F"
+      }
+    },
+    "pipeline_stage_transition": {
+      "$comment": "The MUTATION boundary (write_checkpoint), never state.py's per-stage read inside a 1500ms-polled list comprehension, which also has no memory of the prior value so `from` is not computable there. The primary product writer is a SEPARATE PROCESS \u2014 agent_runner instructs the agent to run scripts/update_stage.py \u2014 so the script writes to a durable local outbox the backend drains on its next flush.",
+      "question": "Where does the pipeline stop? Repair that stage.",
+      "properties": {
+        "stage": "E",
+        "from": "E",
+        "to": "E",
+        "duration_s": "B"
+      }
+    },
+    "project_stalled": {
+      "$comment": "A detached nightly sweep, so it is the ONE genuinely session-less event in the catalog: install-scoped by design.",
+      "question": "Where do projects die? The abandonment metric.",
+      "properties": {
+        "last_activity_days": "B",
+        "furthest_stage": "E",
+        "has_assets": "F"
+      }
+    }
+  },
+  "enums": {
+    "pipeline_type": [
+      "animated-explainer",
+      "animation",
+      "animation-talking-head-50-50",
+      "anthropic-style-animated-talking-head",
+      "article-broll-animations",
+      "avatar-spokesperson",
+      "character-animation",
+      "cinematic",
+      "clip-factory",
+      "documentary-montage",
+      "framework-smoke",
+      "hybrid",
+      "instagram-fast-reel",
+      "instagram-reels-studio",
+      "localization-dub",
+      "podcast-repurpose",
+      "screen-demo",
+      "talking-head",
+      "talking-head-screen-demo-reel"
+    ],
+    "style": [
+      "anime-ghibli",
+      "anthropic-editorial-animated",
+      "clean-professional",
+      "flat-motion-graphics",
+      "founder_clean_reel",
+      "greg-editorial",
+      "greg-isenberg-product-explainer",
+      "kinetic-whiteboard-captions",
+      "minimalist-diagram",
+      "pixel-rpg-product-explainer",
+      "talking-head-screen-demo-reel",
+      "visual-hierarchy-edit-fix",
+      "user"
+    ],
+    "project_opened.entrypoint": [
+      "just_created",
+      "dashboard"
+    ],
+    "editor_opened.source": [
+      "project_bar"
+    ],
+    "project_create_failed.failure_class": [
+      "unknown_pipeline",
+      "unknown_style",
+      "duplicate",
+      "invalid_name",
+      "storage"
+    ],
+    "thread_lifecycle.action": [
+      "created",
+      "switched"
+    ],
+    "stage": [
+      "ideation",
+      "script",
+      "assets",
+      "composition",
+      "render",
+      "review",
+      "publish",
+      "unknown"
+    ],
+    "pipeline_stage_transition.from": [
+      "pending",
+      "in_progress",
+      "awaiting_human",
+      "completed",
+      "failed",
+      "none"
+    ],
+    "pipeline_stage_transition.to": [
+      "pending",
+      "in_progress",
+      "awaiting_human",
+      "completed",
+      "failed"
+    ],
+    "furthest_stage": [
+      "ideation",
+      "script",
+      "assets",
+      "composition",
+      "render",
+      "review",
+      "publish",
+      "unknown"
+    ]
+  }
+}

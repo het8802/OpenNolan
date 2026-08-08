@@ -15,8 +15,10 @@ env/
 .ruff_cache/
 
 # OPN-10 routed caches: dev opt-in routing (OPENNOLAN_ROUTE_CACHES=1 with no
-# OPENNOLAN_HOME) creates <repo>/cache. Anchored — unrelated to scratch/ below.
+# OPENNOLAN_HOME) creates <repo>/appcache. Anchored — unrelated to scratch/ below.
+# (`/cache/` kept for checkouts that ran the pre-rename build.)
 /cache/
+/appcache/
 htmlcov/
 .coverage
 .trae/
@@ -54,6 +56,12 @@ music_library/
 
 # In-app feedback / bug reports written at runtime (contains user messages + emails — never commit)
 /feedback.jsonl
+
+# Electron's clean-exit marker (home() = the repo root in dev). Runtime state, never source.
+/.last-exit.json
+# The per-project random analytics id (server/analytics.py project_key) — inside projects/,
+# which is already ignored, but anchored here too for an explicit OPENNOLAN_PROJECTS_DIR.
+**/.analytics_id
 
 # Stray media downloads (test/scratch clips left in repo root)
 pexels_video_*.mp4

@@ -30,10 +30,13 @@ import shlex
 import shutil
 import sys
 import tempfile
+import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
+from server import analytics
 from server.activity import record_tool_use
 
 DEFAULT_MODEL = "claude-opus-4-8"  # most capable model; strongest at long-horizon agentic runs
@@ -367,6 +370,86 @@ def build_sandbox(
     return Sandbox(base=base, roots=tuple(roots))
 
 
+# ── agent telemetry classifiers ──────────────────────────────────────────────
+# Every one of these collapses something UNBOUNDED (a Bash command, a tool name, a filesystem
+# path, a reason sentence) into a closed vocabulary BEFORE it can reach capture(). None of the
+# raw values ever ship: a Bash command carries paths and content, and a path carries a username.
+
+_ROUTED_MARKERS = frozenset({"silence_cutter", "motion_ops", "auto_reframe", "object_cutout"})
+
+# Raw ffmpeg is a MISSING TOOL, named. The family says which tool to build; the command says
+# which project the user is working on, so only the family goes out.
+_FFMPEG_FILTERS = (
+    ("overlay", ("overlay=",)),
+    ("scale", ("scale=", "scale2ref")),
+    ("concat", ("concat",)),
+    ("atempo", ("atempo=", "asetrate")),
+    ("zscale", ("zscale",)),
+    ("drawtext", ("drawtext",)),
+    ("crop", ("crop=",)),
+    ("xfade", ("xfade",)),
+)
+
+
+def _ffmpeg_filter_family(command: str) -> Optional[str]:
+    c = str(command or "").lower()
+    if "ffmpeg" not in c:
+        return None
+    for family, markers in _FFMPEG_FILTERS:
+        if any(m in c for m in markers):
+            return family
+    return "other"
+
+
+def _known_or_hashed(tool_name: str) -> str:
+    """A tool id we classify, or a stable hash of one we do not. An unknown tool name is
+    externally authored — an MCP server we did not write — so it is not a safe vocabulary."""
+    name = str(tool_name or "")
+    if name in SAFE_TOOLS or name in WRITE_TOOLS or name.startswith("mcp__mc__") or name in ("Bash", "AskUserQuestion"):
+        return name
+    import hashlib
+
+    return "h" + hashlib.sha256(name.encode()).hexdigest()[:12]
+
+
+def _permission_reason_class(reason: str) -> str:
+    """decide_tool's `reason` is a full English sentence written for the agent — it embeds the
+    flagged path and the heavy-op name. The class is what the sandbox question is sliced by."""
+    r = str(reason or "").lower()
+    if "unrecognized" in r:
+        return "unrecognized"
+    if "outside the app workspace" in r:
+        return "path_escape"
+    if "render via the in-process" in r:
+        return "render_route"
+    if "heavy media ops" in r:
+        return "heavy_media_route"
+    return "destructive"
+
+
+def _root_family(tool_input: dict[str, Any]) -> str:
+    """WHICH root the agent reached for, never the path. `/Users/<name>/…` is the username."""
+    import re as _re
+
+    blob = " ".join(str(v) for v in (tool_input or {}).values() if isinstance(v, (str, int, float)))
+    for match in _re.finditer(r"(?<![\w])(/[A-Za-z0-9_./-]+)", blob):
+        p = match.group(1)
+        if p.startswith(("/tmp", "/private/tmp", "/var/folders")):
+            return "tmp"
+        if p.startswith("/Users/") or p.startswith("/home/"):
+            return "home"
+        if p.startswith(("/System", "/Library", "/usr", "/bin", "/sbin", "/etc")):
+            return "system"
+    return "other"
+
+
+def _bucket_seconds(seconds: float) -> str:
+    for edge in (5, 30, 120, 600):
+        if seconds < edge:
+            return f"{0 if edge == 5 else {30: 5, 120: 30, 600: 120}[edge]}-{edge}"
+    return "600+"
+
+
 def decide_tool(
     tool_name: str,
     tool_input: dict[str, Any] | None,
@@ -399,6 +482,7 @@ def decide_tool(
     if tool_name == "Bash":
         command = ti.get("command", "") or ""
         if bash_uses_videocompose_render(command):
+            analytics.capture("agent_rendered_via_bash", {})
             return ToolDecision(
                 ACTION_DENY,
                 "Render via the in-process `render` tool, not Bash/VideoCompose — "
@@ -407,6 +491,13 @@ def decide_tool(
             )
         heavy_op = bash_runs_heavy_media_op(command)
         if heavy_op:
+            analytics.capture(
+                "agent_routed_around_us",
+                {
+                    "marker": heavy_op if heavy_op in _ROUTED_MARKERS else "other",
+                    "steered_to": "run_media_op",
+                },
+            )
             return ToolDecision(
                 ACTION_DENY,
                 f"Run heavy media ops ({heavy_op}) via the in-process `run_media_op` tool, "
@@ -422,11 +513,18 @@ def decide_tool(
                     ACTION_CONFIRM,
                     f"Bash flagged: reaches outside the app workspace ({escape})",
                 )
+        family = _ffmpeg_filter_family(command)
+        if family:
+            analytics.capture("agent_ffmpeg_freehand", {"filter_family": family})
         label = bash_destructive_reason(command)
         if label:
             return ToolDecision(ACTION_CONFIRM, f"Bash flagged: {label}")
         return ToolDecision(ACTION_ALLOW, "Bash has no destructive markers")
     # Unknown / MCP / other tool -> be conservative.
+    # NOT "tool_not_found": this is a conservative fall-through for anything outside
+    # SAFE_TOOLS/WRITE_TOOLS/AskUserQuestion/mcp__mc__/Bash, so it includes valid-but-
+    # unclassified SDK and MCP tools and does NOT prove registry absence.
+    analytics.capture("unrecognized_tool_requested", {"attempted": _known_or_hashed(tool_name)})
     return ToolDecision(ACTION_CONFIRM, f"unrecognized tool {tool_name!r}")
 
 
@@ -437,24 +535,77 @@ ConfirmHandler = Callable[[str, dict[str, Any], str], Awaitable[bool]]
 def make_can_use_tool(
     confirm_handler: Optional[ConfirmHandler] = None,
     sandbox: Optional[Sandbox] = None,
+    turn_ctx: Optional[Callable[[], dict[str, Optional[str]]]] = None,
 ):
     """Build the SDK `can_use_tool` callback from the policy.
 
     Flagged calls go to `confirm_handler`. With no handler (a fully
     unattended run), flagged calls are DENIED — the safe default. ``sandbox``
     (when set) confines file tools/Bash to the app's own folders.
+
+    ``turn_ctx`` returns the LIVE turn's ``{turn_id, session_id}``. It has to be passed in
+    rather than read from the request ContextVar, because this callback runs in the SDK
+    client's task — whose context was captured when the client was BUILT. So
+    `current_session_id()` here returns whichever session first created the client and keeps
+    returning it for every later turn: measured live, 11 permission-family events from three
+    different sessions all stamped with the first one, two of them carrying a `turn_id` from a
+    session their own `session_id` disagreed with.
     """
     from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 
     async def can_use_tool(tool_name: str, tool_input: dict[str, Any], context: Any):
+        ctx = (turn_ctx() if turn_ctx is not None else None) or {}
+        # Bind for the DURATION of this callback, so the captures inside decide_tool()
+        # (agent_rendered_via_bash / agent_routed_around_us / agent_ffmpeg_freehand /
+        # unrecognized_tool_requested) are fixed by the same line rather than each needing the
+        # id threaded through decide_tool's signature.
+        #
+        # UNCONDITIONALLY set (None when there is no live turn) and reset in `finally`. This
+        # task is the SDK client's and is deliberately long-lived, so a bind that is left
+        # standing outlives the turn it belonged to: the next callback with an empty ctx would
+        # otherwise inherit the previous turn's session and mis-attribute against it — the same
+        # class of bug as the one this whole change fixes, just one layer along.
+        token = analytics._session_ctx.set(ctx.get("session_id") or None)
+        try:
+            return await _decide(tool_name, tool_input, ctx)
+        finally:
+            analytics._session_ctx.reset(token)
+
+    async def _decide(tool_name: str, tool_input: dict[str, Any], ctx: dict[str, Any]):
         decision = decide_tool(tool_name, tool_input, sandbox)
         if decision.action == ACTION_ALLOW:
             return PermissionResultAllow()
+        reason_class = _permission_reason_class(decision.reason)
+        analytics.capture(
+            "tool_permission_decided",
+            {
+                "turn_id": ctx.get("turn_id"),
+                "session_id": ctx.get("session_id"),
+                "tool_id": tool_name,
+                "action": "deny" if decision.action == ACTION_DENY else "confirm",
+                "reason_class": reason_class,
+                "root_family": _root_family(tool_input),
+            },
+        )
         if decision.action == ACTION_DENY:
             return PermissionResultDeny(message=decision.reason)
         if confirm_handler is None:
             return PermissionResultDeny(message=f"Blocked (no confirm handler): {decision.reason}")
+        t_wait = time.monotonic()
         approved = await confirm_handler(tool_name, tool_input, decision.reason)
+        # If approval runs above ~95%, stop asking and auto-allow the pattern.
+        analytics.capture(
+            "agent_confirm_resolved",
+            {
+                "turn_id": ctx.get("turn_id"),
+                "session_id": ctx.get("session_id"),
+                "tool_id": tool_name,
+                "reason_class": reason_class,
+                "approved": bool(approved),
+                "wait_s": _bucket_seconds(time.monotonic() - t_wait),
+                "timed_out": False,
+            },
+        )
         if approved:
             return PermissionResultAllow()
         return PermissionResultDeny(message=f"Denied by user: {decision.reason}")
@@ -641,6 +792,7 @@ def build_agent_options(
     resume: Optional[str] = None,
     mcp_servers: Optional[dict[str, Any]] = None,
     disallowed_tools: Optional[list[str]] = None,
+    turn_ctx: Optional[Callable[[], dict[str, Optional[str]]]] = None,
 ):
     """Construct ClaudeAgentOptions for an OpenNolan agent session.
 
@@ -696,7 +848,7 @@ def build_agent_options(
         setting_sources=[],
         plugins=[{"type": "local", "path": str(app_skills_plugin_dir(repo_root))}],
         skills="all",
-        can_use_tool=make_can_use_tool(confirm_handler, sandbox),
+        can_use_tool=make_can_use_tool(confirm_handler, sandbox, turn_ctx),
         resume=resume,
         mcp_servers=mcp_servers or {},
         disallowed_tools=disallowed_tools or [],
@@ -837,6 +989,180 @@ class TurnResult:
     total_cost_usd: Optional[float]
 
 
+# ── turn telemetry reducers ───────────────────────────────────────────────────
+# All local. Per-tool percentiles are computed HERE so tool latency survives without a
+# per-call upload — a 6-turn session with 20 tools each would otherwise breach the
+# per-session event ceiling on its own.
+
+_MCP_PREFIX = "mcp__mc__"
+
+
+def _tool_family(tool_id: str) -> str:
+    """Coarse, closed vocabulary — the raw tool id is already bounded, the family is what
+    makes 'is the agent living in Bash?' answerable in one filter."""
+    if tool_id.startswith(_MCP_PREFIX):
+        return "opennolan"
+    if tool_id in ("Bash", "BashOutput", "KillShell"):
+        return "shell"
+    if tool_id in ("Read", "Write", "Edit", "NotebookEdit", "Glob", "Grep"):
+        return "file"
+    if tool_id in ("WebFetch", "WebSearch"):
+        return "web"
+    if tool_id in ("Task", "Skill", "TodoWrite", "AskUserQuestion"):
+        return "orchestration"
+    return "other"
+
+
+def _percentile(sorted_vals: list[int], q: float) -> int:
+    """Nearest-rank percentile. Exact for the handful of calls a turn makes, and it needs
+    no dependency — statistics.quantiles interpolates and misbehaves under 2 samples."""
+    if not sorted_vals:
+        return 0
+    idx = max(0, min(len(sorted_vals) - 1, int(round(q * (len(sorted_vals) - 1)))))
+    return sorted_vals[idx]
+
+
+class _TurnTools:
+    """The pending map that joins `tool_use` to `tool_result` within ONE turn.
+
+    The SDK splits a tool call across two blocks with different fields — `tool_use` has the
+    name, `tool_result` has only the id and `is_error` — so nothing downstream could ever say
+    which tool failed. Leftovers at turn end are real signal, not bookkeeping: they are calls
+    that never produced a result."""
+
+    def __init__(self) -> None:
+        self.pending: dict[str, tuple[str, float]] = {}
+        self.seen: set[str] = set()
+        self.per_tool: dict[str, dict[str, Any]] = {}
+        self.calls = 0
+        self.errors = 0
+        self.orphan_results = 0
+        self.duplicate_results = 0
+
+    def started(self, tool_use_id: Optional[str], tool_id: str) -> None:
+        if not tool_use_id:
+            return
+        self.pending[tool_use_id] = (tool_id or "unknown", time.monotonic())
+
+    def finished(self, tool_use_id: Optional[str], is_error: bool) -> Optional[dict[str, Any]]:
+        """Resolve one result. Returns the failure detail when it was an error, else None."""
+        if not tool_use_id:
+            return None
+        if tool_use_id in self.seen:
+            self.duplicate_results += 1
+            return None
+        hit = self.pending.pop(tool_use_id, None)
+        if hit is None:
+            # Cause deliberately UNLABELLED until measured — a plausible story (a drained
+            # turn) is not evidence, and a wrong label here would be worse than a count.
+            self.orphan_results += 1
+            return None
+        self.seen.add(tool_use_id)
+        tool_id, t_start = hit
+        duration_ms = int((time.monotonic() - t_start) * 1000)
+        self._record(tool_id, duration_ms, is_error)
+        if not is_error:
+            return None
+        return {"tool_id": tool_id, "family": _tool_family(tool_id), "duration_ms": duration_ms}
+
+    def _record(self, tool_id: str, duration_ms: int, is_error: bool) -> None:
+        self.calls += 1
+        entry = self.per_tool.setdefault(tool_id, {"calls": 0, "errors": 0, "_ms": []})
+        entry["calls"] += 1
+        entry["_ms"].append(duration_ms)
+        if is_error:
+            self.errors += 1
+            entry["errors"] += 1
+
+    def close(self) -> list[dict[str, Any]]:
+        """Synthesize the leftovers as `no_result` and RETURN them.
+
+        A tool call that never produced a result is a 100%-upload failure like any other, so
+        the caller emits one `agent_tool_failed{outcome='no_result'}` per orphan. Counting
+        them into the rollup alone would have left the most interesting failure class — the
+        tool the agent gave up waiting on — visible only as an unexplained error total."""
+        orphans = []
+        for tool_id, t_start in list(self.pending.values()):
+            duration_ms = int((time.monotonic() - t_start) * 1000)
+            self._record(tool_id, duration_ms, is_error=True)
+            orphans.append(
+                {
+                    "tool_id": tool_id,
+                    "family": _tool_family(tool_id),
+                    "duration_ms": duration_ms,
+                }
+            )
+        self.pending.clear()
+        return orphans
+
+    def rollup(self) -> dict[str, Any]:
+        tools: dict[str, dict[str, int]] = {}
+        for tool_id, e in self.per_tool.items():
+            ms = sorted(e["_ms"])
+            tools[tool_id] = {
+                "calls": e["calls"],
+                "errors": e["errors"],
+                "p50_ms": _percentile(ms, 0.5),
+                "p95_ms": _percentile(ms, 0.95),
+                "max_ms": ms[-1] if ms else 0,
+            }
+        return {
+            "tools": tools,
+            "unique_tools": len(tools),
+            "calls": self.calls,
+            "errors": self.errors,
+            "bash_calls": sum(e["calls"] for t, e in tools.items() if _tool_family(t) == "shell"),
+        }
+
+
+def _doc_snapshot(projects_dir: Optional[Path], project_id: str) -> dict[str, int]:
+    """Counts + a hash of the timeline, taken before and after a turn.
+
+    Authorship is detected by DIFF, not by route: the agent writes edit_decisions.json
+    directly (RULES.md), never through the editor's PUT, so `author='agent'` was never
+    observable at any HTTP boundary. Cheap and defensive — a missing/corrupt doc is a
+    zero snapshot, never an exception on the agent's hot path."""
+    snap = {"hash": 0, "cuts": 0, "overlays": 0, "audio": 0, "artifacts": 0}
+    try:
+        base = Path(projects_dir or ".") / project_id
+        raw = (base / "artifacts" / "edit_decisions.json").read_bytes()
+        snap["hash"] = hash(raw)
+        doc = json.loads(raw)
+        snap["cuts"] = len(doc.get("cuts") or [])
+        snap["overlays"] = len(doc.get("overlays") or [])
+        audio = doc.get("audio") if isinstance(doc.get("audio"), dict) else {}
+        music = audio.get("music")
+        snap["audio"] = (
+            (len(music) if isinstance(music, list) else 1 if music else 0)
+            + len((audio.get("narration") or {}).get("segments") or [])
+            + len(audio.get("sfx") or [])
+        )
+    except Exception:
+        pass
+    try:
+        snap["artifacts"] = sum(1 for _ in (Path(projects_dir or ".") / project_id / "artifacts").iterdir())
+    except Exception:
+        pass
+    return snap
+
+
+def _classify_turn_error(exc: BaseException) -> str:
+    """Bounded failure class. NEVER the exception text — it carries prompts and paths."""
+    name = type(exc).__name__.lower()
+    text = f"{name} {exc}".lower()[:400]
+    if any(w in text for w in ("auth", "401", "403", "credential", "oauth")):
+        return "auth"
+    if any(w in text for w in ("budget", "quota", "429", "credit")):
+        return "budget"
+    if any(w in text for w in ("timeout", "connection", "socket", "broken pipe", "transport")):
+        return "transport"
+    if "cancel" in text:
+        return "cancelled"
+    if "sdk" in text or "claude" in text:
+        return "sdk"
+    return "unknown"
+
+
 EmitFn = Callable[[dict[str, Any]], Any]  # sync or async
 
 
@@ -899,6 +1225,24 @@ class AgentRunner:
     _resume_next: dict[str, bool] = field(default_factory=dict, init=False)  # rebuild-with-resume after error
     _fresh_client: dict[str, bool] = field(default_factory=dict, init=False)  # client just (re)created this turn
     _models: dict[str, str] = field(default_factory=dict, init=False)  # UI-selected model per project
+    # The live turn's join keys per project: {turn_id, session_id}. Renders and media ops the
+    # agent starts mid-turn read them from here, which is how a background render job ends up
+    # attributable to the session (and the turn) that caused it.
+    # The live turn's {turn_id, session_id}, per project. Read by the SDK permission callback
+    # and the MCP tool handlers, which run in the CLIENT's task and therefore cannot use the
+    # request ContextVar (it was captured when the client was built, so it names whichever
+    # session first created it — measured live, 11 permission events across 3 sessions all
+    # stamped with the first).
+    #
+    # KNOWN LIMIT — one slot per project, so two CONCURRENT turns on the same project still
+    # misattribute: the second overwrites the first's context, and whichever finishes first
+    # pops it, leaving the other's callbacks reading {}. Nothing serializes turns per project
+    # at the API layer today (the UI's `busy` flag is a client convention, not a server
+    # guarantee). Fixing that properly means a per-project turn lock or threading an immutable
+    # context through the callback lifecycle — a turn-concurrency change, not an analytics one,
+    # so it is named here rather than half-done. Sequential turns, the real usage pattern, are
+    # correct; the empty-context case degrades to NO session rather than a stale one.
+    _turn_ctx: dict[str, dict[str, Optional[str]]] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
         self.repo_root = Path(self.repo_root)
@@ -1180,6 +1524,9 @@ class AgentRunner:
             # wakeup does nothing useful (the backend only reads the stream when the
             # user sends a message) and is a pure source of unsolicited/stray turns.
             disallowed_tools=["AskUserQuestion", "ScheduleWakeup"],
+            # A LIVE getter, not a value: this client outlives the turn that built it, so the
+            # permission callbacks must read whichever turn is running now (see F12).
+            turn_ctx=lambda: self._turn_ctx.get(project_id) or {},
         )
         return ClaudeSDKClient(options=options)
 
@@ -1373,6 +1720,23 @@ class AgentRunner:
         result carrying {provided: bool}; the raw key is NEVER passed back to the model."""
         if not env_var:
             return _text_result({"error": "request_api_key needs a non-empty env_var name."})
+        # The provider FAMILY, never the value. `env_var` is a NAME the agent chose, so it is
+        # collapsed to a closed family here — _scrub would not save us, since it tests the key
+        # NAME and 'ANTHROPIC_API_KEY' rides through unredacted.
+        analytics.capture(
+            "api_key_missing",
+            {
+                "provider_family": analytics.provider_family(env_var),
+                "already_in_byok": bool(os.environ.get(env_var)),
+                "turn_id": (self._turn_ctx.get(project_id) or {}).get("turn_id"),
+                # Explicit, for the same reason as turn_id: an MCP tool handler runs in the
+                # client's task, so current_session_id() would resolve to whichever session
+                # BUILT the client and stay wrong for every later turn (F12).
+                "session_id": (self._turn_ctx.get(project_id) or {}).get("session_id"),
+                "project_id": self._project_key(project_id),
+            },
+        )
+        t_key = time.monotonic()
         emit = self._emit.get(project_id)
         if emit is None:
             return _text_result(
@@ -1409,6 +1773,20 @@ class AgentRunner:
             )
         finally:
             self._key_requests.pop(key_request_id, None)
+        analytics.capture(
+            "api_key_request_resolved",
+            {
+                "provider_family": analytics.provider_family(env_var),
+                "provided": bool(provided),
+                "wait_s": _bucket_seconds(time.monotonic() - t_key),
+                "turn_id": (self._turn_ctx.get(project_id) or {}).get("turn_id"),
+                # Explicit, for the same reason as turn_id: an MCP tool handler runs in the
+                # client's task, so current_session_id() would resolve to whichever session
+                # BUILT the client and stay wrong for every later turn (F12).
+                "session_id": (self._turn_ctx.get(project_id) or {}).get("session_id"),
+                "project_id": self._project_key(project_id),
+            },
+        )
         if provided:
             return _text_result(
                 {
@@ -1447,6 +1825,28 @@ class AgentRunner:
             packs = {}
         if pack not in packs:
             return _text_result({"error": f"unknown capability pack {pack!r}; known: {sorted(packs)}"})
+        # AFTER the guard: `pack` is now provably a member of our own PACKS registry, so it is
+        # a closed vocabulary rather than a string the agent invented.
+        installed_before = False
+        try:
+            installed_before = bool(provision.pack_installed(pack))
+        except Exception:
+            pass
+        analytics.capture(
+            "capability_missing",
+            {
+                "pack": pack,
+                "reason_class": "tool_reported_missing",
+                "installed_before": installed_before,
+                "turn_id": (self._turn_ctx.get(project_id) or {}).get("turn_id"),
+                # Explicit, for the same reason as turn_id: an MCP tool handler runs in the
+                # client's task, so current_session_id() would resolve to whichever session
+                # BUILT the client and stay wrong for every later turn (F12).
+                "session_id": (self._turn_ctx.get(project_id) or {}).get("session_id"),
+                "project_id": self._project_key(project_id),
+            },
+        )
+        t_cap = time.monotonic()
         # Already installed? Then there's nothing to ask — tell the agent to just retry.
         try:
             if provision.pack_installed(pack):
@@ -1486,6 +1886,20 @@ class AgentRunner:
             )
         finally:
             self._cap_requests.pop(cap_request_id, None)
+        analytics.capture(
+            "capability_request_resolved",
+            {
+                "pack": pack,
+                "outcome": "installed" if installed else "declined",
+                "wait_s": _bucket_seconds(time.monotonic() - t_cap),
+                "turn_id": (self._turn_ctx.get(project_id) or {}).get("turn_id"),
+                # Explicit, for the same reason as turn_id: an MCP tool handler runs in the
+                # client's task, so current_session_id() would resolve to whichever session
+                # BUILT the client and stay wrong for every later turn (F12).
+                "session_id": (self._turn_ctx.get(project_id) or {}).get("session_id"),
+                "project_id": self._project_key(project_id),
+            },
+        )
         if installed:
             return _text_result(
                 {
@@ -1531,6 +1945,12 @@ class AgentRunner:
         artifact on disk when edit_decisions is omitted (a thin `render` call)."""
         keys = ("edit_decisions", "asset_manifest", "output_path", "proxies_dir", "hdr_policy", "proposal_packet")
         inputs = {k: args[k] for k in keys if args.get(k) is not None}
+        # The join keys ride into the job record here. This is the ONLY place an agent-started
+        # render can learn which session caused it: the render thread outlives the HTTP request
+        # that carried X-ON-Session, so it can never read the context itself.
+        ctx = self._turn_ctx.get(project_id) or {}
+        inputs["session_id"] = ctx.get("session_id")
+        inputs["turn_id"] = ctx.get("turn_id")
         if "edit_decisions" not in inputs:
             try:
                 from server.editor import read_asset_manifest, read_edit_decisions
@@ -1688,7 +2108,14 @@ class AgentRunner:
             return self._media_op_result(success=False, tool=tool_name, error="input must be an object")
 
         loop = asyncio.get_event_loop()
-        job_id = self.render_store.start_op(project_id, tool_name, tool_input)
+        ctx = self._turn_ctx.get(project_id) or {}
+        job_id = self.render_store.start_op(
+            project_id,
+            tool_name,
+            tool_input,
+            session_id=ctx.get("session_id"),
+            turn_id=ctx.get("turn_id"),
+        )
         emit = self._emit.get(project_id)
         if emit is not None:
             await _maybe_await(
@@ -1787,7 +2214,9 @@ class AgentRunner:
         try:
             res = await asyncio.to_thread(place_asset, self.projects_dir, project_id, kind, src, name, move=move)
         except (ValueError, FileNotFoundError) as exc:
+            self._emit_store_asset(project_id, kind, ok=False)
             return _text_result({"error": str(exc)})
+        self._emit_store_asset(project_id, kind, ok=True)
 
         # Hand back a repo-relative path — directly usable in edit_decisions /
         # asset_manifest — plus the project-relative form.
@@ -1921,8 +2350,18 @@ class AgentRunner:
             # nothing is silently dropped (rare; see the ponytail note above).
             await _flush()
 
-    async def run_turn(self, project_id: str, message: str, on_event: Optional[EmitFn] = None) -> TurnResult:
-        """Send a message to the project's session and stream the response."""
+    async def run_turn(
+        self,
+        project_id: str,
+        message: str,
+        on_event: Optional[EmitFn] = None,
+        session_id: Optional[str] = None,
+    ) -> TurnResult:
+        """Send a message to the project's session and stream the response.
+
+        `session_id` is the browser session the message arrived on (X-ON-Session). It is
+        passed explicitly rather than read from the request context because this coroutine
+        outlives the request, and everything it starts — renders, media ops — inherits it."""
         client = await self._get_client(project_id)
         if on_event is not None:
             self._emit[project_id] = on_event
@@ -1935,7 +2374,19 @@ class AgentRunner:
         # it as the answer to THIS message (the off-by-one). A fresh client has never had a
         # turn, so nothing is buffered — skip it (and avoid touching a just-connected stream).
         if not is_fresh:
+            drained_before = (
+                len(self._pending_unsolicited.get(project_id) or ()) if hasattr(self, "_pending_unsolicited") else 0
+            )
             await self._drain_unsolicited(project_id, client, on_event)
+            analytics.capture(
+                "agent_continuity",
+                {
+                    "event": "unsolicited_drained",
+                    "n_drained": drained_before,
+                    "mid_thread": True,
+                    "project_id": self._project_key(project_id),
+                },
+            )
 
         # On the first turn of a freshly-(re)created client, ground the agent in
         # on-disk progress so it RESUMES the project instead of starting over.
@@ -1955,6 +2406,28 @@ class AgentRunner:
         texts: list[str] = []
         result = TurnResult(text="", is_error=False, num_turns=0, total_cost_usd=None)
         _error_occurred = False
+        # Mint the turn id HERE — project_id is in scope and everything downstream
+        # (renders, media ops, tool outcomes) hangs off it.
+        turn_id = uuid.uuid4().hex[:16]
+        self._turn_ctx[project_id] = {"turn_id": turn_id, "session_id": session_id}
+        tools = _TurnTools()
+        before = _doc_snapshot(self.projects_dir, project_id)
+        t0 = time.monotonic()
+        stop_reason: Optional[str] = None
+        analytics.capture(
+            "agent_turn_started",
+            {
+                "turn_id": turn_id,
+                "session_id": session_id,
+                "project_id": self._project_key(project_id),
+                "model": self._model_for(project_id),
+                "thread_kind": "new" if is_fresh else "resumed",
+                "is_fresh_client": is_fresh,
+                # A LENGTH, never the text. Named input_chars because _scrub destroys any key
+                # containing "prompt"/"message"/"text": prompt_len arrives as prompt_len_len=None.
+                "input_chars": len(message or ""),
+            },
+        )
         try:
             await client.query(prompt)
             async for msg in client.receive_response():
@@ -1967,6 +2440,12 @@ class AgentRunner:
                         if kind == "text":
                             texts.append(it["text"])
                         elif kind == "tool_use":
+                            tools.started(it.get("id"), it.get("name", ""))
+                            # What the agent is doing RIGHT NOW, so an interrupt can say what
+                            # the user gave up on. One assignment, no new traversal.
+                            ctx = self._turn_ctx.get(project_id)
+                            if ctx is not None:
+                                ctx["tool_in_flight"] = it.get("name", "")
                             # Persist the tool call so the Activity tab can show
                             # what files/skills/tools the agent touched, after the
                             # turn and across restarts. Defensive: never raises.
@@ -1976,26 +2455,85 @@ class AgentRunner:
                                 it.get("name", ""),
                                 it.get("detail", "") or "",
                             )
+                        elif kind == "tool_result":
+                            # The join. `tool_result` carries only tool_use_id + is_error —
+                            # no name, no project, no turn — so the outcome of every tool
+                            # call used to be read at event_of() and thrown away. It cannot
+                            # be resolved there either: event_of takes one argument and is
+                            # also called from _drain_unsolicited, which DISCARDS turns.
+                            failed = tools.finished(it.get("tool_use_id"), bool(it.get("is_error")))
+                            if failed is not None:
+                                analytics.capture(
+                                    "agent_tool_failed",
+                                    {
+                                        "turn_id": turn_id,
+                                        "session_id": session_id,
+                                        "project_id": self._project_key(project_id),
+                                        "tool_invocation_id": it.get("tool_use_id"),
+                                        "tool_id": failed["tool_id"],
+                                        "family": failed["family"],
+                                        "outcome": "returned_error",
+                                        "duration_ms": failed["duration_ms"],
+                                    },
+                                )
                 elif evt["type"] == "result":
                     result.is_error = bool(evt.get("is_error"))
                     result.num_turns = int(evt.get("num_turns") or 0)
                     result.total_cost_usd = evt.get("total_cost_usd")
+                    stop_reason = evt.get("stop_reason")
                     # Remember the session id so we can RESUME (not restart-cold)
                     # if this session later dies.
                     if evt.get("session_id"):
                         self._session_ids[project_id] = evt["session_id"]
                     if result.is_error:
                         _error_occurred = True
-        except Exception:
+        except Exception as exc:
             _error_occurred = True
+            analytics.capture(
+                "agent_turn_failed",
+                {
+                    "turn_id": turn_id,
+                    "session_id": session_id,
+                    "project_id": self._project_key(project_id),
+                    "phase": "stream",
+                    "failure_class": _classify_turn_error(exc),
+                    "retryable": _classify_turn_error(exc) in ("transport", "auth"),
+                },
+            )
             raise
         finally:
+            # In the `finally`, NOT after it: the except above re-raises, so a line placed
+            # after this block is unreachable on a crashed turn — and a crashed turn is
+            # exactly the one worth reporting. `finally` runs once on both paths, so no
+            # dedupe is needed; the fields the raise left unset carry their defaults.
             self._emit.pop(project_id, None)
+            self._turn_ctx.pop(project_id, None)
+            self._report_turn(
+                project_id,
+                turn_id,
+                session_id,
+                result,
+                tools,
+                before,
+                t0,
+                stop_reason,
+                errored=_error_occurred,
+            )
             if _error_occurred:
                 # The session is broken (budget ceiling, transport crash, ...).
                 # Drop the dead client, but flag the next turn to RESUME the same
                 # session_id so the agent keeps its context. On-disk artifacts and
                 # checkpoints are untouched either way.
+                analytics.capture(
+                    "agent_session_died",
+                    {
+                        "had_result_error": bool(result.is_error),
+                        "will_resume": True,
+                        "turn_id": turn_id,
+                        "session_id": session_id,
+                        "project_id": self._project_key(project_id),
+                    },
+                )
                 self._resume_next[project_id] = True
                 dead = self._clients.pop(project_id, None)
                 if dead is not None:
@@ -2005,6 +2543,106 @@ class AgentRunner:
                         pass
         result.text = "".join(texts)
         return result
+
+    def _emit_store_asset(self, project_id: str, kind: str, ok: bool) -> None:
+        """Does the agent GENERATE, or only arrange?
+
+        `kind='final_render'` routes to publish_final_render with receipt_doc=None — the
+        publisher deliberately refuses "provenance it has not earned" — so that path produces
+        a real final.mp4 that NEVER fires export_completed. Flagged here rather than left as a
+        hole in the North Star: activation could otherwise read 0 for an entire agent path.
+        """
+        try:
+            final = kind == "final_render"
+            analytics.capture(
+                "agent_store_asset",
+                {
+                    "kind": kind if kind in ("final_render", "video", "image", "audio", "music") else "other",
+                    "ok": ok,
+                    "was_final_render": final,
+                    "unreceipted_final_artifact": bool(final and ok),
+                    "turn_id": (self._turn_ctx.get(project_id) or {}).get("turn_id"),
+                    # Explicit, for the same reason as turn_id: an MCP tool handler runs in the
+                    # client's task, so current_session_id() would resolve to whichever session
+                    # BUILT the client and stay wrong for every later turn (F12).
+                    "session_id": (self._turn_ctx.get(project_id) or {}).get("session_id"),
+                    "project_id": self._project_key(project_id),
+                },
+            )
+        except Exception:
+            pass
+
+    def _project_key(self, project_id: str) -> Optional[str]:
+        """The persisted random analytics id for a project — never the user-derived slug."""
+        return analytics.project_key(self.projects_dir, project_id)
+
+    def _report_turn(
+        self,
+        project_id: str,
+        turn_id: str,
+        session_id: Optional[str],
+        result: TurnResult,
+        tools: "_TurnTools",
+        before: dict[str, int],
+        t0: float,
+        stop_reason: Optional[str],
+        errored: bool = False,
+    ) -> None:
+        """The turn's two terminal events. Called from run_turn's `finally`, so it must
+        tolerate a turn that raised before any of this was populated."""
+        try:
+            orphans = tools.close()
+            for orphan in orphans:
+                analytics.capture(
+                    "agent_tool_failed",
+                    {
+                        "turn_id": turn_id,
+                        "session_id": session_id,
+                        "project_id": self._project_key(project_id),
+                        "outcome": "no_result",
+                        **orphan,
+                    },
+                )
+            after = _doc_snapshot(self.projects_dir, project_id)
+            analytics.capture(
+                "agent_turn_completed",
+                {
+                    "turn_id": turn_id,
+                    "session_id": session_id,
+                    "project_id": self._project_key(project_id),
+                    # `result.is_error` is only ever set by a ResultMessage, so a turn that RAISED
+                    # left it False — and the whole reason this emit lives in the `finally` is to
+                    # catch that path. Without the OR, every crashed turn reported as a success.
+                    "is_error": bool(result.is_error or errored),
+                    "sdk_turns": result.num_turns,
+                    "cost_usd": result.total_cost_usd,
+                    "wall_s": round(time.monotonic() - t0, 1),
+                    "stop_reason": stop_reason,
+                    "tool_calls": tools.calls,
+                    "tool_errors": tools.errors,
+                    "orphan_starts": len(orphans),
+                    "orphan_results": tools.orphan_results,
+                    "duplicate_results": tools.duplicate_results,
+                    # Authorship by DIFF (see _doc_snapshot): the only honest way to say whether
+                    # the agent actually changed anything.
+                    "doc_changed": after["hash"] != before["hash"],
+                    "cuts_delta": after["cuts"] - before["cuts"],
+                    "overlays_delta": after["overlays"] - before["overlays"],
+                    "audio_delta": after["audio"] - before["audio"],
+                    "artifacts_delta": after["artifacts"] - before["artifacts"],
+                },
+            )
+            analytics.capture(
+                "agent_tool_rollup",
+                {
+                    "turn_id": turn_id,
+                    "session_id": session_id,
+                    "project_id": self._project_key(project_id),
+                    **tools.rollup(),
+                },
+            )
+        except Exception:
+            pass  # a reporting bug must never change how a turn ends
 
     async def interrupt(self, project_id: str) -> bool:
         """Stop the agent mid-turn (the UI 'Stop' button).
@@ -2019,6 +2657,16 @@ class AgentRunner:
             return False
         try:
             await client.interrupt()
+            ctx = self._turn_ctx.get(project_id) or {}
+            analytics.capture(
+                "agent_interrupted",
+                {
+                    "tool_in_flight": _known_or_hashed(ctx.get("tool_in_flight") or "none"),
+                    "turn_id": ctx.get("turn_id"),
+                    "session_id": ctx.get("session_id"),
+                    "project_id": self._project_key(project_id),
+                },
+            )
             return True
         except Exception:
             return False

@@ -1,0 +1,152 @@
+{
+  "$comment": "Analytics taxonomy \u2014 asset family. Merged with its siblings by server/analytics.taxonomy(); see _envelope.json.",
+  "events": {
+    "asset_import_finished": {
+      "$comment": "AFTER the copy, before the return \u2014 target.stat() is what gives the final byte count and the probe needs the file to exist. The filename NEVER ships: RULES.md says a user can drop any media on us, so a name is customer and campaign text. `asset_fingerprint` is HMAC(install_secret, sha256(bytes))[:16] \u2014 install-stable so cross-project reuse is answerable, NOT cross-install correlatable. Named asset_fingerprint and not content_fingerprint because `content` is a reserved substring that _scrub rewrites to content_fingerprint_len: 16.",
+      "question": "What media enters, by which path?",
+      "properties": {
+        "asset_id": "I",
+        "asset_fingerprint": "I",
+        "kind": "E",
+        "source": "E",
+        "extension": "E",
+        "bytes": "B",
+        "outcome": "E"
+      }
+    },
+    "asset_import_failed": {
+      "question": "Why can media not enter?",
+      "properties": {
+        "kind": "E",
+        "failure_class": "E"
+      }
+    },
+    "media_probe_finished": {
+      "$comment": "Probed AT INGEST, not on the lazy /source_meta route \u2014 that is not an ingest path at all. Codec, container, pixel format, transfer and fps are the fields that predict render success and none of them were ever captured. All fixed-vocabulary ffprobe output.",
+      "question": "Which codecs do real users actually drop on us? Is HDR a user problem or only ours?",
+      "properties": {
+        "asset_id": "I",
+        "container": "E",
+        "video_codec": "E",
+        "audio_codec": "E",
+        "pix_fmt": "E",
+        "color_transfer": "E",
+        "hdr": "E",
+        "width": "N",
+        "height": "N",
+        "fps": "B",
+        "n_audio_streams": "N",
+        "has_alpha": "F",
+        "duration_s": "B",
+        "bitrate_mbps": "B"
+      }
+    },
+    "media_probe_failed": {
+      "$comment": "The failure branch did NOT exist: the old probe tested only for success, so a non-zero exit produced an unclamped trim with no signal anywhere.",
+      "question": "What is accepted but uninspectable? Reject it clearly instead of trimming it blind.",
+      "properties": {
+        "extension": "E",
+        "failure_class": "E"
+      }
+    },
+    "browser_proxy_finished": {
+      "$comment": "Chromium cannot decode ProRes and HyperFrames alpha overlays ARE ProRes 4444, so previewing the agent's own output silently transcodes. The non-.mov early return is deliberately NOT hooked: no codec is known there and a non-.mov needs no proxy, so it is not a decision.",
+      "question": "What does previewing the agent's own output actually cost?",
+      "properties": {
+        "source_codec": "E",
+        "target": "E",
+        "cache_hit": "F",
+        "duration_ms": "N",
+        "bytes": "B",
+        "outcome": "E"
+      }
+    },
+    "source_resolution_failed": {
+      "$comment": "Emitted at the two CALLERS that know the consumer. resolve_source_path takes no `consumer` argument, so a hook inside it could not supply one \u2014 and its single fallthrough conflates missing, outside-project, resolve errors and non-files.",
+      "question": "'Cut source not found' is this app's signature render failure \u2014 which half of the manifest/path contract broke?",
+      "properties": {
+        "reference_kind": "E",
+        "consumer": "E",
+        "outcome": "E"
+      }
+    },
+    "asset_added_to_doc": {
+      "$comment": "A per-SESSION ROLLUP, not one event per add. 10 adds is 10 uploads and the catalog allows only 6 families to upload per-interaction \u2014 this is none of them. The asset_id ARRAY keeps row 37's `imported joined added_in_editor on asset_id` intact at zero extra events: properties are free, events are not.",
+      "question": "Which imported media becomes an actual edit?",
+      "properties": {
+        "asset_ids": "A",
+        "adds": "N",
+        "by_kind": "O",
+        "by_method": "O"
+      }
+    }
+  },
+  "enums": {
+    "kind": [
+      "images",
+      "image",
+      "video",
+      "audio",
+      "music",
+      "other"
+    ],
+    "asset_import_finished.source": [
+      "picker"
+    ],
+    "asset_import_finished.outcome": [
+      "success",
+      "deduped"
+    ],
+    "asset_import_failed.failure_class": [
+      "invalid_kind",
+      "invalid_name",
+      "traversal",
+      "disk_full",
+      "permission",
+      "copy"
+    ],
+    "media_probe_failed.failure_class": [
+      "ffprobe_missing",
+      "nonzero_exit",
+      "parse",
+      "timeout",
+      "permission"
+    ],
+    "hdr": [
+      "sdr",
+      "hlg",
+      "pq",
+      "unknown"
+    ],
+    "browser_proxy_finished.target": [
+      "vp9_alpha",
+      "native_passthrough"
+    ],
+    "browser_proxy_finished.outcome": [
+      "success",
+      "failed",
+      "skipped"
+    ],
+    "reference_kind": [
+      "manifest_id",
+      "project_path",
+      "shared_asset"
+    ],
+    "consumer": [
+      "preview",
+      "render"
+    ],
+    "source_resolution_failed.outcome": [
+      "missing"
+    ]
+  },
+  "open_vocabularies": {
+    "extension": "A file extension checked against a CLOSED list at the emit site; anything else collapses to 'other'. Listed here because the list lives in code, not in this file.",
+    "container": "An ffprobe format_name. Produced by the demuxer, not by the user \u2014 a container name cannot carry a campaign name the way a filename can.",
+    "video_codec": "An ffprobe codec_name.",
+    "audio_codec": "An ffprobe codec_name.",
+    "pix_fmt": "An ffprobe pix_fmt.",
+    "color_transfer": "An ffprobe color_transfer.",
+    "source_codec": "An ffprobe codec_name, from our own proxy probe."
+  }
+}

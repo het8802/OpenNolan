@@ -85,7 +85,10 @@ def _append_record(record: dict[str, Any]) -> None:
 
 
 def _maybe_email(
-    kind: str, message: str, email: Optional[str], diagnostics: Optional[str],
+    kind: str,
+    message: str,
+    email: Optional[str],
+    diagnostics: Optional[str],
     attachments: Optional[list[dict[str, str]]] = None,
 ) -> bool:
     """Send the feedback email via Resend if configured. Returns True iff an email was sent.
@@ -112,13 +115,37 @@ def _maybe_email(
             },
             timeout=15,
         )
+        if resp.status_code >= 300:
+            _delivery_failed("resend", "http")
         return resp.status_code < 300
-    except requests.RequestException:
+    except requests.RequestException as exc:
+        _delivery_failed("resend", "timeout" if "timeout" in type(exc).__name__.lower() else "network")
         return False
 
 
+def _delivery_failed(channel: str, failure_class: str) -> None:
+    """Feedback is the ONLY qualitative channel there is, so silent loss is unacceptable.
+    The body is already stored locally either way — that is what `locally_stored` says."""
+    try:
+        from server import analytics
+
+        analytics.capture(
+            "feedback_delivery_failed",
+            {
+                "channel": channel,
+                "class": failure_class,
+                "locally_stored": True,
+            },
+        )
+    except Exception:
+        pass
+
+
 def _maybe_relay(
-    kind: str, message: str, email: Optional[str], diagnostics: Optional[str],
+    kind: str,
+    message: str,
+    email: Optional[str],
+    diagnostics: Optional[str],
     attachments: Optional[list[dict[str, str]]] = None,
 ) -> bool:
     """POST feedback to the developer's public relay (website /api/feedback), which sends the email
@@ -136,17 +163,20 @@ def _maybe_relay(
         payload["attachments"] = attachments
     try:
         resp = requests.post(
-            url, headers=headers,
+            url,
+            headers=headers,
             json=payload,
             timeout=15,
         )
         if resp.status_code >= 300:
+            _delivery_failed("relay", "http")
             return False
         try:
             return bool(resp.json().get("emailed"))
         except ValueError:
             return True  # 2xx with a non-JSON body — treat as delivered
-    except requests.RequestException:
+    except requests.RequestException as exc:
+        _delivery_failed("relay", "timeout" if "timeout" in type(exc).__name__.lower() else "network")
         return False
 
 
@@ -173,19 +203,23 @@ def submit(
         "debug_session": debug_session or None,
     }
     _append_record(record)  # durable first — never lose feedback (the raw log also stays on disk)
-    # Analytics gets metadata only; _scrub turns "message" into "message_len" and never sends the body.
+    # Analytics gets metadata only — the body never leaves the machine. `feedback_chars`, NOT
+    # `message_len`: _scrub substring-matches the KEY, so `message_len` would arrive as
+    # `message_len_len: None` and the length signal would be silently destroyed.
     analytics.capture(
         "feedback_submitted",
         {
-            "kind": kind, "message": message, "has_email": bool(email),
-            "has_diagnostics": bool(diagnostics), "has_debug_session": bool(debug_session),
+            "kind": kind,
+            "feedback_chars": len(message),
+            "has_email": bool(email),
+            "has_diagnostics": bool(diagnostics),
+            "has_debug_session": bool(debug_session),
             "has_attachment": bool(attachment),
         },
     )
     # Public relay first (the distributed-app path, no shipped secret); direct Resend is the
     # dev / self-host fallback when a local RESEND_API_KEY is configured instead.
-    emailed = (
-        _maybe_relay(kind, message, email, diagnostics, attachments)
-        or _maybe_email(kind, message, email, diagnostics, attachments)
+    emailed = _maybe_relay(kind, message, email, diagnostics, attachments) or _maybe_email(
+        kind, message, email, diagnostics, attachments
     )
     return {"stored": True, "emailed": emailed}

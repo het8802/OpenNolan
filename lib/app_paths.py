@@ -22,7 +22,7 @@ ships in the bundle, OPENNOLAN_CODE_ROOT) before spawning uvicorn.
     OPENNOLAN_PROJECTS_DIR  -> projects_dir()         (default: <home>/projects)
     OPENNOLAN_ENV_FILE      -> env_path()             (default: <home>/.env)
     OPENNOLAN_RUNTIME_DIR   -> runtime_dir()          (default: <home>/runtime)  [venv lives here]
-    OPENNOLAN_CACHE_DIR     -> cache_dir()            (default: <home>/cache)
+    OPENNOLAN_CACHE_DIR     -> cache_dir()            (default: <home>/appcache)
     OPENNOLAN_ROUTE_CACHES  -> route_caches() gate    (default: on iff packaged; "0" forces off)
 
 Resolution reads os.environ on each call (cheap, and lets a subprocess that sets these
@@ -85,9 +85,16 @@ def runtime_dir() -> Path:
 def cache_dir() -> Path:
     """Root for app-managed caches. ML/tool caches (HF_HOME, TORCH_HOME, U2NET_HOME, npm, pip,
     XDG, scratch) get routed under here by route_caches(), called at backend and provisioning
-    startup, so nothing scatters into the user's ~ or the bundle."""
+    startup, so nothing scatters into the user's ~ or the bundle.
+
+    NAMED `appcache`, NOT `cache`, and that is load-bearing: in the packaged app home() is
+    Electron's userData, which already holds Chromium's `Cache/` — and macOS APFS is
+    case-INSENSITIVE by default, so `home()/cache` and `Cache/` are literally one directory
+    (same inode, verified). Routing HuggingFace/torch/u2net/npm/pip/TMPDIR in there would put
+    multi-GB model downloads inside a folder Chromium evicts under quota and
+    `session.clearCache()` deletes outright."""
     override = os.environ.get("OPENNOLAN_CACHE_DIR")
-    return Path(override) if override else home() / "cache"
+    return Path(override) if override else home() / "appcache"
 
 
 def is_packaged() -> bool:
