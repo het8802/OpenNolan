@@ -360,7 +360,8 @@ def _uv() -> Optional[str]:
 
 def _wheels_dir() -> Optional[Path]:
     """Locate the CORE wheels vendored inside the app (OPENNOLAN_WHEELS, set by main.js -> the packaged
-    Resources/wheels, built by scripts/vendor-wheels.mjs). None in dev -> install online, unchanged."""
+    Resources/wheels, built by scripts/vendor-wheels.mjs). None when the caller isn't asking for an
+    offline install (dev); None while `offline=True` is a hard failure — see _pip_install."""
     env = os.environ.get("OPENNOLAN_WHEELS")
     if env and Path(env).exists():
         return Path(env)
@@ -408,9 +409,20 @@ def _pip_install(target_python: Path, args: list[str], progress: Optional[Progre
     online — torch is not something we ship. `--no-cache` is LOAD-BEARING: `uv --offline` only disables
     the network, not uv's on-disk cache, so without it a wheel we forgot to vendor would still install
     on any machine with a warm ~/.cache/uv (the developer's) and the omission would first surface on a
-    stranger's Mac. That is the exact bug class this exists to kill."""
+    stranger's Mac. That is the exact bug class this exists to kill.
+
+    So `offline=True` with NO wheels directory is a HARD FAILURE, never a quiet online install. The
+    flags are added only when a wheels dir resolves, so a bundle missing Resources/wheels used to fall
+    through to a normal pypi.org install — green on the developer's Mac (which has a network and a warm
+    cache) and a mystery on the machine the redesign exists to protect. Same bug class, different
+    missing thing."""
     uv = _uv()
     wheels = _wheels_dir() if offline else None
+    if offline and wheels is None:
+        raise RuntimeError(
+            "offline install requested but the bundled Python wheels are missing "
+            f"(OPENNOLAN_WHEELS={os.environ.get('OPENNOLAN_WHEELS') or 'unset'}) — this app bundle is "
+            "incomplete. Reinstall OpenNolan, or rebuild it with `node scripts/vendor-wheels.mjs`.")
     if uv:
         local = ["--offline", "--no-cache", "--find-links", str(wheels)] if wheels else []
         _run([uv, "pip", "install", "--python", str(target_python), "--only-binary=:all:", *local, *args],
@@ -451,8 +463,10 @@ def provision_core(progress: Optional[ProgressCb] = None, step: Optional[StepCb]
     else:
         _run([base_python(), "-m", "venv", str(building)], progress)  # stdlib venv seeds pip itself
 
-    # 2) install the core requirement files — from the wheels vendored inside the app when there are
-    #    any (offline=True; see _pip_install + scripts/vendor-wheels.mjs). Dev installs online.
+    # 2) install the core requirement files — offline from the wheels vendored inside the app (see
+    #    _pip_install + scripts/vendor-wheels.mjs). Only the PACKAGED app carries them, so that is the
+    #    condition; a dev checkout asks for the online install EXPLICITLY rather than getting it as a
+    #    silent fallback. Packaged with no wheels dir now raises instead of reaching pypi.org.
     req_args: list[str] = []
     for req in CORE_REQUIREMENTS:
         rp = app_paths.code_root() / req
@@ -461,7 +475,7 @@ def provision_core(progress: Optional[ProgressCb] = None, step: Optional[StepCb]
     if not req_args:
         raise RuntimeError("no core requirement files found under code_root()")
     _step(step, 3, 55, "Installing Python packages…")
-    _pip_install(building_python, req_args, progress, offline=True)
+    _pip_install(building_python, req_args, progress, offline=app_paths.is_packaged())
 
     # 3) verify the backend's hard deps actually import before we trust this venv
     _step(step, 55, 58, "Verifying installation…")

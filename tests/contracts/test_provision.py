@@ -165,6 +165,44 @@ def test_capability_packs_stay_online_even_with_bundled_wheels(monkeypatch, tmp_
     assert not any(f in cmds[0] for f in ("--offline", "--no-cache", "--find-links"))
 
 
+def test_offline_install_without_wheels_fails_instead_of_going_online(monkeypatch, tmp_path):
+    """A missing wheels dir used to turn the offline core install back into an ONLINE one: the flags
+    are added only when a dir resolves, so `offline=True` + no dir called uv with no --offline at all.
+    That is green on the developer's Mac (network + warm cache) and a mystery everywhere else — the
+    same bug class the vendoring exists to kill. It must fail BEFORE any subprocess runs."""
+    monkeypatch.setenv("OPENNOLAN_WHEELS", str(tmp_path / "definitely" / "missing"))
+    monkeypatch.setattr(provision, "_uv", lambda: "/fake/uv")
+    cmds: list[list[str]] = []
+    monkeypatch.setattr(provision, "_run", lambda cmd, progress=None, env=None: cmds.append(cmd))
+    with pytest.raises(RuntimeError, match="wheels are missing"):
+        provision._pip_install(provision.venv_python(), ["-r", "requirements.txt"], None, offline=True)
+    assert cmds == []  # nothing was spawned — no online install slipped through
+
+
+def test_dev_core_install_asks_for_online_explicitly(monkeypatch, tmp_path):
+    """Dev (unpackaged, no vendored wheels) still installs from pypi.org — but because provision_core
+    PASSES offline=False, not because the offline path quietly degraded when the dir was absent."""
+    code = tmp_path / "code"
+    code.mkdir()
+    (code / "requirements.txt").write_text("fastapi\n")
+    monkeypatch.delenv("OPENNOLAN_CODE_ROOT", raising=False)  # unpackaged
+    monkeypatch.delenv("OPENNOLAN_WHEELS", raising=False)
+    monkeypatch.setattr(provision.app_paths, "code_root", lambda: code)
+    monkeypatch.setattr(provision, "_uv", lambda: "/fake/uv")
+    monkeypatch.setattr(provision, "provision_ffmpeg", lambda *a, **k: None)
+    cmds: list[list[str]] = []
+
+    def fake_run(cmd, progress=None, env=None):
+        cmds.append(cmd)
+        if "venv" in cmd:
+            (provision.app_paths.runtime_dir() / "venv.building" / "bin").mkdir(parents=True)
+
+    monkeypatch.setattr(provision, "_run", fake_run)
+    provision.provision_core()
+    install = next(c for c in cmds if "install" in c)
+    assert not any(f in install for f in ("--offline", "--no-index", "--find-links"))
+
+
 def test_wheels_dir_is_none_unless_the_path_really_exists(monkeypatch):
     # Dev (unset) and an older packaged build (var set, dir absent) both fall back to the online install.
     monkeypatch.delenv("OPENNOLAN_WHEELS", raising=False)
