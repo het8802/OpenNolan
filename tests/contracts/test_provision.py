@@ -399,6 +399,9 @@ def test_ffmpeg_pin_applies_to_a_binary_already_on_disk(monkeypatch):
     monkeypatch.setitem(provision.FFMPEG_SHA256, "ffprobe", hashlib.sha256(b"good").hexdigest())
     monkeypatch.setattr(provision, "_download_binary", lambda url, dest, on_bytes=None: dest.write_bytes(b"good"))
     monkeypatch.setattr(provision, "_run", lambda *a, **k: None)  # the `-version` probe can't exec a stub
+    # A successful re-download falls through to `xattr`/`codesign` — real macOS-only tools that
+    # don't exist on the Linux CI runner. Not under test here; stub the shared subprocess entrypoint.
+    monkeypatch.setattr(provision.subprocess, "run", lambda *a, **k: None)
     provision.provision_ffmpeg()
     for name in provision.FFMPEG_URLS:
         assert (provision.bin_dir() / name).read_bytes() == b"good"  # re-downloaded, not trusted
