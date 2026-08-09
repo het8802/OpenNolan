@@ -13,7 +13,15 @@ extend-exclude = [
 [format]
 # Legacy renderer files. Format them in a dedicated mechanical change; mixing
 # that churn into a behavior fix makes review and rollback unsafe.
-exclude = ["tools/video/video_compose.py", "tests/tools/test_hdr_detection.py"]
+#
+# NOTE: with force-exclude = true this does not narrow the check, it deletes it —
+# `ruff format --check <excluded file>` reports "Formatted 0 files" and exits 0,
+# so an excluded file reads as clean when it is not. Only park a file here while
+# its own reformat commit is queued behind a behavior fix.
+exclude = [
+  "tools/video/video_compose.py",
+  "tests/tools/test_hdr_detection.py",
+]
 
 [lint]
 # Start with correctness rules that can be enabled on the existing repository

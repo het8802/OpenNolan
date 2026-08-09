@@ -8,6 +8,7 @@ registry, atomic manifest writes, and the endpoint contracts (mocking the heavy 
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -22,6 +23,7 @@ def _home(monkeypatch, tmp_path):
 
 
 # ── status / doctor ──────────────────────────────────────────────────────────
+
 
 def test_fresh_home_reports_unprovisioned():
     assert provision.venv_ok() is False
@@ -48,8 +50,14 @@ def test_pack_registry_wellformed():
 
 
 def test_manifest_atomic_roundtrip(tmp_path):
-    provision._write_manifest({"schema": provision.MANIFEST_SCHEMA, "base_python": "Python 3.12.13",
-                               "core_installed": True, "packs": ["beat-sync"]})
+    provision._write_manifest(
+        {
+            "schema": provision.MANIFEST_SCHEMA,
+            "base_python": "Python 3.12.13",
+            "core_installed": True,
+            "packs": ["beat-sync"],
+        }
+    )
     assert provision._read_manifest()["packs"] == ["beat-sync"]
     assert list((tmp_path / "runtime").glob(".manifest.*")) == []  # no temp files left
 
@@ -60,8 +68,9 @@ def test_venv_ok_true_only_when_manifest_matches(monkeypatch, tmp_path):
     vp.parent.mkdir(parents=True, exist_ok=True)
     vp.write_text("")  # placeholder file at the venv python path
     monkeypatch.setattr(provision, "_base_python_id", lambda: "Python 3.12.13")
-    provision._write_manifest({"schema": provision.MANIFEST_SCHEMA, "base_python": "Python 3.12.13",
-                               "core_installed": True, "packs": []})
+    provision._write_manifest(
+        {"schema": provision.MANIFEST_SCHEMA, "base_python": "Python 3.12.13", "core_installed": True, "packs": []}
+    )
     assert provision.venv_ok() is True and provision.core_ok() is True
     # a base-python drift (e.g. app update bumped Python) invalidates it -> rebuild
     monkeypatch.setattr(provision, "_base_python_id", lambda: "Python 3.13.0")
@@ -73,7 +82,153 @@ def test_provision_pack_rejects_unknown():
         provision.provision_pack("nope")
 
 
+# ── failure legibility (_run) ─────────────────────────────────────────────────
+
+
+def test_run_attaches_command_output_to_the_error():
+    # A beta tester's first launch died with a bare "command failed (2)" and we could not diagnose it:
+    # uv exits 2 for EVERY failure mode, so the cause has to ride along on the exception itself.
+    with pytest.raises(RuntimeError) as ei:
+        provision._run([sys.executable, "-c", "import sys; print('the real reason'); sys.exit(2)"], None)
+    msg = str(ei.value)
+    assert "command failed (2)" in msg
+    assert "the real reason" in msg
+
+
+def test_run_error_is_capped_but_keeps_the_tail():
+    # The message lands in a native dialog and a mailto body; one traceback line can be kilobytes.
+    with pytest.raises(RuntimeError) as ei:
+        provision._run([sys.executable, "-c", "import sys; print('x' * 9000); print('LAST LINE'); sys.exit(1)"], None)
+    msg = str(ei.value)
+    assert len(msg) <= provision._RUN_ERR_CHARS
+    assert "LAST LINE" in msg  # the END of the output survives — that's where the cause is
+
+
+# ── offline pip (ensurepip, not `uv venv --seed`) ─────────────────────────────
+
+
+def test_core_venv_seeds_pip_from_the_bundled_wheel(monkeypatch, tmp_path):
+    """`uv venv --seed` RESOLVES PIP FROM PYPI (it installs 26.2.1 while the bundled interpreter
+    carries ensurepip/_bundled/pip-25.0.1) — a network hop on the critical path of first launch, and
+    the exact call that failed for a beta tester. ensurepip unzips the bundled wheel instead."""
+    code = tmp_path / "code"
+    code.mkdir()
+    (code / "requirements.txt").write_text("fastapi\n")
+    monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(code))
+    monkeypatch.setattr(provision, "_uv", lambda: "/fake/uv")
+    monkeypatch.setattr(provision, "_pip_install", lambda *a, **k: None)
+    monkeypatch.setattr(provision, "provision_ffmpeg", lambda *a, **k: None)
+    cmds: list[list[str]] = []
+
+    def fake_run(cmd, progress=None, env=None):
+        cmds.append(cmd)
+        if "venv" in cmd:  # the real uv would create it; os.replace() below needs it to exist
+            (provision.app_paths.runtime_dir() / "venv.building" / "bin").mkdir(parents=True)
+
+    monkeypatch.setattr(provision, "_run", fake_run)
+    provision.provision_core()
+    venv_cmd = next(c for c in cmds if "venv" in c)
+    assert "--seed" not in venv_cmd  # --seed = a PyPI round-trip we no longer make
+    assert any(c[-2:] == ["-m", "ensurepip"] for c in cmds)
+
+
+def test_core_install_uses_the_bundled_wheels_offline(monkeypatch, tmp_path):
+    """First launch must not reach pypi.org: scripts/vendor-wheels.mjs ships the core wheels inside the
+    app and main.js points OPENNOLAN_WHEELS at them. `--no-cache` is LOAD-BEARING — `uv --offline`
+    disables the network but NOT ~/.cache/uv, so without it a wheel we forgot to vendor still installs
+    on a warm cache (the developer's) and the omission first surfaces on a stranger's Mac."""
+    code = tmp_path / "code"
+    code.mkdir()
+    (code / "requirements.txt").write_text("fastapi\n")
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(code))
+    monkeypatch.setenv("OPENNOLAN_PACKAGED", "1")
+    monkeypatch.setenv("OPENNOLAN_WHEELS", str(wheels))
+    monkeypatch.setattr(provision, "_uv", lambda: "/fake/uv")
+    monkeypatch.setattr(provision, "provision_ffmpeg", lambda *a, **k: None)
+    cmds: list[list[str]] = []
+
+    def fake_run(cmd, progress=None, env=None):
+        cmds.append(cmd)
+        if "venv" in cmd:
+            (provision.app_paths.runtime_dir() / "venv.building" / "bin").mkdir(parents=True)
+
+    monkeypatch.setattr(provision, "_run", fake_run)
+    provision.provision_core()
+    install = next(c for c in cmds if "install" in c)
+    assert "--offline" in install and "--no-cache" in install
+    assert install[install.index("--find-links") + 1] == str(wheels)
+
+
+def test_capability_packs_stay_online_even_with_bundled_wheels(monkeypatch, tmp_path):
+    """The packs (torch/onnxruntime, GBs) are deliberately NOT vendored, and they share _pip_install —
+    so the offline flags are opt-in per call. Applying them unconditionally would make every pack
+    install resolve against the core wheels dir and fail."""
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    monkeypatch.setenv("OPENNOLAN_WHEELS", str(wheels))
+    monkeypatch.setattr(provision, "_uv", lambda: "/fake/uv")
+    cmds: list[list[str]] = []
+    monkeypatch.setattr(provision, "_run", lambda cmd, progress=None, env=None: cmds.append(cmd))
+    provision._pip_install(provision.venv_python(), ["torch"], None)
+    assert not any(f in cmds[0] for f in ("--offline", "--no-cache", "--find-links"))
+
+
+def test_offline_install_without_wheels_fails_instead_of_going_online(monkeypatch, tmp_path):
+    """A missing wheels dir used to turn the offline core install back into an ONLINE one: the flags
+    are added only when a dir resolves, so `offline=True` + no dir called uv with no --offline at all.
+    That is green on the developer's Mac (network + warm cache) and a mystery everywhere else — the
+    same bug class the vendoring exists to kill. It must fail BEFORE any subprocess runs."""
+    monkeypatch.setenv("OPENNOLAN_WHEELS", str(tmp_path / "definitely" / "missing"))
+    monkeypatch.setattr(provision, "_uv", lambda: "/fake/uv")
+    cmds: list[list[str]] = []
+    monkeypatch.setattr(provision, "_run", lambda cmd, progress=None, env=None: cmds.append(cmd))
+    with pytest.raises(RuntimeError, match="wheels are missing"):
+        provision._pip_install(provision.venv_python(), ["-r", "requirements.txt"], None, offline=True)
+    assert cmds == []  # nothing was spawned — no online install slipped through
+
+
+def test_dev_core_install_asks_for_online_explicitly(monkeypatch, tmp_path):
+    """Dev (unpackaged, no vendored wheels) still installs from pypi.org — but because provision_core
+    PASSES offline=False, not because the offline path quietly degraded when the dir was absent.
+
+    REGRESSION: dev is detected by OPENNOLAN_PACKAGED being unset, NOT by OPENNOLAN_CODE_ROOT — which
+    desktop/main.js provisionEnv() sets unconditionally (provision.py needs code_root() to find these
+    very requirement files). So this test sets CODE_ROOT exactly the way a dev run really has it; when
+    is_packaged() read that var, a dev provision demanded the app's wheels and died before pip ran."""
+    code = tmp_path / "code"
+    code.mkdir()
+    (code / "requirements.txt").write_text("fastapi\n")
+    monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(code))  # provisionEnv() sets this in dev too
+    monkeypatch.delenv("OPENNOLAN_PACKAGED", raising=False)  # unpackaged
+    monkeypatch.delenv("OPENNOLAN_WHEELS", raising=False)
+    monkeypatch.setattr(provision.app_paths, "code_root", lambda: code)
+    monkeypatch.setattr(provision, "_uv", lambda: "/fake/uv")
+    monkeypatch.setattr(provision, "provision_ffmpeg", lambda *a, **k: None)
+    cmds: list[list[str]] = []
+
+    def fake_run(cmd, progress=None, env=None):
+        cmds.append(cmd)
+        if "venv" in cmd:
+            (provision.app_paths.runtime_dir() / "venv.building" / "bin").mkdir(parents=True)
+
+    monkeypatch.setattr(provision, "_run", fake_run)
+    provision.provision_core()
+    install = next(c for c in cmds if "install" in c)
+    assert not any(f in install for f in ("--offline", "--no-index", "--find-links"))
+
+
+def test_wheels_dir_is_none_unless_the_path_really_exists(monkeypatch):
+    # Dev (unset) and an older packaged build (var set, dir absent) both fall back to the online install.
+    monkeypatch.delenv("OPENNOLAN_WHEELS", raising=False)
+    assert provision._wheels_dir() is None
+    monkeypatch.setenv("OPENNOLAN_WHEELS", "/nope/wheels")
+    assert provision._wheels_dir() is None
+
+
 # ── composition tier (OPN-3: Node + Remotion + HyperFrames) ────────────────────
+
 
 def _fake_node(monkeypatch, version="v22.5.0"):
     monkeypatch.setattr(provision, "node_bin", lambda: "/fake/node")
@@ -113,8 +268,9 @@ def test_composition_ok_requires_all_parts_and_node_match(monkeypatch):
     _fake_engines_on_disk()
     assert provision.remotion_ok() and provision.hyperframes_ok()
     assert provision.composition_ok() is False  # engines on disk but manifest not stamped yet
-    provision._write_manifest({"schema": provision.MANIFEST_SCHEMA, "composition_installed": True,
-                               "node_version": "v22.5.0"})
+    provision._write_manifest(
+        {"schema": provision.MANIFEST_SCHEMA, "composition_installed": True, "node_version": "v22.5.0"}
+    )
     assert provision.composition_ok() is True
     # Node-version drift (an app update bumped Node) invalidates -> rebuild, like base_python drift
     monkeypatch.setattr(provision, "_node_id", lambda: "v24.0.0")
@@ -124,8 +280,9 @@ def test_composition_ok_requires_all_parts_and_node_match(monkeypatch):
 def test_force_provision_hides_composition(monkeypatch):
     _fake_node(monkeypatch)
     _fake_engines_on_disk()
-    provision._write_manifest({"schema": provision.MANIFEST_SCHEMA, "composition_installed": True,
-                               "node_version": "v22.5.0"})
+    provision._write_manifest(
+        {"schema": provision.MANIFEST_SCHEMA, "composition_installed": True, "node_version": "v22.5.0"}
+    )
     monkeypatch.setenv("OPENNOLAN_FORCE_PROVISION", "1")
     assert provision.node_ok() is False and provision.composition_ok() is False
 
@@ -145,8 +302,7 @@ def test_provision_composition_records_manifest(monkeypatch, tmp_path):
     (code / "composition" / "hyperframes" / "package.json").write_text("{}")
     monkeypatch.setenv("OPENNOLAN_CODE_ROOT", str(code))
     installed: list[str] = []
-    monkeypatch.setattr(provision, "_install_engine",
-                        lambda name, src, prog, **kw: installed.append(name))
+    monkeypatch.setattr(provision, "_install_engine", lambda name, src, prog, **kw: installed.append(name))
     monkeypatch.setattr(provision, "_ensure_browsers", lambda prog: None)
     provision.provision_composition()
     assert installed == ["remotion", "hyperframes"]  # both engines, Remotion first
@@ -192,13 +348,24 @@ def test_install_engine_atomic_on_failure(monkeypatch, tmp_path):
 
 def test_core_rebuild_preserves_composition_keys(monkeypatch, tmp_path):
     # a core rebuild (python drift) must NOT wipe an already-installed composition tier
-    provision._write_manifest({"schema": provision.MANIFEST_SCHEMA, "base_python": "Python 3.12.13",
-                               "core_installed": True, "packs": ["beat-sync"],
-                               "node_version": "v22.5.0", "composition_installed": True})
+    provision._write_manifest(
+        {
+            "schema": provision.MANIFEST_SCHEMA,
+            "base_python": "Python 3.12.13",
+            "core_installed": True,
+            "packs": ["beat-sync"],
+            "node_version": "v22.5.0",
+            "composition_installed": True,
+        }
+    )
     # exercise just the manifest-preservation tail of provision_core without a real venv build
     m = provision._read_manifest()
-    new_manifest = {"schema": provision.MANIFEST_SCHEMA, "base_python": "Python 3.13.0",
-                    "core_installed": True, "packs": m.get("packs") or []}
+    new_manifest = {
+        "schema": provision.MANIFEST_SCHEMA,
+        "base_python": "Python 3.13.0",
+        "core_installed": True,
+        "packs": m.get("packs") or [],
+    }
     for k in ("node_version", "composition_installed"):
         if k in m:
             new_manifest[k] = m[k]
@@ -209,18 +376,103 @@ def test_core_rebuild_preserves_composition_keys(monkeypatch, tmp_path):
 
 # ── ffmpeg pinning (OPN-3) ──────────────────────────────────────────────────────
 
+
 def test_ffmpeg_sha_mismatch_never_trusts_binary(monkeypatch):
     monkeypatch.setattr(provision.shutil, "which", lambda _x: None)  # force the download path
     monkeypatch.setitem(provision.FFMPEG_SHA256, "ffmpeg", "de" * 32)  # a pin that won't match
-    monkeypatch.setattr(provision, "_download_binary",
-                        lambda url, dest, on_bytes=None: dest.write_bytes(b"not-ffmpeg"))
+    monkeypatch.setattr(provision, "_download_binary", lambda url, dest, on_bytes=None: dest.write_bytes(b"not-ffmpeg"))
     with pytest.raises(RuntimeError, match="sha256 mismatch"):
         provision.provision_ffmpeg()
     assert not (provision.bin_dir() / "ffmpeg").exists()  # mismatched binary removed, not trusted
 
 
+def test_ffmpeg_pin_applies_to_a_binary_already_on_disk(monkeypatch):
+    # The `dest.exists() -> continue` shortcut used to run BEFORE the sha was read, so a binary
+    # downloaded during the unpinned era stayed trusted forever and a later pin never reached it.
+    import hashlib
+
+    monkeypatch.setattr(provision.shutil, "which", lambda _x: None)  # force the download path
+    provision.bin_dir().mkdir(parents=True, exist_ok=True)
+    for name in provision.FFMPEG_URLS:
+        (provision.bin_dir() / name).write_bytes(b"stale-unpinned-binary")
+    monkeypatch.setitem(provision.FFMPEG_SHA256, "ffmpeg", hashlib.sha256(b"good").hexdigest())
+    monkeypatch.setitem(provision.FFMPEG_SHA256, "ffprobe", hashlib.sha256(b"good").hexdigest())
+    monkeypatch.setattr(provision, "_download_binary", lambda url, dest, on_bytes=None: dest.write_bytes(b"good"))
+    monkeypatch.setattr(provision, "_run", lambda *a, **k: None)  # the `-version` probe can't exec a stub
+    # A successful re-download falls through to `xattr`/`codesign` — real macOS-only tools that
+    # don't exist on the Linux CI runner. Not under test here; stub the shared subprocess entrypoint.
+    monkeypatch.setattr(provision.subprocess, "run", lambda *a, **k: None)
+    provision.provision_ffmpeg()
+    for name in provision.FFMPEG_URLS:
+        assert (provision.bin_dir() / name).read_bytes() == b"good"  # re-downloaded, not trusted
+
+
+def test_ffmpeg_existing_binary_kept_when_it_matches_or_is_unpinned(monkeypatch):
+    import hashlib
+
+    monkeypatch.setattr(provision.shutil, "which", lambda _x: None)
+    provision.bin_dir().mkdir(parents=True, exist_ok=True)
+    for name in provision.FFMPEG_URLS:
+        (provision.bin_dir() / name).write_bytes(b"good")
+    monkeypatch.setitem(provision.FFMPEG_SHA256, "ffmpeg", hashlib.sha256(b"good").hexdigest())
+    monkeypatch.setitem(provision.FFMPEG_SHA256, "ffprobe", "")  # unpinned -> keep today's behaviour
+
+    def boom(url, dest, on_bytes=None):
+        raise AssertionError("must not re-download a binary that already satisfies the pin")
+
+    monkeypatch.setattr(provision, "_download_binary", boom)
+    monkeypatch.setattr(provision, "_run", lambda *a, **k: None)  # the `-version` probe can't exec a stub
+    provision.provision_ffmpeg()
+
+
+def test_download_is_bounded_and_a_stall_is_legible(monkeypatch, tmp_path):
+    """urlopen() with no timeout waits forever, so a host that accepts the connection and then goes
+    quiet hangs first launch on a bar that never moves. Bounded + wrapped: the error names the file
+    and the host, so the failure dialog/mailto carries a cause (same reason _run attaches its tail)."""
+    seen: dict = {}
+
+    def fake_urlopen(url, timeout=None):
+        seen["timeout"] = timeout
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(provision.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError, match="downloading ffmpeg from") as err:
+        provision._download_binary(provision.FFMPEG_URLS["ffmpeg"], tmp_path / "ffmpeg")
+    assert seen["timeout"] == provision._DOWNLOAD_TIMEOUT
+    assert isinstance(err.value.__cause__, TimeoutError)
+    assert not (tmp_path / "ffmpeg.download").exists()  # no partial file left for the next run to trust
+
+
+def test_download_has_a_total_deadline_not_just_a_per_read_timeout(monkeypatch, tmp_path):
+    """A per-socket timeout can't catch a transfer that trickles: every read returns inside 30s, so
+    nothing ever times out and first launch hangs on a bar that crawls forever. The wall-clock budget
+    fails it the same legible way a stall does."""
+
+    class TricklingResponse:
+        headers = {"Content-Length": "999999999"}
+
+        def read(self, _n):
+            clock[0] += 60  # each read is slow but never hits _DOWNLOAD_TIMEOUT
+            return b"x"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    clock = [0.0]
+    monkeypatch.setattr(provision.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(provision.urllib.request, "urlopen", lambda url, timeout=None: TricklingResponse())
+    with pytest.raises(RuntimeError, match="total download budget"):
+        provision._download_binary(provision.FFMPEG_URLS["ffmpeg"], tmp_path / "ffmpeg")
+    assert clock[0] <= provision._DOWNLOAD_DEADLINE + 60  # aborted at the budget, not much later
+    assert not (tmp_path / "ffmpeg.download").exists()  # no partial file left behind
+
+
 def test_print_ffmpeg_shas(monkeypatch):
     import hashlib
+
     monkeypatch.setattr(provision, "_download_binary", lambda url, dest, on_bytes=None: dest.write_bytes(b"abc"))
     out = provision.print_ffmpeg_shas()
     assert set(out) == {"ffmpeg", "ffprobe"}
@@ -229,12 +481,14 @@ def test_print_ffmpeg_shas(monkeypatch):
 
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
+
 def _client(tmp_path):
     import tempfile
 
     from fastapi.testclient import TestClient
 
     from server.app import create_app
+
     return TestClient(create_app(projects_dir=tempfile.mkdtemp()))
 
 
@@ -259,6 +513,7 @@ def test_provision_composition_endpoint_streams(monkeypatch, tmp_path):
         if progress:
             progress("installing video engines…")
             progress("done")
+
     monkeypatch.setattr(provision, "provision_composition", fake_composition)
 
     with _client(tmp_path).stream("POST", "/api/provision/composition") as r:
@@ -275,6 +530,7 @@ def test_provision_endpoint_streams(monkeypatch, tmp_path):
         if progress:
             progress(f"installing {name}…")
             progress("done")
+
     monkeypatch.setattr(provision, "provision_pack", fake_pack)
 
     with _client(tmp_path).stream("POST", "/api/provision/beat-sync") as r:

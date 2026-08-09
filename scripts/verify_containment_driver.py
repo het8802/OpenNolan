@@ -15,7 +15,8 @@ This is the same tool-subprocess env path the agent's jobs use.
 Expected environment (set by verify_containment.sh):
     HOME                 -> empty throwaway dir (the tripwire)
     OPENNOLAN_HOME       -> persistent verify dir (venv/models live here across runs)
-    OPENNOLAN_CODE_ROOT  -> repo/bundle root (forces is_packaged() -> routing ON)
+    OPENNOLAN_CODE_ROOT  -> repo/bundle root (where lib.* is imported from)
+    OPENNOLAN_PACKAGED   -> 1 (forces is_packaged() -> routing ON)
 
 Exit codes:
     0  PASS          at least one job ran and $HOME gained no files
@@ -87,7 +88,7 @@ def main() -> int:
 
     base = app_paths.route_caches()
     if base is None:
-        print("INCONCLUSIVE: cache routing is gated OFF (set OPENNOLAN_CODE_ROOT or OPENNOLAN_ROUTE_CACHES=1)")
+        print("INCONCLUSIVE: cache routing is gated OFF (set OPENNOLAN_PACKAGED=1 or OPENNOLAN_ROUTE_CACHES=1)")
         return INCONCLUSIVE
     print(f"routing ON — cache base: {base}")
 
@@ -99,18 +100,26 @@ def main() -> int:
 
     ran = 0
     if _ffmpeg_fixture(["-f", "lavfi", "-i", "testsrc=size=320x240:rate=1", "-frames:v", "1"], png):
+
         def _bg():
             from tools.enhancement.bg_remove import BgRemove
+
             return BgRemove()
-        ran += _run_job("bg_remove (rembg → U2NET_HOME)", _bg,
-                        {"input_path": str(png), "output_path": str(jobs_dir / "frame_nobg.png")})
+
+        ran += _run_job(
+            "bg_remove (rembg → U2NET_HOME)",
+            _bg,
+            {"input_path": str(png), "output_path": str(jobs_dir / "frame_nobg.png")},
+        )
 
     if _ffmpeg_fixture(["-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-ar", "16000"], wav):
+
         def _tr():
             from tools.analysis.transcriber import Transcriber
+
             return Transcriber()
-        ran += _run_job("transcriber (faster-whisper → HF_HOME)", _tr,
-                        {"input_path": str(wav), "model_size": "tiny"})
+
+        ran += _run_job("transcriber (faster-whisper → HF_HOME)", _tr, {"input_path": str(wav), "model_size": "tiny"})
 
     leaked = sorted(p for p in fake_home.rglob("*") if p.is_file() or p.is_symlink())
     if leaked:

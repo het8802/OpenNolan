@@ -33,7 +33,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
 import urllib.request
+from collections import deque
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -46,6 +49,25 @@ CORE_REQUIREMENTS = ("requirements-ui.txt", "requirements.txt")
 
 ProgressCb = Callable[[str], None]
 
+# How much of a failed command's output rides along on the RuntimeError, and the hard cap on the
+# whole message — it ends up in a native dialog and a mailto body, neither of which tolerates a
+# multi-kilobyte traceback line.
+_RUN_TAIL_LINES = 15
+_RUN_ERR_CHARS = 2000
+
+# Per-socket-operation timeout for the ffmpeg downloads — the ONE network hop left on the path to a
+# usable editor. `urlopen()` with no timeout blocks forever, so a host that accepts the connection and
+# then goes quiet (a captive portal, a dead mirror, a corporate proxy that swallows the response) hangs
+# first launch with a progress bar that never moves and nothing to report. Bounded, it fails in 30s with
+# a message, and provision_core's best-effort catch degrades to "ffmpeg skipped — retry from Settings".
+_DOWNLOAD_TIMEOUT = 30
+
+# Total wall-clock budget for ONE binary. _DOWNLOAD_TIMEOUT bounds each socket operation, not the
+# transfer: a host that trickles a few bytes just inside every 30s window never times out per read
+# and never finishes either, so first launch still hangs on a bar that crawls. ~50 MB, so 5 minutes
+# is generous even on a bad connection; blowing it fails the same legible way a stall does.
+_DOWNLOAD_DEADLINE = 300
+
 # Determinate setup progress: (pct, end_pct, label). `pct` is where this step STARTS on the
 # 0-100 scale of the CURRENT provision run; `end_pct` is where it will land when the step
 # finishes, so the UI may creep the bar toward it while a long subprocess (uv/npm) is silent.
@@ -57,6 +79,7 @@ StepCb = Callable[[float, float, str], None]
 def _step(step: Optional[StepCb], pct: float, end: float, label: str) -> None:
     if step:
         step(pct, end, label)
+
 
 # ── composition tier (OPN-3: Node + Remotion + HyperFrames) ───────────────────
 # The two JS composition engines the agent renders with, plus their prerequisite Node runtime.
@@ -107,6 +130,7 @@ PACKS: dict[str, dict] = {
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 
+
 def venv_dir() -> Path:
     return app_paths.runtime_dir() / "venv"
 
@@ -127,6 +151,7 @@ def manifest_path() -> Path:
 # The npm engines install into the writable runtime (the app bundle is read-only). We COPY the
 # read-only composer/package sources out of code_root() into these dirs, then `npm ci` there, so
 # source + node_modules stay colocated (Remotion resolves its own project) and everything is writable.
+
 
 def composition_dir() -> Path:
     return app_paths.runtime_dir() / "composition"
@@ -193,6 +218,7 @@ def _base_python_id() -> str:
 
 # ── manifest (atomic) ──────────────────────────────────────────────────────────
 
+
 def _read_manifest() -> dict:
     p = manifest_path()
     if not p.exists():
@@ -224,6 +250,7 @@ def _write_manifest(data: dict) -> None:
 
 # ── status / doctor ─────────────────────────────────────────────────────────────
 
+
 def forced() -> bool:
     return os.environ.get("OPENNOLAN_FORCE_PROVISION", "").lower() in ("1", "true", "yes")
 
@@ -250,10 +277,12 @@ def ffmpeg_ok() -> bool:
 
     def _have(name: str) -> bool:
         return shutil.which(name) is not None or (bin_dir() / name).exists()
+
     return _have("ffmpeg") and _have("ffprobe")
 
 
 # ── composition status (OPN-3) ──────────────────────────────────────────────────
+
 
 def _node_id() -> str:
     """A stable id for the Node runtime so a version bump on app-update invalidates the install."""
@@ -335,6 +364,7 @@ def doctor() -> dict:
 
 # ── installer plumbing ───────────────────────────────────────────────────────────
 
+
 def _uv() -> Optional[str]:
     """Locate uv: the bundled binary (OPENNOLAN_UV, set by main.js), then PATH. None -> use venv pip."""
     env = os.environ.get("OPENNOLAN_UV")
@@ -343,34 +373,86 @@ def _uv() -> Optional[str]:
     return shutil.which("uv")
 
 
+def _wheels_dir() -> Optional[Path]:
+    """Locate the CORE wheels vendored inside the app (OPENNOLAN_WHEELS, set by main.js -> the packaged
+    Resources/wheels, built by scripts/vendor-wheels.mjs). None when the caller isn't asking for an
+    offline install (dev); None while `offline=True` is a hard failure — see _pip_install."""
+    env = os.environ.get("OPENNOLAN_WHEELS")
+    if env and Path(env).exists():
+        return Path(env)
+    return None
+
+
 def _run(cmd: list[str], progress: Optional[ProgressCb], env: Optional[dict] = None) -> None:
-    """Run a subprocess, streaming stdout+stderr line-by-line to `progress`. Raises on non-zero exit."""
+    """Run a subprocess, streaming stdout+stderr line-by-line to `progress`. Raises on non-zero exit
+    with the tail of that output ATTACHED. uv exits 2 for EVERY failure mode (usage error, unreachable
+    index, bad --python, unwritable target), so a bare "command failed (2)" carries no cause — that is
+    literally all we got from a beta tester's dead first run. `progress` is not enough: it goes to the
+    setup window, while the exception is what reaches the dialog, the email and analytics."""
     if progress:
         progress(f"$ {' '.join(cmd)}")
     proc = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
         env={**os.environ, **(env or {})},
     )
     assert proc.stdout is not None
+    tail: deque[str] = deque(maxlen=_RUN_TAIL_LINES)
     for line in proc.stdout:
+        line = line.rstrip()
+        tail.append(line)
         if progress:
-            progress(line.rstrip())
+            progress(line)
     code = proc.wait()
     if code != 0:
-        raise RuntimeError(f"command failed ({code}): {' '.join(cmd)}")
+        msg = f"command failed ({code}): {' '.join(cmd)}"
+        detail = "\n".join(tail)
+        room = _RUN_ERR_CHARS - len(msg)
+        if detail and room > 2:
+            # Keep the END of the output — the cause is the last line, and one traceback line can be
+            # kilobytes on its own. The command always survives; it is the smaller half.
+            msg += "\n" + (detail if len(detail) < room else "…" + detail[-(room - 2) :])
+        raise RuntimeError(msg)
 
 
-def _pip_install(target_python: Path, args: list[str], progress: Optional[ProgressCb]) -> None:
+def _pip_install(target_python: Path, args: list[str], progress: Optional[ProgressCb], offline: bool = False) -> None:
     """Install into `target_python`'s environment. Prefer uv (fast); fall back to that python's pip.
-    Wheels ONLY (--only-binary=:all:) — a user has no compiler, so a source build = a dead first-run."""
+    Wheels ONLY (--only-binary=:all:) — a user has no compiler, so a source build = a dead first-run.
+
+    `offline=True` (the CORE install only) installs from the wheels vendored inside the app instead of
+    pypi.org. It is opt-in because the capability packs share this function and are deliberately still
+    online — torch is not something we ship. `--no-cache` is LOAD-BEARING: `uv --offline` only disables
+    the network, not uv's on-disk cache, so without it a wheel we forgot to vendor would still install
+    on any machine with a warm ~/.cache/uv (the developer's) and the omission would first surface on a
+    stranger's Mac. That is the exact bug class this exists to kill.
+
+    So `offline=True` with NO wheels directory is a HARD FAILURE, never a quiet online install. The
+    flags are added only when a wheels dir resolves, so a bundle missing Resources/wheels used to fall
+    through to a normal pypi.org install — green on the developer's Mac (which has a network and a warm
+    cache) and a mystery on the machine the redesign exists to protect. Same bug class, different
+    missing thing."""
     uv = _uv()
+    wheels = _wheels_dir() if offline else None
+    if offline and wheels is None:
+        raise RuntimeError(
+            "offline install requested but the bundled Python wheels are missing "
+            f"(OPENNOLAN_WHEELS={os.environ.get('OPENNOLAN_WHEELS') or 'unset'}) — this app bundle is "
+            "incomplete. Reinstall OpenNolan, or rebuild it with `node scripts/vendor-wheels.mjs`."
+        )
     if uv:
-        _run([uv, "pip", "install", "--python", str(target_python), "--only-binary=:all:", *args], progress)
+        local = ["--offline", "--no-cache", "--find-links", str(wheels)] if wheels else []
+        _run([uv, "pip", "install", "--python", str(target_python), "--only-binary=:all:", *local, *args], progress)
     else:
-        _run([str(target_python), "-m", "pip", "install", "--only-binary=:all:", *args], progress)
+        # No bundled/PATH uv (dev, or a broken bundle). pip's spelling of the same three flags — a
+        # missing wheel must fail here, never silently fall through to the network.
+        local = ["--no-index", "--no-cache-dir", "--find-links", str(wheels)] if wheels else []
+        _run([str(target_python), "-m", "pip", "install", "--only-binary=:all:", *local, *args], progress)
 
 
 # ── core provisioning ──────────────────────────────────────────────────────────
+
 
 def provision_core(progress: Optional[ProgressCb] = None, step: Optional[StepCb] = None) -> None:
     """Build the managed venv and install core deps + ffmpeg. Atomic + idempotent."""
@@ -383,18 +465,26 @@ def provision_core(progress: Optional[ProgressCb] = None, step: Optional[StepCb]
         progress(f"Setting up OpenNolan runtime in {rt} …")
 
     # 1) fresh venv in a temp location (so a crash never leaves a half-venv at the real path).
-    #    `--seed` installs pip/setuptools into the venv — `uv venv` OMITS pip by default, which left
-    #    the runtime with no `python -m pip` for lazy capability-pack installs that shell out to pip.
+    #    The venv needs pip: `uv venv` OMITS it, and lazy capability-pack installs shell out to
+    #    `python -m pip`. We used to ask uv for it with `--seed`, but that RESOLVES PIP FROM PYPI —
+    #    proven by the versions: --seed installs pip 26.2.1 while the bundled interpreter already
+    #    carries ensurepip/_bundled/pip-25.0.1-py3-none-any.whl. That was a network round-trip on
+    #    the critical path of first launch, and it is the exact call that died for a beta tester.
+    #    `ensurepip` just unzips the wheel that ships inside the interpreter — fully offline.
     _step(step, 0, 3, "Creating Python environment…")
     shutil.rmtree(building, ignore_errors=True)
     uv = _uv()
-    if uv:
-        _run([uv, "venv", "--seed", "--python", base_python(), str(building)], progress)
-    else:
-        _run([base_python(), "-m", "venv", str(building)], progress)
     building_python = building / "bin" / "python"
+    if uv:
+        _run([uv, "venv", "--python", base_python(), str(building)], progress)
+        _run([str(building_python), "-m", "ensurepip"], progress)
+    else:
+        _run([base_python(), "-m", "venv", str(building)], progress)  # stdlib venv seeds pip itself
 
-    # 2) install the core requirement files (wheels only)
+    # 2) install the core requirement files — offline from the wheels vendored inside the app (see
+    #    _pip_install + scripts/vendor-wheels.mjs). Only the PACKAGED app carries them, so that is the
+    #    condition; a dev checkout asks for the online install EXPLICITLY rather than getting it as a
+    #    silent fallback. Packaged with no wheels dir now raises instead of reaching pypi.org.
     req_args: list[str] = []
     for req in CORE_REQUIREMENTS:
         rp = app_paths.code_root() / req
@@ -403,7 +493,7 @@ def provision_core(progress: Optional[ProgressCb] = None, step: Optional[StepCb]
     if not req_args:
         raise RuntimeError("no core requirement files found under code_root()")
     _step(step, 3, 55, "Installing Python packages…")
-    _pip_install(building_python, req_args, progress)
+    _pip_install(building_python, req_args, progress, offline=app_paths.is_packaged())
 
     # 3) verify the backend's hard deps actually import before we trust this venv
     _step(step, 55, 58, "Verifying installation…")
@@ -474,9 +564,11 @@ def provision_pack(name: str, progress: Optional[ProgressCb] = None) -> None:
 # against the versioned url you intend to ship, then paste the hashes here (and pin the url).
 FFMPEG_URLS = {
     "ffmpeg": os.environ.get(
-        "OPENNOLAN_FFMPEG_URL", "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffmpeg.zip"),
+        "OPENNOLAN_FFMPEG_URL", "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffmpeg.zip"
+    ),
     "ffprobe": os.environ.get(
-        "OPENNOLAN_FFPROBE_URL", "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffprobe.zip"),
+        "OPENNOLAN_FFPROBE_URL", "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffprobe.zip"
+    ),
 }
 # sha256 of the EXTRACTED binary (not the zip). Empty string = unpinned (dev only, warns). Fill before release.
 FFMPEG_SHA256 = {
@@ -487,6 +579,7 @@ FFMPEG_SHA256 = {
 
 def _sha256_file(path: Path) -> str:
     import hashlib
+
     h = hashlib.sha256()
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
@@ -494,8 +587,9 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def provision_ffmpeg(progress: Optional[ProgressCb] = None, step: Optional[StepCb] = None,
-                     span: tuple[float, float] = (0.0, 100.0)) -> None:
+def provision_ffmpeg(
+    progress: Optional[ProgressCb] = None, step: Optional[StepCb] = None, span: tuple[float, float] = (0.0, 100.0)
+) -> None:
     """Ensure ffmpeg + ffprobe are available. Dev: a PATH ffmpeg is used as-is. Packaged clean Mac:
     download a static arm64 build into runtime/bin, then dequarantine + ad-hoc sign so a notarized,
     hardened app can spawn it. main.js prepends runtime/bin to the child PATH so shutil.which finds it.
@@ -521,10 +615,17 @@ def provision_ffmpeg(progress: Optional[ProgressCb] = None, step: Optional[StepC
     for i, (name, url) in enumerate(names):
         f0, f1 = s0 + i * per, s0 + (i + 1) * per
         dest = bd / name
-        if dest.exists():
-            _step(step, f1, f1, f"{name} already present.")
-            continue
         expected = (FFMPEG_SHA256.get(name) or "").strip().lower()
+        if dest.exists():
+            # A pin has to apply RETROACTIVELY. This check used to run BEFORE the sha was read, so a
+            # binary downloaded during the unpinned era (or a truncated/corrupt write) stayed trusted
+            # forever and no later pin could ever reach it. Unpinned: keep today's behaviour.
+            if not expected or _sha256_file(dest).lower() == expected:
+                _step(step, f1, f1, f"{name} already present.")
+                continue
+            if progress:
+                progress(f"[warn] existing {name} fails the sha256 pin — re-downloading.")
+            dest.unlink(missing_ok=True)
         attempts = 2 if expected else 1  # a pin lets us retry a corrupt/partial download once
         for attempt in range(1, attempts + 1):
             if progress:
@@ -533,8 +634,7 @@ def provision_ffmpeg(progress: Optional[ProgressCb] = None, step: Optional[StepC
             # Real byte progress, throttled to ~0.5% increments so we don't flood the NDJSON pipe.
             last_emit = [f0]
 
-            def on_bytes(read: int, total: Optional[int],
-                         _f0=f0, _f1=f1, _name=name, _last=last_emit) -> None:
+            def on_bytes(read: int, total: Optional[int], _f0=f0, _f1=f1, _name=name, _last=last_emit) -> None:
                 if not step or not total:
                     return
                 pct = _f0 + (read / total) * (_f1 - _f0)
@@ -556,7 +656,8 @@ def provision_ffmpeg(progress: Optional[ProgressCb] = None, step: Optional[StepC
             dest.unlink(missing_ok=True)  # never trust a mismatched binary
             if attempt == attempts:
                 raise RuntimeError(
-                    f"{name} sha256 mismatch: expected {expected[:12]}…, got {actual[:12]}… (pin/url out of sync?)")
+                    f"{name} sha256 mismatch: expected {expected[:12]}…, got {actual[:12]}… (pin/url out of sync?)"
+                )
             if progress:
                 progress(f"[warn] {name} sha mismatch — re-downloading")
         dest.chmod(0o755)
@@ -593,19 +694,28 @@ def print_ffmpeg_shas(progress: Optional[ProgressCb] = None) -> dict:
 
 # ── composition provisioning (OPN-3) ────────────────────────────────────────────
 
+
 def _npm_ci(project: Path, progress: Optional[ProgressCb]) -> None:
     """Deterministic install of a project's committed lockfile into <project>/node_modules. Wheels-equivalent:
     npm ci fails (rather than mutating the lockfile) if package.json and the lock disagree."""
     npm = npm_bin()
     if not npm:
         raise RuntimeError(f"npm not found (bundled Node missing?) — need Node >= {NODE_FLOOR_MAJOR}")
-    _run([npm, "ci", "--no-audit", "--no-fund", "--prefix", str(project)], progress,
-         env={"npm_config_update_notifier": "false", "CI": "1"})
+    _run(
+        [npm, "ci", "--no-audit", "--no-fund", "--prefix", str(project)],
+        progress,
+        env={"npm_config_update_notifier": "false", "CI": "1"},
+    )
 
 
-def _install_engine(name: str, src: Path, progress: Optional[ProgressCb],
-                    step: Optional[StepCb] = None, span: tuple[float, float] = (0.0, 100.0),
-                    label: Optional[str] = None) -> Path:
+def _install_engine(
+    name: str,
+    src: Path,
+    progress: Optional[ProgressCb],
+    step: Optional[StepCb] = None,
+    span: tuple[float, float] = (0.0, 100.0),
+    label: Optional[str] = None,
+) -> Path:
     """Copy a READ-ONLY engine source out of the bundle into the WRITABLE runtime, then npm ci. Atomic:
     build in <name>.building and os.replace() into place, so a crash never leaves a half-install."""
     s0, s1 = span
@@ -687,31 +797,44 @@ def provision_composition(progress: Optional[ProgressCb] = None, step: Optional[
         progress("Video engines ready.")
 
 
-def _download_binary(url: str, dest: Path,
-                     on_bytes: Optional[Callable[[int, Optional[int]], None]] = None) -> None:
+def _download_binary(url: str, dest: Path, on_bytes: Optional[Callable[[int, Optional[int]], None]] = None) -> None:
     """Download url to dest. Handles a .zip (extract the single binary) or a raw binary.
     `on_bytes(read, total_or_None)` fires per chunk so callers can surface real download progress."""
     tmp = dest.with_suffix(".download")
-    with urllib.request.urlopen(url) as resp, open(tmp, "wb") as out:  # noqa: S310 (pinned/config'd URL)
-        total: Optional[int] = None
-        try:
-            cl = resp.headers.get("Content-Length")
-            total = int(cl) if cl else None
-        except (TypeError, ValueError):
-            total = None
-        read = 0
-        while True:
-            chunk = resp.read(1 << 20)
-            if not chunk:
-                break
-            out.write(chunk)
-            read += len(chunk)
-            if on_bytes:
-                on_bytes(read, total)
+    try:
+        with (
+            urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as resp,  # noqa: S310 (config'd URL)
+            open(tmp, "wb") as out,
+        ):
+            total: Optional[int] = None
+            try:
+                cl = resp.headers.get("Content-Length")
+                total = int(cl) if cl else None
+            except (TypeError, ValueError):
+                total = None
+            read = 0
+            deadline = time.monotonic() + _DOWNLOAD_DEADLINE
+            while True:
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                out.write(chunk)
+                read += len(chunk)
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"exceeded the {_DOWNLOAD_DEADLINE}s total download budget")
+                if on_bytes:
+                    on_bytes(read, total)
+    except (TimeoutError, urllib.error.URLError) as exc:
+        # A connect-phase timeout arrives WRAPPED in URLError; a read-phase one is raised bare. Either
+        # way a raw "timed out" in the failure dialog names neither the file nor the host, which is the
+        # same illegible dead end as the bare "command failed (2)" _run() exists to prevent.
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"downloading {dest.name} from {url} failed: {getattr(exc, 'reason', exc)}") from exc
     # zip? extract the member matching the target name; else it's the raw binary. Extraction goes
     # through a temp file + os.replace so a kill mid-extract (setup-window cancel) can never leave
     # a truncated binary at dest — dest.exists() is trusted as "complete" on the next run.
     import zipfile
+
     if zipfile.is_zipfile(tmp):
         extracted = dest.with_suffix(".extract")
         with zipfile.ZipFile(tmp) as zf:
