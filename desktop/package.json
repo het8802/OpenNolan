@@ -1,6 +1,6 @@
 {
   "name": "opennolan-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "OpenNolan desktop app (Electron shell over the local Mission Control backend).",
   "author": "OpenNolan",
@@ -10,7 +10,7 @@
     "start": "electron .",
     "dev": "ELECTRON_DEV=1 electron .",
     "test:smoke": "playwright test",
-    "fetch-runtime": "node ../scripts/fetch-python.mjs && node ../scripts/fetch-uv.mjs && node ../scripts/fetch-node.mjs",
+    "fetch-runtime": "node ../scripts/fetch-python.mjs && node ../scripts/fetch-uv.mjs && node ../scripts/fetch-node.mjs && node ../scripts/vendor-wheels.mjs",
     "dist": "npm run fetch-runtime && npm --prefix ../web run build && electron-builder --mac --arm64 --config.mac.notarize=true",
     "dist:dir": "npm run fetch-runtime && npm --prefix ../web run build && electron-builder --mac --arm64 --dir"
   },
@@ -66,6 +66,7 @@
           "!fetch-python.mjs",
           "!fetch-uv.mjs",
           "!fetch-node.mjs",
+          "!vendor-wheels.mjs",
           "!generate_educational_sfx.py"
         ]
       },
@@ -146,6 +147,10 @@
       {
         "from": "resources/node",
         "to": "node"
+      },
+      {
+        "from": "resources/wheels",
+        "to": "wheels"
       }
     ],
     "mac": {
@@ -159,11 +164,11 @@
           ]
         }
       ],
+      "minimumSystemVersion": "12.0",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
-      "_notarize_comment": "Default OFF so no local build ever uploads to Apple; `npm run dist` re-enables it with --config.mac.notarize=true. Must stay a real JSON boolean: app-builder-lib gates on `notarizeOptions === false` (MacTargetHelper.js:258), and a CLI-passed string \"false\" is truthy and would NOT skip.",
       "notarize": false,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "OpenNolan records audio for your videos.",

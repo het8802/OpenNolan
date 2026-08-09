@@ -29,4 +29,5 @@ echo
 env HOME="$FAKE_HOME" \
     OPENNOLAN_HOME="$VERIFY_HOME" \
     OPENNOLAN_CODE_ROOT="$REPO" \
+    OPENNOLAN_PACKAGED=1 \
     "$PY" "$REPO/scripts/verify_containment_driver.py"

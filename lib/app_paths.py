@@ -19,6 +19,7 @@ ships in the bundle, OPENNOLAN_CODE_ROOT) before spawning uvicorn.
 
     OPENNOLAN_HOME          -> home() root            (default: repo root)
     OPENNOLAN_CODE_ROOT     -> code_root()            (default: repo root)
+    OPENNOLAN_PACKAGED      -> is_packaged() gate     (default: off; "1" only in the .app)
     OPENNOLAN_PROJECTS_DIR  -> projects_dir()         (default: <home>/projects)
     OPENNOLAN_ENV_FILE      -> env_path()             (default: <home>/.env)
     OPENNOLAN_RUNTIME_DIR   -> runtime_dir()          (default: <home>/runtime)  [venv lives here]
@@ -100,12 +101,20 @@ def cache_dir() -> Path:
 def is_packaged() -> bool:
     """True when running inside the packaged Mac app, False in a dev checkout.
 
-    The Electron shell (desktop/main.js) sets OPENNOLAN_CODE_ROOT before it spawns
-    the backend, and ONLY in a packaged build (app.isPackaged). A dev checkout leaves
-    it unset. This is the single signal used to gate packaged-only behavior:
-    the restricted pipeline/style catalogue and cache routing (route_caches).
+    The signal is OPENNOLAN_PACKAGED, which the Electron shell (desktop/main.js) sets
+    to "1" for BOTH children it spawns — the provisioning script and the backend — and
+    ONLY in a packaged build (app.isPackaged). A dev checkout leaves it unset.
+
+    It has to be its own var. OPENNOLAN_CODE_ROOT reads like the same signal but is
+    set UNCONDITIONALLY for provisioning, dev included, because scripts/provision.py
+    needs code_root() to locate its own requirement files before anything knows how the
+    app was packaged. Treating it as "packaged" made a dev provision demand the app's
+    vendored wheels and fail every dev first-run.
+
+    This is the single signal gating packaged-only behavior: the restricted pipeline/
+    style catalogue, cache routing (route_caches), and the offline core install.
     Read live from the environment (not cached) to match the rest of this module."""
-    return bool(os.environ.get("OPENNOLAN_CODE_ROOT"))
+    return env_flag("OPENNOLAN_PACKAGED") is True
 
 
 def env_flag(name: str) -> bool | None:
