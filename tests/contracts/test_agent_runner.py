@@ -319,6 +319,24 @@ def test_can_use_tool_confirm_approve_and_deny():
 # --- options + auth -------------------------------------------------------
 
 
+def test_cli_error_detail_surfaces_the_cause_not_the_noise():
+    """A dead CLI must say WHY. The SDK's own message ("exit code 1", "check stderr") names
+    nothing, so the CLI's stderr is the only evidence — and around a crash the CLI prints its
+    own minified source, which is what the length filter drops."""
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
+    runner._record_cli_stderr("p", "139 | " + "x" * 5000)  # minified source dump: noise
+    runner._record_cli_stderr("p", "ReferenceError: SharedArrayBuffer is not defined")
+    for _ in range(10):
+        runner._record_cli_stderr("p", "      at <anonymous> (/$bunfs/root/src/entrypoints/cli.js:11:1368)")
+    runner._record_cli_stderr("p", "Bun v1.4.0 (macOS arm64)")
+
+    detail = runner.cli_error_detail("Command failed with exit code 1", "p")
+    assert "SharedArrayBuffer is not defined" in detail  # the cause survives the stack frames
+    assert "x" * 200 not in detail  # the source dump does not
+    # A project whose CLI never complained is left exactly as it was.
+    assert runner.cli_error_detail("boom", "other") == "boom"
+
+
 def test_build_agent_options():
     opts = build_agent_options("/repo", model="claude-sonnet-4-6", max_budget_usd=3.0)
     assert str(opts.cwd) == "/repo"

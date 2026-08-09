@@ -4,5 +4,12 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 python-multipart>=0.0.9   # asset uploads
-claude-agent-sdk>=0.2     # headless agent runner; auth via `claude setup-token`
+# PINNED, and the pin is load-bearing. The wheel BUNDLES the Claude Code CLI binary
+# (claude_agent_sdk/_bundled/claude) and the SDK prefers it over every system install, so a bad
+# bundle = the agent cannot start AT ALL. 0.2.134's bundle (Claude Code 2.1.226) dies on launch with
+# `ReferenceError: SharedArrayBuffer is not defined` (Bun v1.4.0) — every packaged v1.0.0 user got
+# "Command failed with exit code 1" on their first prompt. 0.2.133 (CLI 2.1.225) is the newest
+# release whose bundle was verified to run. Before bumping this: `node scripts/vendor-wheels.mjs`
+# smoke-runs the bundled CLI and fails the build if it crashes — do not bypass it.
+claude-agent-sdk==0.2.133  # headless agent runner; auth via `claude setup-token`
 posthog>=3.0              # product analytics + error tracking (opt-out honored; see server/analytics.py)

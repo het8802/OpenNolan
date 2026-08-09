@@ -34,7 +34,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
-  mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, statSync,
+  chmodSync, mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, statSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -101,6 +101,46 @@ function parsePylock(toml) {
   return packages;
 }
 
+// The claude-agent-sdk wheel BUNDLES the Claude Code CLI binary (claude_agent_sdk/_bundled/claude)
+// and the SDK prefers it over every system install, so that one file decides whether the agent can
+// run at all. 0.2.134's shipped and died on launch with `ReferenceError: SharedArrayBuffer is not
+// defined` — the app reached users with a dead agent. Extract it and run it. `--version` is NOT a
+// test: it answers before the CLI loads its module graph, which is where that crash happens.
+// FAILS THE BUILD, by design: this must never be a first-launch discovery again.
+// FAILS CLOSED on every outcome that is not "the CLI ran": a missing wheel, a missing member, a
+// corrupt archive, no `unzip`, a hang, a crash. There is deliberately no skip path — the packaged
+// app has NO guaranteed system `claude` to fall back to, so a wheel that carries no runnable CLI is
+// just as unshippable as one that carries a broken one.
+export function smokeTestBundledCli(files) {
+  const whl = files.find((f) => /^claude_agent_sdk-.*\.whl$/.test(f));
+  if (!whl) throw new Error('no claude-agent-sdk wheel vendored — the agent cannot run without it');
+  // The vendored wheel is the arm64 build (the only target), so only an arm64 host can execute it.
+  // Refuse rather than skip: a silent skip on an Intel builder is how an unvetted bundle ships.
+  if (process.arch !== 'arm64') {
+    throw new Error(`cannot vet the arm64 CLI in ${whl} on a ${process.arch} host — build on Apple silicon`);
+  }
+  const member = 'claude_agent_sdk/_bundled/claude';
+  const dir = mkdtempSync(join(tmpdir(), 'opennolan-cli-smoke-'));
+  try {
+    // Extract to DISK, not through a Node buffer: the binary is ~280MB, and a maxBuffer overflow
+    // would arrive as a generic error indistinguishable from a real failure.
+    execFileSync('unzip', ['-o', '-q', join(OUT_DIR, whl), member, '-d', dir], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const cli = join(dir, member);
+    chmodSync(cli, 0o755); // the wheel should carry the exec bit; do not depend on it
+    // timeout: a CLI that hangs on startup must fail the build, not stall it forever.
+    execFileSync(cli, ['--help'], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 60_000 });
+    console.log(`[vendor-wheels] bundled CLI in ${whl} runs`);
+  } catch (err) {
+    // Last 20 SHORT lines: a Bun crash prints ~10 stack frames after the message that matters,
+    // and the lines it interleaves are minified source. Length is the noise filter, not truncation.
+    const tail = String(err.stderr || err.message).split('\n').filter((l) => l.length <= 200).slice(-20).join('\n');
+    throw new Error(`the CLI bundled in ${whl} could not be extracted and run — do not ship it. `
+      + `Pin a different claude-agent-sdk in requirements-ui.txt.\n${tail}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // Bounded-concurrency map over a shared iterator (each worker pulls the next item).
 async function pool(items, n, fn) {
   const queue = items[Symbol.iterator]();
@@ -119,7 +159,9 @@ async function main() {
 
   if (existsSync(MANIFEST)) {
     const prev = JSON.parse(readFileSync(MANIFEST, 'utf8'));
-    const intact = prev.stamp === stamp && prev.wheels?.length
+    // `cliVerified` is part of intactness: a dir vendored before the CLI smoke test existed carries
+    // the same stamp, and skipping on it would let an un-vetted bundle ship. Absent = re-vendor.
+    const intact = prev.stamp === stamp && prev.cliVerified && prev.wheels?.length
       && prev.wheels.every((w) => existsSync(join(OUT_DIR, w.filename))
         && statSync(join(OUT_DIR, w.filename)).size === w.size);
     if (intact) {
@@ -169,9 +211,13 @@ async function main() {
     if (done % 20 === 0) console.log(`[vendor-wheels]   ${done}/${wanted.length}`);
   });
 
+  // Before the stamp: a broken bundle must not be recorded as successfully vendored.
+  smokeTestBundledCli(wanted.map((w) => w.filename));
+
   const bytes = wanted.reduce((n, w) => n + w.size, 0);
   writeFileSync(MANIFEST, `${JSON.stringify({
     stamp,
+    cliVerified: true, // smokeTestBundledCli passed for this exact set; see the `intact` check above
     pythonVersion: PY_VERSION,
     requirements: REQUIREMENTS,
     wheels: wanted.map(({ filename, name, version, sha256, size }) => ({ filename, name, version, sha256, size })),
@@ -179,7 +225,10 @@ async function main() {
   console.log(`[vendor-wheels] done (${stamp}): ${wanted.length} wheels, ${(bytes / 1e6).toFixed(1)} MB`);
 }
 
-main().catch((err) => {
-  console.error(`[vendor-wheels] FAILED: ${err.message}`);
-  process.exit(1);
-});
+// Only when RUN as a script, so smokeTestBundledCli can be imported and exercised on its own.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(`[vendor-wheels] FAILED: ${err.message}`);
+    process.exit(1);
+  });
+}
