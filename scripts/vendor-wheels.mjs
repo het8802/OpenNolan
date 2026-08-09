@@ -34,7 +34,8 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
-  chmodSync, mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, statSync,
+  chmodSync, closeSync, mkdirSync, mkdtempSync, openSync, readdirSync, readSync, rmSync,
+  existsSync, readFileSync, writeFileSync, statSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -101,6 +102,97 @@ function parsePylock(toml) {
   return packages;
 }
 
+// Apple's notary service recurses INTO the .whl archives we ship in Resources/wheels and rejects
+// every Mach-O inside them that is not Developer-ID signed ("The binary is not signed with a valid
+// Developer ID certificate" / "does not include a secure timestamp"). A wheel straight from PyPI
+// carries adhoc, linker-signed extensions, so a freshly vendored set fails notarization: 29 wheels,
+// 266 errors, no release. electron-builder cannot help — its signing pass walks the file tree and a
+// .whl is just a zip to it.
+//
+// So we sign them here: extract, sign every Mach-O with the SAME hardened runtime + inherit
+// entitlements electron-builder applies to nested binaries (the JIT/unsigned-memory entitlements the
+// bundled Bun CLI needs to run at all), rezip. This step used to live only in someone's shell
+// history — v1.0.0 shipped signed wheels that no script in this repo produced, which meant the
+// release could not be reproduced and a re-vendor silently destroyed it.
+//
+// RECORD hashes inside each wheel go stale (they describe the unsigned bytes). That is what v1.0.0
+// shipped and installed from, and neither pip nor uv verifies RECORD on install.
+function signingIdentity() {
+  if (process.env.CSC_NAME) return process.env.CSC_NAME;
+  const out = execFileSync('security', ['find-identity', '-v', '-p', 'codesigning'], { encoding: 'utf8' });
+  const line = out.split('\n').find((l) => l.includes('Developer ID Application'));
+  return line ? line.split('"')[1] : null;
+}
+
+// Mach-O magics: 64-bit LE/BE and the fat/universal wrappers. Cheaper and more exact than shelling
+// out to `file` once per member, and there are thousands of members across the wheel set.
+function isMachO(path) {
+  const fd = openSync(path, 'r');
+  try {
+    const b = Buffer.alloc(4);
+    if (readSync(fd, b, 0, 4, 0) < 4) return false;
+    const m = b.readUInt32BE(0);
+    return m === 0xcffaedfe || m === 0xfeedfacf || m === 0xcafebabe || m === 0xbebafeca;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function walk(dir) {
+  const out = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) out.push(...walk(p));
+    else if (e.isFile() && !e.isSymbolicLink()) out.push(p);
+  }
+  return out;
+}
+
+export function signWheelBinaries(files) {
+  const identity = signingIdentity();
+  if (!identity) {
+    // Dev machine with no Developer ID: the build it produces is unsigned anyway, so there is
+    // nothing to notarize and nothing to protect. Loud, because on a RELEASE machine this would
+    // mean shipping wheels Apple will reject.
+    console.log('[vendor-wheels] no Developer ID identity — skipping wheel signing (unsigned build)');
+    return new Map();
+  }
+  const entitlements = join(REPO_ROOT, 'desktop', 'build', 'entitlements.mac.inherit.plist');
+  if (!existsSync(entitlements)) throw new Error(`inherit entitlements not found at ${entitlements}`);
+  console.log(`[vendor-wheels] signing nested binaries as "${identity}"`);
+  const sizes = new Map();
+  let signedWheels = 0;
+  let signedBins = 0;
+  for (const whl of files.filter((f) => f.endsWith('.whl'))) {
+    const src = join(OUT_DIR, whl);
+    const dir = mkdtempSync(join(tmpdir(), 'opennolan-whl-'));
+    try {
+      execFileSync('unzip', ['-qq', '-o', src, '-d', dir], { stdio: ['ignore', 'ignore', 'pipe'] });
+      const bins = walk(dir).filter(isMachO);
+      if (!bins.length) continue; // pure-python wheel: leave the PyPI bytes untouched
+      for (const bin of bins) {
+        execFileSync('codesign', [
+          '--force', '--sign', identity, '--timestamp', '--options', 'runtime',
+          '--entitlements', entitlements, bin,
+        ], { stdio: ['ignore', 'ignore', 'pipe'] });
+      }
+      rmSync(src);
+      // -X drops the extended attributes that would otherwise land in the archive; the wheel's own
+      // layout is preserved because we zip the extraction root as-is.
+      execFileSync('zip', ['-q', '-r', '-X', src, '.'], { cwd: dir, stdio: ['ignore', 'ignore', 'pipe'] });
+      sizes.set(whl, statSync(src).size);
+      signedWheels += 1;
+      signedBins += bins.length;
+    } catch (err) {
+      throw new Error(`could not sign the binaries inside ${whl}: ${String(err.stderr || err.message).slice(0, 400)}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  console.log(`[vendor-wheels] signed ${signedBins} binaries across ${signedWheels} wheels`);
+  return sizes;
+}
+
 // The claude-agent-sdk wheel BUNDLES the Claude Code CLI binary (claude_agent_sdk/_bundled/claude)
 // and the SDK prefers it over every system install, so that one file decides whether the agent can
 // run at all. 0.2.134's shipped and died on launch with `ReferenceError: SharedArrayBuffer is not
@@ -161,7 +253,7 @@ async function main() {
     const prev = JSON.parse(readFileSync(MANIFEST, 'utf8'));
     // `cliVerified` is part of intactness: a dir vendored before the CLI smoke test existed carries
     // the same stamp, and skipping on it would let an un-vetted bundle ship. Absent = re-vendor.
-    const intact = prev.stamp === stamp && prev.cliVerified && prev.wheels?.length
+    const intact = prev.stamp === stamp && prev.cliVerified && prev.wheelsSigned && prev.wheels?.length
       && prev.wheels.every((w) => existsSync(join(OUT_DIR, w.filename))
         && statSync(join(OUT_DIR, w.filename)).size === w.size);
     if (intact) {
@@ -211,16 +303,28 @@ async function main() {
     if (done % 20 === 0) console.log(`[vendor-wheels]   ${done}/${wanted.length}`);
   });
 
-  // Before the stamp: a broken bundle must not be recorded as successfully vendored.
+  // Sign BEFORE the smoke test, so the CLI we vet is the exact artifact we ship — hardened runtime
+  // is itself a way to break a JIT binary, and the test would not see it in the other order.
+  // Before the stamp either way: a broken or unsignable bundle must not be recorded as vendored.
+  const signedSizes = signWheelBinaries(wanted.map((w) => w.filename));
+  for (const w of wanted) {
+    if (signedSizes.has(w.filename)) w.size = signedSizes.get(w.filename);
+  }
   smokeTestBundledCli(wanted.map((w) => w.filename));
 
   const bytes = wanted.reduce((n, w) => n + w.size, 0);
   writeFileSync(MANIFEST, `${JSON.stringify({
     stamp,
-    cliVerified: true, // smokeTestBundledCli passed for this exact set; see the `intact` check above
+    cliVerified: true,  // smokeTestBundledCli passed for this exact set; see the `intact` check above
+    wheelsSigned: true, // nested Mach-O carry a Developer ID signature (signWheelBinaries)
     pythonVersion: PY_VERSION,
     requirements: REQUIREMENTS,
-    wheels: wanted.map(({ filename, name, version, sha256, size }) => ({ filename, name, version, sha256, size })),
+    // `sha256` is the PyPI file's, verified at download. A wheel we signed no longer hashes to it —
+    // `signedInPlace` marks those so the manifest does not claim otherwise.
+    wheels: wanted.map(({ filename, name, version, sha256, size }) => (
+      signedSizes.has(filename)
+        ? { filename, name, version, sha256, size, signedInPlace: true }
+        : { filename, name, version, sha256, size })),
   }, null, 2)}\n`);
   console.log(`[vendor-wheels] done (${stamp}): ${wanted.length} wheels, ${(bytes / 1e6).toFixed(1)} MB`);
 }
