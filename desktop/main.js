@@ -24,6 +24,28 @@ const worktreeConfig = require('./worktree-config');
 const REPO_ROOT = path.resolve(__dirname, '..');
 const DEV = process.env.ELECTRON_DEV === '1';
 
+// The SAME root lib/app_paths.home() resolves to, in BOTH modes. Getting this wrong is not
+// cosmetic: dev Python writes settings.json (and the analytics opt-out) to the REPO ROOT, so
+// reading Electron's userData in dev makes the shell ignore an opt-out the user actually set.
+// app.getPath('userData') is available before `ready` and is stable.
+function appHome() {
+  return process.env.OPENNOLAN_HOME || (app.isPackaged ? app.getPath('userData') : REPO_ROOT);
+}
+
+// Load the SAME .env the Python side reads (lib/env_loader.py -> app_paths.env_path()).
+// Environment flows parent -> child ONLY: main.js SPAWNS the backend, so the backend loading
+// .env into its own os.environ can never propagate back up here. Without this, POSTHOG_KEY in
+// .env pointed only the backend at the dev project while every desktop_error kept going to
+// production — and a Finder-launched packaged app inherits no shell env at all, so the
+// hardcoded fallback always won there. Does NOT override an already-set var, matching
+// python-dotenv, so an explicitly exported key still wins in both processes.
+function loadDotenv() {
+  try {
+    require('dotenv').config({ path: process.env.OPENNOLAN_ENV_FILE || path.join(appHome(), '.env') });
+  } catch (_) { /* no .env, or dotenv absent — fall through to process.env + defaults */ }
+}
+loadDotenv();
+
 // Read-only backend/code tree. Dev: the git checkout (repo root). Packaged: the extraResources
 // 'backend' dir the electron-builder config emits (Contents/Resources/backend). Branch on
 // app.isPackaged — NOT DEV — because process.resourcesPath is only meaningful in a packaged app.
@@ -50,9 +72,121 @@ const stderrTail = [];     // ring buffer of recent backend stderr lines (for di
 // docs/plans/publish-mac-app.md). Those must report even though /api is unreachable, so we POST
 // straight to PostHog. Public write-only key (same as server/analytics.py); opt-out is honored by
 // reading the SAME settings.json the Python side writes; the home dir is scrubbed from message+stack.
-const POSTHOG_KEY = process.env.POSTHOG_KEY || 'phc_s9P9JiTbBgmzqYGwug8ciiLnWsCSJF62Vz5UGRJsPGBE';
+const DEFAULT_POSTHOG_KEY = 'phc_s9P9JiTbBgmzqYGwug8ciiLnWsCSJF62Vz5UGRJsPGBE';
+const POSTHOG_KEY = process.env.POSTHOG_KEY || DEFAULT_POSTHOG_KEY;
 const POSTHOG_HOST = process.env.POSTHOG_HOST || 'https://us.i.posthog.com';
+// Mirrors server/analytics.py. A harness that must never reach production sets this; with it
+// on, a missing POSTHOG_KEY DISABLES reporting instead of falling back to the hardcoded
+// production token. It has to cover THIS reporter too, and arguably more than the Python one:
+// main.js is what writes when the backend never starts, which is the whole reason it exists.
+const NO_DEFAULT_KEY = !(process.env.POSTHOG_KEY || '').trim()
+  && !['', '0', 'false'].includes((process.env.OPENNOLAN_ANALYTICS_NO_DEFAULT_KEY || '').trim());
 let errorsSent = 0;
+
+// The session id. Minted HERE, in main, not in the renderer: a ⌘R reload rebuilds the whole
+// renderer and would split one session in two, and a launch that fails before the UI exists
+// would have no id at all. The renderer receives it through preload and puts it on the
+// X-ON-Session header, which is how a backend render job ends up joinable to this session.
+const SESSION_ID = require('node:crypto').randomUUID();
+let sessionStart = Date.now();
+
+// Read from the ONE taxonomy the backend validates against, never a second copy of the enums.
+//
+// ALL-OR-NOTHING, mirroring server/analytics._merge_taxonomy: a partial merge would silently
+// turn valid events into undeclared ones, one family file at a time, with nothing to notice.
+// Any defect yields {} — and {} FAILS CLOSED below, exactly as it does in Python.
+function loadTaxonomy() {
+  const dir = path.join(codeRoot(), 'schemas', 'analytics');
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
+  if (!files.includes('_envelope.json')) throw new Error('missing _envelope.json');
+  const merged = JSON.parse(fs.readFileSync(path.join(dir, '_envelope.json'), 'utf8'));
+  merged.events = merged.events || {};
+  for (const key of ['schema_version', 'property_types', 'envelope', 'reporter_envelope', 'reserved_substrings']) {
+    if (!(key in merged)) throw new Error(`_envelope.json is missing ${key}`);
+  }
+  for (const f of files) {
+    if (f === '_envelope.json') continue;
+    const fam = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+    for (const [name, entry] of Object.entries(fam.events || {})) {
+      if (name in merged.events) throw new Error(`event ${name} declared twice (${f})`);
+      merged.events[name] = entry;
+    }
+    for (const section of ['enums', 'open_vocabularies']) {
+      for (const [k, v] of Object.entries(fam[section] || {})) {
+        if (k.startsWith('$')) continue;
+        merged[section] = merged[section] || {};
+        merged[section][k] = v;
+      }
+    }
+  }
+  if (!Object.keys(merged.events).length) throw new Error('merged taxonomy declares no events');
+  return merged;
+}
+
+const TAXONOMY = (() => {
+  try {
+    return loadTaxonomy();
+  } catch (err) {
+    // The only signal there is: fail-closed means no event can carry a counter out.
+    console.error(`[analytics/main] TAXONOMY FAILED TO LOAD — ALL events dropped (fail-closed): ${err && err.message}`);
+    return {};
+  }
+})();
+const SCHEMA_VERSION = TAXONOMY.schema_version != null ? TAXONOMY.schema_version : null;
+
+// Main's direct events bypassed the backend's gate entirely until now — which put the hole
+// exactly where the free-text risk is highest, since `desktop_error` is the one event carrying
+// a classified crash and `launch_failure` classifies a local stderr tail. Same rules as
+// server/analytics.validate_event: unknown event drops the event, unknown property drops the
+// property, and a type-E value outside its declared vocabulary is DENIED BY DEFAULT.
+const BOUNDED_TOKEN = /^[A-Za-z0-9_.:/+-]{1,64}$/;
+const BUCKET_LABEL = /^(?:0|\d+(?:\.\d+)?)(?:-\d+(?:\.\d+)?|\+)?$/;
+
+function enumOk(event, prop, kind, value) {
+  if ((kind !== 'E' && kind !== 'B') || typeof value !== 'string') return true;
+  const enums = TAXONOMY.enums || {};
+  const allowed = enums[`${event}.${prop}`] || enums[prop];
+  if (Array.isArray(allowed)) return allowed.includes(value);
+  if (kind === 'B') return BUCKET_LABEL.test(value);
+  if (!(prop in (TAXONOMY.open_vocabularies || {}))) return false;
+  return BOUNDED_TOKEN.test(value);
+}
+
+/** Returns the surviving properties, or null to drop the whole event. */
+function validateEvent(event, props) {
+  const events = TAXONOMY.events || {};
+  if (!Object.keys(events).length) return null;      // FAIL CLOSED
+  const entry = events[event];
+  if (!entry) return null;
+  const declared = entry.properties || {};
+  const allowed = new Set([...Object.keys(declared), ...Object.keys(TAXONOMY.envelope || {})]);
+  const clean = {};
+  for (const [k, v] of Object.entries(props || {})) {
+    if (!allowed.has(k)) continue;
+    if (!enumOk(event, k, declared[k], v)) continue;
+    if (v !== null && typeof v === 'object') continue;  // main sends no nested values
+    clean[k] = v;
+  }
+  return clean;
+}
+
+// One line answering "which PostHog project am I writing to". Mirrors server/analytics.py:
+// the fallback to the hardcoded production key is SILENT, so a typo'd var name (or a .env
+// this process never loaded) writes to production with no error whatsoever.
+// A prefix is only safe to print on a well-formed key; slicing a short/malformed value prints
+// the whole thing. Mirrors server/analytics.py _key_hint.
+function keyHint(key) {
+  return key.length >= 24 ? key.slice(0, 12) + '…' : `<malformed key, ${key.length} chars>`;
+}
+
+function logAnalyticsDestination() {
+  console.log(
+    `[analytics/main] ${NO_DEFAULT_KEY ? 'DISABLED (no explicit key; production fallback refused) ' : ''}`
+    + `key=${keyHint(POSTHOG_KEY)} host=${POSTHOG_HOST} `
+    + `default_key=${POSTHOG_KEY === DEFAULT_POSTHOG_KEY} env=${app.isPackaged ? 'packaged' : 'dev'} `
+    + `internal=${isInternal()} session=${SESSION_ID.slice(0, 8)}`,
+  );
+}
 
 function scrubText(s) {
   let t = String(s == null ? '' : s);
@@ -62,68 +196,284 @@ function scrubText(s) {
   return t.replace(/(\/Users\/|\/home\/|\/var\/|\/private\/|\/tmp\/)[^\s]*/g, '[path]');
 }
 
+// Same internal-machine marker as server/analytics.py so the developer's own use filters out.
+function isInternal() {
+  try {
+    const flag = (process.env.OPENNOLAN_INTERNAL || '').trim().toLowerCase();
+    return (!!flag && !['0', 'false', 'no'].includes(flag))
+      || fs.existsSync(path.join(os.homedir(), '.opennolan-internal'));
+  } catch (_) { return false; }
+}
+
+// The SAME id server/settings.py device_id() uses: ~/.opennolan/install_id, deliberately
+// outside every worktree. If the two reporters disagree here, one Mac reads as two installs
+// and every per-install rate is wrong.
+//
+// It MINTS the id when the file is absent, and that is the point: on a genuine first launch
+// the shell emits app_launch_started BEFORE the backend has ever run, so a read-only reporter
+// would send 'desktop-unknown' and Python would mint a different id moments later — one
+// launch, two installs, exactly at the moment activation is measured. Same `dev-<32 hex>`
+// shape and same exclusive-create race handling as settings.device_id().
+// WRITE-THEN-PUBLISH, mirroring server/settings._publish_install_id exactly. `flag:'wx'`
+// creates the inode BEFORE the bytes land, so the loser of that window used to read an empty
+// file and fall back to `|| minted` — its OWN id. Electron spawns the backend, so both booting
+// together is the normal case. link() and NOT rename(): rename REPLACES, so two complete temps
+// would both "win" and the later write would silently overwrite the id.
+//
+// Returns null when no id can be established. Null DISABLES reporting; it never invents one,
+// because a second id for one launch breaks every readback join.
+function installId() {
+  if ((process.env.OPENNOLAN_INSTALL_ID || '').trim()) return process.env.OPENNOLAN_INSTALL_ID.trim();
+  const file = path.join(os.homedir(), '.opennolan', 'install_id');
+  try {
+    const existing = fs.readFileSync(file, 'utf8').trim();
+    if (existing) return existing;
+  } catch (_) { /* not minted yet — fall through and publish */ }
+  const minted = 'dev-' + require('node:crypto').randomBytes(16).toString('hex');
+  // Same directory: link() cannot cross filesystems.
+  const tmp = file + '.' + process.pid + '.tmp';
+  let fd = null;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fd = fs.openSync(tmp, 'wx');
+    fs.writeSync(fd, minted + '\n');
+    fs.fsyncSync(fd);
+    fs.closeSync(fd); fd = null;
+    try {
+      fs.linkSync(tmp, file);
+    } catch (err) {
+      if (err && err.code === 'EEXIST') {
+        // Their file is whole — unless a PREVIOUS buggy build left a zero-byte one, which is
+        // why empty is a disabled state and never an id.
+        return fs.readFileSync(file, 'utf8').trim() || null;
+      }
+      throw err;
+    }
+    return minted;
+  } catch (_) {
+    return null;
+  } finally {
+    // An fsync or link that throws must still clean up, or every boot leaks one private temp.
+    try { if (fd !== null) fs.closeSync(fd); } catch (_) { /* already gone */ }
+    try { fs.unlinkSync(tmp); } catch (_) { /* never created, or already unlinked */ }
+  }
+}
+
+// Opt-out is honored by reading the SAME settings.json the Python side writes.
+function analyticsOptedOut() {
+  try {
+    return !!(JSON.parse(fs.readFileSync(path.join(appHome(), 'settings.json'), 'utf8')) || {}).analytics_disabled;
+  } catch (_) { return false; }  // no/corrupt settings → opted in (the default)
+}
+
+// POST one event straight to PostHog. Main must own this transport rather than routing through
+// /api/telemetry/events, because the events that matter most here happen when the backend is
+// not there: before it starts, when it never becomes healthy, and after it has been stopped.
+// Resolves when the request settles so `before-quit` can AWAIT the final flush.
+function postToPostHog(event, properties) {
+  return new Promise((resolve) => {
+    try {
+      if (NO_DEFAULT_KEY) return resolve(false);
+      if (analyticsOptedOut()) return resolve(false);
+      const distinctId = installId();
+      if (!distinctId) return resolve(false);  // no id => no report. Never invent one.
+      // The gate runs on the CALLER's properties only. The envelope below is our own values —
+      // process.platform, app.getVersion(), a uuid — with no user-input path, so it is attached
+      // after validation exactly as server/analytics.capture() attaches _env_props().
+      const checked = validateEvent(event, properties);
+      if (checked === null) return resolve(false);
+      if (!budgetOk(event)) return resolve(false);
+      const body = JSON.stringify({
+        api_key: POSTHOG_KEY,
+        event,
+        distinct_id: distinctId,
+        properties: {
+          ...checked,
+          // The same envelope server/analytics.py attaches. Without it these events cannot be
+          // deduplicated or version-gated alongside the ones the backend sends.
+          schema_version: SCHEMA_VERSION,
+          event_id: require('node:crypto').randomUUID().replace(/-/g, ''),
+          install_id: distinctId,
+          session_id: SESSION_ID,
+          app_version: app.getVersion(),
+          os: process.platform,
+          arch: process.arch,
+          packaged: app.isPackaged,
+          env: app.isPackaged ? 'packaged' : 'dev',
+          internal: isInternal(),
+        },
+      });
+      const u = new URL('/capture/', POSTHOG_HOST);
+      const req = https.request(
+        { method: 'POST', hostname: u.hostname, path: u.pathname,
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+          timeout: 4000 },
+        // Only a 2xx is delivered. Resolving true on any status made a rejected capture
+        // indistinguishable from an accepted one — including in the awaited quit flush.
+        (res) => {
+          res.on('data', () => {});
+          res.on('end', () => resolve(res.statusCode >= 200 && res.statusCode < 300));
+        },
+      );
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { try { req.destroy(); } catch (_) { /* gone */ } resolve(false); });
+      req.write(body);
+      req.end();
+    } catch (_) { resolve(false); }  // reporting must NEVER throw into a crash path
+  });
+}
+
+// ── S7: Electron's half of the per-session upload budget ─────────────────────
+// A backend counter cannot observe this reporter AT ALL — main POSTs raw JSON straight to
+// PostHog, which is the whole reason this transport exists (it must work when the backend
+// never starts). So the shell enforces its own share of the same equation:
+//
+//     backend_noncritical(55) + electron_noncritical(8) + reserves(25 + 12) = 100
+//
+// One process = one session, so these are plain counters rather than a map.
+const BUDGET_NONCRITICAL = 8;
+const BUDGET_CRITICAL = 12;
+const spent = { noncritical: 0, critical: 0 };
+
+function budgetOk(event) {
+  const bucket = (TAXONOMY.events || {})[event] && TAXONOMY.events[event].critical ? 'critical' : 'noncritical';
+  const limit = bucket === 'critical' ? BUDGET_CRITICAL : BUDGET_NONCRITICAL;
+  if (spent[bucket] >= limit) return false;
+  spent[bucket] += 1;
+  return true;
+}
+
+// Product events from the shell. NOT gated on app.isPackaged (unlike reportDesktopError): they
+// carry env + internal, which is what the dashboards filter on, and gating them would leave
+// this direct-to-PostHog transport as unexercised as 12F found it.
+function track(event, properties) { return postToPostHog(event, properties || {}); }
+
+// Which shell sources END a session. wall #5 counts distinct sessions with a FATAL signal, so
+// this is not a severity label — it is the numerator's membership test.
+const FATAL_SOURCES = new Set(['fatal', 'main-uncaught', 'renderer-gone']);
+
+// A crash inbox needs GROUPING and a place to look, not prose. `message` (500 chars) and
+// `stack` (8000 chars) were undeclared and unvalidated — a live free-text path to PostHog,
+// because main posts direct. This is the pattern `launch_failure` already ships (main.js
+// classifies a local stderr tail into `failure_class` and sends only that): a classified
+// class, one path-scrubbed frame, and a hash to group on. The raw text stays in the local log
+// and the dialog, where the user can still read it.
+function classifyException(err) {
+  const name = (err && err.name) || '';
+  if (BOUNDED_TOKEN.test(name)) return name;
+  const m = /^([A-Za-z][A-Za-z0-9_]{0,63}Error)\b/.exec(String((err && err.message) || ''));
+  return m ? m[1] : 'Error';
+}
+
+// basename:line only. A full frame is `/Users/<name>/…/main.js:842:11`, i.e. the OS username.
+function topFrame(err) {
+  const line = String((err && err.stack) || '').split('\n').find((l) => /:\d+:\d+\)?\s*$/.test(l));
+  if (!line) return null;
+  const m = /([^/\\\s()]+):(\d+):\d+\)?\s*$/.exec(line);
+  return m ? `${m[1]}:${m[2]}` : null;
+}
+
+// Group on the SHAPE, not the text: message bodies embed ids and paths, so hashing them would
+// give every occurrence its own group — the opposite of what an inbox is for.
+function stackHash(err) {
+  const shape = String((err && err.stack) || (err && err.message) || '')
+    .split('\n').slice(0, 8)
+    .map((l) => l.replace(/(\/Users\/|\/home\/|\/var\/|\/private\/|\/tmp\/)[^\s)]*/g, '[path]').replace(/:\d+:\d+/g, ''))
+    .join('|');
+  return require('node:crypto').createHash('sha256').update(shape).digest('hex').slice(0, 16);
+}
+
 function reportDesktopError(source, err) {
   try {
-    if (!app.isPackaged) return;   // dev crashes surface in the terminal — keep the inbox = real users
-    if (errorsSent >= 20) return;  // never let a crash loop flood ingestion
-    // Same settings.json app_paths.home() reads (packaged: OPENNOLAN_HOME === userData). Missing file
-    // => opted in (the default). ponytail: in dev these paths can differ, but dev is gated out above.
-    let settings = {};
-    try {
-      const home = process.env.OPENNOLAN_HOME || app.getPath('userData');
-      settings = JSON.parse(fs.readFileSync(path.join(home, 'settings.json'), 'utf8')) || {};
-    } catch (_) { /* no/corrupt settings → default opted-in */ }
-    if (settings.analytics_disabled) return;
+    if (!app.isPackaged) return Promise.resolve(false);  // dev crashes surface in the terminal — keep the inbox = real users
+    if (errorsSent >= 20) return Promise.resolve(false);  // never let a crash loop flood ingestion
     errorsSent++;
-    // slice(-500), not slice(0, 500): a provisioning failure now carries the failing command FIRST
-    // and the reason LAST (lib/provision.py _run), so a leading slice throws away the whole cause.
-    const message = scrubText((err && err.message) || err).slice(-500);
-    const stack = scrubText((err && err.stack) || '').slice(0, 8000);
-    // Same internal-machine marker as server/analytics.py so the developer's own crashes filter out.
-    let internal = false;
-    try {
-      const flag = (process.env.OPENNOLAN_INTERNAL || '').trim().toLowerCase();
-      internal = (!!flag && !['0', 'false', 'no'].includes(flag))
-        || fs.existsSync(path.join(os.homedir(), '.opennolan-internal'));
-    } catch (_) { /* default: not internal */ }
-    const body = JSON.stringify({
-      api_key: POSTHOG_KEY,
-      event: 'desktop_error',
-      distinct_id: settings.device_id || 'desktop-unknown',
-      properties: {
-        source, message, stack, app_version: app.getVersion(),
-        os: process.platform, arch: process.arch, packaged: true,
-        env: 'packaged', internal,
-      },
+    // Local only — this is where the detail lives now, and it is what the fatal dialog shows.
+    console.error(`[desktop_error/${source}] ${scrubText((err && err.message) || err)}\n${scrubText((err && err.stack) || '')}`);
+    // RETURNED, not fired and forgotten: fatal() races this against a 1500ms cap before the
+    // blocking error dialog, and a promise it cannot see is a report it cannot wait for.
+    return postToPostHog('desktop_error', {
+      source,
+      fatal: FATAL_SOURCES.has(source),
+      exception_class: classifyException(err),
+      top_frame: topFrame(err),
+      stack_hash: stackHash(err),
     });
-    const u = new URL('/capture/', POSTHOG_HOST);
-    const req = https.request(
-      { method: 'POST', hostname: u.hostname, path: u.pathname,
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-        timeout: 4000 },
-      (res) => { res.on('data', () => {}); res.on('end', () => {}); },
-    );
-    req.on('error', () => {});
-    req.on('timeout', () => { try { req.destroy(); } catch (_) { /* gone */ } });
-    req.write(body);
-    req.end();
   } catch (_) { /* reporting must NEVER throw into a crash path */ }
+  return Promise.resolve(false);
+}
+
+// ── previous_exit: the only way to see a crash that killed main outright ──────
+// before-quit cannot run after the process dies, so "did the last session end cleanly" has to
+// be answered by what the LAST session left on disk. A marker written at boot and cleared at
+// quit turns an absent-clean-exit into an observable `crash` on the next launch.
+function launchMarkerPath() { return path.join(appHome(), '.last-exit.json'); }
+function readLaunchMarker() {
+  try { return JSON.parse(fs.readFileSync(launchMarkerPath(), 'utf8')) || {}; } catch (_) { return {}; }
+}
+// Carries the SESSION the marker belongs to, not just its outcome: without it the next launch
+// can report that something died but cannot say WHICH session — and wall #5's numerator is
+// counted in distinct session_ids, so an unjoinable death is a death it cannot count.
+function writeLaunchMarker(exit) {
+  try {
+    fs.mkdirSync(path.dirname(launchMarkerPath()), { recursive: true });
+    fs.writeFileSync(launchMarkerPath(), JSON.stringify({
+      exit, version: app.getVersion(), session_id: SESSION_ID,
+    }));
+  } catch (_) { /* best effort — an unwritable marker just means previous_exit='unknown' */ }
+}
+// `open` is written at boot and replaced with `clean` by before-quit. Finding it still `open`
+// means the previous process never reached an orderly shutdown — a crash or a kill. The two
+// are NOT distinguishable from this side (a SIGKILL leaves exactly what a segfault leaves), so
+// this reports the honest superset `crash` rather than guessing; `unknown` stays reserved for
+// "there was no previous launch to classify".
+function classifyPreviousExit(marker) {
+  if (!marker || !marker.exit) return 'unknown';
+  return marker.exit === 'clean' ? 'clean' : 'crash';
+}
+
+// Classify a failure_class from the phase + message, never shipping the raw stderr tail: it
+// embeds absolute paths, and the dialog already shows the user the real text locally.
+function classifyLaunchFailure(text) {
+  const t = String(text || '').toLowerCase();
+  if (t.includes('did not become healthy')) return 'health_timeout';
+  if (t.includes('exited before becoming healthy') || t.includes('backend stopped')) return 'backend_exited';
+  if (t.includes('ui not built') || t.includes('vite dev server')) return 'ui_missing';
+  if (t.includes('eaddrinuse') || t.includes('port')) return 'port';
+  if (t.includes('enoent') || t.includes('no such file')) return 'missing_binary';
+  if (t.includes('provision')) return 'provision';
+  return 'unknown';
 }
 
 function fatal(title, message) {
   if (fatalShown) return;
   fatalShown = true;
+  const failureClass = classifyLaunchFailure(title + ' ' + message);
+  const reported = track('launch_failure', {
+    phase: backendPort ? 'health' : 'spawn',
+    failure_class: failureClass,
+    retryable: ['health_timeout', 'port'].includes(failureClass),
+  });
   // Report before the dialog — this fires for "backend won't start / exited", the crash most likely
   // to lose a new user. Title = the grouping message; message (incl. backend stderr tail) = detail.
-  reportDesktopError('fatal', { message: title, stack: message });
+  // Its promise joins the flush below: it is the crash-inbox half of the same failure, and
+  // leaving it unawaited would let the modal freeze the loop with that POST still in flight.
+  const crashReported = reportDesktopError('fatal', { message: title, stack: message });
   shuttingDown = true;
   stopProvision();
   stopBackend();
   // If the setup window is still up (e.g. the backend died after a first-run install), flip it
   // into its error state — a green bar creeping behind a fatal dialog reads as a lie.
   setupSend('setup:error', message);
-  dialog.showErrorBox(title, message);
-  app.quit();
+  // showErrorBox is SYNCHRONOUS and BLOCKS the main process, so the POST above — which needs the
+  // event loop to finish its socket work — never completed: measured live, the process then sat
+  // unresponsive to SIGTERM with .last-exit.json still 'open', and NEITHER launch_failure nor the
+  // session_ended that before-quit would have sent ever reached PostHog. So let the report leave
+  // first, bounded exactly like the before-quit flush: a network stall must never leave a user
+  // staring at an app that will not tell them it failed.
+  const show = () => { dialog.showErrorBox(title, message); app.quit(); };
+  const flushed = Promise.all([reported, crashReported].map((p) => Promise.resolve(p).catch(() => false)));
+  Promise.race([flushed, new Promise((r) => setTimeout(r, 1500))]).then(show, show);
 }
 
 // The BASE interpreter used to PROVISION the managed venv (Lane E). Packaged: the bundled, signed
@@ -186,6 +536,10 @@ function pythonBin() {
 // re-hydrate the banner after a ⌘R reload via the 'update:get-state' handler (the push event only
 // fires once, when the download finishes).
 let pendingUpdate = null;
+// Set when the user chose "Restart & update". before-quit must NOT defer that quit for a
+// telemetry flush — Squirrel owns the shutdown from that point and delaying it is an
+// untestable risk on a path that only runs against a signed build.
+let installingUpdate = false;
 
 // Auto-update (packaged builds only). electron-updater checks the GitHub Releases feed (build.publish),
 // auto-downloads a newer SIGNED build, and — with autoInstallOnAppQuit (default true) — installs it on
@@ -215,10 +569,17 @@ function initAutoUpdate() {
   try {
     const { autoUpdater } = require('electron-updater');
     autoUpdater.autoDownload = true;
-    autoUpdater.on('error', (e) => console.error('[updater] ' + (e && e.message)));
-    autoUpdater.on('update-available', (i) => console.log('[updater] update available: ' + (i && i.version)));
+    autoUpdater.on('error', (e) => {
+      console.error('[updater] ' + (e && e.message));
+      track('update_lifecycle', { phase: 'failed', target_version: null });
+    });
+    autoUpdater.on('update-available', (i) => {
+      console.log('[updater] update available: ' + (i && i.version));
+      track('update_lifecycle', { phase: 'available', target_version: (i && i.version) || null });
+    });
     autoUpdater.on('update-downloaded', (i) => {
       pendingUpdate = { version: (i && i.version) || null };
+      track('update_lifecycle', { phase: 'downloaded', target_version: pendingUpdate.version });
       console.log('[updater] downloaded, ready to install: ' + pendingUpdate.version);
       try {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update:downloaded', pendingUpdate);
@@ -231,7 +592,9 @@ function initAutoUpdate() {
     // "backend stopped" dialog. No-op (returns false) if nothing is staged.
     ipcMain.handle('update:install', () => {
       if (!pendingUpdate) return false;
+      track('update_lifecycle', { phase: 'install_clicked', target_version: pendingUpdate.version });
       shuttingDown = true;
+      installingUpdate = true;
       setImmediate(() => { try { autoUpdater.quitAndInstall(); } catch (e) { console.error('[updater] install failed: ' + (e && e.message)); } });
       return true;
     });
@@ -471,15 +834,35 @@ async function ensureProvisioned() {
   };
   try {
     if (!coreReady) {
+      // NOT the relay above: its first branch fires per NDJSON LOG LINE (banned hook class 3).
+      // These are the awaited per-tier resolutions — 1-2 per install, not thousands.
+      track('provision_started', { tier: 'core', reason: 'missing' });
+      const t = Date.now();
       await runProvision(['--core'], relay('core')); // fatal on failure (caught below)
+      track('provision_finished', { tier: 'core', outcome: 'success', duration_s: bucketSeconds(Date.now() - t) });
     }
     if (!compositionReady) {
       // Best-effort: swallow failures so a broken Remotion/HyperFrames install never blocks the editor.
+      track('provision_started', { tier: 'composition', reason: 'missing' });
+      const t = Date.now();
       try {
         await runProvision(['--composition'], relay('composition'));
+        track('provision_finished', { tier: 'composition', outcome: 'success', duration_s: bucketSeconds(Date.now() - t) });
       } catch (compErr) {
         if (shuttingDown) throw compErr; // user cancelled — don't misread the kill as an engine failure
         console.error('[provision] composition tier failed (non-fatal): ' + (compErr && compErr.message));
+        track('provision_finished', {
+          tier: 'composition',
+          outcome: shuttingDown ? 'cancelled' : 'failed',
+          duration_s: bucketSeconds(Date.now() - t),
+        });
+        // The first-run failure taxonomy. Classified from the message, never the raw stderr:
+        // it embeds absolute paths, and the local dialog already shows the user the real text.
+        track('provisioning_error', {
+          tier: 'composition',
+          stage: 'install',
+          failure_class: classifyLaunchFailure((compErr && compErr.message) || ''),
+        });
         setupSend('setup:progress', 'Video engines unavailable — you can retry later from Settings.');
         sendStep(seg.composition[1], seg.composition[1], 'Video engines skipped.');
       }
@@ -488,6 +871,11 @@ async function ensureProvisioned() {
     setupSend('setup:done', undefined);
     sendStep(seg.backend[0], 99, 'Starting OpenNolan…'); // backend start = the last slice of the bar
   } catch (err) {
+    track('provisioning_error', {
+      tier: 'core',
+      stage: 'install',
+      failure_class: classifyLaunchFailure((err && err.message) || ''),
+    });
     setupSend('setup:error', String((err && err.message) || err));
     if (err) err.provisioning = true; // boot()'s catch routes this to the retry/email dialog, not fatal()
     throw err;
@@ -615,10 +1003,17 @@ function probeHealth(port, timeoutMs = 1500) {
 // Poll until healthy, the deadline passes, or our backend child dies.
 function waitForHealth(port, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
+  const t0 = Date.now();
+  let probes = 0;
   return new Promise((resolve, reject) => {
     const tick = async () => {
       if (backendDead) return reject(new Error('backend process exited before becoming healthy'));
-      if (await probeHealth(port)) return resolve(port);
+      probes++;
+      if (await probeHealth(port)) {
+        // Exactly one per wait: the poll's other two branches both terminate the promise.
+        track('backend_ready', { startup_ms: Date.now() - t0, probe_count: probes, dev: DEV });
+        return resolve(port);
+      }
       if (Date.now() > deadline) return reject(new Error('backend did not become healthy within ' + Math.round(timeoutMs / 1000) + 's'));
       setTimeout(tick, 300);
     };
@@ -644,6 +1039,11 @@ function startBackend(port) {
   // goes to ~/Library/Application Support via OPENNOLAN_HOME. lib/app_paths.py reads these vars;
   // see docs/plans/publish-mac-app.md.
   const runtimeEnv = { ...process.env };
+  // The backend this shell spawns belongs to THIS session. Without it `app_opened` — the event
+  // anyone reaches for as the funnel entry point — has no session_id at all and cannot be
+  // joined to anything. Only set on a backend WE own: a dev backend that was already running
+  // was not started by this session, and claiming otherwise would be a fabricated join.
+  runtimeEnv.OPENNOLAN_SESSION_ID = SESSION_ID;
   if (app.isPackaged) {
     const home = process.env.OPENNOLAN_HOME || app.getPath('userData');
     runtimeEnv.OPENNOLAN_HOME = home;
@@ -738,6 +1138,9 @@ function createWindow(url) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Hand main's session id to the sandboxed preload. argv is the documented channel —
+      // a sandboxed preload has no module state and no synchronous IPC to fetch it with.
+      additionalArguments: ['--on-session=' + SESSION_ID],
     },
   });
   retryingProvision = false; // see createSetupWindow: the retry's zero-window gap is over
@@ -776,6 +1179,23 @@ function createWindow(url) {
 
 async function boot() {
   try {
+    // Session + launch are recorded FIRST, before anything that can fail: a launch that
+    // never reaches a window still has to appear in the session denominator, or the
+    // crash-free rate silently excludes the users who crash hardest.
+    logAnalyticsDestination();
+    const marker = readLaunchMarker();
+    writeLaunchMarker('open');  // replaced with 'clean' by before-quit; survives as a crash flag
+    sessionStart = Date.now();
+    track('app_launch_started', {
+      launch_kind: (marker.version && marker.version !== app.getVersion()) ? 'post_update' : 'cold',
+      previous_exit: classifyPreviousExit(marker),
+      // The session that died, so wall #5 can attribute the crash to a real session_id rather
+      // than only inferring one from a start with no matching end.
+      prior_session_id: marker.session_id || null,
+    });
+    // `dashboard` is the surface the app actually opens on. Dev/product separation already
+    // lives in the envelope's `env`/`internal`, so it must not leak into this closed enum.
+    track('session_started', { entry: 'dashboard' });
     applyCsp();
     if (DEV) {
       backendPort = worktreeConfig.backendPort();
@@ -827,8 +1247,44 @@ function stopBackend() {
 // today's no-handler default; the process keeps running where Electron would have.
 process.on('uncaughtException', (e) => { reportDesktopError('main-uncaught', e); console.error('[main] uncaught: ' + (e && e.stack || e)); });
 process.on('unhandledRejection', (reason) => { reportDesktopError('main-rejection', reason); console.error('[main] unhandledRejection: ' + (reason && reason.stack || reason)); });
-app.on('render-process-gone', (_e, _wc, d) => reportDesktopError('renderer-gone', { message: 'renderer gone: ' + (d && d.reason), stack: 'exitCode=' + (d && d.exitCode) }));
-app.on('child-process-gone', (_e, d) => reportDesktopError('child-gone', { message: (d && d.type || 'child') + ' gone: ' + (d && d.reason), stack: 'exitCode=' + (d && d.exitCode) }));
+
+// Native failures that escape JS entirely. `process_gone` is the PRODUCT event (bounded
+// enums, joinable to the session); reportDesktopError stays as the crash-inbox entry.
+// exitCode is bucketed, not raw: it is unbounded and the bucket answers the same question.
+// Durations ship as ORDERED BUCKETS, never raw ms: a packaged install time plus a city plus an
+// exact file size is the fingerprinting combination, and the bucket answers the same question.
+// The labels must match server/analytics._BUCKET_LABEL, which is what the validator enforces.
+function bucketSeconds(ms) {
+  const s = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+  if (s < 5) return '0-5';
+  if (s < 15) return '5-15';
+  if (s < 60) return '15-60';
+  if (s < 300) return '60-300';
+  return '300+';
+}
+
+function exitCodeBucket(code) {
+  if (code == null) return 'unknown';
+  if (code === 0) return '0';
+  if (code < 0) return 'signal';
+  return code < 128 ? '1-127' : '128+';
+}
+app.on('render-process-gone', (_e, _wc, d) => {
+  // The renderer IS the app window: losing it ends the session. A utility/GPU child does not.
+  track('process_gone', { process: 'renderer', session_fatal: true, reason: (d && d.reason) || 'unknown', exit_code_bucket: exitCodeBucket(d && d.exitCode) });
+  reportDesktopError('renderer-gone', { message: 'renderer gone: ' + (d && d.reason), stack: 'exitCode=' + (d && d.exitCode) });
+});
+// Electron's child type is display-cased and can contain SPACES ('Sandbox helper', 'Pepper
+// Plugin'). The taxonomy declares a closed token vocabulary for this field, so normalize here
+// rather than let the validator drop a legitimate value on the floor.
+function processName(type) {
+  const t = String(type || 'unknown').trim().toLowerCase().replace(/\s+/g, '_');
+  return /^[a-z0-9_]+$/.test(t) ? t : 'unknown';
+}
+app.on('child-process-gone', (_e, d) => {
+  track('process_gone', { process: processName(d && d.type), session_fatal: false, reason: (d && d.reason) || 'unknown', exit_code_bucket: exitCodeBucket(d && d.exitCode) });
+  reportDesktopError('child-gone', { message: (d && d.type || 'child') + ' gone: ' + (d && d.reason), stack: 'exitCode=' + (d && d.exitCode) });
+});
 
 app.whenReady().then(boot);
 
@@ -844,5 +1300,25 @@ app.on('window-all-closed', () => {
   if (retryingProvision) return;
   shuttingDown = true; stopProvision(); stopBackend(); app.quit();
 });
-app.on('before-quit', () => { shuttingDown = true; stopProvision(); stopBackend(); });
+// The clean-exit hook. `window-all-closed` cannot observe a crash and quits with no flush;
+// `before-quit` is the one place that runs on every ORDERLY exit. The quit is deferred until
+// the event lands — but only for a bounded time: a network stall must never leave the user
+// staring at an app that will not close.
+let quitFlushed = false;
+app.on('before-quit', (e) => {
+  shuttingDown = true;
+  stopProvision();
+  stopBackend();
+  writeLaunchMarker('clean');
+  if (quitFlushed) return;
+  quitFlushed = true;
+  const ended = track('session_ended', {
+    duration_s: Math.round((Date.now() - sessionStart) / 1000),
+    exit_kind: installingUpdate ? 'update' : 'clean',
+  });
+  if (installingUpdate) return;  // Squirrel owns this shutdown — send and let it go
+  e.preventDefault();
+  const finish = () => app.quit();
+  Promise.race([ended, new Promise((r) => setTimeout(r, 1500))]).then(finish, finish);
+});
 process.on('exit', () => { stopProvision(); stopBackend(); });

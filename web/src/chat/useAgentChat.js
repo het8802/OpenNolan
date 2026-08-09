@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '../api.js'
 import { isRenderCommand, AGENT_MODELS, DEFAULT_MODEL } from './chatUtils.js'
+import { track } from '../analytics/track.js'
 
 const MODEL_KEY = 'st.agentModel.v1'   // remembered agent-model choice (a global preference)
 const VALID_MODEL_IDS = new Set(AGENT_MODELS.map(m => m.id))
@@ -31,6 +32,7 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
   const [renderingStage, setRenderingStage] = useState(null) // tool_use id of in-flight render
   const [toolResults, setToolResults] = useState({})          // tool_use_id -> result, for expansion
   const [threads, setThreads] = useState([])                  // chat threads for the project
+  const threadsRef = useRef(0)                                // count for telemetry; see below
   const [activeThread, setActiveThread] = useState(null)      // current thread id
   const [model, setModelState] = useState(loadModel)          // UI-selected agent model
 
@@ -67,13 +69,19 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
 
   // '+' new chat: start a fresh thread (created lazily on first message).
   const newChat = useCallback(() => {
+    track('thread_lifecycle', { action: 'created', n_threads: threadsRef.current, session_resumed: false })
     clearChat()
     setActiveThread(null)
   }, [clearChat])
 
   const refreshThreads = useCallback(() => {
     if (!projectId) return Promise.resolve()
-    return api.listThreads(projectId).then(d => setThreads(d.threads || [])).catch(() => {})
+    return api.listThreads(projectId).then(d => {
+      setThreads(d.threads || [])
+      // A REF, not `threads.length`: newChat/loadThread are memoized on other deps, so reading
+      // the state value there would close over a stale count.
+      threadsRef.current = (d.threads || []).length
+    }).catch(() => {})
   }, [projectId])
 
   const loadThread = useCallback(async (tid) => {
@@ -84,6 +92,9 @@ export function useAgentChat(projectId, { onError, onAuthError } = {}) {
       setMessages(rec.messages || [])
       sessionIdRef.current = rec.session_id || null
       setActiveThread(tid)
+      track('thread_lifecycle', {
+        action: 'switched', n_threads: threadsRef.current, session_resumed: !!rec.session_id,
+      })
     } catch (e) { showError(e) }
   }, [projectId, clearChat, showError])
 

@@ -43,7 +43,9 @@ def test_dev_defaults_are_repo_relative():
     assert app_paths.projects_dir() == _REPO_ROOT / "projects"
     assert app_paths.env_path() == _REPO_ROOT / ".env"
     assert app_paths.runtime_dir() == _REPO_ROOT / "runtime"
-    assert app_paths.cache_dir() == _REPO_ROOT / "cache"
+    # `appcache`, not `cache`: home() is Electron's userData in the packaged app and macOS
+    # APFS is case-insensitive, so `cache` IS Chromium's quota-evicted `Cache/`.
+    assert app_paths.cache_dir() == _REPO_ROOT / "appcache"
 
 
 def test_home_relocates_writable_paths_but_not_code(monkeypatch, tmp_path):
@@ -52,7 +54,7 @@ def test_home_relocates_writable_paths_but_not_code(monkeypatch, tmp_path):
     assert app_paths.projects_dir() == tmp_path / "projects"
     assert app_paths.env_path() == tmp_path / ".env"
     assert app_paths.runtime_dir() == tmp_path / "runtime"
-    assert app_paths.cache_dir() == tmp_path / "cache"
+    assert app_paths.cache_dir() == tmp_path / "appcache"
     # code_root is independent of home — it points at the read-only bundle in prod.
     assert app_paths.code_root() == _REPO_ROOT
 
@@ -128,14 +130,14 @@ def route_env(tmp_path):
     route_caches() mutates os.environ DIRECTLY — monkeypatch only reverts its own
     set/del calls, not mutations made by code under test. A TMPDIR left pointing
     at a deleted tmp_path would corrupt every later tempfile user in the session.
-    Yields the expected cache base (tmp_path/cache).
+    Yields the expected cache base (tmp_path/appcache).
     """
     saved_env = dict(os.environ)
     saved_tempdir = tempfile.tempdir
     for var in _ROUTE_VARS:
         os.environ.pop(var, None)
     os.environ["OPENNOLAN_HOME"] = str(tmp_path)
-    yield tmp_path / "cache"
+    yield tmp_path / "appcache"
     os.environ.clear()
     os.environ.update(saved_env)
     tempfile.tempdir = saved_tempdir
@@ -243,7 +245,7 @@ def test_route_caches_idempotent(route_env):
 
 
 def test_route_caches_mkdir_failure_raises(route_env, tmp_path):
-    (tmp_path / "cache").write_text("not a directory")
+    (tmp_path / "appcache").write_text("not a directory")
     os.environ["OPENNOLAN_ROUTE_CACHES"] = "1"
     with pytest.raises(OSError):
         app_paths.route_caches()  # fail loud by design

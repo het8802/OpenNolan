@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import contextlib
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Iterator, Optional
@@ -39,9 +40,207 @@ from lib.project import (
     publish_final_render,
     renders_dir,
 )
+from server import analytics
 from server.editor import read_asset_manifest, read_edit_decisions, resolve_source_path
 
 TERMINAL_STATUSES = ("done", "failed", "superseded")
+
+
+# Bucket an output size / count so an exact byte count plus a timestamp plus geo can't
+# become a fingerprint (plan §12G).
+_MISS_REASONS = frozenset(
+    {
+        "first_render",
+        "source_hash",
+        "scene_spec",
+        "runtime",
+        "renderer_family",
+        "canvas",
+        "crop",
+        "missing_clip",
+        "corrupt_record",
+    }
+)
+_RUNTIMES = frozenset({"remotion", "hyperframes", "ffmpeg"})
+_HDR_POLICIES = frozenset({"preserve", "tonemap", "sdr", "auto", "unknown"})
+
+
+def _opt_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _miss_reason(value: Any) -> Optional[str]:
+    v = str(value or "")
+    return v if v in _MISS_REASONS else None
+
+
+def _runtime(value: Any) -> Optional[str]:
+    v = str(value or "").lower()
+    return v if v in _RUNTIMES else None
+
+
+def _hdr_policy(value: Any) -> Optional[str]:
+    v = str(value or "").lower()
+    return v if v in _HDR_POLICIES else None
+
+
+def _music_regions(audio: dict[str, Any]) -> int:
+    """`audio.music` is `oneOf object|array` — a recent, expensive, barely-validated surface."""
+    music = audio.get("music")
+    if isinstance(music, list):
+        return len(music)
+    return 1 if music else 0
+
+
+def _narration_mode(audio: dict[str, Any]) -> str:
+    segments = (audio.get("narration") or {}).get("segments") if isinstance(audio.get("narration"), dict) else None
+    if not segments:
+        return "none"
+    return "replace" if (audio.get("narration") or {}).get("replace_base") else "layer"
+
+
+def _loudness(path: Path) -> Optional[dict[str, Any]]:
+    """One ebur128 pass over the PUBLISHED file. Buckets only — never audio, and never an exact
+    dBFS, which combined with an exact duration and a size is a fingerprint."""
+    import shutil as _shutil
+    import subprocess as _subprocess
+
+    if _shutil.which("ffmpeg") is None:
+        return None
+    try:
+        proc = _subprocess.run(
+            ["ffmpeg", "-nostats", "-i", str(path), "-af", "ebur128=peak=true", "-f", "null", "-"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, _subprocess.SubprocessError):
+        return None
+    import re as _re
+
+    tail = proc.stderr[-4000:]
+    lufs = _re.search(r"I:\s*(-?\d+(?:\.\d+)?)\s*LUFS", tail)
+    peak = _re.search(r"Peak:\s*(-?\d+(?:\.\d+)?)\s*dBFS", tail)
+    if not lufs and not peak:
+        return None
+    return {
+        "integrated_lufs_bucket": _signed_bucket(float(lufs.group(1)) if lufs else None, (-30, -23, -16, -9)),
+        "peak_dbfs_bucket": _signed_bucket(float(peak.group(1)) if peak else None, (-20, -6, -1, 0)),
+    }
+
+
+def _signed_bucket(value: Optional[float], edges: tuple[float, ...]) -> Optional[str]:
+    """Loudness is negative, and the validator's bucket labels are non-negative by shape. Shift
+    into a positive scale rather than inventing a second label grammar for one family."""
+    if value is None:
+        return None
+    return _bucket(value - edges[0], tuple(e - edges[0] for e in edges[1:]))
+
+
+# The three geometry fields RULES.md names, plus the mix. Compared as PRESENCE, not values:
+# a divergence is "the assemble dropped something the canvas showed", and the values themselves
+# are the user's composition.
+def _preview_export_divergences(doc: dict[str, Any], data: dict[str, Any]) -> list[str]:
+    out = []
+    overlays = doc.get("overlays") or []
+    if any(isinstance(o, dict) and o.get("position") for o in overlays) and not data.get("applied_overlays", True):
+        out.append("overlay_geometry")
+    if (
+        any(isinstance(c, dict) and (c.get("transform") or {}).get("crop") for c in doc.get("cuts") or [])
+        and data.get("crop_applied") is False
+    ):
+        out.append("crop")
+    return out
+
+
+# The subset of _render_summary()'s keys that `export_completed` DECLARES. Named so a contract
+# test can assert the two never drift apart again: the other five keys the summary carries are
+# declared on render_summary / proxy_cache_miss_reason / comp_rerender_triggered instead, and
+# splatting them onto export_completed tripped data_quality_violation on every successful export.
+EXPORT_COMPLETED_SUMMARY_KEYS = ("n_scenes", "n_cached", "n_rendered")
+
+
+def _publish_phase(exc: BaseException) -> Optional[str]:
+    """WHICH commit step broke, from the traceback's function names — never the message,
+    which embeds absolute paths. Returns None when the publisher was not involved at all."""
+    names = []
+    tb = exc.__traceback__
+    while tb is not None:
+        names.append(tb.tb_frame.f_code.co_name)
+        tb = tb.tb_next
+    if "publish_final_render" not in names:
+        return None
+    if "atomic_write_json" in names or "_write_receipt" in names:
+        return "receipt_failed"
+    if "persist_doc" in names or "_persist_doc" in names:
+        return "persist_failed"
+    return "video_replaced_no_receipt"
+
+
+def _rate(part: Optional[int], whole: Optional[int]) -> Optional[float]:
+    if not whole:
+        return None
+    return round((part or 0) / whole, 3)
+
+
+def _exit_bucket(code: Optional[int]) -> Optional[str]:
+    """ffmpeg exit codes are unbounded; the bucket answers the same question."""
+    if code is None:
+        return None
+    if code == 0:
+        return "0"
+    return "1-127" if 0 < code < 128 else "128+"
+
+
+def _reference_kind(ref: str) -> str:
+    """Which SHAPE of reference failed, never the reference itself: a project path is a folder
+    the user named and an asset id is opaque, so only the shape is safe and only the shape is
+    actionable — it says which half of the manifest/path contract broke."""
+    s = str(ref or "")
+    if "/" in s or "\\" in s:
+        return "shared_asset" if s.startswith(("/", "~")) else "project_path"
+    return "manifest_id"
+
+
+def _bucket(value: Optional[float], edges: tuple[float, ...]) -> Optional[str]:
+    if value is None:
+        return None
+    prev = "0"
+    for e in edges:
+        if value < e:
+            return f"{prev}-{_num(e)}"
+        prev = _num(e)
+    return f"{prev}+"
+
+
+def _num(v: float) -> str:
+    return str(int(v)) if float(v).is_integer() else str(v)
+
+
+def _classify_render_error(error: Optional[str]) -> str:
+    """Map a raw render error to a BOUNDED class. The raw string embeds absolute paths and
+    ffmpeg command lines — _scrub would redact the paths, but a free-form string is also
+    unbounded cardinality, so classify first and never send the text."""
+    e = (error or "").lower()
+    for needle, cls in (
+        ("no edit_decisions", "no_edit_decisions"),
+        ("edit_decisions required", "no_edit_decisions"),
+        ("cut source not found", "cut_source_not_found"),
+        ("source not found", "cut_source_not_found"),
+        ("crop", "crop_oob"),
+        ("encoder", "missing_encoder"),
+        ("rendersdirescapes", "renders_dir_escapes"),
+        ("no space left", "disk"),
+        ("permission denied", "permission"),
+        ("unknown tool", "unknown_tool"),
+        ("ffmpeg", "ffmpeg_nonzero"),
+    ):
+        if needle in e:
+            return cls
+    return "tool_exception" if ":" in (error or "") else "unknown"
 
 
 class RenderJobStore:
@@ -54,8 +253,34 @@ class RenderJobStore:
         self._lock = threading.Lock()
         self._tool: Any = None  # lazily built VideoCompose (importing it discovers nothing heavy)
 
+    # -- analytics ------------------------------------------------------------
+    def _emit(self, event: str, job: dict[str, Any], **props: Any) -> None:
+        """Emit ONE render event from a COPIED job record, always OUTSIDE self._lock.
+
+        `_set` holds the mutex while it writes and `capture()` can block on the SDK's queue —
+        so the copy is taken inside the lock and handed here after it is released. Every
+        render event carries job_id/project_id/session_id/turn_id, which is what lets a
+        render be attributed to the session (and agent turn) that caused it."""
+        try:
+            analytics.capture(
+                event,
+                {
+                    "job_id": job.get("job_id"),
+                    # The PERSISTED random id, never the slug — the slug is a sluggification
+                    # of the name the user typed.
+                    "project_id": analytics.project_key(self._projects_dir, job.get("project_id")),
+                    "session_id": job.get("session_id"),
+                    "turn_id": job.get("turn_id"),
+                    "origin": job.get("origin"),
+                    "publish_intent": bool(job.get("publish_intent")),
+                    **{k: v for k, v in props.items() if v is not None},
+                },
+            )
+        except Exception:
+            pass  # analytics never breaks a render
+
     # -- public API -----------------------------------------------------------
-    def start(self, project_id: str) -> str:
+    def start(self, project_id: str, *, session_id: Optional[str] = None) -> str:
         """Queue a render for `project_id` and return its job_id. Supersedes any prior job.
 
         Publishes to the canonical renders/final.mp4 (it used to mint a per-job
@@ -63,8 +288,21 @@ class RenderJobStore:
         all labelled "Final render")."""
         job_id = uuid.uuid4().hex[:12]
         with self._lock:
-            self._jobs[job_id] = {"job_id": job_id, "project_id": project_id, "status": "queued", "origin": "editor"}
+            # publish_intent is persisted AT CREATION because it is the export denominator and
+            # this is the only boundary every export attempt passes: _run and _run_with_inputs
+            # both return early on a missing doc, long before the render or the publish guard.
+            self._jobs[job_id] = {
+                "job_id": job_id,
+                "project_id": project_id,
+                "status": "queued",
+                "origin": "editor",
+                "publish_intent": True,
+                "session_id": session_id,
+                "queued_at": time.monotonic(),
+            }
             self._active_by_project[project_id] = job_id  # newest job wins
+            snap = dict(self._jobs[job_id])
+        self._emit("render_queued", snap)
         threading.Thread(target=self._run, args=(job_id, project_id), daemon=True).start()
         return job_id
 
@@ -79,6 +317,14 @@ class RenderJobStore:
         Tagged origin="agent" + consumed=False so the agent runner can surface a
         finished job on the user's next turn (see AgentRunner._render_resume_note)."""
         job_id = uuid.uuid4().hex[:12]
+        # Derived, not guessed: the agent may aim an intermediate render at another path under
+        # renders/, and only a job whose target IS the canonical deliverable can ever export.
+        try:
+            publish_intent = self._normalize_output_path(
+                project_id, inputs.get("output_path"), FINAL_RENDER_NAME
+            ) == self._final_target(project_id)
+        except Exception:
+            publish_intent = False
         with self._lock:
             self._jobs[job_id] = {
                 "job_id": job_id,
@@ -86,12 +332,28 @@ class RenderJobStore:
                 "status": "queued",
                 "origin": "agent",
                 "consumed": False,
+                "publish_intent": publish_intent,
+                # Inherited through the turn: the agent's render was caused by a user message
+                # that arrived over HTTP carrying X-ON-Session.
+                "session_id": inputs.get("session_id"),
+                "turn_id": inputs.get("turn_id"),
+                "queued_at": time.monotonic(),
             }
             self._active_by_project[project_id] = job_id  # newest job wins
+            snap = dict(self._jobs[job_id])
+        self._emit("render_queued", snap)
         threading.Thread(target=self._run_with_inputs, args=(job_id, project_id, dict(inputs)), daemon=True).start()
         return job_id
 
-    def start_op(self, project_id: str, tool_name: str, tool_input: dict[str, Any]) -> str:
+    def start_op(
+        self,
+        project_id: str,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        *,
+        session_id: Optional[str] = None,
+        turn_id: Optional[str] = None,
+    ) -> str:
         """Queue a heavy media op (any registry tool run) for `project_id` and return
         its job_id. Same lifecycle as start_with_inputs (daemon thread, supersede,
         consumed tagging) but runs an arbitrary registry tool IN-PROCESS instead of a
@@ -109,8 +371,14 @@ class RenderJobStore:
                 "origin": "agent_op",
                 "tool_name": tool_name,
                 "consumed": False,
+                "publish_intent": False,  # a media op never publishes the deliverable
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "queued_at": time.monotonic(),
             }
             self._active_by_project[project_id] = job_id  # newest job wins
+            snap = dict(self._jobs[job_id])
+        self._emit("render_queued", snap)
         threading.Thread(
             target=self._run_op, args=(job_id, project_id, tool_name, dict(tool_input)), daemon=True
         ).start()
@@ -165,15 +433,22 @@ class RenderJobStore:
     def _is_superseded(self, project_id: str, job_id: str) -> bool:
         return self._active_by_project.get(project_id) != job_id
 
-    def _mark_superseded_locked(self, job_id: str) -> None:
+    def _mark_superseded_locked(self, job_id: str) -> Optional[dict[str, Any]]:
         """Record the TERMINAL `superseded` status. Caller holds self._lock.
 
         Written directly rather than through _set, whose supersede guard would drop
         exactly this update — which is what used to leave the job sitting at
-        queued/running forever, invisible to both the poller and the resume note."""
+        queued/running forever, invisible to both the poller and the resume note.
+
+        Returns a COPY of the record when this call actually changed it, else None. That
+        changed-or-not answer is required, not decoration: `_set` also calls this, so without
+        it a supersede reached both here and through `_set` and would emit twice."""
         job = self._jobs.get(job_id)
         if job is not None and job.get("status") not in TERMINAL_STATUSES:
+            job["prior_status"] = job.get("status")
             job["status"] = "superseded"
+            return dict(job)
+        return None
 
     @contextlib.contextmanager
     def _commit_guard(self, project_id: str, job_id: str) -> Iterator[bool]:
@@ -205,7 +480,22 @@ class RenderJobStore:
             if not ref:
                 return ref
             p = resolve_source_path(self._projects_dir, project_id, ref)
-            return str(p) if p else ref
+            if p is None:
+                # "Cut source not found" is this app's signature render failure. Emitted from
+                # the CALLER, because only the caller knows the consumer — the resolver takes
+                # no `consumer` argument, so a hook inside it could not supply one.
+                # `reference_kind` only, NEVER the path.
+                analytics.capture(
+                    "source_resolution_failed",
+                    {
+                        "reference_kind": _reference_kind(ref),
+                        "consumer": "render",
+                        "outcome": "missing",
+                        "project_id": analytics.project_key(self._projects_dir, project_id),
+                    },
+                )
+                return ref
+            return str(p)
 
         changed = False
         cuts = []
@@ -321,9 +611,107 @@ class RenderJobStore:
         """
         with self._lock:
             if not force and self._is_superseded(project_id, job_id):
-                self._mark_superseded_locked(job_id)
-                return
-            self._jobs[job_id].update(**fields)
+                snap = self._mark_superseded_locked(job_id)
+                changed, event = snap, "render_superseded"
+            else:
+                self._jobs[job_id].update(**fields)
+                snap = dict(self._jobs[job_id])
+                changed = snap if "status" in fields else None
+                event = "render_started" if fields.get("status") == "running" else "render_finished"
+        # OUTSIDE the lock (see _emit): capture() can block, self._lock cannot be held across it.
+        if changed:
+            self._emit_transition(event, changed)
+
+    def _snapshot(self, job_id: str) -> Optional[dict[str, Any]]:
+        """A COPY of one job record, taken under the lock. Emits always run outside the lock
+        from a copy — capture() can block on the SDK queue and _set holds the mutex."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            return dict(job) if job else None
+
+    def _emit_transition(self, event: str, job: dict[str, Any]) -> None:
+        """Turn one status transition into its product event. `job` is already a copy."""
+        queued_at = job.get("queued_at")
+        elapsed_ms = int((time.monotonic() - queued_at) * 1000) if queued_at else None
+        status = job.get("status")
+        if event == "render_superseded":
+            # NEVER a failure: a supersede means the user hit Render again, and counting it
+            # against the export success rate would make spamming the button look like a bug.
+            self._emit("render_superseded", job, stage=job.get("prior_status") or "queued")
+            return
+        if event == "render_started":
+            self._emit("render_started", job, queue_ms=elapsed_ms)
+            return
+        if status not in ("done", "failed"):
+            return
+        summary = job.get("render_summary") or {}
+        failure_class = _classify_render_error(job.get("error")) if status == "failed" else None
+        self._emit(
+            "render_finished",
+            job,
+            status=status,
+            total_ms=elapsed_ms,
+            failure_class=failure_class,
+            final_review_status=job.get("final_review_status"),
+            n_scenes=summary.get("n_scenes"),
+            n_cached=summary.get("n_cached"),
+            n_rendered=summary.get("n_rendered"),
+        )
+        # "Is 'edit live, render rarely' real?" — the app's central performance claim. The
+        # numbers arrive as NUMBERS: video_compose computes them and render_jobs used to turn
+        # them into a WARNING STRING, which discarded them.
+        if summary:
+            self._emit(
+                "render_summary",
+                job,
+                n_scenes=summary.get("n_scenes"),
+                n_cached=summary.get("n_cached"),
+                n_rendered=summary.get("n_rendered"),
+                cache_hit_rate=_rate(summary.get("n_cached"), summary.get("n_scenes")),
+                hdr_policy=summary.get("hdr_policy"),
+                hdr_decision=summary.get("hdr_decision"),
+            )
+            # Counting HITS gives the rate; counting REASONS says which invalidation rule to
+            # repair — e.g. whether crop (a source-px edit that must re-bake the proxy) is the
+            # real cost.
+            missed = summary.get("n_rendered") or 0
+            if missed:
+                self._emit(
+                    "proxy_cache_miss_reason", job, reason=summary.get("miss_reason") or "first_render", count=missed
+                )
+            comps = summary.get("n_comp_rerendered")
+            if comps:
+                # RULES.md: only composition clips require a re-render, and only the CHANGED
+                # one. An aggregate cache rate cannot verify that promise; this can.
+                self._emit(
+                    "comp_rerender_triggered",
+                    job,
+                    runtime=summary.get("runtime") or "unknown",
+                    n_comps=comps,
+                    reason=summary.get("miss_reason") or "scene_spec",
+                )
+        # The failure TAXONOMY, separate from render_finished{status}: `status` says whether
+        # rendering delivered, `render_failed` says WHICH stage and WHICH class, which is what
+        # turns into next week's work.
+        if status == "failed":
+            self._emit(
+                "render_failed",
+                job,
+                stage=job.get("failed_stage") or "render",
+                failure_class=failure_class,
+                ffmpeg_exit_bucket=_exit_bucket(job.get("ffmpeg_exit")),
+                retryable=failure_class in ("disk", "permission", "ffmpeg_nonzero"),
+            )
+        # An export ATTEMPT that failed. export_completed is emitted at the publish commit
+        # instead — a `done` render is not an export unless a receipt describes it.
+        if status == "failed" and job.get("publish_intent"):
+            self._emit(
+                "export_failed",
+                job,
+                stage=job.get("failed_stage") or "render",
+                failure_class=failure_class,
+                elapsed_ms=elapsed_ms,
+            )
 
     def _run(self, job_id: str, project_id: str) -> None:
         """Editor path: read the saved timeline from disk, render it, publish it.
@@ -339,7 +727,11 @@ class RenderJobStore:
             edit_decisions = read_edit_decisions(self._projects_dir, project_id)
             if not edit_decisions:
                 self._set(
-                    job_id, project_id, status="failed", error="no edit_decisions to render — save the timeline first"
+                    job_id,
+                    project_id,
+                    status="failed",
+                    failed_stage="input",
+                    error="no edit_decisions to render — save the timeline first",
                 )
                 return
             asset_manifest = read_asset_manifest(self._projects_dir, project_id)
@@ -356,7 +748,24 @@ class RenderJobStore:
                 publish=True,
             )
         except Exception as exc:  # never let a render thread die silently
+            self._publish_partial(job_id, project_id, exc)
             self._set(job_id, project_id, status="failed", error=f"{type(exc).__name__}: {exc}"[:2000])
+
+    def _publish_partial(self, job_id: str, project_id: str, exc: BaseException) -> None:
+        """Did the publish get PART way? os.replace lands the new bytes before persist_doc and
+        before the receipt write, so a raise in between leaves a real final.mp4 that no receipt
+        describes — deliberately stale, and invisible to the export hook, which is never reached.
+
+        Only a raise from inside the publisher counts: an ordinary render failure never touched
+        the deliverable and must not raise this alarm."""
+        try:
+            phase = _publish_phase(exc)
+            if phase is None:
+                return
+            job = self._snapshot(job_id) or {"job_id": job_id, "project_id": project_id}
+            self._emit("publish_partial", job, phase=phase)
+        except Exception:
+            pass
 
     def _run_with_inputs(self, job_id: str, project_id: str, inputs: dict[str, Any]) -> None:
         """Agent path: render CALLER-supplied inputs (with proposal_packet/hdr_policy).
@@ -375,7 +784,9 @@ class RenderJobStore:
         try:
             edit_decisions = inputs.get("edit_decisions")
             if not edit_decisions:
-                self._set(job_id, project_id, status="failed", error="edit_decisions required to render")
+                self._set(
+                    job_id, project_id, status="failed", failed_stage="input", error="edit_decisions required to render"
+                )
                 return
             asset_manifest = inputs.get("asset_manifest") or {"assets": []}
             renders = renders_dir(self._projects_dir, project_id)
@@ -398,6 +809,7 @@ class RenderJobStore:
                 publish=publish,
             )
         except Exception as exc:
+            self._publish_partial(job_id, project_id, exc)
             self._set(job_id, project_id, status="failed", error=f"{type(exc).__name__}: {exc}"[:2000])
 
     def _run_op(self, job_id: str, project_id: str, tool_name: str, tool_input: dict[str, Any]) -> None:
@@ -413,7 +825,9 @@ class RenderJobStore:
             registry.ensure_discovered()
             tool = registry.get(tool_name)
             if tool is None:
-                self._set(job_id, project_id, status="failed", error=f"unknown tool {tool_name!r}")
+                self._set(
+                    job_id, project_id, status="failed", failed_stage="input", error=f"unknown tool {tool_name!r}"
+                )
                 return
             result = tool.execute(dict(tool_input))
             if getattr(result, "success", False):
@@ -427,11 +841,30 @@ class RenderJobStore:
                     output_path=out,
                     warnings=self._deliverable_write_warning(project_id, out),
                 )
+                self._emit_media_op(job_id, project_id, tool_name, "done", bool(out))
             else:
                 err = getattr(result, "error", None) or "tool failed"
+                self._emit_media_op(job_id, project_id, tool_name, "failed", False)
                 self._set(job_id, project_id, status="failed", error=str(err)[:2000])
         except Exception as exc:
             self._set(job_id, project_id, status="failed", error=f"{type(exc).__name__}: {exc}"[:2000])
+
+    def _emit_media_op(self, job_id: str, project_id: str, tool_name: str, status: str, produced: bool) -> None:
+        """Which heavy ops earn their keep? ~40 tools/video/* modules exist; this is how the
+        ones nobody calls become visible enough to prune."""
+        try:
+            job = self._snapshot(job_id) or {"job_id": job_id, "project_id": project_id, "origin": "agent_op"}
+            queued_at = job.get("queued_at")
+            self._emit(
+                "media_op_finished",
+                job,
+                tool_id=tool_name,
+                status=status,
+                produced_asset=produced,
+                wall_s=_bucket(time.monotonic() - queued_at, (5, 30, 120, 600)) if queued_at else None,
+            )
+        except Exception:
+            pass
 
     def _deliverable_write_warning(self, project_id: str, out: Any) -> Optional[list[str]]:
         """Warn when a media op wrote straight into the top level of renders/.
@@ -483,9 +916,10 @@ class RenderJobStore:
             # Re-check supersede now that we hold the lock: a queue of stale jobs drains
             # instantly instead of each burning a full render nobody will read.
             with self._lock:
-                if self._is_superseded(project_id, job_id):
-                    self._mark_superseded_locked(job_id)
-                    return
+                snap = self._mark_superseded_locked(job_id) if self._is_superseded(project_id, job_id) else None
+            if snap is not None:
+                self._emit_transition("render_superseded", snap)  # outside the lock
+                return
             self._render_locked(
                 job_id,
                 project_id,
@@ -560,7 +994,13 @@ class RenderJobStore:
         if not (result.success and target.exists()):
             if publish:
                 target.unlink(missing_ok=True)  # never leave a .part behind
-            self._set(job_id, project_id, status="failed", error=(result.error or "render failed")[:2000])
+            self._set(
+                job_id,
+                project_id,
+                status="failed",
+                failed_stage="assemble",
+                error=(result.error or "render failed")[:2000],
+            )
             return
 
         if publish:
@@ -575,9 +1015,20 @@ class RenderJobStore:
             )
             if not published["published"]:
                 with self._lock:
-                    self._mark_superseded_locked(job_id)
+                    snap = self._mark_superseded_locked(job_id)
+                if snap is not None:
+                    self._emit_transition("render_superseded", snap)  # outside the lock
                 return
             rel_out = published["path"]
+            # ── THE NORTH STAR ─────────────────────────────────────────────────────────
+            # A successful export is DEFINED as the receipt write completing, inside
+            # publish_final_render. The hook cannot live there: lib/ must not depend on
+            # server/ and analytics imports server.settings. This is the first line after
+            # the publish guard, where origin and job_id are in scope, and `publish=True`
+            # guarantees a receipt described these exact bytes.
+            self._emit_export_completed(
+                job_id, project_id, out_path.parent / Path(rel_out).name, receipt_doc, result.data or {}
+            )
         else:
             # out_path is always a direct child of the project's renders/ dir (see
             # _normalize_output_path), so name it lexically — relative_to against an
@@ -586,10 +1037,13 @@ class RenderJobStore:
 
         data = result.data or {}
         warnings = list(preview_warnings) + list(data.get("warnings") or [])
-        if "n_scenes" in data:
-            warnings.append(
-                f"{data.get('n_rendered', 0)} scene(s) re-rendered, {data.get('n_cached', 0)} reused from cache"
-            )
+        # video_compose computes n_scenes/n_cached/n_rendered as NUMBERS. They used to be
+        # flattened into this warning string and then discarded, so "edit live, render rarely"
+        # — the app's central performance claim — was unverifiable. Keep the human sentence,
+        # but carry the numbers as a TYPED field. Never parse them back out of the text.
+        summary = self._render_summary(data)
+        if summary:
+            warnings.append(f"{summary['n_rendered']} scene(s) re-rendered, {summary['n_cached']} reused from cache")
         self._set(
             job_id,
             project_id,
@@ -601,8 +1055,92 @@ class RenderJobStore:
             # path is RELATIVE to the project dir, so the UI can fetch it via /file?path=
             output_path=rel_out,
             final_review_status=data.get("final_review_status"),
+            render_summary=summary,
             warnings=warnings or None,
         )
+
+    @staticmethod
+    def _render_summary(data: dict[str, Any]) -> Optional[dict[str, int]]:
+        """The render-once cache numbers as numbers, or None when the tool did not report them."""
+        if "n_scenes" not in data:
+            return None
+        return {
+            "n_scenes": int(data.get("n_scenes") or 0),
+            "n_cached": int(data.get("n_cached") or 0),
+            "n_rendered": int(data.get("n_rendered") or 0),
+            # Optional, and absent-not-guessed when the tool did not report them: a wrong
+            # cache-miss reason is worse than a missing one, because it names the wrong
+            # invalidation rule to repair.
+            "n_comp_rerendered": _opt_int(data.get("n_comp_rerendered")),
+            "miss_reason": _miss_reason(data.get("cache_miss_reason")),
+            "runtime": _runtime(data.get("render_runtime")),
+            "hdr_policy": _hdr_policy(data.get("hdr_policy")),
+            "hdr_decision": _hdr_policy(data.get("hdr_decision")),
+        }
+
+    def _emit_export_completed(
+        self,
+        job_id: str,
+        project_id: str,
+        final_path: Path,
+        receipt_doc: Optional[dict[str, Any]],
+        data: dict[str, Any],
+    ) -> None:
+        """The shape of what a user actually made, once per receipt-backed deliverable."""
+        # ponytail: `ordinal` / `first_export` are deliberately NOT emitted. The only counter
+        # available here is the in-memory _jobs dict, which empties on every backend restart —
+        # it would report first_export=true repeatedly and inflate activation and time-to-value.
+        # Both are exact at query time from min(timestamp) per install_id/project_id, which is
+        # how walls #1 and #2 already compute them.
+        try:
+            with self._lock:
+                job = dict(self._jobs.get(job_id) or {})
+            doc = receipt_doc or {}
+            audio = doc.get("audio") if isinstance(doc.get("audio"), dict) else {}
+            try:
+                size_mb = final_path.stat().st_size / 1_000_000
+            except OSError:
+                size_mb = None
+            queued_at = job.get("queued_at")
+            self._emit(
+                "export_completed",
+                job,
+                output_mb=_bucket(size_mb, (1, 5, 10, 25, 50, 100, 250, 500)),
+                n_cuts=_bucket(len(doc.get("cuts") or []), (1, 3, 6, 11, 21, 51)),
+                n_overlays=_bucket(len(doc.get("overlays") or []), (1, 3, 6, 11, 21, 51)),
+                has_music=bool(audio.get("music")),
+                has_narration=bool((audio.get("narration") or {}).get("segments")),
+                has_sfx=bool(audio.get("sfx")),
+                final_review_status=data.get("final_review_status"),
+                total_ms=int((time.monotonic() - queued_at) * 1000) if queued_at else None,
+                # Only the cache numbers export_completed DECLARES. Splatting the whole
+                # _render_summary() dict sent five more (n_comp_rerendered, miss_reason, runtime,
+                # hdr_policy, hdr_decision) that it does not declare, so the validator dropped
+                # them and tripped data_quality_violation on EVERY successful export — measured
+                # live. Those five already have homes: render_summary, proxy_cache_miss_reason
+                # and comp_rerender_triggered, all emitted from the same summary.
+                **{k: v for k, v in (self._render_summary(data) or {}).items() if k in EXPORT_COMPLETED_SUMMARY_KEYS},
+            )
+            # The deliverable's SHAPE, at the one moment the finished file and the receipt doc
+            # are both in hand. A technically successful MP4 with inaudible or clipped audio is
+            # not a successful export, and nothing else in the catalog would notice.
+            self._emit(
+                "audio_stem_shape",
+                job,
+                n_music_regions=_music_regions(audio),
+                narration_mode=_narration_mode(audio),
+                n_sfx=len(audio.get("sfx") or []),
+            )
+            loudness = _loudness(final_path)
+            if loudness:
+                self._emit("audio_output_health", job, **loudness)
+            # RULES.md makes "preview == export" a contract, and records a REAL violation of it
+            # (a source-px crop applied to a canvas-sized proxy → ffmpeg exit 234). The claim
+            # is currently unverifiable; this is what makes it checkable.
+            for field in _preview_export_divergences(doc, data):
+                self._emit("preview_export_divergence", job, field=field, magnitude_bucket="0-1")
+        except Exception:
+            pass  # a reporting bug must never unwind past a successful publish
 
     def _final_target(self, project_id: str) -> Path:
         """The canonical deliverable path, in the same resolved form

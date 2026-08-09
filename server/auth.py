@@ -51,14 +51,14 @@ ANTHROPIC_VERSION = "2023-06-01"
 # so we send one on EVERY outbound request (a missing/urllib UA silently breaks the token exchange).
 _USER_AGENT = "OpenNolan/0.1.0"
 
-OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"      # read by the Agent SDK
+OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"  # read by the Agent SDK
 REFRESH_TOKEN_ENV = "CLAUDE_CODE_REFRESH_TOKEN"  # internal; hidden from the BYOK panel
 API_KEY_ENV = "ANTHROPIC_API_KEY"
 
 _HTTP_TIMEOUT = 15
-_PENDING_TTL = 600          # a started OAuth flow is valid for 10 minutes
-_EXPIRY_SKEW = 60           # treat a token as expired this many seconds early
-_REFRESH_THROTTLE = 60      # at most one silent refresh attempt per minute
+_PENDING_TTL = 600  # a started OAuth flow is valid for 10 minutes
+_EXPIRY_SKEW = 60  # treat a token as expired this many seconds early
+_REFRESH_THROTTLE = 60  # at most one silent refresh attempt per minute
 
 # state -> {"verifier": str, "ts": float}; in-memory (single-user local app).
 _pending: dict[str, dict[str, Any]] = {}
@@ -70,6 +70,7 @@ class AuthError(Exception):
 
 
 # ── small helpers ──────────────────────────────────────────────────────────────
+
 
 def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
@@ -87,13 +88,15 @@ def _cli_available() -> bool:
     """Lazily probe for a logged-in `claude` CLI (dev machines auth from it with no env token)."""
     try:
         from server.agent_runner import claude_cli_available
+
         return claude_cli_available()
     except Exception:
         return False
 
 
-def _http_json(url: str, method: str = "GET", *, headers: Optional[dict] = None,
-               body: Optional[dict] = None) -> tuple[int, dict]:
+def _http_json(
+    url: str, method: str = "GET", *, headers: Optional[dict] = None, body: Optional[dict] = None
+) -> tuple[int, dict]:
     """Minimal stdlib JSON HTTP (no extra deps). Returns (status, parsed_body); never raises on a
     non-2xx — only on a transport/network failure (as AuthError)."""
     hdrs = {"Accept": "application/json", "User-Agent": _USER_AGENT, **(headers or {})}
@@ -125,8 +128,14 @@ def _err_message(payload: dict) -> str:
     if isinstance(err, dict):
         return str(err.get("message") or err.get("error_description") or "")
     # error_description/error = OAuth-style; detail/title = Cloudflare-style (so a block isn't opaque).
-    return str(payload.get("error_description") or err or payload.get("message")
-               or payload.get("detail") or payload.get("title") or "")
+    return str(
+        payload.get("error_description")
+        or err
+        or payload.get("message")
+        or payload.get("detail")
+        or payload.get("title")
+        or ""
+    )
 
 
 def _prune_pending() -> None:
@@ -155,9 +164,55 @@ def _is_expired(expires_at: Optional[str]) -> bool:
 
 # ── runtime auth-error flag (so failures surface instead of dying silently) ──────
 
+
+# Which credential problem this is. The raw provider text NEVER ships: it can quote a key
+# prefix, a URL or an account id. The class is what decides reauth-vs-billing copy.
+def _classify_reauth(detail: str) -> str:
+    d = (detail or "").lower()
+    if "credit" in d or "insufficient" in d:
+        return "credit"
+    if "billing" in d:
+        return "billing"
+    if "expired" in d:
+        return "expired"
+    if "revoked" in d or "invalid_grant" in d:
+        return "revoked"
+    if "invalid" in d or "401" in d or "403" in d or "unauthorized" in d:
+        return "invalid"
+    return "unknown"
+
+
 def mark_auth_error(detail: str) -> None:
     """Record that a live call failed auth, so status() reports needs_reauth until the next success."""
+    was_set = bool(settings.get("claude_auth_error"))
     settings.set_value("claude_auth_error", {"detail": (detail or "")[:400], "ts": _iso(_now())})
+    if was_set:
+        return  # already in the error state: one event per TRANSITION, not per failing call
+    try:
+        from server import analytics
+
+        meta = settings.get("claude_auth") or {}
+        analytics.capture(
+            "auth_needs_reauth",
+            {
+                "class": _classify_reauth(detail),
+                "phase": "mid_turn",
+                "days_since_connect": _days_since_bucket(meta.get("obtained_at")),
+            },
+        )
+    except Exception:
+        pass  # auth must never fail because telemetry did
+
+
+def _days_since_bucket(iso: Optional[str]) -> Optional[str]:
+    try:
+        days = (_now() - datetime.fromisoformat(str(iso))).days
+    except Exception:
+        return None
+    for edge, label in ((1, "0-1"), (7, "1-7"), (30, "7-30"), (90, "30-90")):
+        if days < edge:
+            return label
+    return "90+"
 
 
 def clear_auth_error() -> None:
@@ -170,10 +225,23 @@ def clear_auth_error() -> None:
 # user to reconnect. 401/403 are matched as standalone tokens only.
 _AUTH_CODE_RE = re.compile(r"\b(401|403)\b")
 _AUTH_PHRASES = (
-    "authentication_error", "authentication error", "invalid api key", "invalid x-api-key",
-    "x-api-key header", "oauth token", "token has expired", "token expired", "token is expired",
-    "invalid_grant", "invalid_token", "unauthorized", "please run /login", "run `claude`",
-    "credit balance is too low", "insufficient credit", "billing",
+    "authentication_error",
+    "authentication error",
+    "invalid api key",
+    "invalid x-api-key",
+    "x-api-key header",
+    "oauth token",
+    "token has expired",
+    "token expired",
+    "token is expired",
+    "invalid_grant",
+    "invalid_token",
+    "unauthorized",
+    "please run /login",
+    "run `claude`",
+    "credit balance is too low",
+    "insufficient credit",
+    "billing",
 )
 
 
@@ -185,6 +253,7 @@ def classify_auth_error(text: Optional[str]) -> bool:
 
 
 # ── status ───────────────────────────────────────────────────────────────────
+
 
 def status() -> dict:
     """The single source of truth the UI polls. Attempts a silent refresh first when an OAuth token
@@ -225,6 +294,7 @@ def status() -> dict:
 
 # ── OAuth: "Sign in with Claude" ───────────────────────────────────────────────
 
+
 def start_oauth() -> dict:
     """Begin a PKCE flow. Returns the authorize URL to open in the browser + the state to match on
     finish. The verifier is held in memory keyed by state."""
@@ -263,14 +333,18 @@ def finish_oauth(code_input: str, app_state: Any = None) -> dict:
         else:
             raise AuthError("This sign-in link expired. Click “Sign in with Claude” again.")
 
-    code_status, payload = _http_json(TOKEN_URL, "POST", body={
-        "grant_type": "authorization_code",
-        "code": code,
-        "state": state,
-        "redirect_uri": REDIRECT_URI,
-        "client_id": CLIENT_ID,
-        "code_verifier": pend["verifier"],
-    })
+    code_status, payload = _http_json(
+        TOKEN_URL,
+        "POST",
+        body={
+            "grant_type": "authorization_code",
+            "code": code,
+            "state": state,
+            "redirect_uri": REDIRECT_URI,
+            "client_id": CLIENT_ID,
+            "code_verifier": pend["verifier"],
+        },
+    )
     _pending.pop(state, None)
     if code_status >= 300 or not payload.get("access_token"):
         msg = _err_message(payload)
@@ -289,7 +363,7 @@ def _store_oauth(payload: dict) -> None:
     updates: dict[str, str] = {OAUTH_TOKEN_ENV: access}
     if refresh:
         updates[REFRESH_TOKEN_ENV] = refresh
-    if os.environ.get(API_KEY_ENV):          # OAuth wins — clear a stale key so it can't take precedence
+    if os.environ.get(API_KEY_ENV):  # OAuth wins — clear a stale key so it can't take precedence
         updates[API_KEY_ENV] = ""
     env_config.write_env_vars(updates)
     env_config.reload_env()
@@ -303,9 +377,14 @@ def _store_oauth(payload: dict) -> None:
     expires_at = None
     if isinstance(expires_in, (int, float)) and expires_in > 0:
         expires_at = _iso(_now() + timedelta(seconds=int(expires_in)))
-    settings.set_value("claude_auth", {
-        "method": "oauth", "obtained_at": _iso(_now()), "expires_at": expires_at,
-    })
+    settings.set_value(
+        "claude_auth",
+        {
+            "method": "oauth",
+            "obtained_at": _iso(_now()),
+            "expires_at": expires_at,
+        },
+    )
 
 
 def _maybe_refresh() -> None:
@@ -325,12 +404,16 @@ def _maybe_refresh() -> None:
         return
     _last_refresh_attempt = now
     try:
-        code_status, payload = _http_json(TOKEN_URL, "POST", body={
-            "grant_type": "refresh_token",
-            "refresh_token": refresh,
-            "client_id": CLIENT_ID,
-            "scope": SCOPES,
-        })
+        code_status, payload = _http_json(
+            TOKEN_URL,
+            "POST",
+            body={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh,
+                "client_id": CLIENT_ID,
+                "scope": SCOPES,
+            },
+        )
     except AuthError:
         return
     if code_status < 300 and payload.get("access_token"):
@@ -339,6 +422,7 @@ def _maybe_refresh() -> None:
 
 
 # ── API key fallback ───────────────────────────────────────────────────────────
+
 
 def set_api_key(key: str, app_state: Any = None) -> dict:
     key = (key or "").strip()
@@ -369,7 +453,8 @@ def set_api_key(key: str, app_state: Any = None) -> dict:
 def _validate_api_key(key: str) -> tuple[bool, str]:
     try:
         code_status, payload = _http_json(
-            MODELS_URL, "GET",
+            MODELS_URL,
+            "GET",
             headers={"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION},
         )
     except AuthError as exc:
@@ -383,6 +468,7 @@ def _validate_api_key(key: str) -> tuple[bool, str]:
 
 
 # ── disconnect ─────────────────────────────────────────────────────────────────
+
 
 def disconnect(app_state: Any = None) -> dict:
     """Forget the stored Anthropic credential (leaves a logged-in `claude` CLI, if any, intact)."""

@@ -29,6 +29,7 @@ from lib.checkpoint import CANONICAL_STAGE_ARTIFACTS, write_checkpoint
 VALID = {"in_progress", "completed", "awaiting_human", "failed"}
 NEEDS_ARTIFACT = {"completed", "awaiting_human"}
 
+
 def main():
     if len(sys.argv) < 4:
         print(__doc__)
@@ -69,6 +70,7 @@ def main():
             print(f"ERROR: could not read/parse {art_path}: {exc}", file=sys.stderr)
             sys.exit(1)
 
+    prior = _prior_status(projects_dir, project_id, stage)
     path = write_checkpoint(
         projects_dir,
         project_id,
@@ -77,7 +79,46 @@ def main():
         artifacts=artifacts,
         pipeline_type=pipeline_type,
     )
+    # The MUTATION boundary. This is a separate short-lived process with no PostHog client and
+    # no analytics import available to it, so the event goes to a durable local outbox that the
+    # backend drains on its next flush. A module-registered observer would not exist here.
+    try:
+        from server import outbox
+
+        outbox.capture(
+            "pipeline_stage_transition",
+            {
+                "stage": stage,
+                "from": prior,
+                "to": status,
+                "project_id": _analytics_project_key(projects_dir, project_id),
+            },
+        )
+    except Exception:
+        pass  # a stage write must never fail because telemetry did
     print(f"✓ {project_id} / {stage} → {status}  [{path}]")
+
+
+def _prior_status(projects_dir, project_id: str, stage: str) -> str:
+    """The value `from` needs. Not computable from state.py's read path, which derives one
+    stage's status from a checkpoint file with no memory of the previous one."""
+    try:
+        from lib.checkpoint import read_checkpoint
+
+        cp = read_checkpoint(projects_dir, project_id, stage)
+        return (cp or {}).get("status") or "none"
+    except Exception:
+        return "none"
+
+
+def _analytics_project_key(projects_dir, project_id: str):
+    try:
+        from server import analytics
+
+        return analytics.project_key(projects_dir, project_id)
+    except Exception:
+        return None
+
 
 if __name__ == "__main__":
     main()

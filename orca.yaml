@@ -8,8 +8,29 @@
 #
 # `orca worktree rm` skips the archive hook unless --run-hooks is passed; removal from
 # the Orca UI runs it. Setup follows the repo's policy (`--setup run|skip|inherit`).
+#
+# The setup hook also seeds `.env` from the main checkout. `.env` lives at app_paths.home(),
+# which in dev IS the worktree — so a fresh worktree starts with no BYOK keys and, more
+# subtly, no POSTHOG_KEY, which means analytics silently falls back to the PRODUCTION project
+# key. The seed file `.opennolan-dev.env` lives only in the main checkout and is gitignored
+# (`*.env`). The dev project token must NEVER be written here: this file is public, and a
+# published write key invites strangers to inject junk into the project we validate against.
 scripts:
   setup: |
     scripts/dev setup
+    MAIN=$(git worktree list --porcelain | head -1 | sed 's/^worktree //')
+    SEED="$MAIN/.opennolan-dev.env"
+    # TWO destinations, because two processes resolve app_paths.home() differently and would
+    # otherwise disagree about which PostHog project they write to:
+    #   .env         — the worktree root. What a bare `uvicorn`, pytest, and the Electron
+    #                  shell read (home() defaults to the checkout).
+    #   .local/.env  — what `run-dev` reads, because scripts/dev setup pins
+    #                  OPENNOLAN_HOME=<worktree>/.local in .env.worktree. Seeding only the
+    #                  root, as the plan first specified, leaves the dev BACKEND on the
+    #                  production key while everything else is on the dev project.
+    # Seeding runs AFTER setup so .local/ exists. `|| true` so a fresh clone with no seed file
+    # skips SILENTLY instead of failing setup under `set -e`.
+    { [ -f "$SEED" ] && [ ! -f .env ] && cp "$SEED" .env && chmod 600 .env; } || true
+    { [ -f "$SEED" ] && [ ! -f .local/.env ] && cp "$SEED" .local/.env && chmod 600 .local/.env; } || true
   archive: |
     scripts/dev stop

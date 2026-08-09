@@ -1,0 +1,84 @@
+{
+  "$comment": "Shared header for the split taxonomy. schemas/analytics/*.json are merged ALL-OR-NOTHING by server/analytics.taxonomy(), desktop/main.js and tests/contracts/test_analytics_taxonomy.py. A parse failure, a missing _envelope.json or a duplicate event name across two family files yields {} \u2014 which FAILS CLOSED (validate_event drops every event) and logs once, because under fail-closed no event can ever carry the unknown_events counter out.",
+  "schema_version": 1,
+  "property_types": {
+    "E": "bounded enum / short closed-vocabulary string",
+    "B": "ordered bucket (a string label like '1-5s')",
+    "N": "raw number",
+    "F": "boolean flag",
+    "I": "opaque correlation id",
+    "A": "array of enum members",
+    "O": "object / map keyed by an enum member"
+  },
+  "envelope": {
+    "$comment": "CALLER-LEGAL join keys: an emit site may pass these on any event, so validate_event() adds them to the allowed set. install_id is also the PostHog distinct_id. project_id is the PERSISTED RANDOM id from <project>/.analytics_id, never the directory slug \u2014 the slug is a sluggification of the name the user typed. fatal/handled classify an error for wall #5's crash numerator. Anything a REPORTER attaches after the gate belongs in reporter_envelope, NOT here: every name in this block is a name the renderer can put arbitrary text into via POST /api/telemetry/events, and these are all opaque ids or booleans for exactly that reason.",
+    "schema_version": "N",
+    "event_id": "I",
+    "install_id": "I",
+    "session_id": "I",
+    "project_id": "I",
+    "turn_id": "I",
+    "job_id": "I",
+    "tool_invocation_id": "I",
+    "fatal": "F",
+    "handled": "F"
+  },
+  "reporter_envelope": {
+    "$comment": "Names a REPORTER stamps on after validate_event() has already run. Legal on the wire on every event, but deliberately NOT in `envelope` \u2014 validate_event()'s allowed set is what a caller can send, and `os`/`arch`/`app_version` are unbounded strings that no enum gate would check (an envelope-only property has no per-event `kind`, so _enum_ok returns True and _bounded passes any top-level string). Listing them as caller-legal would hand the renderer a free-text field on every event, which is the exact hole the taxonomy exists to close. env/internal come from analytics._env_props(); app_version/os/arch/packaged from desktop/main.js's post-validation envelope; telemetry_* are the drop counters that ride out on the next successful capture. EVERY name a reporter attaches after the gate must be listed HERE \u2014 one absent from both blocks reaches the wire ungoverned, which is what a live readback caught on 10 of 11 Electron events.",
+    "env": "E",
+    "internal": "F",
+    "app_version": "E",
+    "os": "E",
+    "arch": "E",
+    "packaged": "F",
+    "telemetry_dropped_props": "N",
+    "telemetry_unknown_events": "N",
+    "telemetry_send_failed": "N",
+    "telemetry_budget_dropped": "N"
+  },
+  "reserved_substrings": {
+    "$comment": "analytics._scrub DESTROYS any key containing one of these \u2014 the freetext group is rewritten to '<key>_len' and the secret group to '[redacted]'. No property name in this file may contain one. Verified by contract test 3, which is why prompt_len/message_len/prompt_chars are not usable names.",
+    "freetext": [
+      "prompt",
+      "message",
+      "text",
+      "transcript",
+      "caption",
+      "content",
+      "body"
+    ],
+    "secret": [
+      "key",
+      "token",
+      "secret",
+      "password",
+      "authorization",
+      "cookie"
+    ]
+  },
+  "enums": {
+    "origin": [
+      "editor",
+      "agent",
+      "agent_op"
+    ],
+    "failure_class": [
+      "no_edit_decisions",
+      "cut_source_not_found",
+      "crop_oob",
+      "missing_encoder",
+      "renders_dir_escapes",
+      "disk",
+      "permission",
+      "unknown_tool",
+      "ffmpeg_nonzero",
+      "tool_exception",
+      "unknown"
+    ]
+  },
+  "open_vocabularies": {
+    "os": "platform.platform() / process.platform. Supplied by the OS; no user input path.",
+    "app_version": "Our own package version string.",
+    "final_review_status": "Produced by tools/video/video_compose, i.e. our own code."
+  }
+}

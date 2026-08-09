@@ -15,6 +15,7 @@
     "dist:dir": "npm run fetch-runtime && npm --prefix ../web run build && electron-builder --mac --arm64 --dir"
   },
   "dependencies": {
+    "dotenv": "^16.6.1",
     "electron-updater": "^6.3.9"
   },
   "devDependencies": {
@@ -26,7 +27,7 @@
   "build": {
     "appId": "ai.opennolan.desktop",
     "productName": "OpenNolan",
-    "copyright": "Copyright © 2026 OpenNolan",
+    "copyright": "Copyright \u00a9 2026 OpenNolan",
     "directories": {
       "buildResources": "build",
       "output": "dist"

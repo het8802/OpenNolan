@@ -9,6 +9,16 @@ import { TOOL_ICON, formatToolInput, AGENT_MODELS, DEFAULT_MODEL } from './chatU
 import {
   flattenCandidates, mentionQuery, rankCandidates, applyMention, pruneMentions, MENTION_GROUPS,
 } from './mentions.js'
+import { track } from '../analytics/track.js'
+
+// A bucket, not a raw count: "did the search find anything" is the question, and an exact
+// result count is a fingerprint of the user's asset library.
+function bucketCount(n) {
+  if (!n) return '0'
+  if (n < 5) return '1-5'
+  if (n < 20) return '5-20'
+  return '20+'
+}
 import * as api from '../api.js'
 import { ClaudeLogo, IconAlert, IconKey, IconEye, IconEyeOff, IconBrain, IconTool, IconMovie, IconChevron, IconFolder } from '../components/icons.jsx'
 import CapabilityInstall from '../CapabilityInstall.jsx'
@@ -78,6 +88,18 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
   const queryText = range?.query ?? null
   useEffect(() => { setActive(0); setDismissed(false) }, [queryText])
 
+  // A query that opened and found NOTHING is the signal worth having: the user looked for an
+  // asset that is not there. Fires on the query closing, not per keystroke.
+  const lastMiss = useRef(null)
+  useEffect(() => {
+    if (queryText == null) { lastMiss.current = null; return }
+    if (results.length || queryText.length < 2 || lastMiss.current === queryText) return
+    lastMiss.current = queryText
+    track('asset_mention_menu', {
+      result_count: '0', query_chars: queryText.length, outcome: 'dismissed', input_method: 'keyboard',
+    })
+  }, [queryText, results.length])
+
   // Restore the caret after an insertion (React re-renders from `input`, losing it).
   useEffect(() => {
     if (pendingCaret.current == null) return
@@ -96,6 +118,14 @@ export default function ChatPanel({ chat, disabled = false, className = '', auth
 
   function chooseMention(candidate) {
     if (!candidate || !range) return
+    // A COUNT and a LENGTH, never the query: what the user typed after `@` is their own
+    // filename vocabulary. `query_chars` is one of the three verified scrub-safe *_chars names.
+    track('asset_mention_menu', {
+      result_count: bucketCount(results.length),
+      query_chars: (range.query || '').length,
+      outcome: 'selected',
+      input_method: 'mouse',
+    })
     const out = applyMention(input, range, candidate.path)
     pendingCaret.current = out.caret
     setInput(out.text)

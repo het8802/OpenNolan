@@ -1,0 +1,20 @@
+{
+  "$comment": "S7's volume model, machine-checked by tests/contracts/test_analytics_budget.py. `heavy_journey` is the reviewer's D10 counterexample recomputed across ALL THREE TIERS \u2014 the approved plan sized S7 for 49 P0 events and this build ships 76 names. `expected_productive_session` is the catalog's own SS6 model, which was already all-tier.",
+  "heavy_journey": {
+    "$comment": "8 asset imports + probes, 10 asset adds, 4 project opens, 6 preview switches, 2 agent turns with tool failures, 2 renders, 1 export, plus normal start events. Recomputed VERBATIM it reached 92 \u2014 under the 100 hard cap but 2.3x the <=40 expected, with zero headroom. Two families drove it and BOTH violate the catalog's own SS3 rule ('the 6 families allowed to upload per-interaction'): asset_added_to_doc (10) and preview_mode_switched (6) are neither. They are now rollups, which is the ratified behaviour rather than a new ceiling \u2014 and the joins survive, because properties are free and events are not: asset_added_to_doc carries the asset_id ARRAY that row 37's human_add_rate joins on, and preview_mode_switched's question ('do users keep flipping to render?') is answered better by switch COUNTERS on preview_health than by 6 separate events.",
+    "verbatim_total": 92,
+    "after_rollups": 78,
+    "electron": [
+      "app_launch_started",
+      "session_started",
+      "backend_ready",
+      "session_ended"
+    ]
+  },
+  "per_source": {
+    "electron": 4,
+    "backend": 49,
+    "renderer": 25
+  },
+  "expected_productive_session": 34
+}

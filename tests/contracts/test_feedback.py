@@ -33,18 +33,23 @@ captured: list = []
 
 # ── validation ────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("kind,msg", [
-    ("spam", "hi"),          # bad kind
-    ("bug", ""),             # empty
-    ("bug", "   "),          # whitespace only
-    ("feature", "x" * 5001), # too long
-])
+
+@pytest.mark.parametrize(
+    "kind,msg",
+    [
+        ("spam", "hi"),  # bad kind
+        ("bug", ""),  # empty
+        ("bug", "   "),  # whitespace only
+        ("feature", "x" * 5001),  # too long
+    ],
+)
 def test_invalid_submissions_raise(kind, msg):
     with pytest.raises(feedback.FeedbackError):
         feedback.submit(kind, msg)
 
 
 # ── durable local record ────────────────────────────────────────────────────────
+
 
 def test_submit_always_stores_locally(tmp_path):
     out = feedback.submit("bug", "scrub bar freezes on seek", email="het@example.com")
@@ -65,11 +70,15 @@ def test_submit_emits_metadata_only_event():
     assert args[0] == "feedback_submitted"
     props = args[1]
     assert props["kind"] == "feature" and props["has_email"] is True
-    # the raw body is passed to analytics.capture, which scrubs it (message -> message_len);
-    # scrub behavior itself is covered in test_analytics.py.
+    # Only a LENGTH leaves this function — the body is never handed to analytics at all.
+    # `feedback_chars`, not `message_len`: _scrub matches the KEY, so anything containing
+    # "message" is rewritten to "<key>_len" and a numeric length becomes None.
+    assert props["feedback_chars"] == len("add auto-captions")
+    assert not any("message" in k for k in props)
 
 
 # ── Resend email (best effort) ───────────────────────────────────────────────────
+
 
 def test_email_sent_when_configured(monkeypatch):
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
@@ -109,6 +118,7 @@ def test_email_failure_is_graceful(monkeypatch, tmp_path):
 
 # ── relay (public path — no secret shipped in the app) ──────────────────────────
 
+
 def test_relay_used_when_configured(monkeypatch, tmp_path):
     monkeypatch.setenv("FEEDBACK_RELAY_URL", "https://opennolan.app/api/feedback")
     monkeypatch.setenv("FEEDBACK_RELAY_TOKEN", "tok123")
@@ -116,6 +126,7 @@ def test_relay_used_when_configured(monkeypatch, tmp_path):
 
     class FakeResp:
         status_code = 200
+
         def json(self):
             return {"ok": True, "emailed": True}
 
@@ -131,7 +142,7 @@ def test_relay_used_when_configured(monkeypatch, tmp_path):
     assert sent["url"] == "https://opennolan.app/api/feedback"
     assert sent["token"] == "tok123"
     assert sent["json"]["kind"] == "bug" and sent["json"]["message"] == "relay this"
-    assert (tmp_path / "feedback.jsonl").exists()          # still stored locally regardless
+    assert (tmp_path / "feedback.jsonl").exists()  # still stored locally regardless
 
 
 def test_relay_failure_falls_back_and_is_graceful(monkeypatch, tmp_path):
@@ -141,12 +152,13 @@ def test_relay_failure_falls_back_and_is_graceful(monkeypatch, tmp_path):
         raise feedback.requests.RequestException("relay down")
 
     monkeypatch.setattr(feedback.requests, "post", boom)
-    out = feedback.submit("bug", "still stored")           # no direct Resend key either
+    out = feedback.submit("bug", "still stored")  # no direct Resend key either
     assert out["stored"] is True and out["emailed"] is False
     assert (tmp_path / "feedback.jsonl").exists()
 
 
 # ── debug-report attachment (editor "send debug session" flow) ──────────────────
+
 
 def _write_session(session, events):
     from server import debug_log
@@ -156,14 +168,17 @@ def _write_session(session, events):
 
 def test_debug_attachment_built_from_session_log(tmp_path):
     session = "2026-07-09T00-00-00-000Z-abcd"
-    _write_session(session, [
-        {"seq": 0, "type": "session.start"},
-        {"seq": 1, "type": "console", "level": "error", "data": {"args": ["boom"]}},
-        {"seq": 2, "type": "session.stop"},
-    ])
+    _write_session(
+        session,
+        [
+            {"seq": 0, "type": "session.start"},
+            {"seq": 1, "type": "console", "level": "error", "data": {"args": ["boom"]}},
+            {"seq": 2, "type": "session.stop"},
+        ],
+    )
     att = feedback._debug_attachment(session)
     assert att["filename"] == f"debug-session-{session}.ndjson"
-    decoded = base64.b64decode(att["content"]).decode("utf-8")   # base64 round-trips to the raw NDJSON
+    decoded = base64.b64decode(att["content"]).decode("utf-8")  # base64 round-trips to the raw NDJSON
     assert "session.stop" in decoded and "boom" in decoded
 
 
@@ -190,10 +205,10 @@ def test_submit_emails_the_log_as_a_file_attachment_not_body(monkeypatch, tmp_pa
     out = feedback.submit("bug", "canvas froze", debug_session=session)
     assert out["emailed"] is True
 
-    att = sent["json"]["attachments"][0]                 # the log is a Resend attachment…
+    att = sent["json"]["attachments"][0]  # the log is a Resend attachment…
     assert att["filename"] == f"debug-session-{session}.ndjson"
     assert "session.stop" in base64.b64decode(att["content"]).decode("utf-8")
-    assert "session.stop" not in sent["json"]["text"]    # …NOT pasted into the email body
+    assert "session.stop" not in sent["json"]["text"]  # …NOT pasted into the email body
     assert captured[-1][0][1]["has_attachment"] is True  # analytics flags it (metadata only)
 
 
@@ -222,6 +237,7 @@ def test_endpoint_passes_debug_session_through(tmp_path):
 
 
 # ── endpoint ──────────────────────────────────────────────────────────────────
+
 
 def test_endpoint_ok_and_validation(monkeypatch, tmp_path):
     import tempfile

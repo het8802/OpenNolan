@@ -1,0 +1,44 @@
+{
+  "$comment": "Analytics taxonomy \u2014 feedback family. Merged with its siblings by server/analytics.taxonomy(); see _envelope.json.",
+  "events": {
+    "feedback_submitted": {
+      "$comment": "feedback_chars, NOT message_len: _scrub rewrites any key containing 'message' to '<key>_len' with a None value.",
+      "question": "Who complains, and had they succeeded first?",
+      "critical": true,
+      "properties": {
+        "kind": "E",
+        "feedback_chars": "N",
+        "has_email": "F",
+        "has_diagnostics": "F",
+        "has_debug_session": "F",
+        "has_attachment": "F"
+      }
+    },
+    "feedback_delivery_failed": {
+      "$comment": "The only qualitative channel there is \u2014 silent loss is unacceptable.",
+      "question": "Is user feedback actually reaching us?",
+      "critical": true,
+      "properties": {
+        "channel": "E",
+        "class": "E",
+        "locally_stored": "F"
+      }
+    }
+  },
+  "enums": {
+    "feedback_submitted.kind": [
+      "bug",
+      "feature",
+      "other"
+    ],
+    "feedback_delivery_failed.channel": [
+      "relay",
+      "resend"
+    ],
+    "feedback_delivery_failed.class": [
+      "timeout",
+      "http",
+      "network"
+    ]
+  }
+}

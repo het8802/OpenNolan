@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -65,9 +66,7 @@ def write_edit_decisions(projects_dir: Path | str, project_id: str, doc: dict[st
     atomic_write_json(edit_decisions_path(projects_dir, project_id), doc)
 
 
-def resolve_source_path(
-    projects_dir: Path | str, project_id: str, ref: str
-) -> Optional[Path]:
+def resolve_source_path(projects_dir: Path | str, project_id: str, ref: str) -> Optional[Path]:
     """Resolve a cut's `source` (or an overlay `asset_id`) to a real file ON DISK.
 
     Mirrors `video_compose`'s resolution so the editor's scrub preview reads the SAME
@@ -88,11 +87,7 @@ def resolve_source_path(
     # Curated, in-repo asset libraries the renderer uses (parent of projects_dir is the repo).
     shared_root = (Path(projects_dir).parent / "assets").resolve()
     manifest = read_asset_manifest(projects_dir, project_id)
-    lookup = {
-        a.get("id"): a
-        for a in manifest.get("assets", [])
-        if isinstance(a, dict) and a.get("id")
-    }
+    lookup = {a.get("id"): a for a in manifest.get("assets", []) if isinstance(a, dict) and a.get("id")}
     raw = ref
     entry = lookup.get(ref)
     if entry and entry.get("path"):
@@ -107,8 +102,8 @@ def resolve_source_path(
         # the parent of the projects dir). Project-relative is the manual-editor fallback.
         candidates = [
             Path(projects_dir).parent / raw,  # repo-root-relative: "projects/<id>/assets/.."
-            proj / raw,                        # project-relative:  "assets/video/x.mp4"
-            Path(projects_dir) / raw,          # projects-dir-relative
+            proj / raw,  # project-relative:  "assets/video/x.mp4"
+            Path(projects_dir) / raw,  # projects-dir-relative
         ]
     for c in candidates:
         try:
@@ -137,6 +132,40 @@ def read_asset_manifest(projects_dir: Path | str, project_id: str) -> dict[str, 
         return {"assets": []}
 
 
+def _proxy_event(
+    *, target: str, source_codec: str, cache_hit: bool, outcome: str, started: float, out: Optional[Path] = None
+) -> None:
+    """Chromium cannot decode ProRes, and HyperFrames alpha overlays ARE ProRes 4444 — so
+    previewing the agent's own output silently transcodes. This is the event that makes that
+    cost visible instead of felt."""
+    try:
+        from server import analytics
+
+        analytics.capture(
+            "browser_proxy_finished",
+            {
+                "source_codec": source_codec[:64] or "unknown",
+                "target": target,
+                "cache_hit": cache_hit,
+                "outcome": outcome,
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "bytes": _mb_bucket(out.stat().st_size if out and out.is_file() else None),
+            },
+        )
+    except Exception:
+        pass  # preview must never fail because telemetry did
+
+
+def _mb_bucket(size: Optional[int]) -> Optional[str]:
+    if size is None:
+        return None
+    mb = size / 1e6
+    for edge in (1, 10, 100, 1000):
+        if mb < edge:
+            return f"{'0' if edge == 1 else int(edge // 10)}-{int(edge)}"
+    return "1000+"
+
+
 def browser_preview_path(source_path: Path, cache_dir: Path) -> Optional[Path]:
     """Return a browser-decodable WebM/VP9 proxy for ProRes .mov files.
 
@@ -153,42 +182,74 @@ def browser_preview_path(source_path: Path, cache_dir: Path) -> Optional[Path]:
     """
     if source_path.suffix.lower() != ".mov":
         return None
+    t0 = time.monotonic()
     if shutil.which("ffprobe") is None or shutil.which("ffmpeg") is None:
         return None
 
     # Detect ProRes codec (prores / prores_aw / prores_ap, etc.)
     probe = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "v:0",
-         "-show_entries", "stream=codec_name",
-         "-of", "default=noprint_wrappers=1:nokey=1",
-         str(source_path)],
-        capture_output=True, text=True,
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(source_path),
+        ],
+        capture_output=True,
+        text=True,
     )
     if probe.returncode != 0:
         return None
     codec = probe.stdout.strip().lower()
     if not codec.startswith("prores"):
+        # A non-ProRes .mov: the codec IS known here, so this is the only site that can report
+        # `native_passthrough`. The non-.mov early return above is deliberately NOT hooked —
+        # no codec is known there and a non-.mov needs no proxy, so it is not a decision.
+        _proxy_event(target="native_passthrough", source_codec=codec, cache_hit=False, outcome="skipped", started=t0)
         return None
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     out = cache_dir / (source_path.stem + ".webm")
     if out.is_file() and out.stat().st_size > 0:
+        _proxy_event(target="vp9_alpha", source_codec=codec, cache_hit=True, outcome="success", started=t0, out=out)
         return out  # cache hit
 
     # Transcode: VP9 with alpha (yuva420p), fast preset for live preview use.
     # -deadline realtime -cpu-used 8 trades quality for speed (~2-4x realtime on M1).
     tmp = out.with_suffix(".tmp.webm")
     proc = subprocess.run(
-        ["ffmpeg", "-y", "-i", str(source_path),
-         "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p",
-         "-b:v", "0", "-crf", "30",
-         "-deadline", "realtime", "-cpu-used", "8",
-         "-an", str(tmp)],
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(source_path),
+            "-c:v",
+            "libvpx-vp9",
+            "-pix_fmt",
+            "yuva420p",
+            "-b:v",
+            "0",
+            "-crf",
+            "30",
+            "-deadline",
+            "realtime",
+            "-cpu-used",
+            "8",
+            "-an",
+            str(tmp),
+        ],
         capture_output=True,
     )
     if proc.returncode != 0 or not tmp.is_file() or tmp.stat().st_size == 0:
         tmp.unlink(missing_ok=True)
+        _proxy_event(target="vp9_alpha", source_codec=codec, cache_hit=False, outcome="failed", started=t0)
         return None
 
     tmp.rename(out)
+    _proxy_event(target="vp9_alpha", source_codec=codec, cache_hit=False, outcome="success", started=t0, out=out)
     return out

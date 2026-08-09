@@ -275,7 +275,7 @@ class RecordingRunner:
     def __init__(self):
         self.prompts: list[str] = []
 
-    async def run_turn(self, project_id, message, on_event=None):
+    async def run_turn(self, project_id, message, on_event=None, session_id=None):
         self.prompts.append(message)
 
     async def switch_session(self, project_id, session_id):

@@ -7,6 +7,11 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('openNolan', {
   desktop: true,
+  // The session id minted in main. The renderer only RECEIVES it — minting there would split
+  // a session on every ⌘R and leave pre-UI launch failures unjoinable. It rides out on the
+  // X-ON-Session header (web/src/analytics/track.js). Delivered via additionalArguments
+  // because a sandboxed preload has no ipcRenderer.sendSync and no module state to read.
+  sessionId: (process.argv.find((a) => a.startsWith('--on-session=')) || '').slice(13) || null,
   versions: {
     electron: process.versions.electron,
     chrome: process.versions.chrome,

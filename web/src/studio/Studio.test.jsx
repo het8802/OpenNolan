@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import * as api from '../api.js'
 import Studio from './Studio.jsx'
+import { flush } from '../analytics/track.js'
 
 // A minimal chat bundle (see useAgentChat) so we can mount the agent panel in isolation.
 function mockChat(overrides = {}) {
@@ -166,5 +167,146 @@ describe('editor / agent @-mention sidecar', () => {
     expect(send.mock.calls[0][1]).toEqual([
       { token: '@assets/video/hook.mp4', path: 'assets/video/hook.mp4' },
     ])
+  })
+})
+
+// Analytics P0-6: every discrete edit must carry a feature_id from the CLOSED enum, and no
+// upload may happen per interaction — the summary is one event, flushed on pagehide. Both
+// halves matter: an untagged commit is invisible in the feature ledger, and a per-commit
+// upload breaches the session event ceiling on its own (a 20-minute session is 50-300 commits).
+describe('editor telemetry', () => {
+  // Capture every telemetry batch POST for the duration of one test.
+  function withPostedBatches(fn) {
+    const posted = []
+    const realFetch = global.fetch
+    global.fetch = vi.fn((url, init) => {
+      if (String(url).includes('/api/telemetry/events')) posted.push(JSON.parse(init.body))
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    // track.js's queue is module state shared by every test in this file, and a flush that
+    // fails RE-QUEUES its batch (deliberately — a transient network blip must not drop
+    // events). Earlier tests mount and unmount Studio with no fetch mock in place, so their
+    // summaries are still sitting in that queue. Drain it before observing anything, or this
+    // test reads the previous test's numbers.
+    flush()
+    posted.length = 0
+    return Promise.resolve(fn(posted)).finally(() => { global.fetch = realFetch })
+  }
+
+  const summaryIn = (posted) =>
+    posted.flatMap((b) => b.events).find((e) => e.event === 'editor_session_summary')
+
+  // THE regression this suite exists for. Live QA did a real speed edit, closed the editor
+  // normally, and saw ZERO telemetry requests — because closing the editor sets editing=false
+  // in App.jsx, which UNMOUNTS Studio while the document lives on. `pagehide` never fires on
+  // that path, so the one event carrying every feature_id never left the app.
+  it('uploads the summary when the EDITOR closes, not only when the document unloads', async () =>
+    withPostedBatches(async (posted) => {
+      const { unmount } = render(<Studio projectId="p1" state={{ name: 'demo-project' }} onClose={() => {}} />)
+      await screen.findByText('demo-project')
+
+      fireEvent.click(screen.getByTitle('Duplicate clip'))
+      expect(posted).toEqual([]) // ← still no per-interaction upload
+
+      unmount() // = the user clicking Close, or switching project
+      await waitFor(() => expect(summaryIn(posted)).toBeTruthy())
+      expect(summaryIn(posted).properties.features['editor.duplicate'].commits).toBe(1)
+    }))
+
+  it('tags each timeline action with its feature_id and uploads exactly one summary', async () =>
+    withPostedBatches(async (posted) => {
+      render(<Studio projectId="p1" state={{ name: 'demo-project' }} onClose={() => {}} />)
+      await screen.findByText('demo-project')
+
+      fireEvent.click(screen.getByTitle('Duplicate clip'))
+      fireEvent.click(screen.getByTitle(/Delete selection/))
+      expect(posted).toEqual([])       // ← no per-interaction upload
+
+      window.dispatchEvent(new Event('pagehide'))
+      await waitFor(() => expect(posted.length).toBe(1))
+
+      const summary = summaryIn(posted)
+      expect(summary).toBeTruthy()
+      expect(summary.properties.features['editor.duplicate'].commits).toBe(1)
+      expect(summary.properties.features['editor.delete'].commits).toBe(1)
+      expect(summary.properties.action_digest).toEqual(['editor.duplicate', 'editor.delete'])
+      expect(summary.properties.commits).toBe(2)
+    }))
+
+  it('sends EXACTLY ONE summary when a teardown is followed by an unmount', async () =>
+    withPostedBatches(async (posted) => {
+      const { unmount } = render(<Studio projectId="p1" state={{ name: 'demo-project' }} onClose={() => {}} />)
+      await screen.findByText('demo-project')
+      fireEvent.click(screen.getByTitle('Duplicate clip'))
+
+      window.dispatchEvent(new Event('pagehide'))
+      unmount()
+      await waitFor(() => expect(posted.length).toBeGreaterThan(0))
+      const summaries = posted.flatMap((b) => b.events).filter((e) => e.event === 'editor_session_summary')
+      expect(summaries).toHaveLength(1)
+    }))
+
+  it('still reports an OPENED but untouched editor — that is the zero-use denominator', async () =>
+    withPostedBatches(async (posted) => {
+      // Suppressing this would leave only sessions where somebody did something, which
+      // inflates every per-feature adoption rate exactly where the numbers are smallest.
+      const { unmount } = render(<Studio projectId="p1" state={{ name: 'demo-project' }} onClose={() => {}} />)
+      await screen.findByText('demo-project')
+      unmount()
+      await waitFor(() => expect(summaryIn(posted)).toBeTruthy())
+      expect(summaryIn(posted).properties.commits).toBe(0)
+      expect(summaryIn(posted).properties.features_used).toEqual([])
+    }))
+})
+
+// F2 — asset_added_to_doc.asset_ids was ALWAYS []. `assetIds.current` (the path -> asset_id map
+// recordAdd() looks up) was declared and read but assigned nowhere, and GET /assets did not
+// return an asset_id to build it from. Both halves are fixed; this asserts the join key actually
+// arrives, because an empty array is indistinguishable from "the user added nothing".
+describe('asset_added_to_doc carries the join key', () => {
+  const withPostedBatches = async (fn) => {
+    const posted = []
+    const realFetch = global.fetch
+    global.fetch = vi.fn((url, init) => {
+      if (String(url).includes('/api/telemetry/events')) posted.push(JSON.parse(init.body))
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    flush()
+    posted.length = 0
+    return Promise.resolve(fn(posted)).finally(() => { global.fetch = realFetch })
+  }
+
+  it('reports the asset_id the backend persisted at ingest, not an empty array', async () => {
+    // listAssets supplies the map; browseProject supplies the clickable panel entry. They agree
+    // on `path` — which is exactly what broke server-side: the manifest was keyed by a
+    // PROJECTS-DIR-relative path while every reader uses the project-relative one.
+    vi.mocked(api.listAssets).mockResolvedValue({
+      kinds: { images: [], video: [{ path: 'assets/video/a.mp4', name: 'a.mp4', asset_id: 'aid-123' }], audio: [], music: [] },
+      renders: [], agent_renders: [],
+    })
+    vi.mocked(api.browseProject).mockResolvedValue({
+      path: '', entries: [{ name: 'a.mp4', path: 'assets/video/a.mp4', is_dir: false, kind: 'video', mtime: 1 }],
+    })
+    // No cuts, so Studio auto-selects nothing and the inspector falls to its Assets tab — the
+    // only surface that can call recordAdd(). (With a cut present the first one is selected on
+    // load and the panel shows properties instead, which is why a browser pass never reaches it.)
+    vi.mocked(api.getEditDecisions).mockResolvedValue({
+      content: { version: '1.0', render_runtime: 'ffmpeg', cuts: [] },
+    })
+    await withPostedBatches(async (posted) => {
+      const { unmount } = render(<Studio projectId="p1" state={{ name: 'demo-project' }} onClose={() => {}} />)
+      await screen.findByText('demo-project')
+
+      fireEvent.click(await screen.findByTitle(/a\.mp4 — click to open/))
+      fireEvent.click(await screen.findByText('+ Append as clip'))
+
+      unmount()
+      await waitFor(() => {
+        const added = posted.flatMap((b) => b.events).find((e) => e.event === 'asset_added_to_doc')
+        expect(added).toBeTruthy()
+        expect(added.properties.asset_ids).toEqual(['aid-123'])
+        expect(added.properties.by_method).toEqual({ asset_click: 1 })
+      })
+    })
   })
 })

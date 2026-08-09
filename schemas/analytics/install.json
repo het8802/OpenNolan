@@ -1,0 +1,227 @@
+{
+  "$comment": "Analytics taxonomy \u2014 install family. Merged with its siblings by server/analytics.taxonomy(); see _envelope.json.",
+  "events": {
+    "app_first_run": {
+      "question": "How many real installs are there?",
+      "critical": true,
+      "properties": {
+        "os": "E",
+        "app_version": "E"
+      }
+    },
+    "app_opened": {
+      "question": "Did the backend boot?",
+      "properties": {
+        "os": "E",
+        "app_version": "E"
+      }
+    },
+    "app_launch_started": {
+      "question": "Do launches start, and did the previous one end cleanly?",
+      "properties": {
+        "launch_kind": "E",
+        "previous_exit": "E",
+        "app_version": "E",
+        "prior_session_id": "I"
+      }
+    },
+    "backend_ready": {
+      "question": "How long until the API is usable?",
+      "properties": {
+        "startup_ms": "N",
+        "probe_count": "N",
+        "dev": "F"
+      }
+    },
+    "launch_failure": {
+      "question": "Why can a user not get in at all?",
+      "critical": true,
+      "properties": {
+        "phase": "E",
+        "failure_class": "E",
+        "retryable": "F"
+      }
+    },
+    "session_started": {
+      "question": "The session denominator for every per-session rate.",
+      "properties": {
+        "entry": "E"
+      }
+    },
+    "session_ended": {
+      "$comment": "ENRICHMENT ONLY, never a denominator \u2014 a hard crash reaches neither before-quit nor pagehide.",
+      "question": "What shape does a session have?",
+      "properties": {
+        "duration_s": "N",
+        "exit_kind": "E"
+      }
+    },
+    "process_gone": {
+      "question": "Which native failures escape JS?",
+      "critical": true,
+      "properties": {
+        "process": "E",
+        "reason": "E",
+        "exit_code_bucket": "B",
+        "session_fatal": "F"
+      }
+    },
+    "provision_started": {
+      "question": "What blocks entry to the app on a first run?",
+      "properties": {
+        "tier": "E",
+        "reason": "E"
+      }
+    },
+    "provision_finished": {
+      "$comment": "Hooked at the AWAITED per-tier resolutions, NOT the NDJSON relay: the relay's first branch fires per LOG LINE (banned hook class 3). 1-2 per install.",
+      "question": "Can a new user finish setup?",
+      "properties": {
+        "tier": "E",
+        "outcome": "E",
+        "duration_s": "B"
+      }
+    },
+    "provisioning_error": {
+      "$comment": "SENS \u2014 the failure is CLASSIFIED locally; the raw stderr tail stays in the setup window and the local log, exactly as launch_failure already does.",
+      "question": "What is the first-run failure taxonomy?",
+      "critical": true,
+      "properties": {
+        "tier": "E",
+        "stage": "E",
+        "failure_class": "E"
+      }
+    },
+    "provisioning_snapshot": {
+      "$comment": "CHANGE-ONLY against a module-level last-hash. /api/doctor is called by setup and Settings, not polled. free_gb and proxy_cache_mb are NOT in provision.doctor() \u2014 they are computed in the app-layer handler, which is also the only layer allowed to touch analytics.",
+      "question": "What state are real installs actually in?",
+      "properties": {
+        "venv_ok": "F",
+        "core_ok": "F",
+        "ffmpeg_ok": "F",
+        "node_ok": "F",
+        "remotion_ok": "F",
+        "hyperframes_ok": "F",
+        "composition_ok": "F",
+        "packs": "A",
+        "free_gb": "B",
+        "proxy_cache_mb": "B"
+      }
+    },
+    "pack_install_outcome": {
+      "$comment": "Hooked at the SERVER streaming boundary. An earlier draft cited lib/provision.py, which is both a function DEFINITION and inside lib/ \u2014 violating the catalog's own banned-hook rule ('lib must not depend on server').",
+      "question": "Does anyone take the 2.6 GB pack?",
+      "properties": {
+        "pack": "E",
+        "outcome": "E",
+        "duration_s": "B",
+        "size_mb": "B"
+      }
+    },
+    "update_lifecycle": {
+      "question": "Do users actually get our fixes?",
+      "properties": {
+        "phase": "E",
+        "target_version": "E"
+      }
+    }
+  },
+  "enums": {
+    "launch_kind": [
+      "cold",
+      "activate",
+      "post_update"
+    ],
+    "previous_exit": [
+      "clean",
+      "crash",
+      "unknown"
+    ],
+    "entry": [
+      "dashboard",
+      "editor"
+    ],
+    "exit_kind": [
+      "clean",
+      "update",
+      "crash"
+    ],
+    "exit_code_bucket": [
+      "unknown",
+      "0",
+      "signal",
+      "1-127",
+      "128+"
+    ],
+    "process": [
+      "renderer",
+      "gpu",
+      "utility",
+      "zygote",
+      "sandbox_helper",
+      "pepper_plugin",
+      "pepper_plugin_broker",
+      "unknown"
+    ],
+    "launch_failure.phase": [
+      "provision",
+      "port",
+      "spawn",
+      "health"
+    ],
+    "launch_failure.failure_class": [
+      "health_timeout",
+      "backend_exited",
+      "ui_missing",
+      "port",
+      "missing_binary",
+      "provision",
+      "unknown"
+    ],
+    "tier": [
+      "core",
+      "composition",
+      "pack"
+    ],
+    "provision_started.reason": [
+      "missing"
+    ],
+    "provision_finished.outcome": [
+      "success",
+      "failed",
+      "cancelled"
+    ],
+    "provisioning_error.stage": [
+      "doctor",
+      "download",
+      "install"
+    ],
+    "provisioning_error.failure_class": [
+      "health_timeout",
+      "backend_exited",
+      "ui_missing",
+      "port",
+      "missing_binary",
+      "provision",
+      "disk",
+      "network",
+      "permission",
+      "unknown"
+    ],
+    "pack_install_outcome.outcome": [
+      "success",
+      "failed",
+      "cancelled"
+    ],
+    "update_lifecycle.phase": [
+      "available",
+      "downloaded",
+      "install_clicked",
+      "failed"
+    ]
+  },
+  "open_vocabularies": {
+    "reason": "process_gone: Chromium's own exit-reason vocabulary.",
+    "target_version": "A semver string from OUR published update feed. No user-input path."
+  }
+}

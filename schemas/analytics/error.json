@@ -1,0 +1,103 @@
+{
+  "$comment": "Analytics taxonomy \u2014 error family. Merged with its siblings by server/analytics.taxonomy(); see _envelope.json.",
+  "events": {
+    "desktop_error": {
+      "$comment": "Posted DIRECTLY to PostHog by desktop/main.js (the backend may never have started), so it does NOT pass through server/analytics.validate_event \u2014 main.js runs the same gate itself against this merged taxonomy. It used to send `message` (500 chars) and `stack` (8000 chars), which were undeclared and therefore unvalidated: a live free-text path to the wire. They are replaced by the classified triple below, the same pattern launch_failure already ships. Raw text stays in the local log and the fatal dialog.",
+      "question": "Did the shell crash before the backend could report anything?",
+      "critical": true,
+      "properties": {
+        "source": "E",
+        "app_version": "E",
+        "os": "E",
+        "arch": "E",
+        "packaged": "F",
+        "fatal": "F",
+        "exception_class": "E",
+        "top_frame": "E",
+        "stack_hash": "I"
+      }
+    },
+    "error_reported": {
+      "$comment": "The bounded, taxonomy-gated twin of the SDK's own `$exception`, which is diagnostic and ungated. `fatal` MUST be honored by wall #5's crash numerator \u2014 counting handled errors as crashes was the original defect. `fingerprint` groups on the exception CLASS plus the top frame's BASENAME, never the message: a message embeds ids and paths, so hashing it would give every occurrence its own group.",
+      "question": "One crash inbox \u2014 what is breaking, where, and is it fatal?",
+      "critical": true,
+      "properties": {
+        "layer": "E",
+        "fatal": "F",
+        "handled": "F",
+        "fingerprint": "E"
+      }
+    },
+    "http_error": {
+      "$comment": "The CLIENT-side choke point. Every FastAPI HTTPException bypasses the backend's global exception handler, so this whole 4xx surface is invisible server-side. A per-session ROLLUP: uploading one event per 4xx would put a broken poll loop straight through the budget. The route TEMPLATE, never the concrete path \u2014 /api/projects/q4-launch-teaser/assets is the project slug.",
+      "question": "The whole 4xx surface. Every 422 and 404 is a UX bug we cannot currently see.",
+      "critical": true,
+      "properties": {
+        "count": "N",
+        "by_status": "O",
+        "by_route": "O"
+      }
+    },
+    "network_operation_failed": {
+      "$comment": "NOT inside api.js's json(): json() runs only when the fetch RESOLVES, so offline / dns / tls / reset reject before a response exists and 5 of the 7 declared classes were unobservable there.",
+      "question": "Where does connectivity break a local-first app?",
+      "critical": true,
+      "properties": {
+        "operation": "E",
+        "class": "E",
+        "recovered": "F"
+      }
+    },
+    "data_quality_violation": {
+      "$comment": "Reported on the NEXT successful capture, never from inside validate_event \u2014 that would re-enter the validator on the event already being rejected. Bounded to one pending violation: the question is 'is the taxonomy drifting', and the first one answers it.",
+      "question": "Is the taxonomy drifting away from the code?",
+      "critical": true,
+      "properties": {
+        "class": "E",
+        "event_name": "E",
+        "blocked": "F"
+      }
+    }
+  },
+  "enums": {
+    "desktop_error.source": [
+      "fatal",
+      "main-uncaught",
+      "main-rejection",
+      "renderer-gone",
+      "child-gone"
+    ],
+    "layer": [
+      "electron_main",
+      "renderer",
+      "react",
+      "python_api"
+    ],
+    "network_operation_failed.operation": [
+      "auth",
+      "analytics",
+      "asset_api",
+      "update",
+      "provision"
+    ],
+    "network_operation_failed.class": [
+      "offline",
+      "dns",
+      "timeout",
+      "tls",
+      "reset"
+    ],
+    "data_quality_violation.class": [
+      "unknown_event",
+      "unknown_property",
+      "wrong_type"
+    ]
+  },
+  "open_vocabularies": {
+    "arch": "process.arch. Supplied by the runtime.",
+    "exception_class": "A JS/Python exception CLASS name (TypeError, ENOENT, RenderError). Produced by the runtime or by our own raise sites; never a message body. Bounded-token only, so a class name carrying prose fails the shape check and is dropped.",
+    "top_frame": "basename:line of the topmost stack frame, e.g. `main.js:842`. The directory is stripped at the emit site because a full frame is /Users/<username>/..., i.e. the OS username. Our own source filenames; no user-input path.",
+    "fingerprint": "ExceptionClass@basename:line, built at the emit site from the exception type and the top frame's BASENAME. No message body, no directory \u2014 the directory is /Users/<username>/.",
+    "event_name": "An event name from this very taxonomy, or the undeclared name that was rejected. Bounded-token shape only, so a name carrying prose is dropped."
+  }
+}

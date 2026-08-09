@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Optional
 
@@ -245,7 +246,7 @@ from lib.project import (
     list_projects,
     sanitize_filename,
 )
-from styles.playbook_loader import list_playbooks, load_playbook
+from styles.playbook_loader import builtin_playbooks, list_playbooks, load_playbook
 from server import activity as activity_mod
 from server import analytics as analytics_mod
 from server import artifacts as artifacts_mod
@@ -253,6 +254,9 @@ from server import settings as settings_mod
 from server import auth as auth_mod
 from server import debug_log as debug_log_mod
 from server import editor as editor_mod
+from server import lifecycle as lifecycle_mod
+from server import outbox as outbox_mod
+from server import render_jobs as render_jobs_mod
 from server import threads as thread_store
 from server.agent_runner import AgentRunner, auth_configured
 from server.render_jobs import RenderJobStore
@@ -348,6 +352,16 @@ class ClientErrorReport(BaseModel):
     context: Optional[dict[str, Any]] = None
 
 
+# A runaway renderer must not be able to fan one POST into unbounded ingestion.
+_TELEMETRY_BATCH_MAX = 100
+
+
+class TelemetryBatch(BaseModel):
+    # Product events from the renderer (web/src/analytics/track.js). Each entry is
+    # {event, properties}; the taxonomy gate in analytics.validate_event decides what survives.
+    events: list[dict[str, Any]] = []
+
+
 class DebugLogBody(BaseModel):
     # A batch from the editor's UI session recorder (web/src/debug/recorder.js).
     session: str
@@ -389,6 +403,263 @@ def _default_capabilities() -> dict[str, Any]:
     return registry.provider_menu_summary()
 
 
+# ── schema-alarm classifiers ─────────────────────────────────────────────────
+# A jsonschema message quotes the OFFENDING VALUE, which in this document is a source path, a
+# caption or a project name. Only the SHAPE of the failure travels.
+
+_DOC_OBJECTS = (("cuts", "cut"), ("overlays", "overlay"), ("audio", "audio"))
+_KNOWN_FIELDS = frozenset(
+    "source in_seconds out_seconds speed transform position scale crop keyframes transition "
+    "track opacity start_seconds end_seconds volume gain_db canvas width height renderer_family "
+    "render_runtime asset_id text duration".split()
+)
+
+
+def _rejected_object_kind(detail: str) -> str:
+    d = detail.lower()
+    for marker, kind in _DOC_OBJECTS:
+        if marker in d:
+            return kind
+    return "document"
+
+
+def _rejected_field(detail: str) -> str:
+    """The first DECLARED field name mentioned. An undeclared token is not echoed back: it
+    would be whatever the user typed."""
+    import re as _re
+
+    for token in _re.findall(r"[a-z_]{3,40}", detail.lower()):
+        if token in _KNOWN_FIELDS:
+            return token
+    return "unknown"
+
+
+# ── asset ingest telemetry ───────────────────────────────────────────────────
+# The filename NEVER ships. RULES.md: a user can drop any media on us, so a name is customer
+# and campaign text — `extension` is a closed enum and `asset_id` is an opaque persisted uuid4.
+
+_ASSET_BYTES = (1e6, 1e7, 1e8, 1e9)
+_KNOWN_EXTENSIONS = frozenset(
+    ".mp4 .mov .m4v .webm .mkv .avi .mpg .mpeg .png .jpg .jpeg .gif .webp .heic .tif .tiff "
+    ".mp3 .wav .m4a .aac .flac .ogg .opus .aiff .srt .vtt .txt .md".split()
+)
+
+
+def _extension(name: str) -> str:
+    ext = ("." + name.rsplit(".", 1)[-1].lower()) if "." in name else ""
+    # A closed enum, so an unknown extension collapses rather than becoming a free-text field.
+    return ext if ext in _KNOWN_EXTENSIONS else "other"
+
+
+def _asset_failed(pdir: Path, project_id: str, kind: str, failure_class: str) -> None:
+    try:
+        analytics_mod.capture(
+            "asset_import_failed",
+            {
+                "kind": kind if kind in ASSET_SUBDIRS else "other",
+                "failure_class": failure_class,
+                "project_id": analytics_mod.project_key(pdir, project_id),
+            },
+        )
+    except Exception:
+        pass
+
+
+def _capture_asset_ingest(pdir: Path, project_id: str, kind: str, target: Path, rel: str, name: str) -> Optional[str]:
+    """One `asset_import_finished` + one `media_probe_finished` (or `_failed`) per asset.
+
+    The probe runs HERE, at ingest, and not on the lazy /source_meta route: codec / HDR / fps
+    are the render-outcome predictors, and /source_meta is not an ingest path at all."""
+    try:
+        from server import asset_probe
+
+        project_dir = pdir / project_id
+        # PROJECT-relative, matching the `path` GET /assets reports and asset_probe's own
+        # `rel_path` contract. `rel` here is PROJECTS-DIR-relative (it leads with the project id,
+        # because the POST response's `path` is documented that way), and keying the manifest with
+        # it meant the only reader could never find an entry — the id was minted, persisted under
+        # a key nothing looks up, and asset_ids stayed empty. One writer, one reader: fixed here,
+        # at the writer, so the key means the same thing as `path` everywhere else.
+        aid = asset_probe.asset_id(project_dir, str(target.relative_to(project_dir.resolve())))
+        analytics_mod.capture(
+            "asset_import_finished",
+            {
+                "asset_id": aid,
+                "asset_fingerprint": asset_probe.fingerprint(project_dir, target),
+                "kind": kind,
+                "source": "picker",
+                "extension": _extension(name),
+                "bytes": render_jobs_mod._bucket(target.stat().st_size, _ASSET_BYTES),
+                "outcome": "success",
+                "project_id": analytics_mod.project_key(pdir, project_id),
+            },
+        )
+        if kind in ("video", "audio", "music"):
+            fields, failure = asset_probe.probe(target)
+            if failure:
+                analytics_mod.capture(
+                    "media_probe_failed",
+                    {
+                        "extension": _extension(name),
+                        "failure_class": failure,
+                    },
+                )
+            else:
+                analytics_mod.capture("media_probe_finished", {"asset_id": aid, **(fields or {})})
+        return aid
+    except Exception:
+        return None  # ingest must never fail because telemetry did
+
+
+# ── auth telemetry helpers ───────────────────────────────────────────────────
+
+# CHANGE-ONLY. /api/auth/status is POLLED by the UI, so an event per call is a poll upload.
+# This is also why #14 is EMITTED rather than derived from the transitions: an install may
+# already hold a valid credential when analytics ships, or may never visit auth at all, and
+# would emit none of them.
+_last_auth_state: Optional[str] = None
+_AUTH_ATTEMPT: dict[str, Any] = {}
+_AUTH_SECS = (5, 30, 120, 600)
+
+
+def _capture_auth_state(snapshot: dict[str, Any]) -> None:
+    global _last_auth_state
+    try:
+        state = "connected" if snapshot.get("authenticated") else "unconnected"
+        if snapshot.get("needs_reauth"):
+            state = "needs_reauth"
+        method = snapshot.get("method") or "none"
+        shape = f"{state}:{method}"
+        if shape == _last_auth_state:
+            return
+        _last_auth_state = shape
+        analytics_mod.capture(
+            "auth_state_observed",
+            {
+                "state": state,
+                "method": method,
+                "expired": bool(snapshot.get("expired")),
+            },
+        )
+    except Exception:
+        pass
+
+
+def _classify_connect_failure(detail: str) -> str:
+    """A BOUNDED class from the error text, never the text: it can embed a pasted code, a URL
+    or a provider message. The enum is what the funnel is sliced by."""
+    d = (detail or "").lower()
+    if "state" in d or "expired" in d or "stale" in d:
+        return "expired_link"
+    if "401" in d or "403" in d or "invalid" in d or "rejected" in d:
+        return "exchange_rejected"
+    if "timeout" in d or "connection" in d or "network" in d or "dns" in d:
+        return "network"
+    if "permission" in d or "keychain" in d or "write" in d:
+        return "storage"
+    return "invalid"
+
+
+def _capture_connect_finished(method: str, outcome: str) -> None:
+    try:
+        t0 = _AUTH_ATTEMPT.pop("oauth_t0", None) if method == "oauth" else None
+        analytics_mod.capture(
+            "auth_connect_finished",
+            {
+                "method": method,
+                "outcome": outcome,
+                "duration_s": render_jobs_mod._bucket(time.monotonic() - t0, _AUTH_SECS) if t0 else None,
+                "attempts": _AUTH_ATTEMPT.pop("oauth", 1) if method == "oauth" else 1,
+            },
+        )
+    except Exception:
+        pass
+
+
+# ── provisioning telemetry helpers ───────────────────────────────────────────
+# The app layer is the only one allowed to touch analytics: `lib/` "must not depend on server",
+# which is why free_gb / proxy_cache_mb are computed HERE rather than added to provision.doctor().
+
+_PACK_SIZE_EDGES = (50, 250, 1000, 2500)
+_PROVISION_SECS = (5, 15, 60, 300)
+# CHANGE-ONLY. /api/doctor is called by the setup window and by Settings, and the setup window
+# calls it repeatedly while a tier installs — an event per call would be a poll upload.
+_last_doctor_shape: Optional[str] = None
+
+
+def _free_gb() -> Optional[float]:
+    try:
+        from lib import app_paths
+
+        return shutil.disk_usage(app_paths.home()).free / 1e9
+    except Exception:
+        return None
+
+
+def _proxy_cache_mb() -> Optional[float]:
+    """Total bytes under the render proxy cache. Best-effort and bounded: a walk of a
+    multi-GB tree is not worth blocking a status route for, so a failure returns None."""
+    try:
+        from lib import app_paths
+
+        root = app_paths.home() / "cache" / "render"
+        if not root.is_dir():
+            return 0.0
+        total = 0
+        for p in root.rglob("*"):
+            if p.is_file():
+                total += p.stat().st_size
+        return total / 1e6
+    except Exception:
+        return None
+
+
+def _capture_provisioning_snapshot(doc: dict[str, Any]) -> None:
+    global _last_doctor_shape
+    try:
+        packs = sorted(name for name, ok in (doc.get("packs") or {}).items() if ok)
+        flags = {
+            k: bool(doc.get(k))
+            for k in ("venv_ok", "core_ok", "ffmpeg_ok", "node_ok", "remotion_ok", "hyperframes_ok", "composition_ok")
+        }
+        shape = json.dumps({**flags, "packs": packs}, sort_keys=True)
+        if shape == _last_doctor_shape:
+            return
+        _last_doctor_shape = shape
+        analytics_mod.capture(
+            "provisioning_snapshot",
+            {
+                **flags,
+                "packs": packs,
+                "free_gb": render_jobs_mod._bucket(_free_gb(), (5, 20, 100, 500)),
+                "proxy_cache_mb": render_jobs_mod._bucket(_proxy_cache_mb(), (100, 500, 2000, 10000)),
+            },
+        )
+    except Exception:
+        pass  # a status route must never fail because telemetry did
+
+
+def _capture_pack_outcome(done_extra: Optional[dict], outcome: str, started: float) -> None:
+    """One event per pack install. `tier` installs are covered by Electron's provision_finished."""
+    try:
+        pack = (done_extra or {}).get("pack")
+        if not pack:
+            return
+        from lib import provision
+
+        analytics_mod.capture(
+            "pack_install_outcome",
+            {
+                "pack": pack,
+                "outcome": outcome,
+                "duration_s": render_jobs_mod._bucket(time.monotonic() - started, _PROVISION_SECS),
+                "size_mb": render_jobs_mod._bucket((provision.PACKS.get(pack) or {}).get("size_mb"), _PACK_SIZE_EDGES),
+            },
+        )
+    except Exception:
+        pass
+
+
 def create_app(
     projects_dir: Path | str | None = None,
     *,
@@ -418,13 +689,29 @@ def create_app(
 
     app = FastAPI(title="OpenNolan Mission Control", version="0.1.0")
 
+    @app.middleware("http")
+    async def _bind_session(request: Request, call_next):
+        """Bind the caller's session id for the duration of the request.
+
+        The id is minted ONCE in Electron main (so a ⌘R reload does not split a session) and
+        rides in on `X-ON-Session`. Binding it to a ContextVar here means every capture() in
+        any route picks it up with no per-route plumbing; anyio's threadpool copies the
+        context, so sync `def` routes see it too. Render/agent THREADS outlive the request and
+        do not inherit it — they carry the id explicitly on the job/turn record instead."""
+        analytics_mod.set_session_id(request.headers.get("X-ON-Session"))
+        return await call_next(request)
+
     @app.exception_handler(Exception)
     async def _report_unhandled(request: Request, exc: Exception) -> JSONResponse:
         """Catch-all for unhandled route errors: report to PostHog (no-op when opted out / under
         pytest) so backend crashes are visible, then return a clean 500. HTTPException has its own
         handler and never reaches here. Streaming routes that already started a response handle
         their own errors (see the chat SSE `drive()` below)."""
-        analytics_mod.capture_exception(exc, {"path": request.url.path, "method": request.method})
+        # handled + non-fatal: the request 500s but the app keeps running, so this must NOT
+        # land in wall #5's crash numerator.
+        analytics_mod.capture_exception(
+            exc, {"path": request.url.path, "method": request.method, "fatal": False, "handled": True}
+        )
         return JSONResponse(status_code=500, content={"detail": "internal server error"})
 
     pdir = Path(projects_dir) if projects_dir is not None else _default_projects_dir()
@@ -448,6 +735,11 @@ def create_app(
     if not settings_mod.get("app_first_run_done", False):
         analytics_mod.capture("app_first_run", {"os": platform.platform(), "app_version": app.version})
         settings_mod.set_value("app_first_run_done", True)
+
+    # The abandonment sweep. Every other event fires when a user DOES something; abandonment is
+    # the absence of that, so it has no hook and needs a detached pass. At most once per day,
+    # and it is the ONE genuinely session-less event in the catalog.
+    lifecycle_mod.sweep(pdir)
 
     def _render_store() -> RenderJobStore:
         if app.state.render_store is None:
@@ -531,6 +823,7 @@ def create_app(
         if pt is None and app_paths.is_packaged() and available:
             pt = available[0]
         if pt is not None and pt not in available:
+            analytics_mod.capture("project_create_failed", {"failure_class": "unknown_pipeline"})
             raise HTTPException(
                 status_code=422,
                 detail=f"unknown pipeline_type {pt!r}",
@@ -538,15 +831,31 @@ def create_app(
         # style is optional too; if given it must resolve to a known playbook (built-in or user).
         st = (req.style or "").strip() or None
         if st is not None and st not in set(list_playbooks()):
+            analytics_mod.capture("project_create_failed", {"failure_class": "unknown_style"})
             raise HTTPException(status_code=422, detail=f"unknown style {st!r}")
+        # builtin_playbooks(), NOT list_playbooks(packaged=False): the latter appends the
+        # user's own styles regardless of that flag, so it reported every user style as
+        # "built-in" and the name went out verbatim. That is the project-slug leak again.
+        builtin_styles = builtin_playbooks()
         try:
             created = create_project(pdir, req.name, pt, style=st)
-            analytics_mod.capture("project_created", {"pipeline_type": pt, "style": st})
+            # `style` may be a USER-created playbook whose name the user typed, so send the
+            # built-in name only and collapse everything else to "user". `pipeline_type` is
+            # validated against list_pipelines() above, so it is already a closed set.
+            analytics_mod.capture(
+                "project_created",
+                {"pipeline_type": pt, "style": (st if st in builtin_styles else "user") if st else None},
+            )
             return created
         except ProjectExistsError as exc:
+            analytics_mod.capture("project_create_failed", {"failure_class": "duplicate"})
             raise HTTPException(status_code=409, detail=str(exc))
         except ValueError as exc:  # un-sluggable name
+            analytics_mod.capture("project_create_failed", {"failure_class": "invalid_name"})
             raise HTTPException(status_code=422, detail=str(exc))
+        except OSError as exc:
+            analytics_mod.capture("project_create_failed", {"failure_class": "storage"})
+            raise HTTPException(status_code=500, detail=str(exc))
 
     @app.post("/api/projects/{project_id}/assets", status_code=201)
     def upload_asset(
@@ -557,6 +866,7 @@ def create_app(
         if get_project_record(pdir, project_id) is None:
             raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
         if kind not in ASSET_SUBDIRS:
+            _asset_failed(pdir, project_id, kind, "invalid_kind")
             raise HTTPException(
                 status_code=422,
                 detail=f"invalid asset kind {kind!r}; expected one of {list(ASSET_SUBDIRS)}",
@@ -566,23 +876,35 @@ def create_app(
         try:
             safe_name = sanitize_filename(file.filename or "")
         except ValueError as exc:
+            _asset_failed(pdir, project_id, kind, "invalid_name")
             raise HTTPException(status_code=400, detail=str(exc))
 
         target = (kind_dir / safe_name).resolve()
         base = kind_dir.resolve()
         # Defense in depth: the resolved target must stay inside the kind dir.
         if target != base and base not in target.parents:
+            _asset_failed(pdir, project_id, kind, "traversal")
             raise HTTPException(status_code=400, detail="path traversal detected")
 
         kind_dir.mkdir(parents=True, exist_ok=True)
-        with open(target, "wb") as out:
-            shutil.copyfileobj(file.file, out)
+        try:
+            with open(target, "wb") as out:
+                shutil.copyfileobj(file.file, out)
+        except OSError as exc:
+            _asset_failed(pdir, project_id, kind, "disk_full" if "space" in str(exc).lower() else "copy")
+            raise HTTPException(status_code=500, detail="could not store the asset")
+
+        rel = str(target.relative_to(pdir.resolve()))
+        # AFTER the copy, before the return: `target.stat()` is what gives the final byte count,
+        # and the probe needs the file to exist. Not at the mkdir above, which runs before it.
+        aid = _capture_asset_ingest(pdir, project_id, kind, target, rel, safe_name)
 
         return {
             "project_id": project_id,
             "kind": kind,
             "filename": safe_name,
-            "path": str(target.relative_to(pdir.resolve())),
+            "path": rel,
+            "asset_id": aid,
             "size_bytes": target.stat().st_size,
         }
 
@@ -606,6 +928,15 @@ def create_app(
         kinds: dict[str, list[dict[str, Any]]] = {"images": [], "video": [], "audio": [], "music": []}
         assets_dir = proj / "assets"
         if assets_dir.is_dir():
+            # The persisted ingest ids, read ONCE. A LOOKUP, never asset_probe.asset_id(), which
+            # mints-and-writes: this route is polled every 4s, so minting here would write the
+            # manifest on every tick and hand ids to files that were never ingested. A manually
+            # dropped file has no id and reports null — honest, and the editor just omits it.
+            # Without this the editor had no path->asset_id map at all, so asset_added_to_doc
+            # shipped asset_ids=[] forever and row 37's imported ⋈ added_in_editor join was dead.
+            from server import asset_probe
+
+            manifest = asset_probe.read_manifest(proj)
             for f in sorted(assets_dir.rglob("*")):
                 if not f.is_file() or f.name.startswith("."):
                     continue
@@ -614,7 +945,15 @@ def create_app(
                 if kind:
                     stat = f.stat()
                     kinds[kind].append(
-                        {"path": str(rel), "name": f.name, "size_bytes": stat.st_size, "mtime": int(stat.st_mtime)}
+                        {
+                            "path": str(rel),
+                            "name": f.name,
+                            "size_bytes": stat.st_size,
+                            "mtime": int(stat.st_mtime),
+                            # Resolves the legacy PROJECTS-DIR-relative key too, so ids minted
+                            # before the key was corrected still join.
+                            "asset_id": asset_probe.lookup_asset_id(proj, str(rel), manifest),
+                        }
                     )
 
         renders: list[dict[str, Any]] = []
@@ -779,7 +1118,14 @@ def create_app(
         (the UI scaffolds a minimal valid doc rather than erroring)."""
         if get_project_record(pdir, project_id) is None:
             raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
-        return {"project_id": project_id, "content": editor_mod.read_edit_decisions(pdir, project_id)}
+        return {
+            "project_id": project_id,
+            "content": editor_mod.read_edit_decisions(pdir, project_id),
+            # The random persisted analytics id. The renderer only ever knows the slug (which
+            # is the user's typed name), so without this its session summary — the one event
+            # carrying every feature_id — could not be joined to a project at all.
+            "analytics_id": analytics_mod.project_key(pdir, project_id),
+        }
 
     @app.put("/api/projects/{project_id}/edit_decisions")
     def put_edit_decisions(project_id: str, doc: dict[str, Any] = Body(...)) -> dict[str, Any]:
@@ -790,6 +1136,15 @@ def create_app(
         try:
             editor_mod.write_edit_decisions(pdir, project_id, doc)
         except editor_mod.EditDecisionsInvalid as exc:
+            analytics_mod.capture(
+                "schema_write_rejected",
+                {
+                    "object_kind": _rejected_object_kind(str(exc)),
+                    "failure_field": _rejected_field(str(exc)),
+                    "origin": "editor",
+                    "project_id": analytics_mod.project_key(pdir, project_id),
+                },
+            )
             raise HTTPException(status_code=422, detail=str(exc)[:1500])
         return {"project_id": project_id, "saved": True}
 
@@ -799,7 +1154,9 @@ def create_app(
         Supersedes any in-flight render for this project."""
         if get_project_record(pdir, project_id) is None:
             raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
-        job_id = _render_store().start(project_id)
+        # The render thread outlives this request, so it cannot read the session ContextVar
+        # later — hand the id over now and let it ride on the job record.
+        job_id = _render_store().start(project_id, session_id=analytics_mod.current_session_id())
         return {"project_id": project_id, "job_id": job_id, "status": "queued"}
 
     @app.get("/api/projects/{project_id}/render/{job_id}")
@@ -846,6 +1203,15 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
         target = editor_mod.resolve_source_path(pdir, project_id, ref)
         if target is None:
+            analytics_mod.capture(
+                "source_resolution_failed",
+                {
+                    "reference_kind": render_jobs_mod._reference_kind(ref),
+                    "consumer": "preview",
+                    "outcome": "missing",
+                    "project_id": analytics_mod.project_key(pdir, project_id),
+                },
+            )
             raise HTTPException(status_code=404, detail="source not found within project")
         cache_dir = Path(pdir) / project_id / ".browser_cache"
         preview = editor_mod.browser_preview_path(target, cache_dir)
@@ -945,6 +1311,15 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         env_config.reload_env()  # so the next agent turn / tool subprocess sees the new keys
+        for family in sorted({analytics_mod.provider_family(name) for name in body.vars}):
+            analytics_mod.capture(
+                "byok_var_saved",
+                {
+                    "provider_family": family,
+                    "changed_count": sum(1 for n in body.vars if analytics_mod.provider_family(n) == family),
+                    "outcome": "success",
+                },
+            )
         return {"changed": changed, "path": str(env_config.ENV_PATH), "vars": env_config.list_env_vars()}
 
     # ── Anthropic account auth ("Sign in with Claude" / API-key fallback) ──────────
@@ -953,11 +1328,16 @@ def create_app(
         """Whether the agent can reach the user's Anthropic account, and whether a reconnect is
         needed (expired/revoked token, rejected key). Polled by the UI to drive the sign-in CTA,
         the top-right re-auth button, and the in-chat reconnect box."""
-        return auth_mod.status()
+        snap = auth_mod.status()
+        _capture_auth_state(snap)
+        return snap
 
     @app.post("/api/auth/oauth/start")
     def auth_oauth_start() -> dict[str, Any]:
         """Begin the PKCE flow; returns the claude.ai authorize URL to open in the browser."""
+        analytics_mod.capture("oauth_started", {"entrypoint": "settings"})
+        _AUTH_ATTEMPT["oauth"] = _AUTH_ATTEMPT.get("oauth", 0) + 1
+        _AUTH_ATTEMPT["oauth_t0"] = time.monotonic()
         return auth_mod.start_oauth()
 
     @app.post("/api/auth/oauth/finish")
@@ -966,8 +1346,9 @@ def create_app(
         try:
             result = auth_mod.finish_oauth(body.code, app_state=app.state)
         except auth_mod.AuthError as exc:
+            _capture_connect_finished("oauth", _classify_connect_failure(str(exc)))
             raise HTTPException(status_code=400, detail=str(exc))
-        analytics_mod.capture("auth_connected", {"method": "oauth"})
+        _capture_connect_finished("oauth", "success")
         return result
 
     @app.post("/api/auth/api-key")
@@ -976,13 +1357,16 @@ def create_app(
         try:
             result = auth_mod.set_api_key(body.api_key, app_state=app.state)
         except auth_mod.AuthError as exc:
+            _capture_connect_finished("api_key", _classify_connect_failure(str(exc)))
             raise HTTPException(status_code=400, detail=str(exc))
-        analytics_mod.capture("auth_connected", {"method": "api_key"})
+        _capture_connect_finished("api_key", "success")
         return result
 
     @app.post("/api/auth/disconnect")
     def auth_disconnect() -> dict[str, Any]:
         """Forget the stored Anthropic credential."""
+        prior = (auth_mod.status() or {}).get("method") or "unknown"
+        analytics_mod.capture("auth_disconnected", {"prior_method": prior})
         return auth_mod.disconnect(app_state=app.state)
 
     @app.get("/api/settings/analytics")
@@ -1020,13 +1404,37 @@ def create_app(
         analytics_mod.capture_client_error(body.source, body.message, body.stack, body.context)
         return {"received": True}
 
+    @app.post("/api/telemetry/events")
+    def post_client_events(body: TelemetryBatch) -> dict[str, Any]:
+        """Renderer product events, batched. Mirrors /api/telemetry/error above.
+
+        The renderer has no PostHog client of its own on purpose: routing through here means
+        ONE validator, ONE scrubber and ONE envelope for all four sources. Always 200 — a
+        client that cannot report telemetry must not see an error because of it."""
+        accepted = 0
+        for evt in body.events[:_TELEMETRY_BATCH_MAX]:
+            name = (evt.get("event") or "").strip()
+            props = evt.get("properties")
+            if name and analytics_mod.capture(name, props if isinstance(props, dict) else None):
+                accepted += 1
+        # The renderer's 5s flush is also the backend's natural flush point, so it is where
+        # events queued by SEPARATE PROCESSES (scripts/update_stage.py) are drained.
+        for name, props in outbox_mod.drain():
+            analytics_mod.capture(name, props)
+        # `accepted` is what the renderer's session announcement clears its pending marker on,
+        # so it must mean "capture() handed this to the client", NOT "we looped over it".
+        # `received` is kept for compatibility with anything reading the old shape.
+        return {"received": min(len(body.events), _TELEMETRY_BATCH_MAX), "accepted": accepted}
+
     @app.get("/api/doctor")
     def get_doctor() -> dict[str, Any]:
         """First-run provisioning status: is the managed venv/core/ffmpeg present, which capability
         packs are installed. Drives the setup UI + the 'install pack' prompts. See lib/provision.py."""
         from lib import provision
 
-        return provision.doctor()
+        doc = provision.doctor()
+        _capture_provisioning_snapshot(doc)
+        return doc
 
     def _stream_provision(work, done_extra: Optional[dict] = None) -> StreamingResponse:
         """Run a provisioning `work(progress)` in a worker thread, streaming NDJSON log/done/error frames
@@ -1038,11 +1446,16 @@ def create_app(
         q: "queue.Queue[Optional[str]]" = queue.Queue()
 
         def worker() -> None:
+            started = time.monotonic()
             try:
                 work(lambda line: q.put(json.dumps({"type": "log", "line": line})))
                 q.put(json.dumps({"type": "done", **(done_extra or {})}))
+                _capture_pack_outcome(done_extra, "success", started)
             except Exception as exc:  # surface a clean error frame to the stream
                 q.put(json.dumps({"type": "error", "error": str(exc)}))
+                # The SERVER streaming boundary, not lib/provision.py: that is both a function
+                # DEFINITION and inside lib/, which "must not depend on server".
+                _capture_pack_outcome(done_extra, "failed", started)
             finally:
                 q.put(None)  # sentinel
 
@@ -1147,11 +1560,20 @@ def create_app(
                     await queue.put({"type": "auth_error", "detail": text[:400]})
             await queue.put(evt)
 
+        # Read the session id NOW, in the request's own context. `drive()` is a task that
+        # outlives this handler, so it cannot rely on the ContextVar still being bound.
+        session_id = analytics_mod.current_session_id()
+
         async def drive() -> None:
             try:
                 # Same object when there are no mentions, so every existing turn is
                 # byte-for-byte unchanged.
-                await runner.run_turn(project_id, message_with_mentions(body.message, resolved), on_event=emit)
+                await runner.run_turn(
+                    project_id,
+                    message_with_mentions(body.message, resolved),
+                    on_event=emit,
+                    session_id=session_id,
+                )
             except Exception as exc:  # surface runner failure as an SSE event
                 detail = str(exc)[:500]
                 if auth_mod.classify_auth_error(detail):
