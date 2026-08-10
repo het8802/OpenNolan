@@ -1584,7 +1584,10 @@ def create_app(
                     # most runtime crashes surface, and the SSE stream already started so the global
                     # exception handler above can't see it.
                     analytics_mod.capture_exception(exc, {"where": "agent_turn"})
-                    await queue.put({"type": "error", "detail": detail})
+                    # Append the CLI's own stderr. Classification above stays on the bare message
+                    # (a stderr tail mentioning auth must not turn an unrelated crash into a
+                    # reconnect prompt); only the text the user reads gets the extra detail.
+                    await queue.put({"type": "error", "detail": runner.cli_error_detail(detail, project_id)[:2000]})
             finally:
                 await queue.put(None)  # sentinel: stream complete
 

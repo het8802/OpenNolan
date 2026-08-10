@@ -32,6 +32,7 @@ import sys
 import tempfile
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -793,6 +794,7 @@ def build_agent_options(
     mcp_servers: Optional[dict[str, Any]] = None,
     disallowed_tools: Optional[list[str]] = None,
     turn_ctx: Optional[Callable[[], dict[str, Optional[str]]]] = None,
+    stderr: Optional[Callable[[str], None]] = None,
 ):
     """Construct ClaudeAgentOptions for an OpenNolan agent session.
 
@@ -856,6 +858,12 @@ def build_agent_options(
         # writable projects dir that sits outside its read-only cwd (OPN-4).
         env={"PATH": agent_subprocess_path()},
         add_dirs=agent_add_dirs(projects_dir),
+        # LOAD-BEARING for diagnosability: the SDK pipes the CLI's stderr ONLY when a callback is
+        # registered, and reports a dead CLI as "Command failed with exit code 1 / Check stderr
+        # output for details" — with nothing else. Without this, the one place that says WHY the
+        # agent could not start is thrown away (that is how a bundled-CLI crash reached users as
+        # an error naming nothing).
+        stderr=stderr,
     )
 
 
@@ -1208,6 +1216,8 @@ class AgentRunner:
     projects_dir: Optional[Path] = None
 
     _clients: dict[str, Any] = field(default_factory=dict, init=False)
+    # Recent stderr from each project's Claude CLI subprocess (see _record_cli_stderr).
+    _cli_stderr: dict[str, deque] = field(default_factory=dict, init=False)
     _emit: dict[str, EmitFn] = field(default_factory=dict, init=False)
     _pending: dict[str, asyncio.Future] = field(default_factory=dict, init=False)
     _confirm_seq: int = field(default=0, init=False)
@@ -1527,6 +1537,7 @@ class AgentRunner:
             # A LIVE getter, not a value: this client outlives the turn that built it, so the
             # permission callbacks must read whichever turn is running now (see F12).
             turn_ctx=lambda: self._turn_ctx.get(project_id) or {},
+            stderr=lambda line: self._record_cli_stderr(project_id, line),
         )
         return ClaudeSDKClient(options=options)
 
@@ -1535,9 +1546,40 @@ class AgentRunner:
         UI-selected override if one has been set, else the runner default."""
         return self._models.get(project_id, self.model)
 
+    def _record_cli_stderr(self, project_id: str, line: str) -> None:
+        """Keep (and log) the Claude CLI's own stderr, so a dead CLI can say why it died.
+
+        Clipped BEFORE it is stored, not on the way out: the CLI dumps whole minified source lines
+        around a crash (tens of KB each), so 60 unclipped lines is megabytes held per project — and
+        the same text is what reaches the local backend log and Electron's crash dialog."""
+        line = line.rstrip()[:300]
+        self._cli_stderr.setdefault(project_id, deque(maxlen=60)).append(line)
+        print(f"[claude-cli] {line}", file=sys.stderr)
+
+    def cli_error_detail(self, detail: str, project_id: str, n: int = 20) -> str:
+        """`detail` plus the CLI's recent stderr — what the user sees when a turn fails.
+
+        The SDK's transport errors ("Command failed with exit code 1", "Check stderr output for
+        details") name nothing on their own, and the CLI's stderr is the only place the real cause
+        appears. Long lines are dropped, not truncated: around a crash the CLI prints its own
+        minified source, so line length is what separates the noise from the message.
+
+        ponytail: scoped to the CURRENT client (the buffer is dropped when one is created), so the
+        worst staleness is a warning from an earlier turn of the same client — diagnostic text,
+        where recent CLI stderr is useful context either way.
+        """
+        lines = [ln for ln in (self._cli_stderr.get(project_id) or ()) if ln.strip() and len(ln) <= 200]
+        if not lines:
+            return detail
+        return detail + "\n\nClaude CLI stderr (recent):\n" + "\n".join(lines[-n:])
+
     async def _get_client(self, project_id: str) -> Any:
         client = self._clients.get(project_id)
         if client is None:
+            # This client's CLI has said nothing yet: drop the dead one's stderr so a failure here
+            # cannot be explained with the previous subprocess's output (and so the buffer cannot
+            # accumulate a key per project for the life of the backend).
+            self._cli_stderr.pop(project_id, None)
             client = self.client_factory(project_id)
             await client.connect()
             self._clients[project_id] = client
