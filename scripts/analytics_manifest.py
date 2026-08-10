@@ -40,6 +40,10 @@ KEPT_OUTSIDE_CATALOG = {
     "app_opened": "Predates the catalog. The backend-boot signal; app_launch_started is the shell's.",
     "desktop_error": "The crash inbox entry from Electron main, which posts direct because the "
     "backend may never have started.",
+    "phone_receive_finished": "Postdates the catalog — the phone-receive path (server/lan_receive.py) "
+    "did not exist when it was written. ONE per-session rollup, not a per-interaction family: "
+    "the per-file signal is already asset_import_finished{source:'phone'}, and this answers the "
+    "question that one structurally cannot — whether people open the window and get nothing.",
 }
 
 RENAMED = {

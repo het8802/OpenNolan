@@ -432,7 +432,7 @@ export default function StudioInspector({
   projectId, doc, canvas, ffmpeg, selCut, selOverlayIndex, selAudio, selAudioObj, playhead, assets, sourceMetas,
   onUpdateCut, onUpdateOverlay, onNormalizeOverlay, onUpdateAudio, onSetKeyframes, onUpsertKeyframe, onRemoveKeyframe,
   onLiveUpdateCut, onLiveUpdateOverlay, onLiveUpdateAudio, onScrubBegin,
-  onAddImage, onAddClip, onAddSfx, onSetMusic, onSetBackground, onUploadAsset,
+  onAddImage, onAddClip, onAddSfx, onSetMusic, onSetBackground, onUploadAsset, onAssetsChanged,
 }) {
   const selOverlay = selOverlayIndex >= 0 ? (doc?.overlays || [])[selOverlayIndex] : null
 
@@ -496,7 +496,7 @@ export default function StudioInspector({
     <StudioAssets
       projectId={projectId} assets={assets} background={doc?.metadata?.background || null}
       onAddImage={onAddImage} onAddClip={onAddClip} onAddSfx={onAddSfx} onSetMusic={onSetMusic}
-      onSetBackground={onSetBackground} onUploadAsset={onUploadAsset}
+      onSetBackground={onSetBackground} onUploadAsset={onUploadAsset} onAssetsChanged={onAssetsChanged}
     />
   )
 }

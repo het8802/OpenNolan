@@ -16,9 +16,11 @@ import * as api from '../api.js'
 import { IconPlay, IconMusic, IconFileText } from '../components/icons.jsx'
 import { FolderNav, useFolderBrowse, uploadKindFor, uploadDirLabel } from '../components/FolderBrowser.jsx'
 import AssetModal from '../components/AssetModal.jsx'
+import ReceiveModal from '../components/ReceiveModal.jsx'
 
-export default function StudioAssets({ projectId, assets, background, onAddImage, onAddClip, onAddSfx, onSetMusic, onSetBackground, onUploadAsset }) {
+export default function StudioAssets({ projectId, assets, background, onAddImage, onAddClip, onAddSfx, onSetMusic, onSetBackground, onUploadAsset, onAssetsChanged }) {
   const [dragging, setDragging] = useState(false)
+  const [receiving, setReceiving] = useState(false)
   const [viewer, setViewer] = useState(null)   // index into `files` — the open dialog
   const inputRef = useRef(null)
   // `assets` is the parent's asset listing — it re-lists after an upload and at the end of an
@@ -94,6 +96,14 @@ export default function StudioAssets({ projectId, assets, background, onAddImage
           Drop a file here, or click to choose — saves to <strong>{uploadDirLabel(cwd)}</strong>
           <input ref={inputRef} type="file" hidden onChange={(e) => handleFiles(e.target.files)} />
         </div>
+      )}
+
+      {/* The other half of "drop a file": the file is on a phone. See ReceiveModal. */}
+      <button className="rcv-open" onClick={() => setReceiving(true)} disabled={!projectId}>
+        Receive assets from phone
+      </button>
+      {receiving && (
+        <ReceiveModal projectId={projectId} onClose={() => setReceiving(false)} onReceived={onAssetsChanged} />
       )}
 
       {viewer !== null && (
