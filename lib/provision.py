@@ -42,7 +42,11 @@ from typing import Callable, Optional
 
 from lib import app_paths
 
-MANIFEST_SCHEMA = 1
+# Bump this to force every EXISTING install to rebuild its venv. Staleness is keyed to schema +
+# base-python, NOT to the requirement files, so a pin change alone would only reach new downloads —
+# 2 = the claude-agent-sdk==0.2.133 pin (its predecessor shipped a bundled Claude Code CLI that
+# crashed on launch, so v1.0.0 installs carry a venv whose agent cannot start; see requirements-ui.txt).
+MANIFEST_SCHEMA = 2
 
 # Core requirement files (relative to code_root) installed eagerly so the backend + agent can run.
 CORE_REQUIREMENTS = ("requirements-ui.txt", "requirements.txt")
@@ -519,7 +523,12 @@ def provision_core(progress: Optional[ProgressCb] = None, step: Optional[StepCb]
         "schema": MANIFEST_SCHEMA,
         "base_python": _base_python_id(),
         "core_installed": True,
-        "packs": m.get("packs") or [],
+        # NOT carried over. This venv was built from scratch, so every pack's packages are GONE —
+        # claiming them installed makes pack_installed() lie, and the agent's request_capability
+        # then answers "already installed — RETRY the tool" forever while the import keeps failing
+        # (server/agent_runner.py `_request_capability`). Empty is self-healing: packs are lazy and
+        # installed on first use anyway. Composition/ffmpeg live outside the venv and are preserved.
+        "packs": [],
     }
     for k in ("node_version", "composition_installed"):
         if k in m:
