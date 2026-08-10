@@ -371,14 +371,19 @@ def test_unauthenticated_connections_cannot_exhaust_threads(ctx):
         alive = refused = 0
         for s in held:
             s.settimeout(1)
+            # "Did the server hang up on this socket?" has TWO wire spellings and the platform
+            # picks which one you get: macOS sends RST (our unread "G" was still in its receive
+            # buffer when it closed) and recv raises; Linux sends a clean FIN and recv returns
+            # b"". An earlier version only counted the raising case, so it passed on macOS and
+            # reported "0 of 64 refused" on CI. Both mean the same thing — no thread was spent.
             try:
-                alive += 1 if s.recv(1) else 0
+                hung_up = s.recv(1) == b""
             except socket.timeout:
-                alive += 1  # parked in a handler thread, waiting for the rest of the request
+                hung_up = False  # still parked in a handler thread, awaiting the rest
             except OSError:
-                # The server hung up. RST rather than FIN because our unread "G" was still in
-                # its receive buffer when it closed — either way, no thread was spent.
-                refused += 1
+                hung_up = True
+            refused += hung_up
+            alive += not hung_up
         assert alive <= lan_receive._MAX_CONNECTIONS, f"{alive} threads for a cap of {lan_receive._MAX_CONNECTIONS}"
         assert refused >= 20, f"only {refused} of {len(held)} were refused"
     finally:
