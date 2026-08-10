@@ -9,10 +9,28 @@ and *when to distrust it*.
 
 | | |
 |---|---|
-| Dashboard | `OpenNolan — Dev / Internal` |
-| URL | https://us.posthog.com/project/544720/dashboard/1964915 |
-| PostHog project | `OpenNolan - Dev`, id **544720**, token prefix `phc_tTqiU…` |
-| Production project | `OpenNolan`, id **478214**, token prefix `phc_s9P9…` |
+| PostHog projects | prod `OpenNolan` id **478214** (`phc_s9P9…`) · dev `OpenNolan - Dev` id **544720** (`phc_tTqiU…`) |
+
+**2026-08-09: four boards, and they exist IDENTICALLY in both projects.** Same names, same
+tiles, same query text — verified byte-for-byte by hashing every tile's SQL in both projects.
+
+| Board | prod 478214 | dev 544720 | Tiles |
+|---|---|---|---|
+| Product Health (the five walls) | [1976294](https://us.posthog.com/project/478214/dashboard/1976294) | [1976342](https://us.posthog.com/project/544720/dashboard/1976342) | 6 + reading guide |
+| Acquisition & First Run | [1976295](https://us.posthog.com/project/478214/dashboard/1976295) | [1976343](https://us.posthog.com/project/544720/dashboard/1976343) | 6 |
+| Errors & Crashes | [1976296](https://us.posthog.com/project/478214/dashboard/1976296) | [1976344](https://us.posthog.com/project/544720/dashboard/1976344) | 8 |
+| Usage & Features | [1976297](https://us.posthog.com/project/478214/dashboard/1976297) | [1976345](https://us.posthog.com/project/544720/dashboard/1976345) | 9 |
+
+Superseded and unpinned, not deleted: `OpenNolan — Dev / Internal` (dev 1964915),
+`OpenNolan — App Monitoring` (prod 1821355), `My App Dashboard` (prod 1737528).
+
+**To keep the two in sync:** edit a tile in one project, paste the same SQL into the
+same-named tile in the other. To verify, hash every tile in both and diff:
+
+```sql
+SELECT name, lower(hex(cityHash64(JSONExtractString(toString(query), 'source', 'query')))) AS h
+FROM system.insights WHERE NOT deleted ORDER BY name
+```
 
 ---
 
@@ -47,26 +65,33 @@ sends — which is what this dashboard is.
 
 ---
 
-## The one line you will want to change
+## Two columns, not two boards *(this replaces the old one-line flip)*
 
-Every tile is a **SQL insight**, and each one carries this line:
+Every tile is a **SQL insight**. The four boards above do **not** filter `internal` out — each
+tile reports **external** (real users) and **internal** (our own machines) *side by side*:
 
 ```sql
--- internal board; flip to != 'true' for external users
-AND toString(properties.internal) = 'true'
+countIf(toString(properties.internal) != 'true') AS external,
+countIf(toString(properties.internal) =  'true') AS internal,
 ```
 
-That is deliberate, and it is worth understanding before you touch it.
+Three reasons this beats the old "duplicate the board and flip `= 'true'` to `!= 'true'`":
 
-**Why the filter exists.** Events carry an `internal` flag so your own usage can be separated
-from real users'. Right now **100% of events in this project are `internal: true`**, because the
-sentinel file `~/.opennolan-internal` exists on the dev machine. So `= 'true'` is the only filter
-that shows anything at all pre-beta. When real users arrive, duplicate the dashboard and flip
-this line to `!= 'true'` for a board that describes them instead of you.
+- **One query text is valid in both projects**, which is the only thing that makes prod/dev
+  parity cheap enough to actually hold. The old approach needed two divergent copies per tile.
+- **An empty board is never ambiguous.** `0 external / 14 internal` says the pipe is alive and
+  nobody outside has arrived. A board that just says `0` cannot tell you which — and that
+  ambiguity is exactly why production looked broken for a month when it was merely unvisited.
+- **Rates stay honest per cohort.** Dev machines get killed on purpose during testing; averaging
+  that into a real user's crash rate would poison the number rather than filter it.
 
-**Why it is baked into every query rather than set once on the dashboard.** PostHog dashboard-level
-filters **do not apply to SQL insights**. Setting a dashboard filter would look like it worked
-and silently do nothing. One line per tile is uglier and honest.
+**Why the split is baked into every query rather than set once on the dashboard.** PostHog
+dashboard-level filters **do not apply to SQL insights**. Setting a dashboard filter would look
+like it worked and silently do nothing.
+
+A trap worth knowing: `OPENNOLAN_INTERNAL=0` does **not** turn the flag off. A falsy env var falls
+through to the sentinel-file check (`server/analytics.py`), so the file wins. Delete
+`~/.opennolan-internal` if you want your own runs to look external.
 
 A trap worth knowing: `OPENNOLAN_INTERNAL=0` does **not** turn the flag off. A falsy env var falls
 through to the sentinel-file check (`server/analytics.py`), so the file wins. Delete

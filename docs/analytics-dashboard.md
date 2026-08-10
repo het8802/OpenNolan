@@ -13,6 +13,12 @@ query sheet.
 
 ---
 
+> **2026-08-09 — the two-board split below is superseded by a two-COLUMN split.** The live boards
+> report external and internal side by side in every tile instead of filtering one out, so one
+> query text is valid in both the prod and dev projects. The reasoning about *why* the `internal`
+> flag exists is unchanged and still applies; only the packaging changed. See
+> [`analytics-dashboard-guide.md`](analytics-dashboard-guide.md) for the four live boards.
+
 ## The two filters, and why there are two boards
 
 ```
