@@ -964,7 +964,7 @@ export default function Studio({ projectId, state, onClose, chat, auth, onReconn
                   onLiveUpdateCut={onLiveUpdateCut} onLiveUpdateOverlay={onLiveUpdateOverlay} onLiveUpdateAudio={onLiveUpdateAudio} onScrubBegin={snapshot}
                   onSetKeyframes={onSetKeyframes} onUpsertKeyframe={onUpsertKeyframe} onRemoveKeyframe={onRemoveKeyframe}
                   onAddImage={onAddImage} onAddClip={onAddClip} onAddSfx={onAddSfx} onSetMusic={onSetMusic}
-                  onSetBackground={onSetBackground} onUploadAsset={onUploadAsset}
+                  onSetBackground={onSetBackground} onUploadAsset={onUploadAsset} onAssetsChanged={refreshAssets}
                 />
               </div>
             </>

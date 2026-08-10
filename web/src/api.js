@@ -238,6 +238,16 @@ export const uploadAsset = (id, kind, file) => {
   return fetch(`/api/projects/${id}/assets`, { method: 'POST', body: fd }).then(json)
 }
 
+// Receive from phone. `start` opens a token-gated, self-expiring server on the LAN and returns
+// the URL to put in a QR code; `get` polls what has landed; `stop` closes it. See
+// server/lan_receive.py for why this is a separate server from the one serving this page.
+export const startReceive = (id) => fetch(`/api/projects/${id}/receive`, { method: 'POST' }).then(json)
+export const getReceive = (id) => fetch(`/api/projects/${id}/receive`).then(json)
+// `sessionId` closes only the window this caller opened — see server/lan_receive.py::stop.
+export const stopReceive = (id, sessionId) =>
+  fetch(`/api/projects/${id}/receive${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`,
+    { method: 'DELETE' }).then(json)
+
 export const confirmTool = (id, confirm_id, approved) =>
   fetch(`/api/projects/${id}/agent/confirm`, {
     method: 'POST',

@@ -12,6 +12,7 @@ export function Svg({ size = 16, style, ...p }) {
 export const IconKey = (p) => <Svg {...p}><circle cx="7.5" cy="15.5" r="4.5" /><path d="M11 12 20 3" /><path d="m16 7 3 3" /><path d="m13.5 9.5 2.5 2.5" /></Svg>
 export const IconEye = (p) => <Svg {...p}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></Svg>
 export const IconEyeOff = (p) => <Svg {...p}><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 8 10 8a18 18 0 0 1-2.16 3.19" /><path d="M6.6 6.6A18 18 0 0 0 2 12s3.5 8 10 8a9.3 9.3 0 0 0 5.4-1.6" /><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M2 2l20 20" /></Svg>
+export const IconCopy = (p) => <Svg {...p}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h8" /></Svg>
 export const IconCheck = (p) => <Svg {...p}><path d="M20 6 9 17l-5-5" /></Svg>
 // One disclosure chevron for every expand/collapse. It points RIGHT at rest and is rotated
 // by CSS when open, so there is a single glyph instead of a ▸/▾ font-glyph swap (whose weight

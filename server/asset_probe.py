@@ -159,7 +159,24 @@ def probe(target: Path) -> tuple[Optional[dict[str, Any]], Optional[str]]:
         return None, "ffprobe_missing"
     try:
         proc = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(target)],
+            # -protocol_whitelist file: a crafted playlist-ish "video" can name external URLs
+            # and make ffprobe fetch them, which is an SSRF from the user's machine with their
+            # network position. Media that arrives over the LAN (server/lan_receive.py) makes
+            # that reachable by someone who is not the user, but the picker path wants the same
+            # guard — probing a LOCAL file never legitimately needs another protocol.
+            # This is not a sandbox: decoder bugs and CPU bombs still run in-process.
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-protocol_whitelist",
+                "file",
+                "-show_streams",
+                "-show_format",
+                "-of",
+                "json",
+                str(target),
+            ],
             capture_output=True,
             text=True,
             timeout=_PROBE_TIMEOUT_S,

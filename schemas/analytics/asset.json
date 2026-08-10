@@ -1,8 +1,8 @@
 {
-  "$comment": "Analytics taxonomy \u2014 asset family. Merged with its siblings by server/analytics.taxonomy(); see _envelope.json.",
+  "$comment": "Analytics taxonomy — asset family. Merged with its siblings by server/analytics.taxonomy(); see _envelope.json.",
   "events": {
     "asset_import_finished": {
-      "$comment": "AFTER the copy, before the return \u2014 target.stat() is what gives the final byte count and the probe needs the file to exist. The filename NEVER ships: RULES.md says a user can drop any media on us, so a name is customer and campaign text. `asset_fingerprint` is HMAC(install_secret, sha256(bytes))[:16] \u2014 install-stable so cross-project reuse is answerable, NOT cross-install correlatable. Named asset_fingerprint and not content_fingerprint because `content` is a reserved substring that _scrub rewrites to content_fingerprint_len: 16.",
+      "$comment": "AFTER the copy, before the return — target.stat() is what gives the final byte count and the probe needs the file to exist. The filename NEVER ships: RULES.md says a user can drop any media on us, so a name is customer and campaign text. `asset_fingerprint` is HMAC(install_secret, sha256(bytes))[:16] — install-stable so cross-project reuse is answerable, NOT cross-install correlatable. Named asset_fingerprint and not content_fingerprint because `content` is a reserved substring that _scrub rewrites to content_fingerprint_len: 16.",
       "question": "What media enters, by which path?",
       "properties": {
         "asset_id": "I",
@@ -18,11 +18,13 @@
       "question": "Why can media not enter?",
       "properties": {
         "kind": "E",
+        "source": "E",
         "failure_class": "E"
-      }
+      },
+      "$comment": "`source` mirrors asset_import_finished's. Without it a phone refusal and a picker refusal are the same row, and the phone path — whose whole question is whether it is worth keeping — reports a 100% success rate by construction, because only its successes are instrumented."
     },
     "media_probe_finished": {
-      "$comment": "Probed AT INGEST, not on the lazy /source_meta route \u2014 that is not an ingest path at all. Codec, container, pixel format, transfer and fps are the fields that predict render success and none of them were ever captured. All fixed-vocabulary ffprobe output.",
+      "$comment": "Probed AT INGEST, not on the lazy /source_meta route — that is not an ingest path at all. Codec, container, pixel format, transfer and fps are the fields that predict render success and none of them were ever captured. All fixed-vocabulary ffprobe output.",
       "question": "Which codecs do real users actually drop on us? Is HDR a user problem or only ours?",
       "properties": {
         "asset_id": "I",
@@ -62,8 +64,8 @@
       }
     },
     "source_resolution_failed": {
-      "$comment": "Emitted at the two CALLERS that know the consumer. resolve_source_path takes no `consumer` argument, so a hook inside it could not supply one \u2014 and its single fallthrough conflates missing, outside-project, resolve errors and non-files.",
-      "question": "'Cut source not found' is this app's signature render failure \u2014 which half of the manifest/path contract broke?",
+      "$comment": "Emitted at the two CALLERS that know the consumer. resolve_source_path takes no `consumer` argument, so a hook inside it could not supply one — and its single fallthrough conflates missing, outside-project, resolve errors and non-files.",
+      "question": "'Cut source not found' is this app's signature render failure — which half of the manifest/path contract broke?",
       "properties": {
         "reference_kind": "E",
         "consumer": "E",
@@ -71,13 +73,24 @@
       }
     },
     "asset_added_to_doc": {
-      "$comment": "A per-SESSION ROLLUP, not one event per add. 10 adds is 10 uploads and the catalog allows only 6 families to upload per-interaction \u2014 this is none of them. The asset_id ARRAY keeps row 37's `imported joined added_in_editor on asset_id` intact at zero extra events: properties are free, events are not.",
+      "$comment": "A per-SESSION ROLLUP, not one event per add. 10 adds is 10 uploads and the catalog allows only 6 families to upload per-interaction — this is none of them. The asset_id ARRAY keeps row 37's `imported joined added_in_editor on asset_id` intact at zero extra events: properties are free, events are not.",
       "question": "Which imported media becomes an actual edit?",
       "properties": {
         "asset_ids": "A",
         "adds": "N",
         "by_kind": "O",
         "by_method": "O"
+      }
+    },
+    "phone_receive_finished": {
+      "$comment": "ONE event per receive window, emitted where the window is torn down (server/lan_receive.py stop()), so Done, the 15-minute watchdog, a replace and a status() reap all land here rather than in four places. A per-SESSION rollup, not one event per file: the per-file signal is already asset_import_finished{source:'phone'}, and the catalog does not allow another per-interaction family. `seconds_open` is bucketed because the raw value is a behavioural timestamp, not a measurement we act on.",
+      "question": "Does the phone path deliver, or do people open it, meet the wifi/firewall, and give up?",
+      "properties": {
+        "outcome": "E",
+        "files": "N",
+        "bytes": "B",
+        "seconds_open": "B",
+        "by_kind": "O"
       }
     }
   },
@@ -91,7 +104,8 @@
       "other"
     ],
     "asset_import_finished.source": [
-      "picker"
+      "picker",
+      "phone"
     ],
     "asset_import_finished.outcome": [
       "success",
@@ -103,7 +117,12 @@
       "traversal",
       "disk_full",
       "permission",
-      "copy"
+      "copy",
+      "too_large",
+      "session_budget",
+      "incomplete",
+      "link_expired",
+      "malformed_request"
     ],
     "media_probe_failed.failure_class": [
       "ffprobe_missing",
@@ -138,11 +157,21 @@
     ],
     "source_resolution_failed.outcome": [
       "missing"
+    ],
+    "asset_import_failed.source": [
+      "picker",
+      "phone"
+    ],
+    "phone_receive_finished.outcome": [
+      "received",
+      "closed_empty",
+      "expired_empty",
+      "unavailable"
     ]
   },
   "open_vocabularies": {
     "extension": "A file extension checked against a CLOSED list at the emit site; anything else collapses to 'other'. Listed here because the list lives in code, not in this file.",
-    "container": "An ffprobe format_name. Produced by the demuxer, not by the user \u2014 a container name cannot carry a campaign name the way a filename can.",
+    "container": "An ffprobe format_name. Produced by the demuxer, not by the user — a container name cannot carry a campaign name the way a filename can.",
     "video_codec": "An ffprobe codec_name.",
     "audio_codec": "An ffprobe codec_name.",
     "pix_fmt": "An ffprobe pix_fmt.",

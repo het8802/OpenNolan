@@ -8,6 +8,7 @@ import CapabilitiesModal from './CapabilitiesModal.jsx'
 import UpdateBanner from './UpdateBanner.jsx'
 import { FolderNav, useFolderBrowse, uploadKindFor, uploadDirLabel } from './components/FolderBrowser.jsx'
 import AssetModal from './components/AssetModal.jsx'
+import ReceiveModal from './components/ReceiveModal.jsx'
 import { useAgentChat } from './chat/useAgentChat.js'
 import { useAuth } from './auth/useAuth.js'
 import { track } from './analytics/track.js'
@@ -1321,6 +1322,7 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
   const [data, setData] = useState(null)
   const inputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
+  const [receiving, setReceiving] = useState(false)
   const [viewer, setViewer] = useState(null)   // { items:[{kind,name,url,path}], index } — lightbox
 
   // Poll the asset listing for the selected project (live as the agent writes files).
@@ -1427,8 +1429,13 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
             Drop a file here, or click to choose — saves to <strong>{uploadDirLabel(cwd)}</strong>
             <input ref={inputRef} type="file" hidden onChange={e => handleFiles(e.target.files)} />
           </div>
+
+          {/* The other half of "drop a file": the file is on a phone. See ReceiveModal. */}
+          <button className="rcv-open" onClick={() => setReceiving(true)}>Receive assets from phone</button>
         </div>
       )}
+      {/* The listing above already polls every 4s, so received files surface on their own. */}
+      {receiving && <ReceiveModal projectId={selected} onClose={() => setReceiving(false)} />}
       {viewer && (
         <AssetModal items={viewer.items} index={viewer.index} onClose={() => setViewer(null)} />
       )}

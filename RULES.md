@@ -205,6 +205,28 @@ canvas-sized proxy goes out of bounds (`crop=1440x2560 on a 1080x1920 proxy → 
 So a crop edit re-renders that one scene (crop is a content edit); reorder/retime/transition/
 position stay cheap.
 
+## Brand assets are copied, never approximated
+
+We ship more than one surface — the Mac app, the website, the page a phone opens over the LAN
+(`server/lan_receive.py`), any future embed. A user who sees two of them in one minute must see
+the SAME product. "Close enough" logos are how that breaks: nobody notices one surface drifting,
+and then nobody can say which one is right.
+
+- **The website is the source of truth for the lockup.** `website/index.html` `.brand` holds the
+mark geometry, the wordmark typeface, the weight, the size and the spacing. Copy those values
+verbatim into any new surface. Do not redraw the mark, do not retype the font stack from memory,
+do not substitute a system font because it "looks similar" — Fraunces 600 and a system serif are
+not the same wordmark.
+- **Logo colors are the logo's, not the surface's.** The mark stays brand terracotta `#D9694A` on
+`#FBF8F1` even on a surface whose accent token is `--accent: #c8643c`. Page chrome uses the
+palette; the logo is an artifact that travels unchanged.
+- **A brand font on an offline surface ships glyph-subset and inline.** The phone page must make
+zero external requests, so Fraunces rides as a data-URI woff2 containing only the letters in
+"OpenNolan" (3.3 KB, see `_BRAND_FONT_B64`). Never add a `fonts.googleapis.com` link to a surface
+that has to work without internet — and never quietly fall back to a system font instead.
+- **Changing the lockup means changing it everywhere in the same PR.** If the website's `.brand`
+moves, grep for the other copies and move them too.
+
 ## Testing
 
 - **Run:** `npm test` in `web/` (vitest). Component tests need jsdom (configured in

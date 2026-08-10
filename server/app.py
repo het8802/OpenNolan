@@ -26,6 +26,7 @@ import tempfile
 import time
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Optional
+from urllib.parse import urlsplit
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -254,6 +255,7 @@ from server import settings as settings_mod
 from server import auth as auth_mod
 from server import debug_log as debug_log_mod
 from server import editor as editor_mod
+from server import lan_receive
 from server import lifecycle as lifecycle_mod
 from server import outbox as outbox_mod
 from server import render_jobs as render_jobs_mod
@@ -451,12 +453,13 @@ def _extension(name: str) -> str:
     return ext if ext in _KNOWN_EXTENSIONS else "other"
 
 
-def _asset_failed(pdir: Path, project_id: str, kind: str, failure_class: str) -> None:
+def _asset_failed(pdir: Path, project_id: str, kind: str, failure_class: str, source: str = "picker") -> None:
     try:
         analytics_mod.capture(
             "asset_import_failed",
             {
                 "kind": kind if kind in ASSET_SUBDIRS else "other",
+                "source": source,
                 "failure_class": failure_class,
                 "project_id": analytics_mod.project_key(pdir, project_id),
             },
@@ -465,11 +468,71 @@ def _asset_failed(pdir: Path, project_id: str, kind: str, failure_class: str) ->
         pass
 
 
-def _capture_asset_ingest(pdir: Path, project_id: str, kind: str, target: Path, rel: str, name: str) -> Optional[str]:
+# Buckets for the receive-window rollup. Coarse on purpose: "did anyone leave it open long
+# enough to walk to their phone" is the question, not a duration measurement.
+_RECEIVE_SECONDS = (15, 60, 300, 900)
+
+
+def _capture_receive_closed(pdir: Path, project_id: str, rollup: dict[str, Any]) -> None:
+    """One `phone_receive_finished` per window. Called from lan_receive.stop(), which is the
+    single teardown path — Done, the watchdog, a replace and a status() reap all reach it."""
+    try:
+        analytics_mod.capture(
+            "phone_receive_finished",
+            {
+                "outcome": rollup["outcome"],
+                "files": rollup["files"],
+                "bytes": render_jobs_mod._bucket(rollup["bytes"], _ASSET_BYTES),
+                "seconds_open": render_jobs_mod._bucket(rollup["seconds_open"], _RECEIVE_SECONDS),
+                "by_kind": rollup["by_kind"],
+                "project_id": analytics_mod.project_key(pdir, project_id),
+            },
+        )
+    except Exception:
+        pass
+
+
+# ── browser-origin guard for the receive routes ──────────────────────────────────────
+# Loopback is not an authorization boundary. A page the user merely VISITS can fire a
+# cross-origin POST at 127.0.0.1 — the browser hides the response but sends the request —
+# and a page that DNS-rebinds its own name to 127.0.0.1 can read responses too. For most
+# routes here that is a pre-existing read; for /receive it would open a listening socket on
+# the user's wifi with no user action (reproduced against this app before this guard), and
+# the GET hands back the upload token. Hence: Host must be loopback (an attacker cannot
+# forge it — it is their own hostname) and any Origin must be loopback too.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+
+
+def _loopback_host(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    # urlsplit needs a scheme to populate .hostname, and Host arrives bare ("127.0.0.1:8000").
+    host = urlsplit(value if "//" in value else f"//{value}").hostname
+    return host in _LOOPBACK_HOSTS
+
+
+def _only_this_app(request: Request) -> None:
+    """Refuse anything that is not this desktop app talking to its own backend."""
+    if not _loopback_host(request.headers.get("host")):
+        raise HTTPException(status_code=403, detail="unexpected Host")
+    origin = request.headers.get("origin")
+    # Absent on same-origin GETs and on non-browser callers; present on every browser
+    # POST/DELETE, including our own — so a foreign value means another site is driving.
+    if origin is not None and not _loopback_host(origin):
+        raise HTTPException(status_code=403, detail="cross-origin request refused")
+
+
+def _capture_asset_ingest(
+    pdir: Path, project_id: str, kind: str, target: Path, rel: str, name: str, source: str = "picker"
+) -> Optional[str]:
     """One `asset_import_finished` + one `media_probe_finished` (or `_failed`) per asset.
 
     The probe runs HERE, at ingest, and not on the lazy /source_meta route: codec / HDR / fps
-    are the render-outcome predictors, and /source_meta is not an ingest path at all."""
+    are the render-outcome predictors, and /source_meta is not an ingest path at all.
+
+    `source` is the closed enum in schemas/analytics/asset.json — "picker" for drop-or-choose
+    on the Mac, "phone" for a file sent over the LAN by server/lan_receive.py. It is the one
+    property that answers whether the phone path is worth keeping."""
     try:
         from server import asset_probe
 
@@ -487,7 +550,7 @@ def _capture_asset_ingest(pdir: Path, project_id: str, kind: str, target: Path, 
                 "asset_id": aid,
                 "asset_fingerprint": asset_probe.fingerprint(project_dir, target),
                 "kind": kind,
-                "source": "picker",
+                "source": source,
                 "extension": _extension(name),
                 "bytes": render_jobs_mod._bucket(target.stat().st_size, _ASSET_BYTES),
                 "outcome": "success",
@@ -907,6 +970,60 @@ def create_app(
             "asset_id": aid,
             "size_bytes": target.stat().st_size,
         }
+
+    # ── receive from a phone (server/lan_receive.py) ──────────────────────────────────
+    # macOS lets no app receive an AirDrop, so the phone-to-project path is a QR code the
+    # phone opens. These three routes stay on 127.0.0.1 like everything else here; the only
+    # thing that ever binds 0.0.0.0 is the token-gated, self-expiring server they start.
+
+    @app.post("/api/projects/{project_id}/receive", status_code=201)
+    def start_receive(project_id: str, request: Request) -> dict[str, Any]:
+        _only_this_app(request)
+        if get_project_record(pdir, project_id) is None:
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        try:
+            return lan_receive.start(
+                pdir,
+                project_id,
+                on_saved=lambda kind, target, rel, name: _capture_asset_ingest(
+                    pdir, project_id, kind, target, rel, name, source="phone"
+                ),
+                on_failed=lambda kind, failure_class: _asset_failed(
+                    pdir, project_id, kind, failure_class, source="phone"
+                ),
+                on_closed=lambda rollup: _capture_receive_closed(pdir, project_id, rollup),
+            )
+        except lan_receive.LanUnavailable as exc:
+            # A window that never opened is still an outcome, and the one most likely to mean
+            # the feature is unusable for someone — so it rides the same rollup rather than
+            # being invisible because there was no session to close.
+            _capture_receive_closed(
+                pdir,
+                project_id,
+                {"outcome": "unavailable", "files": 0, "bytes": 0, "seconds_open": 0, "by_kind": {}},
+            )
+            raise HTTPException(status_code=503, detail=str(exc))
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"could not open the receive port: {exc}")
+
+    @app.get("/api/projects/{project_id}/receive")
+    def receive_status(project_id: str, request: Request) -> dict[str, Any]:
+        # Guarded like the writes: this response CARRIES THE TOKEN, so it is the one route a
+        # rebinding page would most like to read.
+        _only_this_app(request)
+        # One window at a time app-wide, so a window belonging to ANOTHER project reads as
+        # closed here — otherwise this project's panel would show someone else's uploads.
+        st = lan_receive.status()
+        if st is None or st["project_id"] != project_id:
+            return {"active": False, "received": []}
+        return st
+
+    @app.delete("/api/projects/{project_id}/receive")
+    def stop_receive(project_id: str, request: Request, session_id: Optional[str] = None) -> dict[str, Any]:
+        _only_this_app(request)
+        # `session_id` closes only the window the caller opened. Without it a stale close from
+        # a re-mounted dialog would shut down the window that replaced it.
+        return {"stopped": lan_receive.stop(session_id)}
 
     @app.get("/api/projects/{project_id}/assets")
     def list_assets(project_id: str) -> dict[str, Any]:
