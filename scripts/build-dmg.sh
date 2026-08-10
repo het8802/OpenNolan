@@ -126,6 +126,55 @@ if [[ $PUBLISH == 1 ]]; then
   command -v gh >/dev/null || die "gh not found — needed to upload the .dmg to the release (brew install gh)"
 fi
 
+# --- publish verification -----------------------------------------------------
+# Assert what was actually published instead of printing that we published it. Both failures below
+# have already shipped once: electron-builder's GitHub publisher raced itself and created TWO drafts
+# for v1.0.1 in the same second (drafts create no tag ref, so GitHub does not enforce uniqueness),
+# and the assets split across them — .dmg on one, the update .zip on the other. `gh release upload`
+# resolves a tag to ONE release, so with two drafts it silently picks. Publishing either would have
+# been broken: no .zip means every auto-update 404s, no .dmg means no download button. The whole
+# thing was invisible because the line below this used to be an unconditional success message.
+verify_release() {
+  local tag="$1" ids n
+  ids="$(gh api "repos/{owner}/{repo}/releases" --paginate \
+          --jq ".[] | select(.tag_name==\"$tag\") | .id" 2>/dev/null)" \
+    || die "could not read the releases for $tag — verify by hand before announcing this build"
+  n="$(printf '%s\n' "$ids" | grep -c . || true)"
+  [[ "$n" == 0 ]] && die "no release exists for $tag — electron-builder's publish step did nothing.
+    Check its output above for an upload error, then re-run with --publish."
+  [[ "$n" == 1 ]] || die "expected exactly ONE release for $tag, found $n: $(printf '%s' "$ids" | tr '\n' ' ')
+    electron-builder's publisher can create duplicate DRAFTS for one tag and split the assets
+    across them. Keep the one holding the .dmg, re-upload the missing assets to it, delete the
+    other (gh api --method DELETE repos/{owner}/{repo}/releases/<id>), then re-run this step."
+
+  # Every artifact a user or the updater fetches must be present AND byte-complete. Sizes come from
+  # the files we just built, so a truncated or half-uploaded asset fails here rather than on someone
+  # else's Mac. The blockmap only enables delta updates, so it is checked when built, not required.
+  local assets f name local_size remote_size
+  assets="$(gh api "repos/{owner}/{repo}/releases/$ids/assets" --paginate \
+            --jq '.[] | "\(.name) \(.size) \(.state)"' 2>/dev/null)" \
+    || die "could not list the assets on $tag"
+  for f in "$DMG" \
+           "$DESKTOP/dist/OpenNolan-${VERSION}-arm64-mac.zip" \
+           "$DESKTOP/dist/latest-mac.yml" \
+           "$DESKTOP/dist/OpenNolan-${VERSION}-arm64-mac.zip.blockmap"; do
+    name="$(basename "$f")"
+    if [[ ! -f "$f" ]]; then
+      case "$name" in
+        *.blockmap) continue ;;  # optional: delta updates only
+        *) die "$name was never built locally — the release cannot be complete without it" ;;
+      esac
+    fi
+    local_size="$(stat -f%z "$f")"
+    remote_size="$(printf '%s\n' "$assets" | awk -v n="$name" '$1==n {print $2}')"
+    [[ -n "$remote_size" ]] || die "$name is MISSING from the $tag release.
+    Upload it before publishing:  gh release upload $tag \"$f\" --clobber"
+    [[ "$remote_size" == "$local_size" ]] || die "$name on $tag is $remote_size bytes, local file is $local_size — re-upload it:
+    gh release upload $tag \"$f\" --clobber"
+  done
+  info "${GRN}verified${RST} $tag: one release, $(printf '%s\n' "$assets" | grep -c . || true) assets, sizes match the local build"
+}
+
 # --- DMG builder --------------------------------------------------------------
 # We build the .dmg with `hdiutil create -srcfolder` instead of electron-builder's
 # bundled dmgbuild. dmgbuild's final step is `hdiutil convert`, which on managed
@@ -257,6 +306,7 @@ if [[ $SIGNED == 1 ]]; then
     gh release upload "v$VERSION" "$DMG" --clobber \
       || die "upload failed. If that was a 403, the active gh account cannot write to the repo:
     gh auth switch --user <owner> && export GH_TOKEN=\$(gh auth token)"
+    verify_release "v$VERSION"
     info "${GRN}published on v$VERSION:${RST} .dmg (download) + .zip + latest-mac.yml (auto-update)"
   fi
 else
