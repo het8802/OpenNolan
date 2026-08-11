@@ -1111,6 +1111,52 @@ select { cursor: pointer; }
 
 .schedule-modal { width: min(460px, 92vw); }
 .schedule-modal .modal-hint.warn { color: var(--amber-ink); margin-top: 0; }
+
+/* ── Date + time picker (`dtf-`) ──────────────────────────────────────────────
+   `<input type="datetime-local">` pops an OS-drawn calendar that no stylesheet can reach, so the
+   field is a button and the popup is ours. It is the month view's language at dropdown scale:
+   same grid source (model.monthDays), same .calendar-nav chevrons, terracotta selection. */
+.dtf { position: relative; }
+.dtf-trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  width: 100%; text-align: left; color: var(--ink); font-weight: 400;
+}
+.dtf-trigger:not(:disabled):hover { background: var(--field); border-color: var(--accent-ink); }
+.dtf-trigger svg { color: var(--ink-dim); flex-shrink: 0; }
+.dtf-pop {
+  position: absolute; z-index: 10; top: calc(100% + var(--space-1)); left: 0; width: 268px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3); padding: var(--space-3);
+  display: flex; flex-direction: column; gap: var(--space-2);
+}
+.dtf-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.dtf-head strong { font-size: var(--text-sm); color: var(--ink); }
+.dtf-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
+.dtf-weekday {
+  padding-bottom: var(--space-1); text-align: center;
+  color: var(--ink-dim); font-size: var(--text-2xs); font-weight: 650;
+}
+.dtf-day {
+  padding: 0; height: 30px; border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent; color: var(--ink); font-size: var(--text-xs); font-weight: 550;
+}
+.dtf-day.outside { color: var(--ink-dim); }
+.dtf-day:not(:disabled):hover { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent-ink); }
+.dtf-day.today { border-color: var(--accent); }
+.dtf-day.on, .dtf-day.on:hover { background: var(--accent-ink); border-color: var(--accent-ink); color: #fff; }
+.dtf-day:disabled { background: transparent; border-color: transparent; color: var(--line); }
+.dtf-time {
+  display: flex; align-items: center; gap: var(--space-1);
+  border-top: 1px solid var(--line); padding-top: var(--space-2);
+}
+.dtf-time-label { margin-right: auto; color: var(--ink-dim); font-size: var(--text-xs); }
+.dtf-time select { padding: var(--space-1) var(--space-1); font-size: var(--text-sm); }
+.dtf-done {
+  margin-left: var(--space-1); padding: var(--space-1) var(--space-3); border-radius: var(--radius-pill);
+  border-color: var(--accent); background: var(--panel); color: var(--accent-ink);
+  font-size: var(--text-sm); font-weight: 600;
+}
+.dtf-done:not(:disabled):hover { background: var(--accent-soft); border-color: var(--accent-ink); color: var(--accent-ink); }
 .schedule-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
 .schedule-modal-head p { margin: var(--space-1) 0 0; color: var(--ink-dim); font-size: var(--text-xs); line-height: 1.45; }
 .schedule-channels { margin: 0; padding: 0; border: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }

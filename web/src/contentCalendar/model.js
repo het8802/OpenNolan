@@ -1,3 +1,6 @@
+// Shared by the month view and the Schedule dialog's day picker, so both grids read the same.
+export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
 export function dateKey(value) {
   const date = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(date.getTime())) return ''
@@ -73,4 +76,54 @@ export function datetimeLocalValue(date) {
   const next = new Date(date)
   const offsetMs = next.getTimezoneOffset() * 60_000
   return new Date(next.getTime() - offsetMs).toISOString().slice(0, 16)
+}
+
+// ── `YYYY-MM-DDTHH:MM` arithmetic for the day/time picker ────────────────────────────────────
+// The dialog's value stays the datetime-local string the save flow already sends, so the picker
+// only ever swaps one half of it. Kept here (pure, tested) rather than in the component.
+
+export function parseDatetimeLocal(value) {
+  const parsed = new Date(String(value || ''))
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+/** Same clock time, different day. */
+export function withDate(value, date) {
+  const current = parseDatetimeLocal(value) || new Date()
+  const next = new Date(date)
+  next.setHours(current.getHours(), current.getMinutes(), 0, 0)
+  return datetimeLocalValue(next)
+}
+
+/** Same day, different clock time. `hour` is 0-23. */
+export function withTime(value, hour, minute) {
+  const next = parseDatetimeLocal(value) || new Date()
+  next.setHours(hour, minute, 0, 0)
+  return datetimeLocalValue(next)
+}
+
+/** 0-23 -> the 12-hour parts a human picks with. */
+export function clockParts(value) {
+  const date = parseDatetimeLocal(value)
+  if (!date) return { hour12: 12, minute: 0, meridiem: 'PM' }
+  const hour = date.getHours()
+  return {
+    hour12: hour % 12 || 12,
+    minute: date.getMinutes(),
+    meridiem: hour < 12 ? 'AM' : 'PM',
+  }
+}
+
+export function hour24(hour12, meridiem) {
+  return (hour12 % 12) + (meridiem === 'PM' ? 12 : 0)
+}
+
+/** What the closed field shows — the app's own formatting, not the browser's locale widget. */
+export function datetimeLabel(value) {
+  const date = parseDatetimeLocal(value)
+  if (!date) return 'Pick a date and time'
+  return date.toLocaleString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  })
 }

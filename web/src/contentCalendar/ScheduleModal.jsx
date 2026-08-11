@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api.js'
 import { IconX } from '../components/icons.jsx'
+import DateTimeField from './DateTimeField.jsx'
 import { channelLabel, datetimeLocalValue, defaultDatetimeLocal, entryForProject } from './model.js'
 
 // Opening this dialog READS the project's current slot from `/api/content-calendar` — the same
@@ -57,7 +58,10 @@ export default function ScheduleModal({ projectId, onClose, onScheduled }) {
     }
   }
 
-  const stale = current && new Date(current.scheduled_at) <= new Date()
+  // Keyed on the CHOSEN value, which is the pre-filled one until the user picks: covers a stale
+  // stored slot and a same-day time that has already gone by. The custom picker has no native
+  // `min` to block submit for us, so the hint and the disabled button stand in for it.
+  const stale = !!scheduledAt && new Date(scheduledAt) <= new Date()
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -75,15 +79,10 @@ export default function ScheduleModal({ projectId, onClose, onScheduled }) {
             <IconX />
           </button>
         </div>
-        <label className="modal-field">
-          <span>Date and time</span>
-          <input
-            type="datetime-local"
-            value={scheduledAt}
-            min={datetimeLocalValue(new Date())}
-            onChange={event => setScheduledAt(event.target.value)}
-          />
-        </label>
+        <div className="modal-field">
+          <label htmlFor="schedule-when">Date and time</label>
+          <DateTimeField id="schedule-when" value={scheduledAt} onChange={setScheduledAt} />
+        </div>
         {stale && <p className="modal-hint warn">That slot has already passed — pick a new date and time.</p>}
         <fieldset className="schedule-channels">
           <legend>Channels</legend>
@@ -103,7 +102,7 @@ export default function ScheduleModal({ projectId, onClose, onScheduled }) {
         {error && <div className="modal-err">{error}</div>}
         <div className="modal-actions">
           <button type="button" className="modal-cancel" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy || !scheduledAt || !selected.length}>
+          <button type="submit" className="btn-primary" disabled={busy || !scheduledAt || stale || !selected.length}>
             {busy ? 'Saving…' : current ? 'Update schedule' : 'Schedule'}
           </button>
         </div>

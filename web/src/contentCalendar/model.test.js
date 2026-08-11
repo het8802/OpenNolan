@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
   channelLabel,
+  clockParts,
   dateKey,
+  datetimeLabel,
   defaultDatetimeLocal,
   entriesByDay,
   entryForProject,
+  hour24,
   monthDays,
   nearestEntryMonth,
+  withDate,
+  withTime,
 } from './model.js'
 
 // The vocabulary itself is the backend's (server/content_calendar.CHANNELS); this is the order
@@ -53,6 +58,18 @@ describe('content calendar model', () => {
   it('renders channel ids with their real brand casing', () => {
     expect([...CHANNELS].map(channelLabel)).toEqual(['TikTok', 'Instagram', 'YouTube'])
     expect(channelLabel('threads')).toBe('threads')   // backend owns the vocabulary
+  })
+
+  it('swaps one half of a datetime-local value at a time', () => {
+    const value = '2026-08-12T13:00'
+
+    expect(withDate(value, new Date(2026, 11, 3))).toBe('2026-12-03T13:00')  // clock survives
+    expect(withTime(value, 9, 30)).toBe('2026-08-12T09:30')                  // day survives
+    expect(clockParts(value)).toEqual({ hour12: 1, minute: 0, meridiem: 'PM' })
+    expect(clockParts('2026-08-12T00:05')).toEqual({ hour12: 12, minute: 5, meridiem: 'AM' })
+    expect([hour24(12, 'AM'), hour24(12, 'PM'), hour24(1, 'PM')]).toEqual([0, 12, 13])
+    expect(datetimeLabel('nonsense')).toBe('Pick a date and time')
+    expect(datetimeLabel(value)).toContain('2026')
   })
 
   it('finds a project current slot in the shared calendar aggregate', () => {

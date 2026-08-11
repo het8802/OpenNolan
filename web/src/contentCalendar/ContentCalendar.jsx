@@ -3,9 +3,7 @@ import * as api from '../api.js'
 import { track } from '../analytics/track.js'
 import AssetModal from '../components/AssetModal.jsx'
 import { IconChevron } from '../components/icons.jsx'
-import { channelLabel, dateKey, entriesByDay, monthDays, nearestEntryMonth } from './model.js'
-
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+import { WEEKDAYS, channelLabel, dateKey, entriesByDay, monthDays, nearestEntryMonth } from './model.js'
 
 function monthLabel(cursor) {
   return cursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ContentCalendar from './ContentCalendar.jsx'
 import ScheduleModal from './ScheduleModal.jsx'
-import { datetimeLocalValue } from './model.js'
+import { datetimeLabel, datetimeLocalValue } from './model.js'
 import * as api from '../api.js'
 
 vi.mock('../api.js', () => ({
@@ -74,6 +74,44 @@ describe('Content Calendar', () => {
     expect(onScheduled).toHaveBeenCalledWith({ id: 'saved' })
   })
 
+  // The native datetime-local popup is OS-drawn and unstylable, so the field opens OUR grid.
+  it('picks the day and the clock from its own dropdown, not the native popup', async () => {
+    api.getContentCalendar.mockResolvedValue({ channels: ['tiktok'], entries: [] })
+    api.scheduleProject.mockResolvedValue({ entry: { id: 'saved' } })
+
+    render(<ScheduleModal projectId="launch" onClose={() => {}} onScheduled={() => {}} />)
+    await screen.findByLabelText('TikTok')
+
+    // No native control anywhere in the dialog, and the popup is closed until asked for.
+    expect(document.querySelector('input[type="datetime-local"]')).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Pick a date and time' })).toBeNull()
+
+    fireEvent.click(screen.getByLabelText('Date and time'))
+    expect(screen.getByRole('dialog', { name: 'Pick a date and time' })).toBeInTheDocument()
+
+    // Default is tomorrow noon; the day it lands on is the one marked selected.
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const selected = screen.getByRole('button', { name: String(tomorrow.getDate()), pressed: true })
+    expect(selected).toHaveClass('dtf-day', 'on')
+
+    // Move a month on, take the 20th, then set the clock — both halves of the value, one at a time.
+    fireEvent.click(screen.getByLabelText('Next month'))
+    fireEvent.click(screen.getAllByRole('button', { name: '20' })[0])
+    fireEvent.change(screen.getByLabelText('Hour'), { target: { value: '9' } })
+    fireEvent.change(screen.getByLabelText('Minute'), { target: { value: '30' } })
+    fireEvent.change(screen.getByLabelText('AM or PM'), { target: { value: 'AM' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+
+    expect(screen.queryByRole('dialog', { name: 'Pick a date and time' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule' }))
+
+    await waitFor(() => expect(api.scheduleProject).toHaveBeenCalled())
+    const saved = new Date(api.scheduleProject.mock.calls[0][1].scheduled_at)
+    const expected = new Date(tomorrow.getFullYear(), tomorrow.getMonth() + 1, 20, 9, 30)
+    expect(saved.getTime()).toBe(expected.getTime())
+  })
+
   // The bug this guards: the dialog used to open blank, so a slot the AGENT set was invisible
   // here and re-saving appended a second entry.
   it('pre-fills the slot already on the calendar, including one the agent set', async () => {
@@ -95,8 +133,10 @@ describe('Content Calendar', () => {
 
     render(<ScheduleModal projectId="launch" onClose={() => {}} onScheduled={() => {}} />)
 
+    // The field is our own button now (the native popup was unstylable), so the pre-filled slot
+    // shows as the label we render rather than an input value.
     const when = await screen.findByLabelText('Date and time')
-    expect(when).toHaveValue(datetimeLocalValue(agentSlot))
+    expect(when).toHaveTextContent(datetimeLabel(datetimeLocalValue(agentSlot)))
     expect(screen.getByLabelText('Instagram')).toBeChecked()
     expect(screen.getByLabelText('YouTube')).toBeChecked()
     expect(screen.getByLabelText('TikTok')).not.toBeChecked()
