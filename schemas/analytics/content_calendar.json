@@ -1,0 +1,55 @@
+{
+  "$comment": "Analytics taxonomy — MVP content calendar. No project names, niche labels, channel names, or exact posting times leave the machine.",
+  "events": {
+    "content_schedule_created": {
+      "question": "Are people or agents placing completed videos on the calendar?",
+      "properties": {
+        "created_by": "E",
+        "channel_count": "N",
+        "timing_source": "E"
+      }
+    },
+    "content_schedule_failed": {
+      "question": "What prevents a completed video from being scheduled?",
+      "properties": {
+        "created_by": "E",
+        "failure_class": "E"
+      }
+    },
+    "content_calendar_opened": {
+      "question": "Does the calendar become a useful project-level destination?",
+      "properties": {
+        "entry_count": "N"
+      }
+    },
+    "content_calendar_video_opened": {
+      "question": "Do calendar entries lead users back to the actual scheduled output?",
+      "properties": {
+        "channel_count": "N",
+        "status": "E"
+      }
+    }
+  },
+  "enums": {
+    "created_by": [
+      "user",
+      "agent"
+    ],
+    "timing_source": [
+      "requested",
+      "baseline",
+      "cache",
+      "researched"
+    ],
+    "content_schedule_failed.failure_class": [
+      "no_final_render",
+      "invalid_channels",
+      "invalid_time",
+      "invalid_request",
+      "storage"
+    ],
+    "content_calendar_video_opened.status": [
+      "scheduled"
+    ]
+  }
+}

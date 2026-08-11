@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
 from server import analytics
+from server import content_calendar as content_calendar_mod
 from server.activity import record_tool_use
 
 DEFAULT_MODEL = "claude-opus-4-8"  # most capable model; strongest at long-horizon agentic runs
@@ -683,6 +684,11 @@ into assets/, hf/renders/, or renders/ by hand and never pass a hand-picked proj
 generator; write generated files to a scratch path, then hand them to `store_asset`. This is the \
 ONLY correct way to place assets — declaring the wrong folder yourself makes intermediate clips \
 show up as the final render in the editor.
+
+To SCHEDULE a completed project, read the content-calendar-scheduling skill and call the \
+`schedule_content` tool. It writes the same calendar entry as Mission Control, avoids obvious \
+collisions, and can remember a researched per-niche local posting time for future calls. It does \
+not publish to a social network.
 
 Announce cost before any paid generation. Never exceed the budget.
 """
@@ -1384,6 +1390,41 @@ class AgentRunner:
         async def store_asset(args: dict[str, Any]) -> dict[str, Any]:
             return await self._store_asset(project_id, args)
 
+        @tool(
+            "schedule_content",
+            "Schedule this completed project's final render on the Content Calendar. The tool "
+            "checks existing entries and moves an occupied slot to the next open day. Omit "
+            "scheduled_at to let it choose a sensible local time. Optionally pass niche; when "
+            "you researched a better posting time, pass learned_local_time as 24-hour HH:MM so "
+            "future calls for that niche reuse it without web research. This schedules only; it "
+            "does not publish to social platforms.",
+            {
+                "type": "object",
+                "properties": {
+                    "scheduled_at": {
+                        "type": "string",
+                        "description": "Optional future ISO-8601 date-time. Omit to auto-select.",
+                    },
+                    "channels": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(content_calendar_mod.CHANNELS)},
+                        "description": "One or more target channels.",
+                    },
+                    "niche": {
+                        "type": "string",
+                        "description": "Optional stable niche label used for the posting-time cache.",
+                    },
+                    "learned_local_time": {
+                        "type": "string",
+                        "description": "Optional researched host-local posting time as HH:MM.",
+                    },
+                },
+                "required": ["channels"],
+            },
+        )
+        async def schedule_content(args: dict[str, Any]) -> dict[str, Any]:
+            return await self._schedule_content(project_id, args)
+
         # request_api_key: the agent's key-provisioning tool. When a generation/media
         # tool fails because an API key isn't set (e.g. "GOOGLE_API_KEY not set"), the
         # agent calls this instead of telling the user to open BYOK by hand. A secure
@@ -1511,7 +1552,9 @@ class AgentRunner:
             )
 
         mc_server = create_sdk_mcp_server(
-            "mc", "1.0.0", [ask_user, render, store_asset, request_api_key, request_capability, run_media_op]
+            "mc",
+            "1.0.0",
+            [ask_user, render, store_asset, schedule_content, request_api_key, request_capability, run_media_op],
         )
 
         # If a prior session for this project died, resume it so the agent
@@ -2270,6 +2313,57 @@ class AgentRunner:
                 "deduped": res["deduped"],
             }
         )
+
+    async def _schedule_content(self, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        """Write an agent-selected slot through the shared calendar service."""
+        try:
+            entry = await asyncio.to_thread(
+                content_calendar_mod.create_scheduled_entry,
+                self.projects_dir,
+                project_id,
+                (args.get("scheduled_at") or "").strip() or None,
+                args.get("channels") or [],
+                created_by="agent",
+                avoid_collisions=True,
+                niche=(args.get("niche") or "").strip() or None,
+                learned_local_time=(args.get("learned_local_time") or "").strip() or None,
+            )
+        except (content_calendar_mod.ScheduleValidationError, content_calendar_mod.FinalRenderMissing) as exc:
+            analytics.capture(
+                "content_schedule_failed",
+                {
+                    "created_by": "agent",
+                    "failure_class": content_calendar_mod.failure_class(exc),
+                    "turn_id": (self._turn_ctx.get(project_id) or {}).get("turn_id"),
+                    "session_id": (self._turn_ctx.get(project_id) or {}).get("session_id"),
+                    "project_id": self._project_key(project_id),
+                },
+            )
+            return _text_result({"error": str(exc), "failure_class": content_calendar_mod.failure_class(exc)})
+        except (OSError, ValueError) as exc:
+            analytics.capture(
+                "content_schedule_failed",
+                {
+                    "created_by": "agent",
+                    "failure_class": "storage",
+                    "turn_id": (self._turn_ctx.get(project_id) or {}).get("turn_id"),
+                    "session_id": (self._turn_ctx.get(project_id) or {}).get("session_id"),
+                    "project_id": self._project_key(project_id),
+                },
+            )
+            return _text_result({"error": "could not save calendar entry", "failure_class": "storage"})
+        analytics.capture(
+            "content_schedule_created",
+            {
+                "created_by": "agent",
+                "channel_count": len(entry["channels"]),
+                "timing_source": entry["timing_source"],
+                "turn_id": (self._turn_ctx.get(project_id) or {}).get("turn_id"),
+                "session_id": (self._turn_ctx.get(project_id) or {}).get("session_id"),
+                "project_id": self._project_key(project_id),
+            },
+        )
+        return _text_result({"scheduled": True, "entry": entry})
 
     def _render_resume_note(self, project_id: str) -> Optional[str]:
         """If there's an UNCONSUMED agent job (a render OR a media op) for this project,

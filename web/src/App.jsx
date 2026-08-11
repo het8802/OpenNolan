@@ -13,6 +13,8 @@ import { useAgentChat } from './chat/useAgentChat.js'
 import { useAuth } from './auth/useAuth.js'
 import { track } from './analytics/track.js'
 import ConnectClaudeModal from './auth/ConnectClaudeModal.jsx'
+import ContentCalendar from './contentCalendar/ContentCalendar.jsx'
+import ScheduleModal from './contentCalendar/ScheduleModal.jsx'
 
 // Ages ship as ORDERED BUCKETS, never a timestamp: an exact creation time plus geo plus a file
 // size is the fingerprinting combination, and "did they come back to an old project" is a bucket
@@ -46,6 +48,9 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [uploadTick, setUploadTick] = useState(0)             // bump to refresh asset listing
   const [editing, setEditing] = useState(false)               // manual editor open (full-screen)
+  const [homeView, setHomeView] = useState(() => window.location.hash === '#/calendar' ? 'calendar' : 'projects')
+  const [finalRender, setFinalRender] = useState(null)
+  const [scheduling, setScheduling] = useState(false)
   const [showConnect, setShowConnect] = useState(false)        // "Sign in with Claude" modal open
   const justCreated = useRef(null)                             // separates a first open from a return visit
 
@@ -65,6 +70,12 @@ export default function App() {
     // Poll the project list so externally/agent-created projects appear live.
     const id = setInterval(refreshProjects, 4000)
     return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    const syncHash = () => setHomeView(window.location.hash === '#/calendar' ? 'calendar' : 'projects')
+    window.addEventListener('hashchange', syncHash)
+    return () => window.removeEventListener('hashchange', syncHash)
   }, [])
 
   // Poll state
@@ -112,6 +123,9 @@ export default function App() {
 
   // Open a project; the chat hook revives its most recent conversation from disk.
   function openProject(id) {
+    window.location.hash = ''
+    setHomeView('projects')
+    setFinalRender(null)
     setSelected(id)
     // The user ACTION. Deliberately not the 4s refreshProjects poll above (banned hook
     // class 5) — a poll would report an "open" every four seconds for an idle window.
@@ -132,6 +146,19 @@ export default function App() {
   )
 
   if (!selected) {
+    if (homeView === 'calendar') {
+      return (
+        <div className="app">
+          <ContentCalendar
+            onProjects={() => { window.location.hash = ''; setHomeView('projects') }}
+            onError={showError}
+          />
+          {connectModal}
+          {toast && <div className={`toast ${toast.kind}${toast.leaving ? ' leaving' : ''}`}>{toast.text}</div>}
+          <UpdateBanner />
+        </div>
+      )
+    }
     return (
       <div className="app">
         <Dashboard
@@ -139,6 +166,7 @@ export default function App() {
           styles={styles}
           projects={projects}
           onOpen={openProject}
+          onCalendar={() => { window.location.hash = '/calendar'; setHomeView('calendar') }}
           auth={auth.status}
           onConnect={() => setShowConnect(true)}
           onCreate={async (name, pipeline, style) => {
@@ -172,11 +200,13 @@ export default function App() {
     <div className="app">
       <ProjectBar
         state={state} projects={projects} selected={selected}
+        canSchedule={!!finalRender}
+        onSchedule={() => setScheduling(true)}
         onEdit={() => {
           track('editor_opened', { source: 'project_bar' })
           setEditing(true)
         }}
-        onBack={() => { setSelected(null); setEditing(false) }}
+        onBack={() => { setSelected(null); setEditing(false); setFinalRender(null) }}
       />
       <main className="grid">
         <ChatPanel chat={chat} disabled={!selected}
@@ -185,6 +215,7 @@ export default function App() {
         <AssetPanel
           selected={selected}
           uploadTick={uploadTick}
+          onFinalRender={setFinalRender}
           onUpload={async (kind, file) => {
             try {
               const r = await api.uploadAsset(selected, kind, file)
@@ -194,6 +225,16 @@ export default function App() {
           }}
         />
       </main>
+      {scheduling && (
+        <ScheduleModal
+          projectId={selected}
+          onClose={() => setScheduling(false)}
+          onScheduled={entry => {
+            setScheduling(false)
+            showOk(`Scheduled for ${fmtDateTime(entry.scheduled_at)}`)
+          }}
+        />
+      )}
       {connectModal}
       {toast && <div className={`toast ${toast.kind}${toast.leaving ? ' leaving' : ''}`}>{toast.text}</div>}
       <UpdateBanner />
@@ -216,7 +257,7 @@ function fmtDate(s) {
   } catch { return '' }
 }
 
-function Dashboard({ pipelines, styles = [], projects, onOpen, onCreate, auth, onConnect }) {
+function Dashboard({ pipelines, styles = [], projects, onOpen, onCreate, onCalendar, auth, onConnect }) {
   const [creating, setCreating] = useState(false)
   const [showEnv, setShowEnv] = useState(false)
   const [showCaps, setShowCaps] = useState(false)
@@ -230,6 +271,7 @@ function Dashboard({ pipelines, styles = [], projects, onOpen, onCreate, auth, o
       <header className="dash-header">
         <div className="brand"><span className="dot" /> OpenNolan</div>
         <div className="dash-sub">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
+        <button className="calendar-open-btn" onClick={onCalendar}>Content Calendar</button>
         {auth && connected && (
           <button
             className={`claude-btn claude-btn-sm reauth-btn${needsReauth ? ' warn' : ''}`}
@@ -583,7 +625,7 @@ function CreateModal({ pipelines, styles = [], onClose, onCreate }) {
 
 // ─── Project Bar (slim top bar inside a project) ────────────────────────────────
 
-function ProjectBar({ state, projects, selected, onBack, onEdit }) {
+function ProjectBar({ state, projects, selected, onBack, onSchedule, canSchedule, onEdit }) {
   const p = projects.find(x => x.project_id === selected)
   const name = state?.name || p?.name || selected
   const type = state?.pipeline_type || p?.pipeline_type || ''
@@ -596,6 +638,12 @@ function ProjectBar({ state, projects, selected, onBack, onEdit }) {
         {type && <span className="pb-type">{type}</span>}
       </div>
       <div className="runtimes">
+        {onSchedule && (
+          <button className="schedule-open-btn" onClick={onSchedule} disabled={!canSchedule}
+            title={canSchedule ? 'Schedule this final video' : 'Schedule is available after a final render'}>
+            Schedule
+          </button>
+        )}
         {onEdit && <button className="editor-open-btn" onClick={onEdit} title="Hand-edit this project's timeline">✎ Edit</button>}
       </div>
     </header>
@@ -1318,7 +1366,7 @@ function ContentSignalView({ c }) {
 
 // ─── Assets Panel ─────────────────────────────────────────────────────────────
 
-function AssetPanel({ selected, onUpload, uploadTick }) {
+function AssetPanel({ selected, onUpload, uploadTick, onFinalRender }) {
   const [data, setData] = useState(null)
   const inputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
@@ -1327,7 +1375,7 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
 
   // Poll the asset listing for the selected project (live as the agent writes files).
   useEffect(() => {
-    if (!selected) { setData(null); return }
+    if (!selected) { setData(null); onFinalRender?.(null); return }
     let alive = true
     // #97 — from the CONSUMER, on the `current` flag flipping true->false. NOT from
     // lib/project.py's final_render_status: that runs inside list_assets, which THIS poll hits
@@ -1337,6 +1385,7 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
     const tick = () => api.listAssets(selected).then(d => {
       if (!alive) return
       const final = (d?.renders || []).find(r => r.name === 'final.mp4')
+      onFinalRender?.(final || null)
       const nowCurrent = final ? !!final.current : null
       if (wasCurrent === true && nowCurrent === false) {
         track('export_became_stale', { cause: final?.reason === 'receipt_missing' ? 'receipt_missing' : 'human_edit' })
@@ -1346,8 +1395,8 @@ function AssetPanel({ selected, onUpload, uploadTick }) {
     }).catch(() => {})
     tick()
     const id = setInterval(tick, 4000)
-    return () => { alive = false; clearInterval(id) }
-  }, [selected, uploadTick])
+    return () => { alive = false; clearInterval(id); onFinalRender?.(null) }
+  }, [selected, uploadTick, onFinalRender])
 
   // Browse the project like a folder instead of flat kind tabs; `data` is the 4s poll, so each
   // tick re-lists the open folder too and agent-written files appear as they land.

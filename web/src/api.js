@@ -70,6 +70,13 @@ export const getPipelines = () => fetch('/api/pipelines').then(json)
 // Visual style playbooks (built-in + user-created) for the New Project picker.
 export const getStyles = () => fetch('/api/styles').then(json)
 export const getProjects = () => withNetworkTelemetry(fetch('/api/projects').then(json), 'asset_api')
+export const getContentCalendar = () => fetch('/api/content-calendar').then(json)
+export const scheduleProject = (id, body) =>
+  fetch(`/api/projects/${id}/schedule`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(json)
 
 // BYOK: read the local .env (curated variable menu + current values) and save edits back.
 export const getEnv = () => fetch('/api/env').then(json)
