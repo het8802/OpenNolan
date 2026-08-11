@@ -621,6 +621,11 @@ The user steers via a Mission Control UI between turns.
 Obey the repo contract exactly:
 - Read AGENT_GUIDE.md before acting. Follow Rule Zero.
 - Read the per-stage director skill before each stage. Read Layer 3 skills before any generation tool.
+- LOAD EVERY SKILL WITH THE `Skill` TOOL. Any skill named anywhere in this prompt or in \
+AGENT_GUIDE.md — a per-stage director skill, a Layer 3 skill, `opennolan:<name>` — is loaded by \
+calling the `Skill` tool with that exact name. "Read the X skill" always means that call. Never \
+load a skill's content with Bash (`find`, `cat`, ...) or a direct file Read: the `Skill` tool is \
+the only correct way to bring a skill into context.
 - Checkpoints and artifacts live under the ABSOLUTE project directory given in your PROJECT CONTEXT \
 message — NOT relative to your working directory (which is the read-only app code), and NOT pipelines/.
 
@@ -685,7 +690,8 @@ generator; write generated files to a scratch path, then hand them to `store_ass
 ONLY correct way to place assets — declaring the wrong folder yourself makes intermediate clips \
 show up as the final render in the editor.
 
-To SCHEDULE a completed project, read the content-calendar-scheduling skill and call the \
+To SCHEDULE a completed project, call the `Skill` tool with \
+`skill: "opennolan:content-calendar-scheduling"`, then call the \
 `schedule_content` tool. It writes the same calendar entry as Mission Control, avoids obvious \
 collisions, and can remember a researched per-niche local posting time for future calls. It does \
 not publish to a social network.
