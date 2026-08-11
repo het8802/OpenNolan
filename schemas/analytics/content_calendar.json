@@ -1,0 +1,53 @@
+{
+  "$comment": "Analytics taxonomy — MVP content calendar. No project names, niche labels, channel names, or exact posting times leave the machine.",
+  "events": {
+    "content_schedule_created": {
+      "question": "Are people or agents placing completed videos on the calendar? `replaced` answers the one the MVP deferred: if slots get corrected in normal use, reschedule/delete has to become a first-class UI instead of a re-save.",
+      "properties": {
+        "created_by": "E",
+        "channel_count": "N",
+        "timing_source": "E",
+        "replaced": "F"
+      }
+    },
+    "content_schedule_failed": {
+      "question": "What prevents a completed video from being scheduled?",
+      "properties": {
+        "created_by": "E",
+        "failure_class": "E"
+      }
+    },
+    "content_calendar_viewed": {
+      "$comment": "ONE name for both interactions on this surface, discriminated by `action` — the same shape as thread_lifecycle. Two names would put the taxonomy at 101 against a hard <=100 EMITTED-name cap (scripts/analytics_manifest.py --check), and 'opened the month' -> 'played an entry' is a funnel on one screen, not two families. The dropped `status` carried nothing: its whole declared vocabulary was ['scheduled'].",
+      "question": "Does the calendar become a destination, and do entries lead back to the actual output? `calendar` with entry_count is the denominator; `video` is the click-through.",
+      "properties": {
+        "action": "E",
+        "entry_count": "N",
+        "channel_count": "N"
+      }
+    }
+  },
+  "enums": {
+    "created_by": [
+      "user",
+      "agent"
+    ],
+    "timing_source": [
+      "requested",
+      "baseline",
+      "cache",
+      "researched"
+    ],
+    "content_schedule_failed.failure_class": [
+      "no_final_render",
+      "invalid_channels",
+      "invalid_time",
+      "invalid_request",
+      "storage"
+    ],
+    "content_calendar_viewed.action": [
+      "calendar",
+      "video"
+    ]
+  }
+}

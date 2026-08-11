@@ -17,6 +17,7 @@ def test_app_skills_form_a_local_plugin():
 
     assert manifest["name"] == "opennolan"
     assert (plugin_root / "skills" / "ffmpeg" / "SKILL.md").is_file()
+    assert (plugin_root / "skills" / "content-calendar-scheduling" / "SKILL.md").is_file()
 
 
 def test_every_coding_skill_is_symlinked_for_claude_code():

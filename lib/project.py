@@ -94,6 +94,26 @@ def sanitize_filename(filename: str) -> str:
     return name
 
 
+def is_safe_project_id(project_id: Any) -> bool:
+    """True iff `project_id` is a plain directory name, so joining it can't escape.
+
+    A project id is always a `slugify` slug or an existing directory name read back from
+    `iterdir()` — never a path. It is REJECTED, not rewritten: `sanitize_filename` turning
+    ``../foo`` into ``foo`` is right for an upload (the user picked a file, we pick where it
+    lands) and wrong for an id (rewriting it would silently address a DIFFERENT project).
+    So this asks sanitize_filename for the safe basename and demands it be the id itself.
+
+    `..` reaches the route as `%2e%2e`, which Starlette percent-decodes before the path
+    param is bound, so the guard has to live behind the decode — here — not in a URL check.
+    """
+    if not isinstance(project_id, str):
+        return False
+    try:
+        return sanitize_filename(project_id) == project_id
+    except ValueError:
+        return False
+
+
 def project_dir(projects_dir: Path | str, project_id: str) -> Path:
     return Path(projects_dir) / project_id
 
@@ -205,7 +225,14 @@ def get_project_record(projects_dir: Path | str, project_id: str) -> Optional[di
     else None. Use this — not read_project_manifest — to decide whether a
     project exists, so legacy dirs are first-class everywhere (state, chat,
     assets, threads), exactly as they appear in the project list.
+
+    Because every caller gates on this — "record is None -> 404" — an id that isn't a
+    plain directory name resolves to None HERE rather than in each route. `projects/..`
+    can name a real-looking dir (a parent with renders/ passes the legacy test), and
+    there is no project called `..`, so "not found" is the honest answer.
     """
+    if not is_safe_project_id(project_id):
+        return None
     rec = read_project_manifest(projects_dir, project_id)
     if rec is None:
         rec = _infer_legacy_project(Path(projects_dir), project_id)

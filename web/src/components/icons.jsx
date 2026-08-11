@@ -28,6 +28,7 @@ export const IconFolder = (p) => <Svg {...p}><path d="M3 7a2 2 0 0 1 2-2h3.9a2 2
 export const IconRefresh = (p) => <Svg {...p}><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v5h-5" /></Svg>
 export const IconAlert = (p) => <Svg {...p}><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></Svg>
 export const IconMessage = (p) => <Svg {...p}><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 9 9 0 0 1-4-.9L3 20l1.9-5.5a8.38 8.38 0 0 1-.9-4A8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5Z" /></Svg>
+export const IconCalendar = (p) => <Svg {...p}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M8 3v4M16 3v4M3 10h18" /></Svg>
 
 // Emoji replacements (RULES.md: aesthetic icons, no emoji). Same stroke language as above.
 export const IconMovie = (p) => <Svg {...p}><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M8 4v16M16 4v16M4 8h4M4 16h4M16 8h4M16 16h4M4 12h16" /></Svg>

@@ -80,7 +80,7 @@ test('studio toolbar holds one row at the 960px minimum width', async ({ page })
   await page.reload();
   await page.waitForLoadState('networkidle');
   await page.getByText(projectName, { exact: true }).click();
-  await page.locator('.editor-open-btn').click();
+  await page.locator('.pb-action', { hasText: 'Edit' }).click();
   await expect(page.locator('.st-bar')).toBeVisible();
   await expect(page.locator('.st-tools')).toBeVisible();
 
@@ -123,4 +123,55 @@ test('studio toolbar holds one row at the 960px minimum width', async ({ page })
   });
   expect(centres.length).toBeGreaterThan(3);
   expect(Math.max(...centres) - Math.min(...centres)).toBeLessThan(8);
+});
+
+// The Calendar / Schedule / Edit entry points were restyled to REUSE existing pills rather than
+// carry their own look. "Same pill" is a computed-style claim, so it can only be checked against
+// real layout — jsdom has no cascade for this. Guards against a future edit quietly reintroducing
+// a bespoke style, and against Schedule drifting away from Edit's shape or side.
+test('calendar and project-bar entry points reuse the shared pills', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+
+  const projectName = `Pills ${Date.now()}`;
+  const created = await page.evaluate(async (name) => {
+    const response = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    return { status: response.status, body: await response.json() };
+  }, projectName);
+  expect(created.status).toBe(201);
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+
+  // 1. Calendar is one of the dashboard header's pills, not its own thing: same class, same
+  //    computed shape and type as BYOK, with an icon like its neighbours.
+  const calendar = page.locator('.byok-btn', { hasText: 'Calendar' });
+  await expect(calendar).toBeVisible();
+  await expect(calendar.locator('svg')).toHaveCount(1);
+  const shape = (selector) => page.evaluate((sel) => {
+    const el = [...document.querySelectorAll('.byok-btn')].find((node) => node.textContent.trim() === sel);
+    const s = getComputedStyle(el);
+    return [s.borderRadius, s.fontSize, s.fontWeight, s.padding, s.borderWidth].join('|');
+  }, selector);
+  expect(await shape('Calendar')).toBe(await shape('BYOK'));
+
+  // 2. Schedule and Edit are two of the SAME pill, side by side, Schedule on the left.
+  await page.getByText(projectName, { exact: true }).click();
+  const actions = page.locator('.runtimes .pb-action');
+  await expect(actions).toHaveCount(2);
+  await expect(actions.nth(0)).toHaveText(/Schedule/);
+  await expect(actions.nth(1)).toHaveText(/Edit/);
+  await expect(actions.nth(0).locator('svg')).toHaveCount(1);
+  await expect(actions.nth(1).locator('svg')).toHaveCount(1);
+  const boxes = await actions.evaluateAll((els) => els.map((el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, right: r.right, mid: r.top + r.height / 2, radius: getComputedStyle(el).borderRadius };
+  }));
+  expect(boxes[0].right).toBeLessThanOrEqual(boxes[1].left);        // Schedule sits left of Edit
+  expect(Math.abs(boxes[0].mid - boxes[1].mid)).toBeLessThan(2);    // one row
+  expect(boxes[0].radius).toBe(boxes[1].radius);                    // one pill shape
+  expect(parseFloat(boxes[0].radius)).toBeGreaterThan(100);         // ...and it IS a pill
 });

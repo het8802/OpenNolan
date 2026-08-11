@@ -251,6 +251,7 @@ from styles.playbook_loader import builtin_playbooks, list_playbooks, load_playb
 from server import activity as activity_mod
 from server import analytics as analytics_mod
 from server import artifacts as artifacts_mod
+from server import content_calendar as content_calendar_mod
 from server import settings as settings_mod
 from server import auth as auth_mod
 from server import debug_log as debug_log_mod
@@ -269,6 +270,11 @@ class CreateProjectRequest(BaseModel):
     name: str
     pipeline_type: Optional[str] = None  # None/empty -> the agent picks one
     style: Optional[str] = None  # None/empty -> the agent picks a style
+
+
+class ScheduleProjectRequest(BaseModel):
+    scheduled_at: str
+    channels: list[str]
 
 
 class MentionRef(BaseModel):
@@ -874,6 +880,65 @@ def create_app(
     @app.get("/api/projects")
     def projects() -> dict[str, Any]:
         return {"projects": list_projects(pdir)}
+
+    @app.get("/api/content-calendar")
+    def content_calendar() -> dict[str, Any]:
+        entries = content_calendar_mod.list_calendar_entries(pdir)
+        return {"channels": list(content_calendar_mod.CHANNELS), "entries": entries}
+
+    @app.post("/api/projects/{project_id}/schedule", status_code=201)
+    def schedule_project(project_id: str, req: ScheduleProjectRequest) -> dict[str, Any]:
+        if get_project_record(pdir, project_id) is None:
+            raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+        try:
+            entry = content_calendar_mod.create_scheduled_entry(
+                pdir,
+                project_id,
+                req.scheduled_at,
+                req.channels,
+                created_by="user",
+            )
+        except content_calendar_mod.FinalRenderMissing as exc:
+            analytics_mod.capture(
+                "content_schedule_failed",
+                {
+                    "created_by": "user",
+                    "failure_class": "no_final_render",
+                    "project_id": analytics_mod.project_key(pdir, project_id),
+                },
+            )
+            raise HTTPException(status_code=409, detail=str(exc))
+        except content_calendar_mod.ScheduleValidationError as exc:
+            analytics_mod.capture(
+                "content_schedule_failed",
+                {
+                    "created_by": "user",
+                    "failure_class": content_calendar_mod.failure_class(exc),
+                    "project_id": analytics_mod.project_key(pdir, project_id),
+                },
+            )
+            raise HTTPException(status_code=422, detail=str(exc))
+        except (OSError, ValueError) as exc:
+            analytics_mod.capture(
+                "content_schedule_failed",
+                {
+                    "created_by": "user",
+                    "failure_class": "storage",
+                    "project_id": analytics_mod.project_key(pdir, project_id),
+                },
+            )
+            raise HTTPException(status_code=500, detail="could not save calendar entry") from exc
+        analytics_mod.capture(
+            "content_schedule_created",
+            {
+                "created_by": "user",
+                "channel_count": len(entry["channels"]),
+                "timing_source": entry["timing_source"],
+                "replaced": entry["replaced"],
+                "project_id": analytics_mod.project_key(pdir, project_id),
+            },
+        )
+        return {"entry": entry}
 
     @app.post("/api/projects", status_code=201)
     def new_project(req: CreateProjectRequest) -> dict[str, Any]:
