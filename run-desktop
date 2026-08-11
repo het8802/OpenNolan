@@ -93,7 +93,7 @@ if [ "$mode" = "dev" ]; then
   ( exec npm --prefix web run dev ) &
   pids+=("$!")
 
-  echo "run-desktop: waiting for Vite on :$FRONTEND_PORT…"
+  echo "run-desktop: waiting for Vite on :$FRONTEND_PORT"
   for _ in $(seq 1 60); do
     curl -sf -o /dev/null "http://localhost:$FRONTEND_PORT" && break
     sleep 0.5
