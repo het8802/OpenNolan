@@ -28,6 +28,16 @@ export function entriesByDay(entries) {
   return grouped
 }
 
+// A project holds ONE slot (the server upserts by project id). Read it out of the same aggregate
+// the month view renders so the Schedule dialog and the calendar can never disagree; the earliest
+// entry wins if an older file still carries duplicates from before the upsert.
+export function entryForProject(entries, projectId) {
+  const mine = (entries || [])
+    .filter(entry => entry && entry.project_id === projectId && entry.scheduled_at)
+    .sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)))
+  return mine[0] || null
+}
+
 export function defaultDatetimeLocal(now = new Date()) {
   const next = new Date(now)
   next.setDate(next.getDate() + 1)

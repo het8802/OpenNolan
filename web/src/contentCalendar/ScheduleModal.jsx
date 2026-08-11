@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api.js'
 import { IconX } from '../components/icons.jsx'
-import { datetimeLocalValue, defaultDatetimeLocal } from './model.js'
+import { datetimeLocalValue, defaultDatetimeLocal, entryForProject } from './model.js'
 
+// Opening this dialog READS the project's current slot from `/api/content-calendar` — the same
+// aggregate the calendar month view renders — so an entry the agent's `schedule_content` tool
+// wrote pre-fills here too. Saving upserts that one entry (server-side, by project id), so a
+// correction moves the slot instead of leaving a duplicate behind.
 export default function ScheduleModal({ projectId, onClose, onScheduled }) {
   const [scheduledAt, setScheduledAt] = useState(() => defaultDatetimeLocal())
   const [available, setAvailable] = useState([])
   const [selected, setSelected] = useState([])
+  const [current, setCurrent] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
 
@@ -16,17 +21,23 @@ export default function ScheduleModal({ projectId, onClose, onScheduled }) {
       .then(data => {
         if (!alive) return
         const channels = data.channels || []
+        const entry = entryForProject(data.entries, projectId)
         setAvailable(channels)
-        setSelected(channels.slice(0, 1))
+        setCurrent(entry)
+        setScheduledAt(entry ? datetimeLocalValue(new Date(entry.scheduled_at)) : defaultDatetimeLocal())
+        // Filter through the vocabulary so a stale channel in an old entry can't be re-submitted.
+        setSelected(entry
+          ? channels.filter(channel => (entry.channels || []).includes(channel))
+          : channels.slice(0, 1))
       })
       .catch(err => alive && setError(String(err.message || err)))
     return () => { alive = false }
-  }, [])
+  }, [projectId])
 
   function toggle(channel) {
-    setSelected(current => current.includes(channel)
-      ? current.filter(value => value !== channel)
-      : [...current, channel])
+    setSelected(chosen => chosen.includes(channel)
+      ? chosen.filter(value => value !== channel)
+      : [...chosen, channel])
   }
 
   async function submit(event) {
@@ -46,13 +57,19 @@ export default function ScheduleModal({ projectId, onClose, onScheduled }) {
     }
   }
 
+  const stale = current && new Date(current.scheduled_at) <= new Date()
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <form className="modal schedule-modal" onClick={event => event.stopPropagation()} onSubmit={submit}>
         <div className="schedule-modal-head">
           <div>
-            <h3>Schedule final video</h3>
-            <p>Choose when this completed render should appear on your content plan.</p>
+            <h3>{current ? 'Reschedule final video' : 'Schedule final video'}</h3>
+            <p>
+              {current
+                ? `Already on your plan — set ${current.created_by === 'agent' ? 'by the agent' : 'by you'}. Saving moves this entry.`
+                : 'Choose when this completed render should appear on your content plan.'}
+            </p>
           </div>
           <button type="button" className="am-close" onClick={onClose} title="Close" aria-label="Close">
             <IconX />
@@ -67,6 +84,7 @@ export default function ScheduleModal({ projectId, onClose, onScheduled }) {
             onChange={event => setScheduledAt(event.target.value)}
           />
         </label>
+        {stale && <p className="modal-hint warn">That slot has already passed — pick a new date and time.</p>}
         <fieldset className="schedule-channels">
           <legend>Channels</legend>
           {available.map(channel => (
@@ -86,7 +104,7 @@ export default function ScheduleModal({ projectId, onClose, onScheduled }) {
         <div className="modal-actions">
           <button type="button" className="modal-cancel" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn-primary" disabled={busy || !scheduledAt || !selected.length}>
-            {busy ? 'Scheduling…' : 'Schedule'}
+            {busy ? 'Saving…' : current ? 'Update schedule' : 'Schedule'}
           </button>
         </div>
       </form>

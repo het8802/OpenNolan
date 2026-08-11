@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as api from './api.js'
 import { LineChart } from './components/LineChart.jsx'
-import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, IconMessage, ClaudeLogo, IconMovie, IconMic, IconStar, IconMusic, IconListDetails, IconFileText, IconChevron } from './components/icons.jsx'
+import { IconKey, IconEye, IconEyeOff, IconCheck, IconX, IconAlert, IconMessage, ClaudeLogo, IconMovie, IconMic, IconStar, IconMusic, IconListDetails, IconFileText, IconChevron, IconCalendar, IconPencil } from './components/icons.jsx'
 import Studio from './studio/Studio.jsx'
 import ChatPanel from './chat/ChatPanel.jsx'
 import CapabilitiesModal from './CapabilitiesModal.jsx'
@@ -231,7 +231,7 @@ export default function App() {
           onClose={() => setScheduling(false)}
           onScheduled={entry => {
             setScheduling(false)
-            showOk(`Scheduled for ${fmtDateTime(entry.scheduled_at)}`)
+            showOk(`${entry.replaced ? 'Rescheduled' : 'Scheduled'} for ${fmtDateTime(entry.scheduled_at)}`)
           }}
         />
       )}
@@ -271,7 +271,6 @@ function Dashboard({ pipelines, styles = [], projects, onOpen, onCreate, onCalen
       <header className="dash-header">
         <div className="brand"><span className="dot" /> OpenNolan</div>
         <div className="dash-sub">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
-        <button className="calendar-open-btn" onClick={onCalendar}>Content Calendar</button>
         {auth && connected && (
           <button
             className={`claude-btn claude-btn-sm reauth-btn${needsReauth ? ' warn' : ''}`}
@@ -280,6 +279,10 @@ function Dashboard({ pipelines, styles = [], projects, onOpen, onCreate, onCalen
             <ClaudeLogo size={15} /> Re-authenticate with Claude
           </button>
         )}
+        {/* Same `.byok-btn` outline pill as its neighbours — one class, so the header row can't drift. */}
+        <button className="byok-btn" onClick={onCalendar} title="Open your content calendar">
+          <IconCalendar /> Calendar
+        </button>
         <button className="byok-btn" onClick={() => setShowCaps(true)} title="Manage optional on-device capabilities">
           Capabilities
         </button>
@@ -638,13 +641,18 @@ function ProjectBar({ state, projects, selected, onBack, onSchedule, canSchedule
         {type && <span className="pb-type">{type}</span>}
       </div>
       <div className="runtimes">
+        {/* Schedule + Edit share ONE pill class so the pair can never drift apart visually. */}
         {onSchedule && (
-          <button className="schedule-open-btn" onClick={onSchedule} disabled={!canSchedule}
+          <button className="pb-action" onClick={onSchedule} disabled={!canSchedule}
             title={canSchedule ? 'Schedule this final video' : 'Schedule is available after a final render'}>
-            Schedule
+            <IconCalendar /> Schedule
           </button>
         )}
-        {onEdit && <button className="editor-open-btn" onClick={onEdit} title="Hand-edit this project's timeline">✎ Edit</button>}
+        {onEdit && (
+          <button className="pb-action" onClick={onEdit} title="Hand-edit this project's timeline">
+            <IconPencil /> Edit
+          </button>
+        )}
       </div>
     </header>
   )

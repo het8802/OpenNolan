@@ -934,6 +934,7 @@ def create_app(
                 "created_by": "user",
                 "channel_count": len(entry["channels"]),
                 "timing_source": entry["timing_source"],
+                "replaced": entry["replaced"],
                 "project_id": analytics_mod.project_key(pdir, project_id),
             },
         )

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api.js'
 import { track } from '../analytics/track.js'
 import AssetModal from '../components/AssetModal.jsx'
+import { IconChevron } from '../components/icons.jsx'
 import { dateKey, entriesByDay, monthDays } from './model.js'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -79,9 +80,13 @@ export default function ContentCalendar({ onProjects, onError = () => {} }) {
             <h1>{monthLabel(cursor)}</h1>
           </div>
           <div className="calendar-nav" aria-label="Calendar navigation">
-            <button onClick={() => moveMonth(-1)} aria-label="Previous month">←</button>
+            <button className="calendar-step" onClick={() => moveMonth(-1)} aria-label="Previous month">
+              <IconChevron style={{ transform: 'rotate(180deg)' }} />
+            </button>
             <button onClick={() => setCursor(new Date())}>Today</button>
-            <button onClick={() => moveMonth(1)} aria-label="Next month">→</button>
+            <button className="calendar-step" onClick={() => moveMonth(1)} aria-label="Next month">
+              <IconChevron />
+            </button>
           </div>
         </div>
         <div className="calendar-grid" aria-label={monthLabel(cursor)}>

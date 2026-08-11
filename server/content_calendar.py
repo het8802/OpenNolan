@@ -235,12 +235,25 @@ def create_scheduled_entry(
                 timing_source = "cache"
 
         candidate = _parse_time(scheduled_at) if scheduled_at else _next_local_slot(cached_time)
+        # A project holds ONE scheduled slot, so re-scheduling REPLACES it (same id) instead of
+        # appending a second entry. Both the UI's Schedule dialog and the agent's
+        # `schedule_content` tool land here, so neither can leave a duplicate behind.
+        schedule = read_project_schedule(projects_root, project_id)
+        # Earliest-first, matching the UI's `entryForProject`, so both sides agree on WHICH entry
+        # is "the" slot if an older file still carries duplicates from before this rule.
+        mine = sorted(
+            (saved for saved in schedule["entries"] if saved.get("project_id") == project_id),
+            key=lambda saved: str(saved.get("scheduled_at") or ""),
+        )
+        previous = mine[0] if mine else None
         if avoid_collisions:
-            candidate = _open_slot(candidate, list_calendar_entries(projects_root))
+            # The slot we are about to overwrite must not push itself out of the way.
+            others = [other for other in list_calendar_entries(projects_root) if other.get("project_id") != project_id]
+            candidate = _open_slot(candidate, others)
 
         stat = render.stat()
         entry = {
-            "id": uuid.uuid4().hex,
+            "id": (previous or {}).get("id") or uuid.uuid4().hex,
             "project_id": project_id,
             "render_ref": {
                 "path": FINAL_RENDER_REL,
@@ -251,11 +264,13 @@ def create_scheduled_entry(
             "channels": selected_channels,
             "status": "scheduled",
             "created_by": created_by,
-            "created_at": _iso_utc(datetime.now(timezone.utc)),
+            "created_at": (previous or {}).get("created_at") or _iso_utc(datetime.now(timezone.utc)),
             "timing_source": timing_source,
+            "replaced": previous is not None,
         }
-        schedule = read_project_schedule(projects_root, project_id)
-        schedule["entries"].append(entry)
+        schedule["entries"] = [saved for saved in schedule["entries"] if saved.get("project_id") != project_id] + [
+            entry
+        ]
         atomic_write_json(schedule_path(projects_root, project_id), schedule)
         return entry
 

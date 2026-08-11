@@ -80,7 +80,7 @@ test('studio toolbar holds one row at the 960px minimum width', async ({ page })
   await page.reload();
   await page.waitForLoadState('networkidle');
   await page.getByText(projectName, { exact: true }).click();
-  await page.locator('.editor-open-btn').click();
+  await page.locator('.pb-action', { hasText: 'Edit' }).click();
   await expect(page.locator('.st-bar')).toBeVisible();
   await expect(page.locator('.st-tools')).toBeVisible();
 

@@ -1392,8 +1392,10 @@ class AgentRunner:
 
         @tool(
             "schedule_content",
-            "Schedule this completed project's final render on the Content Calendar. The tool "
-            "checks existing entries and moves an occupied slot to the next open day. Omit "
+            "Schedule this completed project's final render on the Content Calendar. A project "
+            "holds one slot: calling this again for the same project MOVES that slot rather than "
+            "adding a second entry. The tool checks other projects' entries and moves an occupied "
+            "slot to the next open day. Omit "
             "scheduled_at to let it choose a sensible local time. Optionally pass niche; when "
             "you researched a better posting time, pass learned_local_time as 24-hour HH:MM so "
             "future calls for that niche reuse it without web research. This schedules only; it "
@@ -2358,6 +2360,7 @@ class AgentRunner:
                 "created_by": "agent",
                 "channel_count": len(entry["channels"]),
                 "timing_source": entry["timing_source"],
+                "replaced": entry["replaced"],
                 "turn_id": (self._turn_ctx.get(project_id) or {}).get("turn_id"),
                 "session_id": (self._turn_ctx.get(project_id) or {}).get("session_id"),
                 "project_id": self._project_key(project_id),

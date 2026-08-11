@@ -2,11 +2,12 @@
   "$comment": "Analytics taxonomy — MVP content calendar. No project names, niche labels, channel names, or exact posting times leave the machine.",
   "events": {
     "content_schedule_created": {
-      "question": "Are people or agents placing completed videos on the calendar?",
+      "question": "Are people or agents placing completed videos on the calendar? `replaced` answers the one the MVP deferred: if slots get corrected in normal use, reschedule/delete has to become a first-class UI instead of a re-save.",
       "properties": {
         "created_by": "E",
         "channel_count": "N",
-        "timing_source": "E"
+        "timing_source": "E",
+        "replaced": "F"
       }
     },
     "content_schedule_failed": {

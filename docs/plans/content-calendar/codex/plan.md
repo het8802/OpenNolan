@@ -62,7 +62,8 @@ asset lightbox for playback.
 |---|---|---|
 | Social account auth or posting | Explicitly out of scope; entries are planning records only. | A separate publishing/connectors feature is approved. |
 | A database or global calendar database | Per-project JSON is the repository's persistence model and is enough to aggregate an MVP. | Schedule volume or cross-process write contention becomes measurable. |
-| Edit/delete/reschedule/status transitions | The request only requires creating and viewing scheduled entries. | Users need to correct mistakes in normal use. |
+| Delete/status transitions | The request only requires creating and viewing scheduled entries. | Users need to remove a plan, not just move it. |
+| ~~Reschedule~~ | ~~The request only requires creating and viewing.~~ **BUILT in the follow-up round** — a project holds ONE slot and the Schedule dialog re-saves it, because a dialog that opened blank over an existing (often agent-set) entry read as data loss and appended duplicates. | — |
 | Automatic manual collision resolution | A user-picked datetime is authoritative; silently moving it is surprising. | Product defines a conflict UI or explicit auto-move option. |
 | Timezone settings UI | `datetime-local` can convert through the browser's local zone; the agent uses the host local zone. | Teams schedule for accounts in other timezones. |
 | Immutable copies of scheduled videos | MVP can reference the canonical final render just like the existing UI. | Scheduled versions must survive later re-renders byte-for-byte. |
@@ -136,6 +137,26 @@ Existing tests most likely to expose regressions are
 - The bundled agent guidance is
   `.agents/app/skills/content-calendar-scheduling/SKILL.md:1`; learned per-niche
   times are written to a runtime copy beside project data.
+### Follow-up round (human review of the two competing spikes)
+
+The human kept this build and asked for three things:
+
+1. The Calendar entry point now reuses the dashboard header's existing `.byok-btn`
+   outline pill (icon + label) instead of its own accent-filled style, and sits in
+   that row between Re-authenticate and Capabilities.
+2. Schedule and Edit on the project bar now share ONE `.pb-action` pill class
+   (`web/src/styles.css`), replacing the divergent `.schedule-open-btn` /
+   `.editor-open-btn` pair, with `IconCalendar` / `IconPencil` in place of the `✎`
+   glyph.
+3. **Sync fix.** `ScheduleModal` never read the project's stored slot — it only
+   pulled the channel vocabulary out of `/api/content-calendar` and then defaulted
+   to tomorrow-noon plus the first channel, so an entry the agent's
+   `schedule_content` tool had written was invisible and re-saving APPENDED a
+   second entry. The dialog now looks its slot up in that same aggregate
+   (`model.entryForProject`), and `create_scheduled_entry` upserts by project id —
+   same `id` and `created_at`, new time/channels, `replaced: true` — so the UI and
+   the agent tool can no longer disagree or duplicate.
+
 - Focused feature, analytics, and UI tests pass. The non-LAN backend suite
   passes 2,168 tests and all 413 Vitest tests pass. The required full command is
   blocked only by 19 pre-existing real-LAN socket tests resetting connections

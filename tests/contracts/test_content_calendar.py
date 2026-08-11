@@ -76,6 +76,38 @@ def test_manual_schedule_persists_one_multi_channel_entry(tmp_path):
     assert saved == {"version": "1.0", "entries": [entry]}
 
 
+def test_rescheduling_moves_the_same_entry_instead_of_duplicating_it(tmp_path):
+    """The Schedule dialog re-saves an existing slot; a project holds exactly one."""
+    projects, project_id = _project(tmp_path)
+    _final(projects, project_id)
+    client = _client(projects)
+
+    first = client.post(
+        f"/api/projects/{project_id}/schedule",
+        json={"scheduled_at": _future(2, 11), "channels": ["instagram"]},
+    ).json()["entry"]
+    assert first["replaced"] is False
+
+    # An agent slot for the SAME project must also move that one entry, not add a second.
+    runner = AgentRunner(repo_root=tmp_path, projects_dir=projects, client_factory=lambda _pid: None)
+    moved = _tool_payload(
+        asyncio.run(runner._schedule_content(project_id, {"channels": ["youtube"], "scheduled_at": _future(5, 16)}))
+    )["entry"]
+
+    assert moved["id"] == first["id"]
+    assert moved["created_at"] == first["created_at"]
+    assert moved["replaced"] is True
+    assert moved["channels"] == ["youtube"]
+    assert moved["scheduled_at"] != first["scheduled_at"]
+
+    entries = list_calendar_entries(projects)
+    assert len(entries) == 1
+    assert entries[0]["scheduled_at"] == moved["scheduled_at"]
+    # And the UI reads exactly that: one entry keyed by this project id.
+    body = client.get("/api/content-calendar").json()
+    assert [entry["project_id"] for entry in body["entries"]] == [project_id]
+
+
 def test_calendar_aggregates_projects_and_returns_channel_vocabulary(tmp_path):
     projects, first = _project(tmp_path, "First Reel")
     _, second = _project(tmp_path, "Second Reel")

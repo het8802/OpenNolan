@@ -25,6 +25,10 @@ social platform.
    `learned_local_time`; the tool writes it into the runtime copy of this skill.
 5. Call `schedule_content` once and report its returned date, time, and channels.
 
+A project holds ONE slot. Calling the tool again for the same project MOVES that
+slot instead of adding a second one, so a correction is just another call — and
+the user sees the new time when they open Schedule in Mission Control.
+
 The writable cache lives beside project data at
 `.content-calendar/content-calendar-scheduling/SKILL.md`. A cached niche skips
 the research step on later calls. Never place research prose, user content, or

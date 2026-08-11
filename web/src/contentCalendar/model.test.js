@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dateKey, defaultDatetimeLocal, entriesByDay, monthDays } from './model.js'
+import { dateKey, defaultDatetimeLocal, entriesByDay, entryForProject, monthDays } from './model.js'
 
 describe('content calendar model', () => {
   it('builds a six-week Sunday-first month grid', () => {
@@ -21,5 +21,18 @@ describe('content calendar model', () => {
     const value = defaultDatetimeLocal(new Date(2026, 7, 10, 16, 45))
 
     expect(value).toBe('2026-08-11T12:00')
+  })
+
+  it('finds a project current slot in the shared calendar aggregate', () => {
+    const mine = { id: 'mine', project_id: 'launch', scheduled_at: '2026-08-12T19:00:00Z' }
+    const entries = [
+      { id: 'other', project_id: 'teaser', scheduled_at: '2026-08-11T19:00:00Z' },
+      { id: 'stale', project_id: 'launch', scheduled_at: '2026-08-20T19:00:00Z' },
+      mine,
+    ]
+
+    expect(entryForProject(entries, 'launch')).toBe(mine)
+    expect(entryForProject(entries, 'nobody')).toBeNull()
+    expect(entryForProject(undefined, 'launch')).toBeNull()
   })
 })
