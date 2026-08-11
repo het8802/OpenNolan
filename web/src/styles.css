@@ -336,7 +336,12 @@ select { cursor: pointer; }
 .activity-chip.thinking { color: var(--ink-dim); font-style: italic; }
 .activity-chip.tool { color: var(--ink); }
 .activity-chip.tool-err { background: var(--red-soft); color: var(--red-ink); }
-.tc-icon { flex-shrink: 0; }
+/* inline-flex, like .tc-caret below: the wrapper was `inline` (blockified to `block` as a flex
+   item), so its box was the chip's 18px line-height and the 13px icon inside was placed on the
+   TEXT BASELINE — plus icons.jsx's default `vertical-align: -0.125em` — landing 1px above the
+   chip's centre while the box itself measured as centred. A flex wrapper makes the icon a flex
+   item, so vertical-align no longer applies and the box hugs the glyph. */
+.tc-icon { flex-shrink: 0; display: inline-flex; }
 .tc-name { font-weight: 600; flex-shrink: 0; }
 .tc-detail { color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; font-family: ui-monospace, monospace; font-size: var(--text-2xs); }
 
