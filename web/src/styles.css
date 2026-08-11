@@ -1040,8 +1040,14 @@ select { cursor: pointer; }
 }
 .calendar-topbar .brand { font-size: var(--text-lg); }
 .calendar-topbar-title { color: var(--ink-dim); font-size: var(--text-sm); }
-.calendar-shell { flex: 1; min-height: 0; overflow: auto; padding: var(--space-5) var(--space-6) var(--space-6); }
-.calendar-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
+.calendar-shell { flex: 1; min-height: 0; overflow: auto; padding: 0 var(--space-6) var(--space-6); }
+/* Sticky so the month title and the prev/Today/next pills PIN instead of sliding under the
+   topbar and getting clipped mid-pill. The opaque --bg is what the grid scrolls behind. */
+.calendar-toolbar {
+  position: sticky; top: 0; z-index: 1; background: var(--bg);
+  display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4);
+  padding: var(--space-5) 0 var(--space-4);
+}
 .calendar-toolbar h1 { margin: 0; font-size: var(--text-2xl); letter-spacing: -0.025em; }
 .calendar-eyebrow { margin: 0 0 var(--space-1); color: var(--ink-dim); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em; }
 .calendar-nav { display: flex; align-items: center; gap: var(--space-1); }
@@ -1088,13 +1094,20 @@ select { cursor: pointer; }
 .calendar-entry-channels { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-05); }
 .calendar-entry-channels span {
   padding: 0 var(--space-1); border-radius: var(--radius-pill); background: var(--panel);
-  font-size: var(--text-2xs); font-weight: 600; text-transform: capitalize;
+  font-size: var(--text-2xs); font-weight: 600;
 }
 .calendar-empty {
-  margin: var(--space-4) auto 0; max-width: 46ch; padding: var(--space-4);
+  margin: 0 auto var(--space-4); max-width: 46ch; padding: var(--space-4);
   border: 1px dashed var(--border); border-radius: var(--radius-lg);
   color: var(--ink-dim); font-size: var(--text-sm); text-align: center;
 }
+/* "This month is blank but your plan isn't" — one click to the month that has the entry. */
+.calendar-jump {
+  display: block; margin: 0 auto var(--space-3); border-radius: var(--radius-pill);
+  background: var(--panel); border-color: var(--border); color: var(--ink-dim);
+  padding: var(--space-1) var(--space-3); font-size: var(--text-sm);
+}
+.calendar-jump:not(:disabled):hover { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--accent-soft); }
 
 .schedule-modal { width: min(460px, 92vw); }
 .schedule-modal .modal-hint.warn { color: var(--amber-ink); margin-top: 0; }
@@ -1105,13 +1118,13 @@ select { cursor: pointer; }
 .schedule-channel {
   display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--field);
-  color: var(--ink); font-size: var(--text-sm); text-transform: capitalize; cursor: pointer;
+  color: var(--ink); font-size: var(--text-sm); cursor: pointer;
 }
 .schedule-channel:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
 .schedule-channel input { margin: 0; accent-color: var(--accent-ink); }
 
 @media (max-width: 720px) {
-  .calendar-shell { padding: var(--space-4) var(--space-3); }
+  .calendar-shell { padding: 0 var(--space-3) var(--space-4); }
   .calendar-toolbar { align-items: flex-start; flex-direction: column; }
 }
 

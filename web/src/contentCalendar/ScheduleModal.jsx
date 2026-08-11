@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api.js'
 import { IconX } from '../components/icons.jsx'
-import { datetimeLocalValue, defaultDatetimeLocal, entryForProject } from './model.js'
+import { channelLabel, datetimeLocalValue, defaultDatetimeLocal, entryForProject } from './model.js'
 
 // Opening this dialog READS the project's current slot from `/api/content-calendar` — the same
 // aggregate the calendar month view renders — so an entry the agent's `schedule_content` tool
@@ -94,7 +94,7 @@ export default function ScheduleModal({ projectId, onClose, onScheduled }) {
                 checked={selected.includes(channel)}
                 onChange={() => toggle(channel)}
               />
-              <span>{channel}</span>
+              <span>{channelLabel(channel)}</span>
             </label>
           ))}
           {!available.length && !error && <span className="modal-hint">Loading channels…</span>}

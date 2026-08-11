@@ -31,12 +31,32 @@ describe('Content Calendar', () => {
     render(<ContentCalendar onProjects={() => {}} onError={() => {}} />)
 
     const block = await screen.findByRole('button', { name: /Launch film/i })
-    expect(block).toHaveTextContent('tiktok')
-    expect(block).toHaveTextContent('youtube')
+    expect(block).toHaveTextContent('TikTok')   // brand casing, not CSS-capitalized "Tiktok"
+    expect(block).toHaveTextContent('YouTube')
     fireEvent.click(block)
 
     expect(await screen.findByTitle('Close (Esc)')).toBeInTheDocument()
     expect(document.querySelector('video')).toHaveAttribute('src', '/file/launch/renders/final.mp4?v=42')
+  })
+
+  it('offers a jump to the month that actually holds the entry', async () => {
+    const far = new Date(new Date().getFullYear() + 1, 0, 9, 9, 15)
+    api.getContentCalendar.mockResolvedValue({
+      channels: ['tiktok'],
+      entries: [{
+        id: 'entry-1', project_id: 'launch', project_name: 'Launch film',
+        scheduled_at: far.toISOString(), channels: ['tiktok'],
+        status: 'scheduled', playback: { path: 'renders/final.mp4', mtime: 42 },
+      }],
+    })
+
+    render(<ContentCalendar onProjects={() => {}} onError={() => {}} />)
+
+    const jump = await screen.findByRole('button', { name: /go to January/i })
+    fireEvent.click(jump)
+
+    expect(await screen.findByRole('button', { name: /Launch film/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /go to/i })).toBeNull()
   })
 
   it('saves one entry with all selected channels', async () => {
@@ -45,8 +65,8 @@ describe('Content Calendar', () => {
     const onScheduled = vi.fn()
 
     render(<ScheduleModal projectId="launch" onClose={() => {}} onScheduled={onScheduled} />)
-    await screen.findByLabelText('tiktok')
-    fireEvent.click(screen.getByLabelText('instagram'))
+    await screen.findByLabelText('TikTok')
+    fireEvent.click(screen.getByLabelText('Instagram'))
     fireEvent.click(screen.getByRole('button', { name: 'Schedule' }))
 
     await waitFor(() => expect(api.scheduleProject).toHaveBeenCalled())
@@ -77,9 +97,9 @@ describe('Content Calendar', () => {
 
     const when = await screen.findByLabelText('Date and time')
     expect(when).toHaveValue(datetimeLocalValue(agentSlot))
-    expect(screen.getByLabelText('instagram')).toBeChecked()
-    expect(screen.getByLabelText('youtube')).toBeChecked()
-    expect(screen.getByLabelText('tiktok')).not.toBeChecked()
+    expect(screen.getByLabelText('Instagram')).toBeChecked()
+    expect(screen.getByLabelText('YouTube')).toBeChecked()
+    expect(screen.getByLabelText('TikTok')).not.toBeChecked()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update schedule' }))
 

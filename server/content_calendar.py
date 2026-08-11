@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from lib.atomic_io import atomic_write_json
-from lib.project import FINAL_RENDER_REL, final_render_path, get_project_record, list_projects
+from lib.project import (
+    FINAL_RENDER_REL,
+    final_render_path,
+    get_project_record,
+    is_safe_project_id,
+    list_projects,
+)
 
 
 CHANNELS = ("tiktok", "instagram", "youtube")
@@ -37,6 +43,10 @@ class FinalRenderMissing(FileNotFoundError):
 
 
 def schedule_path(projects_dir: Path | str, project_id: str) -> Path:
+    # Defense in depth: `get_project_record` already rejects a non-plain id, but this is the
+    # only function that turns an id into a WRITE target, so it refuses one too.
+    if not is_safe_project_id(project_id):
+        raise ScheduleValidationError(f"invalid project id: {project_id!r}")
     return Path(projects_dir) / project_id / "artifacts" / "content_schedule.json"
 
 
@@ -52,7 +62,11 @@ def _parse_time(value: str) -> datetime:
     except ValueError as exc:
         raise ScheduleValidationError("scheduled_at must be an ISO-8601 datetime") from exc
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+        # `.astimezone()` on a NAIVE value reads the platform's local rules FOR THAT DATE.
+        # `datetime.now().astimezone().tzinfo` looked equivalent but is today's offset frozen
+        # into a fixed-offset object, so a slot across a DST boundary was stamped an hour off
+        # (a naive 2026-11-20 18:45 requested in August became 18:45 PDT, i.e. 17:45 PST).
+        parsed = parsed.astimezone()
     parsed = parsed.astimezone(timezone.utc)
     if parsed <= datetime.now(timezone.utc):
         raise ScheduleValidationError("scheduled_at must be in the future")
@@ -181,7 +195,11 @@ def _save_timing(projects_dir: Path | str, niche: str, local_time: str) -> None:
 
 
 def _next_local_slot(local_time: str | None = None) -> datetime:
-    now = datetime.now().astimezone()
+    # Walk WALL-CLOCK days naively ("13:00 next Tuesday"), then attach the offset that is
+    # actually in force on that date. Carrying today's offset forward on an aware value put
+    # the chosen slot an hour off on the far side of a DST transition.
+    now = datetime.now()
+    floor = now.astimezone() + timedelta(hours=1)
     for day_offset in range(8):
         day = now + timedelta(days=day_offset)
         minutes = DEFAULT_LOCAL_MINUTES[day.weekday()]
@@ -189,8 +207,8 @@ def _next_local_slot(local_time: str | None = None) -> datetime:
             hour, minute = (int(part) for part in local_time.split(":"))
         else:
             hour, minute = divmod(minutes, 60)
-        candidate = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if candidate > now + timedelta(hours=1):
+        candidate = day.replace(hour=hour, minute=minute, second=0, microsecond=0).astimezone()
+        if candidate > floor:
             return candidate.astimezone(timezone.utc)
     raise ScheduleValidationError("could not choose a future posting slot")
 

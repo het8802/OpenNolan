@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { dateKey, defaultDatetimeLocal, entriesByDay, entryForProject, monthDays } from './model.js'
+import {
+  channelLabel,
+  dateKey,
+  defaultDatetimeLocal,
+  entriesByDay,
+  entryForProject,
+  monthDays,
+  nearestEntryMonth,
+} from './model.js'
+
+// The vocabulary itself is the backend's (server/content_calendar.CHANNELS); this is the order
+// the API returns, which is what the UI renders.
+const CHANNELS = ['tiktok', 'instagram', 'youtube']
 
 describe('content calendar model', () => {
   it('builds a six-week Sunday-first month grid', () => {
@@ -21,6 +33,26 @@ describe('content calendar model', () => {
     const value = defaultDatetimeLocal(new Date(2026, 7, 10, 16, 45))
 
     expect(value).toBe('2026-08-11T12:00')
+  })
+
+  it('points an empty month at the nearest month that has an entry', () => {
+    const entries = [
+      { scheduled_at: new Date(2026, 2, 4, 9).toISOString() },
+      { scheduled_at: new Date(2027, 0, 9, 9).toISOString() },
+    ]
+
+    // Forward first — a plan is about what is next.
+    expect(nearestEntryMonth(entries, new Date(2026, 7, 1))).toEqual(new Date(2027, 0, 1))
+    // Nothing ahead: fall back to the latest month that does have one.
+    expect(nearestEntryMonth(entries, new Date(2028, 4, 1))).toEqual(new Date(2027, 0, 1))
+    // This month already has entries, or there are none at all: no cue.
+    expect(nearestEntryMonth(entries, new Date(2026, 2, 20))).toBeNull()
+    expect(nearestEntryMonth([], new Date(2026, 7, 1))).toBeNull()
+  })
+
+  it('renders channel ids with their real brand casing', () => {
+    expect([...CHANNELS].map(channelLabel)).toEqual(['TikTok', 'Instagram', 'YouTube'])
+    expect(channelLabel('threads')).toBe('threads')   // backend owns the vocabulary
   })
 
   it('finds a project current slot in the shared calendar aggregate', () => {

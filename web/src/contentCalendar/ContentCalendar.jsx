@@ -3,7 +3,7 @@ import * as api from '../api.js'
 import { track } from '../analytics/track.js'
 import AssetModal from '../components/AssetModal.jsx'
 import { IconChevron } from '../components/icons.jsx'
-import { dateKey, entriesByDay, monthDays } from './model.js'
+import { channelLabel, dateKey, entriesByDay, monthDays, nearestEntryMonth } from './model.js'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -30,7 +30,7 @@ export default function ContentCalendar({ onProjects, onError = () => {} }) {
         setLoading(false)
         if (!opened.current) {
           opened.current = true
-          track('content_calendar_opened', { entry_count: next.length })
+          track('content_calendar_viewed', { action: 'calendar', entry_count: next.length })
         }
       })
       .catch(err => {
@@ -45,16 +45,14 @@ export default function ContentCalendar({ onProjects, onError = () => {} }) {
 
   const days = useMemo(() => monthDays(cursor), [cursor])
   const grouped = useMemo(() => entriesByDay(entries), [entries])
+  const jump = useMemo(() => nearestEntryMonth(entries, cursor), [entries, cursor])
 
   function moveMonth(delta) {
     setCursor(current => new Date(current.getFullYear(), current.getMonth() + delta, 1))
   }
 
   function openEntry(entry) {
-    track('content_calendar_video_opened', {
-      channel_count: entry.channels.length,
-      status: entry.status,
-    })
+    track('content_calendar_viewed', { action: 'video', channel_count: entry.channels.length })
     setViewer({
       items: [{
         kind: 'video',
@@ -89,6 +87,16 @@ export default function ContentCalendar({ onProjects, onError = () => {} }) {
             </button>
           </div>
         </div>
+        {/* Both cues sit ABOVE the grid: six 126px rows push anything below them off a laptop
+            screen, and a first-run user would never scroll to find guidance they can't see. */}
+        {!loading && !entries.length && (
+          <div className="calendar-empty">Schedule a completed video from its project view to start your plan.</div>
+        )}
+        {jump && (
+          <button className="calendar-jump" onClick={() => setCursor(jump)}>
+            Nothing in {monthLabel(cursor)} — go to {monthLabel(jump)}
+          </button>
+        )}
         <div className="calendar-grid" aria-label={monthLabel(cursor)}>
           {WEEKDAYS.map(day => <div key={day} className="calendar-weekday">{day}</div>)}
           {days.map(day => {
@@ -107,7 +115,7 @@ export default function ContentCalendar({ onProjects, onError = () => {} }) {
                       </span>
                       <span className="calendar-entry-name">{entry.project_name || entry.project_id}</span>
                       <span className="calendar-entry-channels">
-                        {entry.channels.map(channel => <span key={channel}>{channel}</span>)}
+                        {entry.channels.map(channel => <span key={channel}>{channelLabel(channel)}</span>)}
                       </span>
                     </button>
                   ))}
@@ -116,9 +124,6 @@ export default function ContentCalendar({ onProjects, onError = () => {} }) {
             )
           })}
         </div>
-        {!loading && !entries.length && (
-          <div className="calendar-empty">Schedule a completed video from its project view to start your plan.</div>
-        )}
       </main>
       {viewer && <AssetModal items={viewer.items} index={viewer.index} onClose={() => setViewer(null)} />}
     </div>

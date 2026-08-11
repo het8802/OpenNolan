@@ -44,6 +44,18 @@ KEPT_OUTSIDE_CATALOG = {
     "did not exist when it was written. ONE per-session rollup, not a per-interaction family: "
     "the per-file signal is already asset_import_finished{source:'phone'}, and this answers the "
     "question that one structurally cannot — whether people open the window and get nothing.",
+    "content_schedule_created": "Postdates the catalog — the content calendar (server/content_calendar.py) "
+    "did not exist when it was written. The feature's ONE success signal, shared by the REST route and "
+    "the agent's schedule_content tool; `replaced` is what decides whether reschedule/delete has to "
+    "become real UI instead of a re-save.",
+    "content_schedule_failed": "The failure half of the pair above, and the half nobody files a bug "
+    "about: no final render, a rejected channel, a past time, a bad write. Without it 'nobody schedules' "
+    "and 'scheduling is broken' look identical.",
+    "content_calendar_viewed": "Postdates the catalog. Deliberately ONE name for both interactions on "
+    "the surface, discriminated by action{calendar|video} — the same shape as thread_lifecycle — because "
+    "the <=100 cap has room for one calendar view event, not two, and month-opened -> entry-played is a "
+    "funnel on one screen. Answers whether the calendar is found at all (the abandonment question) and "
+    "whether an entry leads back to the render.",
 }
 
 RENAMED = {
