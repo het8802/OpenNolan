@@ -100,12 +100,8 @@ describe('scaffoldEditDecisions', () => {
     expect(d.version).toBe('1.0')
     expect(['remotion', 'hyperframes', 'ffmpeg']).toContain(d.render_runtime)
     expect(d.renderer_family).toBeTruthy()  // required by video_compose's pre-compose gate
-    expect(Array.isArray(d.cuts) && d.cuts.length).toBeTruthy()
-    for (const c of d.cuts) {
-      expect(c).toMatchObject({ id: expect.any(String), source: expect.any(String) })
-      expect(typeof c.in_seconds).toBe('number')
-      expect(typeof c.out_seconds).toBe('number')
-    }
+    // OPN-48: cuts starts EMPTY — no phantom placeholder clip. `cuts` has no schema minItems.
+    expect(d.cuts).toEqual([])
   })
 
   // OPN-39: a new project DECLARES 9:16 instead of inheriting canvasOf's landscape
