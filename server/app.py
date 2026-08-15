@@ -942,14 +942,10 @@ def create_app(
 
     @app.post("/api/projects", status_code=201)
     def new_project(req: CreateProjectRequest) -> dict[str, Any]:
-        # pipeline_type is optional: omit it and (in dev) the agent chooses one on
-        # its first turn. If provided, it must be an AVAILABLE pipeline.
+        # pipeline_type is optional: omit it and the agent chooses one on its
+        # first turn. If provided, it must be an AVAILABLE pipeline.
         pt = (req.pipeline_type or "").strip() or None
-        available = list_pipelines()  # packaged-filtered to the single pipeline
-        # In the packaged app there is exactly one pipeline — pin it so there is
-        # no "agent picks" path and the project can never land on another pipeline.
-        if pt is None and app_paths.is_packaged() and available:
-            pt = available[0]
+        available = list_pipelines()
         if pt is not None and pt not in available:
             analytics_mod.capture("project_create_failed", {"failure_class": "unknown_pipeline"})
             raise HTTPException(

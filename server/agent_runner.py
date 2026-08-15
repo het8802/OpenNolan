@@ -1651,14 +1651,6 @@ class AgentRunner:
         except Exception:
             pt = None
             style = None
-        # In the packaged app there is exactly one pipeline — pin it instead of
-        # telling the agent to browse pipeline_defs/ (which would let it "choose").
-        if not pt:
-            from lib import app_paths
-            from lib.pipeline_loader import PACKAGED_PIPELINES
-
-            if app_paths.is_packaged() and PACKAGED_PIPELINES:
-                pt = PACKAGED_PIPELINES[0]
         if pt:
             pipeline_clause = f" using the '{pt}' pipeline"
             choose_clause = ""

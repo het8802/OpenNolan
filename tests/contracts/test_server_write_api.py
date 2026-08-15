@@ -30,6 +30,7 @@ def _ctx(tmp_path):
 
 # --- create project -------------------------------------------------------
 
+
 def test_create_project_201(tmp_path):
     client, projects = _ctx(tmp_path)
     r = client.post("/api/projects", json={"name": "Sky Test", "pipeline_type": PIPELINE})
@@ -63,6 +64,15 @@ def test_create_project_no_pipeline_lets_agent_decide(tmp_path):
     assert (projects / "decide-later" / "project.json").exists()
 
 
+def test_create_project_no_pipeline_lets_agent_decide_when_packaged(tmp_path, monkeypatch):
+    # Packaged used to pin instagram-fast-reel whenever pipeline_type was omitted.
+    monkeypatch.setenv("OPENNOLAN_PACKAGED", "1")
+    client, _ = _ctx(tmp_path)
+    r = client.post("/api/projects", json={"name": "Decide Later"})
+    assert r.status_code == 201
+    assert r.json()["pipeline_type"] is None
+
+
 def test_create_project_empty_pipeline_normalized_to_none(tmp_path):
     client, _ = _ctx(tmp_path)
     # An empty/whitespace pipeline_type is treated as "agent decides", not a 422.
@@ -72,6 +82,7 @@ def test_create_project_empty_pipeline_normalized_to_none(tmp_path):
 
 
 # --- upload asset ---------------------------------------------------------
+
 
 def _make_project(client):
     return client.post("/api/projects", json={"name": "Sky", "pipeline_type": PIPELINE}).json()["project_id"]
@@ -136,14 +147,17 @@ def test_upload_unknown_project_404(tmp_path):
 
 # --- list + serve assets --------------------------------------------------
 
+
 def test_list_assets_groups_by_kind_and_renders(tmp_path):
     client, projects = _ctx(tmp_path)
     pid = _make_project(client)
     # upload one image, one audio (under music/), and drop a render on disk
-    client.post(f"/api/projects/{pid}/assets", data={"kind": "images"},
-                files={"file": ("logo.png", b"\x89PNG", "image/png")})
-    client.post(f"/api/projects/{pid}/assets", data={"kind": "music"},
-                files={"file": ("track.mp3", b"ID3", "audio/mpeg")})
+    client.post(
+        f"/api/projects/{pid}/assets", data={"kind": "images"}, files={"file": ("logo.png", b"\x89PNG", "image/png")}
+    )
+    client.post(
+        f"/api/projects/{pid}/assets", data={"kind": "music"}, files={"file": ("track.mp3", b"ID3", "audio/mpeg")}
+    )
     (projects / pid / "renders").mkdir(parents=True, exist_ok=True)
     (projects / pid / "renders" / "final.mp4").write_bytes(b"\x00\x00\x00\x18ftyp")
 
@@ -158,8 +172,9 @@ def test_list_assets_groups_by_kind_and_renders(tmp_path):
 def test_get_file_serves_and_blocks_traversal(tmp_path):
     client, projects = _ctx(tmp_path)
     pid = _make_project(client)
-    client.post(f"/api/projects/{pid}/assets", data={"kind": "images"},
-                files={"file": ("pic.png", b"PNGDATA", "image/png")})
+    client.post(
+        f"/api/projects/{pid}/assets", data={"kind": "images"}, files={"file": ("pic.png", b"PNGDATA", "image/png")}
+    )
 
     # serve a real file
     ok = client.get(f"/api/projects/{pid}/file", params={"path": "assets/images/pic.png"})
