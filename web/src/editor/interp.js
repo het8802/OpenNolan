@@ -200,15 +200,21 @@ export function removeKeyframe(doc, index, kfIndex) {
  */
 const NEW_PROJECT_CANVAS = { width: 1080, height: 1920, fps: 30 }
 
-/** A minimal valid edit_decisions for a fresh manual project (passes the schema's required set). */
-export function scaffoldEditDecisions({ runtime = 'ffmpeg', source = 'clip.mp4', duration = 5 } = {}) {
+/**
+ * A minimal valid edit_decisions for a fresh manual project (passes the schema's required
+ * set). `cuts` starts EMPTY — no phantom placeholder clip (OPN-48). The schema requires the
+ * `cuts` key but sets no `minItems`, so `[]` validates; the rest of the app already treats
+ * zero cuts as a normal empty-timeline state (cutAtTime, the split button, Studio's
+ * `doc?.cuts || []` guards) and lands the user on the Assets browser instead.
+ */
+export function scaffoldEditDecisions({ runtime = 'ffmpeg' } = {}) {
   return {
     version: '1.0',
     render_runtime: runtime,
     // renderer_family is optional in the schema but REQUIRED by video_compose's pre-compose
     // gate — set it so a fresh manual project can render without a cryptic block.
     renderer_family: 'social-reel',
-    cuts: [{ id: 'c1', source, in_seconds: 0, out_seconds: duration }],
+    cuts: [],
     // Declare the canvas instead of leaning on canvasOf's landscape fallback: an explicit
     // compose_target is the ONE value both the preview and video_compose read.
     metadata: { compose_target: { ...NEW_PROJECT_CANVAS } },
