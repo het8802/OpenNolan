@@ -20,6 +20,9 @@
         "cost_usd": "N",
         "wall_s": "N",
         "stop_reason": "E",
+        "terminal_reason": "E",
+        "api_error_status": "N",
+        "permission_denials": "N",
         "tool_calls": "N",
         "tool_errors": "N",
         "orphan_starts": "N",
@@ -62,6 +65,15 @@
         "bash_calls": "N"
       }
     },
+    "agent_rate_limited": {
+      "$comment": "Projected from the SDK's native RateLimitEvent, which the CLI emits only on a status TRANSITION — so this is rare, not per-turn. The quiet 'allowed' state is not uploaded.",
+      "question": "Are users hitting the Claude rate limit, and on which window?",
+      "properties": {
+        "status": "E",
+        "rate_limit_type": "E",
+        "utilization": "N"
+      }
+    },
     "agent_session_died": {
       "question": "How often does the SDK session break, and is resume reliable?",
       "properties": {
@@ -77,7 +89,7 @@
       }
     },
     "tool_permission_decided": {
-      "$comment": "DENY and CONFIRM branches only. Hooking right after decide_tool would fire for every SAFE_TOOLS/WRITE_TOOLS allow too: a 4-turn x 20-tool session adds ~80 events and breaches the hard cap. Ordinary allows are counted in agent_tool_rollup instead.",
+      "$comment": "DENY and CONFIRM branches only. Emitting this for every auto-approved tool too (everything in AGENT_AUTO_ALLOWED_TOOLS / the SDK's own allow rules) would add ~80 events for a 4-turn x 20-tool session and breach the hard cap. Ordinary allows are counted in agent_tool_rollup instead.",
       "question": "Is the sandbox blocking real work? Loosen a boundary, or keep it.",
       "properties": {
         "tool_id": "E",
@@ -294,6 +306,11 @@
     "agent_continuity.event": [
       "unsolicited_drained"
     ],
+    "agent_rate_limited.status": [
+      "allowed",
+      "allowed_warning",
+      "rejected"
+    ],
     "asset_mention_menu.outcome": [
       "selected",
       "dismissed"
@@ -305,6 +322,8 @@
   },
   "open_vocabularies": {
     "stop_reason": "Set by the Claude Agent SDK's ResultMessage; no user input path.",
+    "terminal_reason": "Set by the Claude Agent SDK's ResultMessage (\"completed\", \"max_turns\", \"aborted_streaming\", …); no user input path.",
+    "rate_limit_type": "Set by the Claude Agent SDK's RateLimitInfo (five_hour, seven_day, overage, …); no user input path.",
     "tool_id": "SDK tool names plus our own mcp__mc__ prefix. RESIDUAL RISK: if a user-registered MCP server ever ships, its tool names would become externally authored and this entry must be revisited. No such surface exists today.",
     "attempted": "A tool id we classify, or a stable sha256 prefix of one we do not \u2014 an unknown tool name is externally authored (an MCP server we did not write), so it is hashed at the emit site rather than admitted as a vocabulary.",
     "tool_in_flight": "Same treatment as `attempted`: classified or hashed at the emit site."

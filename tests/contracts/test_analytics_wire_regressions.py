@@ -186,9 +186,15 @@ async def test_f12_permission_events_carry_the_live_turns_session(monkeypatch):
     monkeypatch.setattr(analytics, "current_session_id", lambda: "session-that-built-the-client")
 
     live = {"turn_id": "turn-now", "session_id": "session-now"}
-    can_use_tool = agent_runner.make_can_use_tool(sandbox=None, turn_ctx=lambda: live)
-    # A denied Bash command: reaches the capture without needing a confirm handler.
-    await can_use_tool("Bash", {"command": "python -c 'VideoCompose().render_proxies()'"}, None)
+    # The render route moved to the ALWAYS-RUN PreToolUse hook (an allow rule or sandbox
+    # auto-approval can resolve a Bash call before can_use_tool). It reads the same live
+    # getter, and F12 must hold there too.
+    hook = agent_runner.make_pre_tool_use_hook(sandbox=None, turn_ctx=lambda: live)
+    await hook(
+        {"tool_name": "Bash", "tool_input": {"command": "python -c 'VideoCompose().render_proxies()'"}},
+        "tu_1",
+        None,
+    )
 
     named = {e: p for e, p in captured}
     assert "tool_permission_decided" in named, f"no permission event captured: {list(named)}"
