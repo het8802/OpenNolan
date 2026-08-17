@@ -85,11 +85,13 @@ def _iso(dt: datetime) -> str:
 
 
 def _cli_available() -> bool:
-    """Lazily probe for a logged-in `claude` CLI (dev machines auth from it with no env token)."""
+    """Lazily probe for a logged-in EXTERNAL `claude` CLI (dev machines auth from it with no
+    env token). Deliberately not the SDK's bundled runtime — that ships with every install
+    and proves nothing about login."""
     try:
-        from server.agent_runner import claude_cli_available
+        from server.agent_runner import external_claude_cli_available
 
-        return claude_cli_available()
+        return external_claude_cli_available()
     except Exception:
         return False
 

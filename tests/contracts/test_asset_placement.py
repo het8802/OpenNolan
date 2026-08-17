@@ -35,7 +35,7 @@ from lib.project import (
     project_lock,
     publish_final_render,
 )
-from server.agent_runner import ACTION_ALLOW, decide_tool
+from server.agent_runner import AGENT_AUTO_ALLOWED_TOOLS
 
 
 @pytest.fixture
@@ -175,10 +175,9 @@ def test_missing_source_raises(project):
 
 
 def test_store_asset_tool_is_auto_allowed():
-    # Discovery/permission: the tool rides the mc MCP prefix, so decide_tool
-    # allows it with no special-casing (same path as ask_user / render).
-    decision = decide_tool("mcp__mc__store_asset", {"kind": "image", "src": "x.png"})
-    assert decision.action == ACTION_ALLOW
+    # Discovery/permission: the tool rides the mc MCP prefix, so ONE SDK allow rule covers it
+    # with no special-casing (same path as ask_user / render).
+    assert "mcp__mc__*" in AGENT_AUTO_ALLOWED_TOOLS
 
 
 def test_kind_dirs_cover_the_tool_enum():

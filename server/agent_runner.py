@@ -56,21 +56,63 @@ DEFAULT_MAX_BUDGET_USD = 15.0  # SDK-native hard ceiling per session
 DEFAULT_CONFIRM_TIMEOUT_S = 300
 DEFAULT_ANSWER_TIMEOUT_S = 900  # users may take a while to answer a question
 
-# Always-safe tools (run unattended).
-SAFE_TOOLS = frozenset(
-    {
-        "Read",
-        "Glob",
-        "Grep",
-        "LS",
-        "NotebookRead",
-        "TodoWrite",
-        "WebSearch",
-        "WebFetch",
-    }
+# The CLOSED set of built-in tools the agent may see. Availability is the SDK's job
+# (`ClaudeAgentOptions.tools`), not a Python branch: a tool that is absent from model context
+# can never turn into a surprise "unrecognized tool" permission prompt.
+#
+# VERIFIED LIVE against the pinned runtime (claude-agent-sdk 0.2.133 / bundled Claude Code
+# 2.1.225, requirements-ui.txt:14): a client started with exactly this list reports
+# Bash, Edit, Glob, Grep, NotebookEdit, Read, Skill, WebFetch, WebSearch, Write in its `init`
+# message. BashOutput/KillShell/TodoWrite are accepted names the CLI surfaces CONDITIONALLY
+# (BashOutput/KillShell only once a background shell exists) so they never appear in that init
+# list — they are declared here because the CLI can still auto-background a slow foreground
+# Bash command, which is exactly when the agent needs them. `MultiEdit`, `LS` and
+# `NotebookRead` are NOT names this CLI knows; asking for them is a no-op, so they are absent.
+# `Task` is deliberately absent: a sub-agent is another source of unsolicited turns.
+AGENT_BUILTIN_TOOLS: tuple[str, ...] = (
+    "Read",
+    "Write",
+    "Edit",
+    "NotebookEdit",
+    "Glob",
+    "Grep",
+    "Bash",
+    "BashOutput",
+    "KillShell",
+    "WebFetch",
+    "WebSearch",
+    "TodoWrite",
+    "Skill",
 )
-# Writes are legitimate (the agent writes artifacts/checkpoints under projects/).
-WRITE_TOOLS = frozenset({"Write", "Edit", "NotebookEdit", "MultiEdit"})
+# Auto-approved: they never reach `can_use_tool`. Bash is deliberately NOT here — every Bash
+# call must still reach the destructive/escape policy. File tools ARE here; their path
+# boundary is enforced earlier, in the always-run PreToolUse hook, which an allow rule cannot
+# shadow (proved live: a PreToolUse deny beats an `allowed_tools` entry — the tool never ran
+# and can_use_tool was never consulted).
+#
+# `mcp__mc__*` covers our seven in-process product tools with one SDK rule instead of a Python
+# prefix branch. Also verified live on the pinned CLI: with that rule, mcp__mc__ping executed
+# without can_use_tool being called; without it, can_use_tool was consulted first.
+#
+# `Skill` is deliberately ABSENT from this tuple even though it's in AGENT_BUILTIN_TOOLS: it is
+# still auto-approved, just not by us. `skills="all"` (build_agent_options) makes the SDK
+# transport itself append a bare "Skill" to the effective allowed_tools before the CLI ever
+# evaluates permissions, so it never reaches can_use_tool either. Listing it here too would be
+# redundant, not wrong — but don't mistake its absence for an oversight.
+AGENT_AUTO_ALLOWED_TOOLS: tuple[str, ...] = (
+    "Read",
+    "Write",
+    "Edit",
+    "NotebookEdit",
+    "Glob",
+    "Grep",
+    "BashOutput",
+    "KillShell",
+    "WebFetch",
+    "WebSearch",
+    "TodoWrite",
+    "mcp__mc__*",
+)
 
 ACTION_ALLOW = "allow"
 ACTION_CONFIRM = "confirm"
@@ -185,11 +227,6 @@ _PATH_TOOLS = frozenset(
 )
 # Harmless device paths a shell command may legitimately reference.
 _BASH_OK_PATHS = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
-
-
-# Path-like tokens in a shell command: ~…, $HOME…, /abs…, ./rel…, ../rel…
-def _truthy(value: Optional[str]) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _resolve_under(path_str: str, base: Path, *, expand_vars: bool = False) -> Path:
@@ -403,11 +440,16 @@ def _ffmpeg_filter_family(command: str) -> Optional[str]:
     return "other"
 
 
+# Names that are a safe analytics vocabulary: everything we make available, plus the two
+# built-ins we deliberately remove (a request for one of those is signal, not free text).
+_CLASSIFIED_TOOLS = frozenset(AGENT_BUILTIN_TOOLS) | {"AskUserQuestion", "ScheduleWakeup"}
+
+
 def _known_or_hashed(tool_name: str) -> str:
     """A tool id we classify, or a stable hash of one we do not. An unknown tool name is
     externally authored — an MCP server we did not write — so it is not a safe vocabulary."""
     name = str(tool_name or "")
-    if name in SAFE_TOOLS or name in WRITE_TOOLS or name.startswith("mcp__mc__") or name in ("Bash", "AskUserQuestion"):
+    if name in _CLASSIFIED_TOOLS or name.startswith("mcp__mc__"):
         return name
     import hashlib
 
@@ -452,61 +494,69 @@ def _bucket_seconds(seconds: float) -> str:
     return "600+"
 
 
+def file_boundary_deny_reason(
+    tool_name: str,
+    tool_input: dict[str, Any] | None,
+    sandbox: Optional[Sandbox],
+) -> Optional[str]:
+    """The steering message for a built-in file tool that reaches OUTSIDE the app's own
+    folders, else None. ``sandbox=None`` (the dev opt-out) disables the check entirely.
+
+    Pure, and deliberately separate from the permission callback: this is the hard boundary,
+    so it runs from the always-run PreToolUse hook where no SDK allow rule can shadow it."""
+    if sandbox is None or tool_name not in _PATH_TOOLS:
+        return None
+    for pth in _tool_paths(tool_name, tool_input or {}):
+        if not _within(pth, sandbox):
+            return (
+                f"Path {pth!r} is outside the app workspace. Only read or write "
+                "within the project directory and the app's own folders."
+            )
+    return None
+
+
+def bash_route_deny_reason(command: str) -> Optional[tuple[str, str]]:
+    """``(reason, analytics_marker)`` for a Bash command that must go through one of our
+    in-process tools instead, else None. Renders and heavy media ops outlive the CLI's
+    foreground Bash timeout, get auto-backgrounded, and end the turn — the off-by-one.
+
+    Like the file boundary this must run on EVERY Bash call, so it lives in the PreToolUse
+    hook: sandbox auto-approval or an allow rule can resolve a call before ``can_use_tool``."""
+    if bash_uses_videocompose_render(command):
+        return (
+            "Render via the in-process `render` tool, not Bash/VideoCompose — "
+            "background renders break turn attribution. Call the `render` tool "
+            "with edit_decisions/asset_manifest/proposal_packet.",
+            "render",
+        )
+    heavy_op = bash_runs_heavy_media_op(command)
+    if heavy_op:
+        return (
+            f"Run heavy media ops ({heavy_op}) via the in-process `run_media_op` tool, "
+            "not `python … .execute(…)` in Bash — a long re-encode gets auto-backgrounded "
+            "and ends your turn, which breaks turn attribution. Call `run_media_op` with "
+            "{tool, input}; it blocks and returns the result in this same turn.",
+            heavy_op,
+        )
+    return None
+
+
 def decide_tool(
     tool_name: str,
     tool_input: dict[str, Any] | None,
     sandbox: Optional[Sandbox] = None,
 ) -> ToolDecision:
-    """Allow safe tools and clean Bash; route destructive Bash + unknown tools to confirm.
-    Hard-deny (with a steer to the `render` tool) Bash that renders via VideoCompose.
+    """The INTERACTIVE half of the policy: what an unresolved tool call should ask the user.
 
-    When ``sandbox`` is set, file tools that target a path OUTSIDE the app's own
-    folders are hard-denied (with a steering message), and Bash commands that
-    reference an out-of-bounds path are routed to confirm. ``sandbox=None`` (the
-    dev default) disables path enforcement entirely."""
+    Availability now lives in `ClaudeAgentOptions.tools`/`allowed_tools` and the must-run
+    boundaries (file paths, render/media routing) in the PreToolUse hook, so in practice only
+    Bash reaches here. Everything else falls through to the defensive branch at the bottom.
+
+    When ``sandbox`` is set, Bash commands that reference an out-of-bounds path are routed to
+    confirm. ``sandbox=None`` (the dev opt-out) disables path enforcement entirely."""
     ti = tool_input or {}
-    # Sandbox: keep the agent inside the app's own folders. File tools name their
-    # target directly, so an out-of-bounds path is an unambiguous, hard deny.
-    if sandbox is not None and tool_name in _PATH_TOOLS:
-        for pth in _tool_paths(tool_name, ti):
-            if not _within(pth, sandbox):
-                return ToolDecision(
-                    ACTION_DENY,
-                    f"Path {pth!r} is outside the app workspace. Only read or write "
-                    "within the project directory and the app's own folders.",
-                )
-    if tool_name in SAFE_TOOLS or tool_name in WRITE_TOOLS:
-        return ToolDecision(ACTION_ALLOW, f"{tool_name} is a safe/standard tool")
-    # Question/render tools are always allowed — our in-process mc tools are safe.
-    # Covers the built-in AskUserQuestion and our ask_user / render MCP tools.
-    if tool_name == "AskUserQuestion" or tool_name.startswith("mcp__mc__"):
-        return ToolDecision(ACTION_ALLOW, "in-process mc tool (ask_user / render)")
     if tool_name == "Bash":
         command = ti.get("command", "") or ""
-        if bash_uses_videocompose_render(command):
-            analytics.capture("agent_rendered_via_bash", {})
-            return ToolDecision(
-                ACTION_DENY,
-                "Render via the in-process `render` tool, not Bash/VideoCompose — "
-                "background renders break turn attribution. Call the `render` tool "
-                "with edit_decisions/asset_manifest/proposal_packet.",
-            )
-        heavy_op = bash_runs_heavy_media_op(command)
-        if heavy_op:
-            analytics.capture(
-                "agent_routed_around_us",
-                {
-                    "marker": heavy_op if heavy_op in _ROUTED_MARKERS else "other",
-                    "steered_to": "run_media_op",
-                },
-            )
-            return ToolDecision(
-                ACTION_DENY,
-                f"Run heavy media ops ({heavy_op}) via the in-process `run_media_op` tool, "
-                "not `python … .execute(…)` in Bash — a long re-encode gets auto-backgrounded "
-                "and ends your turn, which breaks turn attribution. Call `run_media_op` with "
-                "{tool, input}; it blocks and returns the result in this same turn.",
-            )
         # Bash is free-form; flag commands that reach outside the app workspace.
         if sandbox is not None:
             escape = bash_path_escape_reason(command, sandbox)
@@ -522,10 +572,18 @@ def decide_tool(
         if label:
             return ToolDecision(ACTION_CONFIRM, f"Bash flagged: {label}")
         return ToolDecision(ACTION_ALLOW, "Bash has no destructive markers")
-    # Unknown / MCP / other tool -> be conservative.
-    # NOT "tool_not_found": this is a conservative fall-through for anything outside
-    # SAFE_TOOLS/WRITE_TOOLS/AskUserQuestion/mcp__mc__/Bash, so it includes valid-but-
-    # unclassified SDK and MCP tools and does NOT prove registry absence.
+    # DEFENSIVE, and expected to be unreachable: `tools` closes the built-in set and
+    # `allowed_tools` auto-approves every safe one, so anything arriving here is either a tool
+    # the closed list forgot or one we never registered. Kept rather than deleted precisely
+    # because "the closed list is wrong" is the failure it would otherwise hide — a confirm is
+    # the safe answer, and the event says which name it was.
+    # NOT "tool_not_found": it includes valid-but-unclassified SDK and MCP tools and does NOT
+    # prove registry absence.
+    print(
+        f"[agent_runner] unexpected tool reached the permission callback: {tool_name!r} "
+        "(not in AGENT_BUILTIN_TOOLS / AGENT_AUTO_ALLOWED_TOOLS)",
+        file=sys.stderr,
+    )
     analytics.capture("unrecognized_tool_requested", {"attempted": _known_or_hashed(tool_name)})
     return ToolDecision(ACTION_CONFIRM, f"unrecognized tool {tool_name!r}")
 
@@ -542,8 +600,12 @@ def make_can_use_tool(
     """Build the SDK `can_use_tool` callback from the policy.
 
     Flagged calls go to `confirm_handler`. With no handler (a fully
-    unattended run), flagged calls are DENIED — the safe default. ``sandbox``
-    (when set) confines file tools/Bash to the app's own folders.
+    unattended run), flagged calls are DENIED — the safe default.
+
+    In practice only Bash reaches this callback now: every other built-in is either
+    auto-approved by `allowed_tools` or hard-denied earlier by the always-run PreToolUse hook,
+    which is where ``sandbox`` now confines file tools. Here, ``sandbox`` (when set) only gates
+    Bash commands that reference a path outside the app's own folders.
 
     ``turn_ctx`` returns the LIVE turn's ``{turn_id, session_id}``. It has to be passed in
     rather than read from the request ContextVar, because this callback runs in the SDK
@@ -558,9 +620,8 @@ def make_can_use_tool(
     async def can_use_tool(tool_name: str, tool_input: dict[str, Any], context: Any):
         ctx = (turn_ctx() if turn_ctx is not None else None) or {}
         # Bind for the DURATION of this callback, so the captures inside decide_tool()
-        # (agent_rendered_via_bash / agent_routed_around_us / agent_ffmpeg_freehand /
-        # unrecognized_tool_requested) are fixed by the same line rather than each needing the
-        # id threaded through decide_tool's signature.
+        # (agent_ffmpeg_freehand / unrecognized_tool_requested) are fixed by the same line
+        # rather than each needing the id threaded through decide_tool's signature.
         #
         # UNCONDITIONALLY set (None when there is no live turn) and reset in `finally`. This
         # task is the SDK client's and is deliberately long-lived, so a bind that is left
@@ -613,6 +674,81 @@ def make_can_use_tool(
         return PermissionResultDeny(message=f"Denied by user: {decision.reason}")
 
     return can_use_tool
+
+
+def make_pre_tool_use_hook(
+    sandbox: Optional[Sandbox] = None,
+    turn_ctx: Optional[Callable[[], dict[str, Optional[str]]]] = None,
+):
+    """The ALWAYS-RUN half of the policy, as an SDK `PreToolUse` hook.
+
+    Two checks live here rather than in `can_use_tool`, because `can_use_tool` is not an
+    enforcement point: an `allowed_tools` entry (or a permission mode, or sandbox
+    auto-approval) resolves a call BEFORE the callback is consulted — the SDK says so itself
+    in `CanUseToolShadowedWarning`. Proved live against the pinned CLI: with
+    `allowed_tools=["mcp__mc__*"]` a PreToolUse deny stopped the tool and `can_use_tool` was
+    never called.
+
+    1. the built-in file-tool path boundary — the hard containment guarantee (OPN-10); and
+    2. render/heavy-media routing — must see EVERY Bash call or a background render slips
+       through and breaks turn attribution.
+
+    Anything else returns an empty decision, which falls through to the normal permission
+    path (`allowed_tools`, then `can_use_tool` -> `decide_tool`).
+
+    ``turn_ctx`` is a LIVE getter for the same reason as in `make_can_use_tool`: one client
+    outlives many turns, so a value captured at build time names the wrong session forever.
+    """
+
+    async def pre_tool_use(input_data: dict[str, Any], tool_use_id: Optional[str], context: Any):
+        tool_name = str(input_data.get("tool_name") or "")
+        tool_input = input_data.get("tool_input") or {}
+        reason = file_boundary_deny_reason(tool_name, tool_input, sandbox)
+        marker: Optional[str] = None
+        if reason is None and tool_name == "Bash":
+            route = bash_route_deny_reason(str(tool_input.get("command") or ""))
+            if route is not None:
+                reason, marker = route
+        if reason is None:
+            return {}
+        ctx = (turn_ctx() if turn_ctx is not None else None) or {}
+        # Same bind/reset discipline as can_use_tool: hook matchers are dispatched
+        # concurrently by the CLI and this task outlives the turn, so a bind left standing
+        # would stamp the next turn's events with this one's session.
+        token = analytics._session_ctx.set(ctx.get("session_id") or None)
+        try:
+            if marker == "render":
+                analytics.capture("agent_rendered_via_bash", {})
+            elif marker is not None:
+                analytics.capture(
+                    "agent_routed_around_us",
+                    {
+                        "marker": marker if marker in _ROUTED_MARKERS else "other",
+                        "steered_to": "run_media_op",
+                    },
+                )
+            analytics.capture(
+                "tool_permission_decided",
+                {
+                    "turn_id": ctx.get("turn_id"),
+                    "session_id": ctx.get("session_id"),
+                    "tool_id": tool_name,
+                    "action": "deny",
+                    "reason_class": _permission_reason_class(reason),
+                    "root_family": _root_family(tool_input),
+                },
+            )
+        finally:
+            analytics._session_ctx.reset(token)
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
+
+    return pre_tool_use
 
 
 AGENT_SYSTEM_PROMPT = """You are the OpenNolan production agent, running HEADLESS. \
@@ -700,8 +836,10 @@ Announce cost before any paid generation. Never exceed the budget.
 """
 
 
-# The same locations the Agent SDK searches in subprocess_cli._find_cli, so this
-# gate agrees with what the SDK will actually resolve at call time.
+# Where an EXTERNALLY installed `claude` CLI lands. These mirror the system-fallback half of
+# the SDK's resolver — NOT the whole of it: the SDK resolves its own bundled wheel executable
+# FIRST and only then falls back to PATH/these locations. That difference is load-bearing (see
+# external_claude_cli_available).
 _CLI_FALLBACK_LOCATIONS = (
     Path("/usr/local/bin/claude"),
     Path.home() / ".npm-global/bin/claude",
@@ -712,16 +850,22 @@ _CLI_FALLBACK_LOCATIONS = (
 )
 
 
-def claude_cli_available() -> bool:
-    """True if the `claude` CLI is resolvable on this machine.
+def external_claude_cli_available() -> bool:
+    """True if an EXTERNAL (user-installed) `claude` CLI is resolvable on this machine.
 
-    The Agent SDK drives this CLI as a subprocess, and the CLI authenticates from
-    its OWN stored login (e.g. the macOS Keychain) when no env credential is set.
-    So a resolvable CLI means the agent can run even without CLAUDE_CODE_OAUTH_TOKEN
-    — a user already logged into Claude Code needs no env token. (Verified: an SDK
-    query with both auth env vars unset returns a normal response on a logged-in
-    machine.) CLI present-but-not-logged-in is rare for a Claude Code user; if it
-    happens, the agent call surfaces the real auth error rather than a blank 503.
+    This is an AUTH heuristic, not a runtime-presence check. A user-installed CLI
+    authenticates from its OWN stored login (e.g. the macOS Keychain), so finding one is
+    evidence the agent can run without CLAUDE_CODE_OAUTH_TOKEN — a user already logged into
+    Claude Code needs no env token. (Verified: an SDK query with both auth env vars unset
+    returns a normal response on a logged-in machine.) CLI present-but-not-logged-in is rare
+    for a Claude Code user; if it happens, the agent call surfaces the real auth error rather
+    than a blank 503.
+
+    DO NOT extend this to the SDK's bundled wheel executable. That file ships with every
+    install and carries no credential, so counting it here would make `auth_configured()`
+    true on every packaged install and swallow the actionable setup response the API returns
+    (server/app.py). Runtime discovery is the SDK's job and it already resolves
+    bundled-first; this predicate answers a different question.
     """
     if shutil.which("claude"):
         return True
@@ -732,11 +876,13 @@ def auth_configured() -> bool:
     """True if the agent has a way to authenticate.
 
     Either an explicit env credential (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY)
-    OR a resolvable `claude` CLI that self-authenticates from its stored login.
+    OR a resolvable EXTERNAL `claude` CLI that self-authenticates from its stored login.
+    The SDK's bundled runtime is deliberately not consulted — it proves a binary exists,
+    never that anyone is logged in.
     """
     if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"):
         return True
-    return claude_cli_available()
+    return external_claude_cli_available()
 
 
 def agent_subprocess_path() -> str:
@@ -823,7 +969,7 @@ def build_agent_options(
     ``disallowed_tools`` steers the agent away from the built-in AskUserQuestion
     (whose headless I/O we don't control) toward our ask_user tool.
     """
-    from claude_agent_sdk import ClaudeAgentOptions
+    from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
     from lib import app_paths
 
     # Loud, non-fatal signal if the managed venv is missing in a packaged run
@@ -853,6 +999,17 @@ def build_agent_options(
         model=model,
         max_budget_usd=max_budget_usd,
         permission_mode="default",  # so can_use_tool is consulted
+        # Availability is the SDK's job. A CLOSED built-in list keeps tools we do not use out
+        # of model context entirely, instead of showing them and turning the first call into a
+        # surprise "unrecognized tool" prompt.
+        tools=list(AGENT_BUILTIN_TOOLS),
+        allowed_tools=list(AGENT_AUTO_ALLOWED_TOOLS),
+        # Only the servers we pass in: no project .mcp.json, no user/global settings, no
+        # plugin-provided servers. The same reasoning as setting_sources=[] below.
+        strict_mcp_config=True,
+        # The must-run boundaries. NOT can_use_tool: allow rules above shadow that callback
+        # (the SDK warns about exactly this), and a shadowed file boundary is no boundary.
+        hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[make_pre_tool_use_hook(sandbox, turn_ctx)])]},
         # Skills come from the bundled `.agents/app` plugin, never from the
         # filesystem settings (OPN-41). `setting_sources=[]` is load-bearing:
         # with "project" the dev-mode agent (cwd == repo root) would also pick up
@@ -921,12 +1078,27 @@ def _tool_detail(name: str, inp: dict[str, Any]) -> dict[str, Any]:
     return {"label": ""}
 
 
+# Rate-limit statuses the CLI reports. "allowed" is the quiet state; the other two are the
+# ones worth showing and counting (declared as the agent_rate_limited.status vocabulary).
+_RATE_LIMIT_STATUSES = ("allowed", "allowed_warning", "rejected")
+
+
 def event_of(message: Any) -> dict[str, Any]:
-    """Normalize one SDK message into a serializable event dict."""
+    """Normalize one SDK message into a serializable event dict.
+
+    The UI needs stable JSON rather than SDK dataclasses, but "stable" is not "flattened":
+    native result/rate-limit/task structure is projected through rather than collapsed to a
+    subtype string. Event types the UI does not know are ignored by it, so a new one is
+    additive."""
     from claude_agent_sdk import (
         AssistantMessage,
+        RateLimitEvent,
         ResultMessage,
         SystemMessage,
+        TaskNotificationMessage,
+        TaskProgressMessage,
+        TaskStartedMessage,
+        TaskUpdatedMessage,
         TextBlock,
         ThinkingBlock,
         ToolResultBlock,
@@ -995,7 +1167,53 @@ def event_of(message: Any) -> dict[str, Any]:
             "result": message.result,
             "stop_reason": message.stop_reason,
             "session_id": message.session_id,
+            # Native status the runner used to re-derive from exception text. `terminal_reason`
+            # says WHY the loop ended ("completed", "max_turns", "aborted_streaming");
+            # `api_error_status` is the HTTP status of a failing API call (429/500/529).
+            "subtype": message.subtype,
+            "duration_ms": message.duration_ms,
+            "duration_api_ms": message.duration_api_ms,
+            "terminal_reason": message.terminal_reason,
+            "api_error_status": message.api_error_status,
+            "usage": message.usage,
+            "model_usage": message.model_usage,
+            "permission_denials": message.permission_denials,
+            "errors": message.errors,
         }
+    if isinstance(message, RateLimitEvent):
+        # NOT a SystemMessage subclass — its own top-level message type, so it would otherwise
+        # fall through to "other" and the UI could never warn before a hard limit.
+        info = message.rate_limit_info
+        return {
+            "type": "rate_limit",
+            "status": info.status,
+            "rate_limit_type": info.rate_limit_type,
+            "resets_at": info.resets_at,
+            "utilization": info.utilization,
+            "session_id": message.session_id,
+        }
+    # Task lifecycle. These ARE SystemMessage subclasses, so they must be matched BEFORE the
+    # generic SystemMessage branch below or they collapse back to a bare subtype.
+    if isinstance(message, TaskStartedMessage):
+        return {"type": "task", "phase": "started", "task_id": message.task_id, "description": message.description}
+    if isinstance(message, TaskProgressMessage):
+        return {
+            "type": "task",
+            "phase": "progress",
+            "task_id": message.task_id,
+            "description": message.description,
+            "usage": message.usage,
+        }
+    if isinstance(message, TaskNotificationMessage):
+        return {
+            "type": "task",
+            "phase": "completed",
+            "task_id": message.task_id,
+            "status": message.status,
+            "summary": message.summary,
+        }
+    if isinstance(message, TaskUpdatedMessage):
+        return {"type": "task", "phase": "updated", "task_id": message.task_id, "patch": message.patch}
     if isinstance(message, SystemMessage):
         return {"type": "system", "subtype": message.subtype}
     return {"type": "other", "repr": type(message).__name__}
@@ -1007,6 +1225,11 @@ class TurnResult:
     is_error: bool
     num_turns: int
     total_cost_usd: Optional[float]
+    # Native status off the SDK's ResultMessage. Defaulted, because a turn that raises before
+    # any result exists never sets them — that is the case _classify_turn_error still covers.
+    terminal_reason: Optional[str] = None
+    api_error_status: Optional[int] = None
+    permission_denials: int = 0
 
 
 # ── turn telemetry reducers ───────────────────────────────────────────────────
@@ -1167,7 +1390,11 @@ def _doc_snapshot(projects_dir: Optional[Path], project_id: str) -> dict[str, in
 
 
 def _classify_turn_error(exc: BaseException) -> str:
-    """Bounded failure class. NEVER the exception text — it carries prompts and paths."""
+    """Bounded failure class for a turn that died BEFORE any structured ResultMessage existed.
+
+    The FALLBACK, not the primary source: when the SDK does produce a result, its
+    `terminal_reason`/`api_error_status` are reported instead of guessing from exception text.
+    NEVER the exception text itself — it carries prompts and paths."""
     name = type(exc).__name__.lower()
     text = f"{name} {exc}".lower()[:400]
     if any(w in text for w in ("auth", "401", "403", "credential", "oauth")):
@@ -2423,14 +2650,15 @@ class AgentRunner:
             f"if you need a fresh run.]"
         )
 
-    async def _drain_unsolicited(self, project_id: str, client: Any, on_event: Optional[EmitFn]) -> None:
+    async def _drain_unsolicited(self, project_id: str, client: Any, on_event: Optional[EmitFn]) -> int:
         """Consume any turn(s) the CLI produced BETWEEN user messages — a background
         Bash-task completion or a scheduled wakeup — before we send the next message.
         Without this, the next receive_response() reads that buffered turn first and stops
         at its ResultMessage, mis-attributing the prior turn's output as the answer to the
         new message (the off-by-one). Each fully-drained turn is surfaced as a
         `background_update` event (the UI renders it as a system note), cleanly separated
-        from the answer that's about to come.
+        from the answer that's about to come. Returns HOW MANY stray turns were drained —
+        the `agent_continuity` counter that used to read an attribute nobody ever set.
 
         Cancellation-safe: the SDK read suspends on a memory-stream receive() (queue-style),
         so a timed-out anext() leaves any unread item buffered — no data lost, no stream
@@ -2442,6 +2670,7 @@ class AgentRunner:
         it = client.receive_messages()
         texts: list[str] = []
         turn_open = False
+        drained = 0
 
         async def _flush() -> None:
             summary = "".join(texts).strip()
@@ -2474,6 +2703,7 @@ class AgentRunner:
                             texts.append(itm["text"])
                 elif etype == "result":
                     turn_open = False
+                    drained += 1
                     if evt.get("session_id"):
                         self._session_ids[project_id] = evt["session_id"]
                     await _flush()
@@ -2486,6 +2716,7 @@ class AgentRunner:
             # A stray turn still mid-stream when we gave up: surface its partial text so
             # nothing is silently dropped (rare; see the ponytail note above).
             await _flush()
+        return drained
 
     async def run_turn(
         self,
@@ -2511,15 +2742,12 @@ class AgentRunner:
         # it as the answer to THIS message (the off-by-one). A fresh client has never had a
         # turn, so nothing is buffered — skip it (and avoid touching a just-connected stream).
         if not is_fresh:
-            drained_before = (
-                len(self._pending_unsolicited.get(project_id) or ()) if hasattr(self, "_pending_unsolicited") else 0
-            )
-            await self._drain_unsolicited(project_id, client, on_event)
+            n_drained = await self._drain_unsolicited(project_id, client, on_event)
             analytics.capture(
                 "agent_continuity",
                 {
                     "event": "unsolicited_drained",
-                    "n_drained": drained_before,
+                    "n_drained": n_drained,
                     "mid_thread": True,
                     "project_id": self._project_key(project_id),
                 },
@@ -2613,11 +2841,31 @@ class AgentRunner:
                                         "duration_ms": failed["duration_ms"],
                                     },
                                 )
+                elif evt["type"] == "rate_limit":
+                    # Native, structured, and otherwise invisible: the CLI only emits this on a
+                    # status TRANSITION, so it is rare enough to upload as-is.
+                    status = evt.get("status")
+                    if status in _RATE_LIMIT_STATUSES and status != "allowed":
+                        analytics.capture(
+                            "agent_rate_limited",
+                            {
+                                "turn_id": turn_id,
+                                "session_id": session_id,
+                                "project_id": self._project_key(project_id),
+                                "status": status,
+                                "rate_limit_type": evt.get("rate_limit_type"),
+                                "utilization": evt.get("utilization"),
+                            },
+                        )
                 elif evt["type"] == "result":
                     result.is_error = bool(evt.get("is_error"))
                     result.num_turns = int(evt.get("num_turns") or 0)
                     result.total_cost_usd = evt.get("total_cost_usd")
                     stop_reason = evt.get("stop_reason")
+                    # Structured status, preferred over parsing an exception string.
+                    result.terminal_reason = evt.get("terminal_reason")
+                    result.api_error_status = evt.get("api_error_status")
+                    result.permission_denials = len(evt.get("permission_denials") or ())
                     # Remember the session id so we can RESUME (not restart-cold)
                     # if this session later dies.
                     if evt.get("session_id"):
@@ -2755,6 +3003,11 @@ class AgentRunner:
                     "cost_usd": result.total_cost_usd,
                     "wall_s": round(time.monotonic() - t0, 1),
                     "stop_reason": stop_reason,
+                    # Native result fields, so a failed turn says WHY without string-matching
+                    # an exception. None on a turn that died before any result existed.
+                    "terminal_reason": result.terminal_reason,
+                    "api_error_status": result.api_error_status,
+                    "permission_denials": result.permission_denials,
                     "tool_calls": tools.calls,
                     "tool_errors": tools.errors,
                     "orphan_starts": len(orphans),
@@ -2834,27 +3087,36 @@ class AgentRunner:
     async def set_model(self, project_id: str, model: Optional[str]) -> None:
         """Point the project's session at a UI-selected model.
 
-        The model is baked into the SDK client at build time, so a change means
-        tearing down the live client; the next turn rebuilds with the new model.
-        Conversation context survives — if the project already has a session, the
-        rebuild RESUMES it (so switching model mid-chat keeps history). Unknown or
-        empty ids are ignored (the session keeps its current model). No-op when the
-        model is unchanged, so it's safe to call on every turn.
+        A LIVE client switches in place via the SDK's own `ClaudeSDKClient.set_model` (present
+        in the pinned 0.2.133, and documented for exactly this — changing the model during a
+        streaming session): no CLI restart, no plugin/MCP re-initialization, no session
+        resume, and so no resume failure edge. `_models` stays the INITIAL-model setting,
+        used when a project has no client yet.
+
+        Unknown or empty ids are ignored (the session keeps its current model). No-op when
+        the model is unchanged, so it's safe to call on every turn.
         """
         if not model or model not in AGENT_MODELS:
             return
         if self._model_for(project_id) == model:
             return
         self._models[project_id] = model
-        dead = self._clients.pop(project_id, None)
-        if dead is not None:
-            try:
-                await dead.disconnect()
-            except Exception:
-                pass
-        # Preserve context across the model swap: resume the existing session if any.
-        if self._session_ids.get(project_id):
-            self._resume_next[project_id] = True
+        client = self._clients.get(project_id)
+        if client is None:
+            return  # nothing live to switch; the next client is built with the new model
+        try:
+            await client.set_model(model)
+        except Exception:
+            # The live switch failed (not connected, transport gone). Fall back to the old
+            # behavior: drop the client and rebuild, resuming the session so context survives.
+            dead = self._clients.pop(project_id, None)
+            if dead is not None:
+                try:
+                    await dead.disconnect()
+                except Exception:
+                    pass
+            if self._session_ids.get(project_id):
+                self._resume_next[project_id] = True
 
     async def aclose(self) -> None:
         for client in self._clients.values():

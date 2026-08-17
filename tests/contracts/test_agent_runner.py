@@ -30,6 +30,8 @@ from server.agent_runner import (
     ACTION_ALLOW,
     ACTION_CONFIRM,
     ACTION_DENY,
+    AGENT_AUTO_ALLOWED_TOOLS,
+    AGENT_BUILTIN_TOOLS,
     AGENT_MODELS,
     DEFAULT_MODEL,
     AgentRunner,
@@ -40,25 +42,44 @@ from server.agent_runner import (
     build_agent_options,
     build_sandbox,
     decide_tool,
+    file_boundary_deny_reason,
     make_can_use_tool,
+    make_pre_tool_use_hook,
 )
+
+
+def _hook_decision(hook, tool_name, tool_input):
+    """Run a PreToolUse hook and return its permissionDecision (None when it abstains)."""
+    out = asyncio.run(hook({"tool_name": tool_name, "tool_input": tool_input}, "tu_1", None))
+    return (out.get("hookSpecificOutput") or {}).get("permissionDecision")
 
 
 # --- permission policy ----------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "tool,inp",
-    [
-        ("Read", {"file_path": "x"}),
-        ("Glob", {"pattern": "*.py"}),
-        ("Grep", {"pattern": "foo"}),
-        ("Write", {"file_path": "projects/x/artifacts/a.json"}),
-        ("Edit", {"file_path": "lib/x.py"}),
-    ],
+    "tool",
+    ["Read", "Glob", "Grep", "Write", "Edit", "WebSearch", "WebFetch", "TodoWrite"],
 )
-def test_safe_and_write_tools_allowed(tool, inp):
-    assert decide_tool(tool, inp).action == ACTION_ALLOW
+def test_safe_tools_are_auto_allowed_by_sdk_config(tool):
+    """Availability and auto-approval are SDK config now, not a Python set. These tools never
+    reach can_use_tool at all — `allowed_tools` resolves them first."""
+    assert tool in AGENT_BUILTIN_TOOLS
+    assert tool in AGENT_AUTO_ALLOWED_TOOLS
+
+
+def test_bash_is_available_but_never_auto_allowed():
+    """Every Bash call must still reach the destructive/escape policy."""
+    assert "Bash" in AGENT_BUILTIN_TOOLS
+    assert "Bash" not in AGENT_AUTO_ALLOWED_TOOLS
+
+
+def test_background_shell_tools_are_available_and_auto_allowed():
+    """The CLI can auto-background a slow foreground Bash command, so these stay reachable —
+    and reading/killing a shell we already permitted is not a second decision."""
+    for tool in ("BashOutput", "KillShell"):
+        assert tool in AGENT_BUILTIN_TOOLS
+        assert tool in AGENT_AUTO_ALLOWED_TOOLS
 
 
 @pytest.mark.parametrize(
@@ -96,18 +117,29 @@ def test_bash_destructive_confirmed(command, label_substr):
 
 
 def test_unknown_tool_confirmed():
+    """The defensive branch. With `tools` closed and `allowed_tools` covering the safe ones
+    this should be unreachable — kept precisely because "the closed list is wrong" is the
+    failure it would otherwise hide."""
     assert decide_tool("SomeMcpTool", {}).action == ACTION_CONFIRM
 
 
-def test_question_tools_always_allowed():
-    # The built-in question tool and our in-process ask_user tool never confirm.
-    assert decide_tool("AskUserQuestion", {}).action == ACTION_ALLOW
-    assert decide_tool("mcp__mc__ask_user", {"question": "?"}).action == ACTION_ALLOW
+def test_our_mcp_tools_are_auto_allowed_by_one_sdk_rule():
+    """One SDK wildcard replaces the old `startswith('mcp__mc__')` branch. Verified live
+    against the pinned CLI: with this rule an mcp__mc__ tool ran without can_use_tool."""
+    assert "mcp__mc__*" in AGENT_AUTO_ALLOWED_TOOLS
+
+
+def test_native_question_and_wakeup_tools_stay_unavailable():
+    """AskUserQuestion (headless I/O we don't control) and ScheduleWakeup (a pure source of
+    unsolicited turns) are removed from model context, not merely un-approved."""
+    for tool in ("AskUserQuestion", "ScheduleWakeup"):
+        assert tool not in AGENT_BUILTIN_TOOLS
+        assert tool not in AGENT_AUTO_ALLOWED_TOOLS
 
 
 def test_no_sandbox_skips_path_checks():
-    # sandbox=None (the dev default) → any path is allowed, unchanged behavior.
-    assert decide_tool("Read", {"file_path": "/etc/passwd"}).action == ACTION_ALLOW
+    # sandbox=None (the dev opt-out) → any path is allowed, unchanged behavior.
+    assert file_boundary_deny_reason("Read", {"file_path": "/etc/passwd"}, None) is None
     assert decide_tool("Bash", {"command": "cat /etc/passwd"}).action == ACTION_ALLOW
 
 
@@ -118,12 +150,15 @@ def test_sandbox_allows_in_bounds(tmp_path):
     proj = tmp_path / "projects"
     proj.mkdir()
     sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(), proj.resolve()))
+    hook = make_pre_tool_use_hook(sb)
     # relative path resolves under base (the agent cwd)
-    assert decide_tool("Read", {"file_path": "AGENT_GUIDE.md"}, sb).action == ACTION_ALLOW
+    assert file_boundary_deny_reason("Read", {"file_path": "AGENT_GUIDE.md"}, sb) is None
     # absolute path under a root
-    assert decide_tool("Write", {"file_path": str(proj / "x/a.json")}, sb).action == ACTION_ALLOW
+    assert file_boundary_deny_reason("Write", {"file_path": str(proj / "x/a.json")}, sb) is None
     # search rooted inside the workspace
-    assert decide_tool("Grep", {"pattern": "foo", "path": str(tmp_path / "lib")}, sb).action == ACTION_ALLOW
+    assert file_boundary_deny_reason("Grep", {"pattern": "foo", "path": str(tmp_path / "lib")}, sb) is None
+    # and the hook abstains, so the normal permission path decides
+    assert _hook_decision(hook, "Read", {"file_path": "AGENT_GUIDE.md"}) is None
 
 
 @pytest.mark.parametrize(
@@ -140,7 +175,8 @@ def test_sandbox_allows_in_bounds(tmp_path):
 )
 def test_sandbox_denies_out_of_bounds(tmp_path, tool, inp):
     sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(),))
-    assert decide_tool(tool, inp, sb).action == ACTION_DENY
+    assert file_boundary_deny_reason(tool, inp, sb) is not None
+    assert _hook_decision(make_pre_tool_use_hook(sb), tool, inp) == "deny"
 
 
 def test_sandbox_bash_escape_confirms(tmp_path):
@@ -279,13 +315,65 @@ def test_store_asset_copies_non_temp_src(monkeypatch, tmp_path):
     assert (projects / "my-reel" / "assets/images/keep.png").is_file()
 
 
-def test_can_use_tool_sandbox_denies_out_of_bounds(tmp_path):
+# --- PreToolUse hook: the boundary an allow rule cannot shadow ------------
+
+
+def test_the_file_boundary_hook_cannot_be_shadowed_by_an_allow_rule(tmp_path):
+    """THE reason the boundary moved out of can_use_tool.
+
+    Read/Write/Edit/Glob/Grep are all in `allowed_tools`, which auto-approves them BEFORE the
+    can_use_tool callback runs — the SDK says so itself in CanUseToolShadowedWarning. So a
+    boundary that lived only in that callback would not run at all for exactly the tools it
+    guards. Proved live against the pinned CLI (0.2.133 / Claude Code 2.1.225): with
+    allowed_tools=["mcp__mc__*"], a PreToolUse deny stopped the tool and can_use_tool was
+    never consulted.
+    """
     sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(),))
-    cb = make_can_use_tool(confirm_handler=None, sandbox=sb)
-    denied = asyncio.run(cb("Read", {"file_path": "/etc/passwd"}, None))
-    assert isinstance(denied, PermissionResultDeny)
-    ok = asyncio.run(cb("Read", {"file_path": "notes.txt"}, None))
-    assert isinstance(ok, PermissionResultAllow)
+    hook = make_pre_tool_use_hook(sb)
+    for tool, inp in (
+        ("Read", {"file_path": "/etc/passwd"}),
+        ("Write", {"file_path": "/Users/someone-else/x"}),
+        ("Edit", {"file_path": "/etc/hosts"}),
+        ("Glob", {"pattern": "/Users/**"}),
+    ):
+        assert tool in AGENT_AUTO_ALLOWED_TOOLS, f"{tool} must be shadowed for this to prove anything"
+        assert _hook_decision(hook, tool, inp) == "deny", tool
+        # ...and the callback that WOULD have been shadowed never sees it as an allow either.
+        cb = make_can_use_tool(confirm_handler=None, sandbox=sb)
+        assert isinstance(asyncio.run(cb(tool, inp, None)), PermissionResultDeny)
+
+
+def test_the_hook_denies_render_and_heavy_media_bash(tmp_path):
+    """Routing must run on EVERY Bash call: sandbox auto-approval or an allow rule can resolve
+    a call before can_use_tool, and a backgrounded render breaks turn attribution."""
+    hook = make_pre_tool_use_hook(None)
+    render = 'python -c "from tools.video.video_compose import VideoCompose; VideoCompose().render_proxies(x)"'
+    heavy = "python -c \"registry.get('silence_cutter').execute({})\""
+    assert _hook_decision(hook, "Bash", {"command": render}) == "deny"
+    assert _hook_decision(hook, "Bash", {"command": heavy}) == "deny"
+    assert _hook_decision(hook, "Bash", {"command": "ffprobe in.mp4"}) is None
+
+
+def test_the_hook_reads_the_live_turn_context(tmp_path):
+    """One client outlives many turns, so the hook must read a GETTER, not a captured value —
+    the same F12 bug the permission callback already fixed, one layer along."""
+    import server.agent_runner as ar
+
+    seen = []
+    live = {"turn_id": "t1", "session_id": "s1"}
+    sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(),))
+    hook = make_pre_tool_use_hook(sb, turn_ctx=lambda: live)
+    orig = ar.analytics.capture
+    ar.analytics.capture = lambda e, p=None: seen.append((e, p or {}))
+    try:
+        _hook_decision(hook, "Read", {"file_path": "/etc/passwd"})
+        live.clear()
+        live.update({"turn_id": "t2", "session_id": "s2"})
+        _hook_decision(hook, "Read", {"file_path": "/etc/passwd"})
+    finally:
+        ar.analytics.capture = orig
+    turns = [p.get("turn_id") for e, p in seen if e == "tool_permission_decided"]
+    assert turns == ["t1", "t2"], turns
 
 
 # --- can_use_tool callback ------------------------------------------------
@@ -293,7 +381,7 @@ def test_can_use_tool_sandbox_denies_out_of_bounds(tmp_path):
 
 def test_can_use_tool_allows_safe():
     cb = make_can_use_tool(confirm_handler=None)
-    res = asyncio.run(cb("Read", {"file_path": "x"}, None))
+    res = asyncio.run(cb("Bash", {"command": "ls -la projects/"}, None))
     assert isinstance(res, PermissionResultAllow)
 
 
@@ -352,19 +440,59 @@ def test_build_agent_options():
     assert opts.plugins == [{"type": "local", "path": "/repo/.agents/app"}]
 
 
+def test_build_agent_options_closes_the_tool_set():
+    """Availability is SDK config, so an unused tool is absent from model context rather than
+    shown and then turned into a surprise permission prompt.
+
+    Names verified live against the PINNED runtime (claude-agent-sdk 0.2.133 / bundled Claude
+    Code 2.1.225): a client started with exactly this `tools` list reports Bash, Edit, Glob,
+    Grep, NotebookEdit, Read, Skill, WebFetch, WebSearch, Write in its init message
+    (BashOutput/KillShell/TodoWrite are accepted names the CLI surfaces conditionally).
+    """
+    opts = build_agent_options("/repo", disallowed_tools=["AskUserQuestion", "ScheduleWakeup"])
+    assert set(opts.tools) == set(AGENT_BUILTIN_TOOLS)
+    assert set(opts.allowed_tools) == set(AGENT_AUTO_ALLOWED_TOOLS)
+    # Only the servers we register: no project .mcp.json, no user/global settings.
+    assert opts.strict_mcp_config is True
+    # The two built-ins we remove outright stay removed, and are not quietly re-added.
+    assert set(opts.disallowed_tools) == {"AskUserQuestion", "ScheduleWakeup"}
+    for tool in ("AskUserQuestion", "ScheduleWakeup", "Task"):
+        assert tool not in opts.tools
+    # Bash is available but never auto-approved: every command still meets the policy.
+    assert "Bash" in opts.tools and "Bash" not in opts.allowed_tools
+    # ...and the always-run boundary is installed.
+    assert list(opts.hooks or {}) == ["PreToolUse"]
+    assert opts.hooks["PreToolUse"][0].hooks
+
+
 def test_auth_configured(monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    # No env token AND no resolvable CLI → no way to authenticate.
-    monkeypatch.setattr("server.agent_runner.claude_cli_available", lambda: False)
+    # No env token AND no EXTERNAL CLI → no way to authenticate. The SDK's bundled runtime is
+    # deliberately not consulted: it ships with every install and proves nothing about login.
+    monkeypatch.setattr("server.agent_runner.external_claude_cli_available", lambda: False)
     assert auth_configured() is False
-    # A resolvable `claude` CLI is enough — it self-authenticates from its stored login.
-    monkeypatch.setattr("server.agent_runner.claude_cli_available", lambda: True)
+    # A resolvable external `claude` CLI is enough — it self-authenticates from its stored login.
+    monkeypatch.setattr("server.agent_runner.external_claude_cli_available", lambda: True)
     assert auth_configured() is True
     # An explicit env token also works, independent of the CLI.
-    monkeypatch.setattr("server.agent_runner.claude_cli_available", lambda: False)
+    monkeypatch.setattr("server.agent_runner.external_claude_cli_available", lambda: False)
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
     assert auth_configured() is True
+
+
+def test_external_cli_probe_ignores_the_sdk_bundled_runtime(monkeypatch):
+    """The regression this rename exists to prevent: counting the always-present bundled wheel
+    executable would make every packaged install look authenticated and swallow the actionable
+    setup response at server/app.py."""
+    from claude_agent_sdk import _cli_version  # the installed wheel, bundled CLI and all
+    import server.agent_runner as ar
+
+    bundled = Path(_cli_version.__file__).parent / "_bundled" / "claude"
+    assert bundled.exists(), "the pinned wheel is supposed to bundle a CLI"
+    monkeypatch.setattr(ar.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(ar, "_CLI_FALLBACK_LOCATIONS", ())
+    assert ar.external_claude_cli_available() is False
 
 
 # --- run_turn with a fake client -----------------------------------------
@@ -375,9 +503,14 @@ class FakeClient:
         self._messages = messages
         self.connects = 0
         self.queries: list[str] = []
+        self.models: list[str] = []
+        self.disconnects = 0
 
     async def connect(self, prompt=None):
         self.connects += 1
+
+    async def set_model(self, model=None):
+        self.models.append(model)
 
     async def query(self, prompt, session_id="default"):
         self.queries.append(prompt)
@@ -392,7 +525,7 @@ class FakeClient:
             yield m
 
     async def disconnect(self):
-        pass
+        self.disconnects += 1
 
 
 class DrainFakeClient:
@@ -703,6 +836,192 @@ def test_first_turn_preamble_includes_context_even_for_fresh_project(tmp_path):
     assert "RESUMING WORK" not in pre
 
 
+# --- native message projection ---------------------------------------------
+
+
+def test_event_of_projects_native_result_fields():
+    """`terminal_reason`/`api_error_status` are what the runner used to re-derive by
+    string-matching an exception. They are on the wire now, not thrown away."""
+    from server.agent_runner import event_of
+
+    evt = event_of(
+        ResultMessage(
+            subtype="success",
+            duration_ms=1200,
+            duration_api_ms=900,
+            is_error=True,
+            num_turns=2,
+            session_id="s",
+            total_cost_usd=0.02,
+            result="boom",
+            api_error_status=429,
+            terminal_reason="max_turns",
+            usage={"input_tokens": 10},
+            model_usage={"claude-opus-4-8": {"inputTokens": 10}},
+            permission_denials=[{"tool_name": "Bash"}],
+            errors=["overloaded"],
+        )
+    )
+    assert evt["type"] == "result"
+    assert evt["terminal_reason"] == "max_turns"
+    assert evt["api_error_status"] == 429
+    assert evt["duration_ms"] == 1200 and evt["duration_api_ms"] == 900
+    assert evt["usage"] == {"input_tokens": 10}
+    assert evt["model_usage"] == {"claude-opus-4-8": {"inputTokens": 10}}
+    assert evt["permission_denials"] == [{"tool_name": "Bash"}]
+    assert evt["errors"] == ["overloaded"]
+    import json as _json
+
+    _json.dumps(evt)  # SSE carries JSON, so every projected field must serialize
+
+
+def test_event_of_projects_rate_limit_and_task_messages():
+    """RateLimitEvent is its own top-level message type (not a SystemMessage), and the task
+    messages ARE SystemMessage subclasses — so both used to collapse to `other`/`system`."""
+    from claude_agent_sdk import RateLimitEvent, RateLimitInfo, TaskNotificationMessage, TaskStartedMessage
+    from server.agent_runner import event_of
+
+    rl = event_of(
+        RateLimitEvent(
+            rate_limit_info=RateLimitInfo(
+                status="allowed_warning", resets_at=1700000000, rate_limit_type="five_hour", utilization=0.9
+            ),
+            uuid="u",
+            session_id="s",
+        )
+    )
+    assert rl == {
+        "type": "rate_limit",
+        "status": "allowed_warning",
+        "rate_limit_type": "five_hour",
+        "resets_at": 1700000000,
+        "utilization": 0.9,
+        "session_id": "s",
+    }
+    started = event_of(
+        TaskStartedMessage(
+            subtype="task_started", data={}, task_id="k1", description="encode", uuid="u", session_id="s"
+        )
+    )
+    assert started == {"type": "task", "phase": "started", "task_id": "k1", "description": "encode"}
+    done = event_of(
+        TaskNotificationMessage(
+            subtype="task_notification",
+            data={},
+            task_id="k1",
+            status="completed",
+            output_file="/x",
+            summary="ok",
+            uuid="u",
+            session_id="s",
+        )
+    )
+    assert done["type"] == "task" and done["phase"] == "completed" and done["status"] == "completed"
+
+
+def test_run_turn_reports_native_result_status_and_a_rate_limit_transition(monkeypatch):
+    """The two halves of "consume native status": the result fields reach the turn event, and
+    a rate-limit transition becomes its own (declared) event."""
+    from claude_agent_sdk import RateLimitEvent, RateLimitInfo
+    import server.agent_runner as ar
+
+    captured: list[tuple[str, dict]] = []
+    monkeypatch.setattr(ar.analytics, "capture", lambda e, p=None: captured.append((e, dict(p or {}))))
+    fake = FakeClient(
+        [
+            RateLimitEvent(
+                rate_limit_info=RateLimitInfo(status="allowed_warning", rate_limit_type="five_hour", utilization=0.9),
+                uuid="u",
+                session_id="s",
+            ),
+            ResultMessage(
+                subtype="success",
+                duration_ms=1,
+                duration_api_ms=1,
+                is_error=True,
+                num_turns=1,
+                session_id="s",
+                total_cost_usd=0.01,
+                result="x",
+                api_error_status=529,
+                terminal_reason="aborted_streaming",
+                permission_denials=[{"tool_name": "Bash"}],
+            ),
+        ]
+    )
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: fake)
+    res = asyncio.run(runner.run_turn("proj", "go"))
+    assert res.terminal_reason == "aborted_streaming"
+    assert res.api_error_status == 529
+    assert res.permission_denials == 1
+    named = {e: p for e, p in captured}
+    assert named["agent_rate_limited"]["status"] == "allowed_warning"
+    assert named["agent_rate_limited"]["rate_limit_type"] == "five_hour"
+    completed = named["agent_turn_completed"]
+    assert completed["terminal_reason"] == "aborted_streaming"
+    assert completed["api_error_status"] == 529
+    assert completed["permission_denials"] == 1
+
+
+def test_the_analytics_gate_drops_an_undeclared_field_on_a_new_event(monkeypatch):
+    """The gate is fail-closed by NAME, so a field that is not in schemas/analytics/agent.json
+    never reaches the wire — which is why every field above had to be declared first.
+    (The event-level twin of this is test_analytics_taxonomy::test_1a.)"""
+    from server import analytics
+
+    sent: list[tuple[str, dict]] = []
+
+    class FakeSink:
+        def capture(self, **kw):
+            sent.append((kw["event"], kw["properties"]))
+
+    analytics.reset()
+    monkeypatch.setattr(analytics, "_get_client", lambda: FakeSink())
+    monkeypatch.setattr(analytics, "_under_pytest", lambda: False)
+    analytics.capture(
+        "agent_rate_limited",
+        {"status": "rejected", "rate_limit_type": "seven_day", "utilization": 1.0, "prompt_text": "secret"},
+    )
+    delivered = [p for e, p in sent if e == "agent_rate_limited"]
+    assert delivered, "a declared event with a declared payload must survive the gate"
+    assert delivered[-1]["status"] == "rejected"
+    assert "prompt_text" not in delivered[-1]
+    # ...and the drop is counted, not silent.
+    assert any(p.get("class") == "unknown_property" for _e, p in sent)
+
+
+def test_the_drain_counter_reports_real_drained_turns():
+    """`n_drained` read an attribute nothing ever defined, so it reported 0 forever — the
+    exact "regression alarm that can never fire" this event exists to prevent."""
+    import server.agent_runner as ar
+
+    stray = [
+        AssistantMessage(content=[TextBlock(text="background done")], model="m"),
+        ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="s",
+            total_cost_usd=0.01,
+            result="background done",
+        ),
+    ]
+    client = DrainFakeClient(stray, _scripted_turn())
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: client)
+    runner._clients["proj"] = client  # warm: the drain runs
+    captured: list[tuple[str, dict]] = []
+    orig = ar.analytics.capture
+    ar.analytics.capture = lambda e, p=None: captured.append((e, dict(p or {})))
+    try:
+        asyncio.run(runner.run_turn("proj", "next"))
+    finally:
+        ar.analytics.capture = orig
+    drained = [p for e, p in captured if e == "agent_continuity"]
+    assert drained and drained[0]["n_drained"] == 1, drained
+
+
 # --- model selection -------------------------------------------------------
 
 
@@ -727,16 +1046,35 @@ def test_set_model_ignores_unknown_and_empty():
     assert runner._model_for("proj") == DEFAULT_MODEL  # unchanged
 
 
-def test_set_model_change_tears_down_client_and_resumes_session():
+def test_set_model_switches_a_live_client_in_place():
+    """Native `ClaudeSDKClient.set_model`: no CLI restart, no plugin/MCP re-init, no session
+    resume — and therefore no resume failure edge."""
     fake = FakeClient(_scripted_turn())
     runner = AgentRunner(repo_root=".", client_factory=lambda pid: fake)
     runner._clients["proj"] = fake
-    runner._session_ids["proj"] = "sess-1"  # there IS a live session to preserve
+    runner._session_ids["proj"] = "sess-1"
     other = next(m for m in AGENT_MODELS if m != DEFAULT_MODEL)
     asyncio.run(runner.set_model("proj", other))
-    # client dropped so the next turn rebuilds with the new model, resuming context
+    assert fake.models == [other]
+    assert runner._clients.get("proj") is fake  # same live client, same conversation
+    assert fake.disconnects == 0
+    assert runner._resume_next.get("proj") is None  # nothing to rebuild, nothing to resume
+    assert runner._model_for("proj") == other
+
+
+def test_set_model_falls_back_to_a_rebuild_when_the_live_switch_fails():
+    class Broken(FakeClient):
+        async def set_model(self, model=None):
+            raise RuntimeError("not connected")
+
+    fake = Broken(_scripted_turn())
+    runner = AgentRunner(repo_root=".", client_factory=lambda pid: fake)
+    runner._clients["proj"] = fake
+    runner._session_ids["proj"] = "sess-1"
+    other = next(m for m in AGENT_MODELS if m != DEFAULT_MODEL)
+    asyncio.run(runner.set_model("proj", other))
     assert "proj" not in runner._clients
-    assert runner._resume_next.get("proj") is True
+    assert runner._resume_next.get("proj") is True  # context survives the rebuild
     assert runner._model_for("proj") == other
 
 
@@ -749,12 +1087,13 @@ def test_set_model_noop_when_unchanged_keeps_client():
     assert runner._resume_next.get("proj") is None
 
 
-def test_set_model_fresh_project_no_resume_flag():
+def test_set_model_fresh_project_applies_on_next_connect():
+    """No live client: `_models` is just the INITIAL-model setting, applied when one is built."""
     runner = AgentRunner(repo_root=".", client_factory=lambda pid: None)
     other = next(m for m in AGENT_MODELS if m != DEFAULT_MODEL)
     asyncio.run(runner.set_model("proj", other))  # no session yet
     assert runner._resume_next.get("proj") is None
-    assert runner._model_for("proj") == other
+    assert runner._model_for("proj") == other  # what the next build_agent_options() will use
 
 
 def test_default_factory_builds_client_with_selected_model(monkeypatch):

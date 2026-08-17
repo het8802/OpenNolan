@@ -45,7 +45,7 @@ def test_chat_without_auth_returns_503_with_guidance(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     # Force the no-CLI path so the auth-gated 503 is exercised even on a dev
     # machine that has the `claude` CLI installed (which would otherwise pass).
-    monkeypatch.setattr("server.agent_runner.claude_cli_available", lambda: False)
+    monkeypatch.setattr("server.agent_runner.external_claude_cli_available", lambda: False)
     create_project(tmp_path / "projects", "Sky", PIPELINE)
     r = _client(tmp_path).post("/api/projects/sky/chat", json={"message": "hi"})
     assert r.status_code == 503

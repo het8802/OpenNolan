@@ -30,10 +30,12 @@ from claude_agent_sdk import (
 from server.agent_runner import (
     ACTION_ALLOW,
     ACTION_DENY,
+    AGENT_AUTO_ALLOWED_TOOLS,
     AgentRunner,
     bash_uses_videocompose_render,
     decide_tool,
     make_can_use_tool,
+    make_pre_tool_use_hook,
 )
 from server.render_jobs import RenderJobStore
 
@@ -310,9 +312,12 @@ def test_bash_steer_denies_heavy_media_op():
         "SilenceCutter().execute({'input_path': 'x.mov'})\""
     )
     assert bash_runs_heavy_media_op(cmd)
-    d = decide_tool("Bash", {"command": cmd})
-    assert d.action == ACTION_DENY
-    assert "run_media_op" in d.reason
+    # The steer lives in the always-run PreToolUse hook: sandbox auto-approval or an allow
+    # rule can resolve a Bash call before can_use_tool ever runs.
+    out = asyncio.run(make_pre_tool_use_hook(None)({"tool_name": "Bash", "tool_input": {"command": cmd}}, "t", None))
+    spec = out["hookSpecificOutput"]
+    assert spec["permissionDecision"] == "deny"
+    assert "run_media_op" in spec["permissionDecisionReason"]
 
 
 def test_bash_steer_allows_introspection_and_quick_calls():
@@ -656,7 +661,8 @@ def test_bash_uses_videocompose_render_detects_signature():
         'VideoCompose().execute({"operation": "render_proxies", "edit_decisions": ed})\nEOF'
     )
     assert bash_uses_videocompose_render(cmd) is True
-    assert decide_tool("Bash", {"command": cmd}).action == ACTION_DENY
+    out = asyncio.run(make_pre_tool_use_hook(None)({"tool_name": "Bash", "tool_input": {"command": cmd}}, "t", None))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def test_other_videocompose_ops_not_denied():
@@ -670,15 +676,16 @@ def test_plain_ffmpeg_still_allowed():
 
 
 def test_render_mcp_tool_allowed_by_policy():
-    assert decide_tool("mcp__mc__render", {}).action == ACTION_ALLOW
+    # One SDK wildcard replaces the old `startswith("mcp__mc__")` branch.
+    assert "mcp__mc__*" in AGENT_AUTO_ALLOWED_TOOLS
 
 
-def test_can_use_tool_maps_deny_to_permission_deny():
-    can = make_can_use_tool(confirm_handler=None)
+def test_the_hook_maps_a_route_violation_to_a_deny_decision():
     cmd = 'from tools.video.video_compose import VideoCompose\nVideoCompose().execute({"operation": "render_proxies"})'
-    res = asyncio.run(can("Bash", {"command": cmd}, None))
-    assert isinstance(res, PermissionResultDeny)
-    assert "render" in res.message.lower()
+    out = asyncio.run(make_pre_tool_use_hook(None)({"tool_name": "Bash", "tool_input": {"command": cmd}}, "t", None))
+    spec = out["hookSpecificOutput"]
+    assert spec["permissionDecision"] == "deny"
+    assert "render" in spec["permissionDecisionReason"].lower()
 
 
 # --- app wiring: agent shares the editor's RenderJobStore -----------------
