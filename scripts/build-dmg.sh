@@ -66,6 +66,13 @@ if [[ ! -x "$DESKTOP/node_modules/.bin/electron-builder" ]]; then
   info "installing desktop deps (first run)…"
   npm --prefix "$DESKTOP" install
 fi
+# Vite compiles web/src + web/node_modules into web/dist; the .app only ships
+# that dist. Missing or stale web deps fail the compile (and therefore the
+# whole package), so always install from the lockfile — do not assume the
+# developer already ran npm install in web/.
+[[ -f "$REPO_ROOT/web/package-lock.json" ]] || die "web/package-lock.json missing"
+info "syncing web deps from lockfile…"
+npm --prefix "$REPO_ROOT/web" ci
 info "repo:    $REPO_ROOT"
 info "node:    $(node -v)   npm: $(npm -v)"
 

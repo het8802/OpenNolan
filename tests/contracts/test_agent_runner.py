@@ -814,6 +814,17 @@ def test_project_context_binds_to_project_id(tmp_path):
     assert "update_stage.py bind-me" in ctx
 
 
+def test_project_context_does_not_pin_pipeline_when_packaged(tmp_path, monkeypatch):
+    from lib.project import create_project
+
+    monkeypatch.setenv("OPENNOLAN_PACKAGED", "1")
+    create_project(tmp_path / "projects", "Open Brief")
+    runner = AgentRunner(repo_root=tmp_path)
+    ctx = runner._project_context("open-brief")
+    assert "instagram-fast-reel" not in ctx
+    assert "No pipeline_type has been chosen" in ctx
+
+
 def test_first_turn_preamble_includes_context_even_for_fresh_project(tmp_path):
     from lib.project import create_project
 
