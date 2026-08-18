@@ -1,0 +1,111 @@
+identity:
+  name: "Product Demo Kinetic"
+  category: motion-graphics
+  mood: fast, confident, tactile, live, product-first
+  pace: rapid
+  best_for: "Vertical software product demos built from static UI screenshots — launch videos, feature reveals, 'here is the thing working' walkthroughs. Use when the viewer must believe they are watching someone USE the product, not watching a slideshow about it."
+
+visual_language:
+  color_palette:
+    primary: ["#141414", "#FBF8F1"]
+    accent: ["#D9694A", "#E8A87C", "#2F6F5E", "#F4C84A"]
+    background: "#FBF8F1"
+    text: "#141414"
+    muted: "#8A857D"
+  composition: "1080x1920 vertical. The product UI fills the frame and is CROPPED by it — never a shrunken window floating on a background with a caption underneath. Chrome (title bars, tabs, the OS menu bar) is cropped out or masked. One UI region in focus per beat. Captions sit in a fixed dark lower band (#141414 at 0.92 opacity) so they never collide with the moving UI. The animated cursor is ~44px at 1.0 camera scale with a terracotta (#D9694A) click ripple."
+  texture: "Real screenshots at native pixel density, never upscaled past 1.0 during a hold. Soft drop shadow only where a surface genuinely floats (modals, menus, the cursor). No paper grain, no glow, no gradient wash over the UI."
+
+typography:
+  headings:
+    font: "Inter Tight"
+    weight: 800
+    tracking: "-0.03em"
+    line_height: 1.0
+  body:
+    font: "Inter Tight"
+    weight: 600
+    tracking: "-0.02em"
+    line_height: 1.1
+  code:
+    font: "Fira Code"
+    weight: 500
+  stat_card:
+    font: "Inter Tight"
+    weight: 850
+    size_multiplier: 1.8
+  scale_system: "major_third"
+  weight_matrix:
+    title: 800
+    heading: 750
+    body: 600
+    caption: 500
+
+motion:
+  transitions: [snap-zoom, whip-pan, cursor-led-push, click-cut, ui-state-swap, speed-ramp-through-wait, match-cut-on-element]
+  animation_style: >
+    A CAMERA MOVING THROUGH A LIVE APP, not a slideshow with highlights. The frame is
+    always travelling: push in on the region about to change, whip-pan to the region that
+    changes next, snap-zoom on the click target. An animated cursor drives every
+    interaction — it travels to a control, the click ripple fires, and the UI state swaps
+    ON that frame. Typing is typed, character by character, not revealed. Cut on the
+    action, never after it. Waiting states (spinners, uploads, renders) are speed-ramped
+    through in 0.2-0.4s, never held. Highlight rings and callout chips are a LAST resort
+    for something the camera cannot reach — if you find yourself ringing a static
+    screenshot, you have made the explainer video this playbook exists to replace.
+  pacing_rules:
+    min_scene_hold_seconds: 0.5
+    max_scene_hold_seconds: 2.0
+    # Schema floor. Speed comes from the camera and the cuts, not from cutting reading time.
+    text_card_hold_seconds: 1.0
+    stat_card_hold_seconds: 1.0
+    transition_duration_seconds: 0.12
+  entrance: >
+    Camera moves, not object entrances. A new beat arrives by the camera ARRIVING at it:
+    scale travel of 15-40% over 0.35-0.6s on cubic ease-out, or a whip-pan of 0.18-0.25s
+    with motion blur. UI elements that genuinely appear (a modal, a toast, a result row)
+    scale 0.94->1.0 over 0.18s. Nothing slides in from off-frame just to be decorative.
+  exit: >
+    Hard cuts on the click or the keystroke. Whip-pans out of a region into the next one.
+    Speed ramps out of any wait. No crossfades between UI states — a crossfade reads as
+    "two pictures", a cut reads as "it responded".
+
+audio:
+  voice_style: "fast, confident builder narration — short declarative clauses, one claim per beat, each landing on the frame where the UI proves it"
+  music_mood: "driving minimal electronic with a steady pulse; carries the cut rhythm without competing with narration"
+  music_volume: 0.1
+  sfx_style: "mechanical key clicks for typing, a soft click for every cursor press, a short whoosh on whip-pans, a low confirm tone when a result lands"
+  ducking_threshold_db: -6
+  voice_variation_allowed: false
+
+asset_generation:
+  image_prompt_prefix: "clean vertical software product UI screenshot, warm off-white interface, terracotta accent, crisp legible small text, realistic macOS application window, "
+  image_negative_prompt: "blurry text, fake lorem ipsum UI, generic dashboard stock art, purple neon gradient, 3d render of a laptop, watermark, distorted glyphs, tiny unreadable labels"
+  diagram_style: "only when the product's own UI cannot show the idea: flat orthogonal connectors, terracotta nodes, no decorative isometric scenes"
+  consistency_anchors:
+    - "The product's real UI is on screen in nearly every beat"
+    - "One animated cursor, one visual identity, present across every interaction beat"
+    - "Camera is moving or has just landed — a completely still frame is a defect"
+    - "Captions live in one fixed band; they never move with the camera"
+    - "Window chrome, OS menu bar, and any agent/developer chat panels are cropped out"
+
+overlays:
+  key_term:
+    bg: "#141414"
+    border: "#141414"
+    text: "#FBF8F1"
+    radius: 10
+
+quality_rules:
+  - "NEVER ship a scene with no camera movement and no UI state change — that is a slideshow frame"
+  - "NEVER make camera scale travel under 10% the primary motion of a beat"
+  - "NEVER hold a single framing longer than 2.0s"
+  - "NEVER use ring/arrow highlights over an otherwise static screenshot as the main visual device"
+  - "NEVER crossfade between two UI states — cut, so it reads as a response"
+  - "NEVER hold a spinner, progress bar or empty loading state at 1x speed"
+  - "NEVER show window chrome, the OS menu bar, or any developer/agent chat panel"
+  - "NEVER write a caption that restates what the UI already says on screen"
+  - "ALWAYS give an interaction beat a visible cursor that travels, presses, and leaves a click ripple"
+  - "ALWAYS land a UI state change on the exact frame of its click or keystroke"
+  - "ALWAYS land a reveal ON the narrated word, never before it"
+  - "ALWAYS verify UI text is legible on a real exported frame, not on the source screenshot"
+  - "ALWAYS make consecutive beats differ in framing, not just in content"

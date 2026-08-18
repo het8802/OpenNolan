@@ -20,12 +20,13 @@ from lib import app_paths
 
 STYLES_DIR = Path(__file__).resolve().parent
 
-# The packaged Mac app offers exactly TWO styles; a dev checkout keeps them all.
-# These are the two playbooks the instagram-fast-reel pipeline is built around
-# (Anthropic editorial surface + Greg Isenberg motion grammar).
+# The styles the packaged Mac app offers; a dev checkout keeps them all. MUST cover the
+# `recommended` playbooks of every pipeline in PACKAGED_PIPELINES — a shipped pipeline
+# whose own playbook is filtered out falls back to another pipeline's motion grammar.
 PACKAGED_PLAYBOOKS: tuple[str, ...] = (
     "anthropic-editorial-animated",
     "greg-isenberg-product-explainer",
+    "product-demo-kinetic",
 )
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schemas" / "styles" / "playbook.schema.json"
 

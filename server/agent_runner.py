@@ -56,6 +56,8 @@ DEFAULT_MAX_BUDGET_USD = 15.0  # SDK-native hard ceiling per session
 DEFAULT_CONFIRM_TIMEOUT_S = 300
 DEFAULT_ANSWER_TIMEOUT_S = 900  # users may take a while to answer a question
 
+MAX_SDK_MESSAGE_BYTES = 24 * 1024 * 1024  # one CLI->SDK stdout message; see build_agent_options
+
 # The CLOSED set of built-in tools the agent may see. Availability is the SDK's job
 # (`ClaudeAgentOptions.tools`), not a Python branch: a tool that is absent from model context
 # can never turn into a surprise "unrecognized tool" permission prompt.
@@ -283,6 +285,10 @@ def _bash_tokens(command: str) -> list[str]:
     Tolerant of unbalanced quotes / odd syntax (an unterminated `python -c "…` is common): we keep
     whatever fully-formed tokens were lexed before the error. Best-effort by design — the file-tool
     boundary in decide_tool is the hard guarantee."""
+    # A `)` ends a token, so a Python/JS path-join glued to one (`projects_dir()/'name'`) leaves a
+    # PHANTOM token `/name` that reads as filesystem root — an embedded script that never touched
+    # disk outside the sandbox got flagged. Drop the operator slash; a real path never follows `)`.
+    command = re.sub(r"\)\s*/", ") ", command)
     try:
         lex = shlex.shlex(command, posix=True, punctuation_chars=True)  # split off ; | & < > ( )
         lex.whitespace_split = True
@@ -325,7 +331,8 @@ def bash_path_escape_reason(command: str, sandbox: Sandbox) -> Optional[str]:
     for token in _bash_tokens(command):
         for cand in _path_candidates(token):
             cand = cand.rstrip(".,:;")
-            if not cand or cand.startswith("//"):  # "//" → URL authority, not a path
+            # "/" alone is an operator leftover (`x.split('/')`), not a target; "//" → URL authority
+            if not cand or cand == "/" or cand.startswith("//"):
                 continue
             if not _looks_like_path(cand):
                 continue
@@ -822,9 +829,14 @@ To SAVE any file you produce (image/video/audio/music, an intermediate scene cli
 deliverable), call the `store_asset` tool with its `kind` and `src` — it places the file in the \
 correct folder and returns the path to reference in edit_decisions/asset_manifest. NEVER write \
 into assets/, hf/renders/, or renders/ by hand and never pass a hand-picked project path to a \
-generator; write generated files to a scratch path, then hand them to `store_asset`. This is the \
-ONLY correct way to place assets — declaring the wrong folder yourself makes intermediate clips \
-show up as the final render in the editor.
+generator; write generated files to your scratch directory, then hand them to `store_asset`. This \
+is the ONLY correct way to place assets — declaring the wrong folder yourself makes intermediate \
+clips show up as the final render in the editor.
+
+Your scratch directory is the project's own `.scratch/` folder; its absolute path is in the \
+PROJECT CONTEXT above. EVERY working file goes there — generator scripts, intermediate HTML/JSON, \
+extracted QA frames, anything on the way to a deliverable. NEVER use /tmp or any path outside the \
+project for your own files: a project must carry everything it took to build it.
 
 To SCHEDULE a completed project, call the `Skill` tool with \
 `skill: "opennolan:content-calendar-scheduling"`, then call the \
@@ -1033,6 +1045,10 @@ def build_agent_options(
         # agent could not start is thrown away (that is how a bundled-CLI crash reached users as
         # an error naming nothing).
         stderr=stderr,
+        # The CLI writes an image tool_result's base64 TWICE per stdout line (API block +
+        # its `tool_use_result` sidecar), so the usable ceiling is HALF this. The SDK's 1MB
+        # default therefore kills any `Read` of a PNG over ~390KB — a 1080p QA frame.
+        max_buffer_size=MAX_SDK_MESSAGE_BYTES,
     )
 
 
@@ -1610,7 +1626,8 @@ class AgentRunner:
                     "src": {
                         "type": "string",
                         "description": "Path to the file you produced (absolute, or relative to "
-                        "the repo root). Typically a scratch/temp path a generator wrote.",
+                        "the repo root). Normally a path your generator wrote into the project's "
+                        ".scratch/ directory.",
                     },
                     "name": {
                         "type": "string",
@@ -1878,15 +1895,33 @@ class AgentRunner:
         except Exception:
             pt = None
             style = None
+        # Pin only when the packaged app ships ONE pipeline; with more, pinning [0] would
+        # silently force every project onto the first name. The rest of the manifests ride
+        # along in the bundle as inert data, so a choice must be limited to this list.
+        packaged_only: tuple[str, ...] = ()
+        if not pt:
+            from lib import app_paths
+            from lib.pipeline_loader import PACKAGED_PIPELINES
+
+            if app_paths.is_packaged() and PACKAGED_PIPELINES:
+                if len(PACKAGED_PIPELINES) == 1:
+                    pt = PACKAGED_PIPELINES[0]
+                else:
+                    packaged_only = tuple(PACKAGED_PIPELINES)
         if pt:
             pipeline_clause = f" using the '{pt}' pipeline"
             choose_clause = ""
             stage_cmd = f"python scripts/update_stage.py {project_id} <stage> <status> {pt}"
         else:
             pipeline_clause = ""
+            where = (
+                "ONLY these pipelines are available: " + ", ".join(f"'{n}'" for n in packaged_only)
+                if packaged_only
+                else "the available pipelines under pipeline_defs/"
+            )
             choose_clause = (
-                " No pipeline_type has been chosen for this project yet — read the user's request and the "
-                "available pipelines under pipeline_defs/, pick the best-fit pipeline, and then use that SAME "
+                " No pipeline_type has been chosen for this project yet — read the user's request and "
+                f"{where}, pick the best-fit pipeline, and then use that SAME "
                 "pipeline_type consistently for every checkpoint and update_stage call."
             )
             stage_cmd = f"python scripts/update_stage.py {project_id} <stage> <status> <pipeline_type>"
@@ -1898,12 +1933,22 @@ class AgentRunner:
             )
         else:
             style_clause = ""
+        # Name the scratch dir or the agent invents one in /tmp (which is inside the
+        # sandbox, so nothing stops it). Dot-prefixed: the Assets browser hides it.
+        scratch = self.projects_dir / project_id / ".scratch"
+        try:
+            scratch.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass  # name it anyway; the agent's own mkdir -p surfaces a real failure
         return (
             f"[PROJECT CONTEXT: You are working on the existing project '{project_id}'{pipeline_clause}.{choose_clause}{style_clause} "
             f"Use EXACTLY this project_id for everything — do NOT create a new project directory. "
             f"Write artifacts to the ABSOLUTE path {self.projects_dir / project_id}/artifacts/ — your working "
             f"directory is the read-only app code, so a relative 'projects/{project_id}/...' path would write to "
-            f"the wrong place. For every produced asset "
+            f"the wrong place. Put ALL scratch/working files — generator scripts, intermediate "
+            f"HTML/JSON, extracted QA frames, anything you make on the way to a deliverable — under "
+            f"{scratch}/ . Do NOT use /tmp or any path outside this project for your own working "
+            f"files; a project must carry everything it took to build it. For every produced asset "
             f"(image/video/audio/music/render/final_render) call the `store_asset` tool instead of "
             f"choosing a folder — it files each asset in the right place and returns its path. As you "
             f"work each stage, update its status so the UI stepper reflects progress: run `{stage_cmd}` "
@@ -2513,9 +2558,12 @@ class AgentRunner:
         # Temp-staged files are RELOCATED into the project (OPN-10: the staging
         # copy is litter once placed — /tmp used to accumulate a twin of every
         # asset); files anywhere else are copied, since they're not ours to consume.
+        # The project's own .scratch is staging too — it is where we tell the agent to
+        # work — else the twin just moves inside the project instead of going away.
         try:
             resolved = src.resolve()
-            move = any(resolved.is_relative_to(r) for r in _temp_roots())
+            staging = (*_temp_roots(), (self.projects_dir / project_id / ".scratch").resolve())
+            move = any(resolved.is_relative_to(r) for r in staging)
         except OSError:
             move = False
 
