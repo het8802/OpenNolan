@@ -21,15 +21,18 @@ typography:
   # generic; the Fraunces serif used for "Mythos" in the hook is the look to keep.)
   headings:
     font: "Fraunces"
+    file: "assets/fonts/Fraunces/Fraunces-Variable.ttf"
     weight: 900
     tracking: "-0.03em"
     line_height: 0.95
   body:
     font: "Inter"
+    file: "assets/fonts/Inter/Inter-Variable.ttf"
     weight: 600
     line_height: 1.3
   stat_card:
     font: "Inter"
+    file: "assets/fonts/Inter/Inter-Variable.ttf"
     weight: 900
     tracking: "-0.04em"
     size_multiplier: 2.2

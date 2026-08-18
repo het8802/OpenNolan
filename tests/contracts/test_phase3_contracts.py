@@ -241,6 +241,24 @@ class TestStylePlaybooks:
         assert "min_scene_hold_seconds" in pacing
         assert "max_scene_hold_seconds" in pacing
 
+    @pytest.mark.parametrize("name", ["anthropic-editorial-animated", "greg-isenberg-product-explainer"])
+    def test_packaged_style_fonts_are_bundled(self, name):
+        """The 2 styles that ship in the packaged app declare a `file` for every font role,
+        and that file is a real, in-repo TTF — not a name the agent has to go find or
+        download at runtime (see assets/fonts/)."""
+        pb = load_playbook(name)
+        roles = [r for r in ("headings", "body", "code", "stat_card") if r in pb["typography"]]
+        assert roles, "expected at least one typography role"
+        for role in roles:
+            spec = pb["typography"][role]
+            assert "file" in spec, f"{name}.typography.{role} has no bundled font file"
+            font_path = PROJECT_ROOT / spec["file"]
+            assert font_path.is_file(), f"{name}.typography.{role}.file does not exist: {font_path}"
+            assert font_path.stat().st_size > 1000, f"{font_path} looks empty/truncated"
+            # TrueType/OpenType magic: 0x00010000 (TTF) or "OTTO" (OTF/CFF).
+            magic = font_path.read_bytes()[:4]
+            assert magic in (b"\x00\x01\x00\x00", b"OTTO"), f"{font_path} is not a valid TTF/OTF ({magic!r})"
+
     def test_compatible_with_manifest(self):
         manifest = load_pipeline("animated-explainer")
         available = list_playbooks()
