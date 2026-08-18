@@ -1,0 +1,247 @@
+name: product-demo
+version: "1.0"
+description: >
+  Kinetic software product demo built from STATIC UI screenshots: a camera travelling
+  through the real UI, an animated cursor that moves, clicks and types, and UI state
+  changes that land on the click frame.
+
+  Pick this when the input is screenshots. Pick `screen-demo` when you have a real
+  recording (it needs captured footage and keeps motion minimal, which is right when
+  the capture already has the cursor in it). Pick `animated-explainer` when the subject
+  is an idea, not a product surface — its grammar is annotating a static visual, which
+  on screenshots produces highlight rings and a slideshow.
+
+  Directors are reused from `screen-demo`; the stage shape is identical. What differs
+  is this manifest's review gates and the bound playbook, which is where the motion
+  direction actually lives.
+category: screen_recording
+stability: beta
+default_checkpoint_policy: guided
+
+reference_input:
+  supported: true
+  analysis_depth: standard
+  analysis_tools:
+    - frame_sampler
+    - video_analyzer
+
+orchestration:
+  mode: executive-producer
+  skill: pipelines/screen-demo/executive-producer
+  budget_default_usd: 1.50
+  max_revisions_per_stage: 3
+  max_send_backs: 3
+  max_wall_time_minutes: 15
+
+extensions:
+  custom_scripts: true
+  custom_playbooks: true
+  custom_skills: true
+  custom_tools: false
+
+required_skills:
+  - creative/product-demo-kinetic
+  - creative/screen-recording
+  - creative/short-form
+  - creative/video-editing
+  - creative/sound-design
+  - pipelines/screen-demo/executive-producer
+  - pipelines/screen-demo/idea-director
+  - pipelines/screen-demo/script-director
+  - pipelines/screen-demo/scene-director
+  - pipelines/screen-demo/asset-director
+  - pipelines/screen-demo/edit-director
+  - pipelines/screen-demo/compose-director
+  - pipelines/screen-demo/publish-director
+  - meta/reviewer
+  - meta/checkpoint-protocol
+  - meta/animation-runtime-selector
+
+compatible_playbooks:
+  recommended:
+    - product-demo-kinetic
+  also_works:
+    - greg-isenberg-product-explainer
+  custom_allowed: true
+
+stages:
+  - name: idea
+    skill: pipelines/screen-demo/idea-director
+    produces:
+      - brief
+      - decision_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Brief names ONE product and the specific job the viewer sees it do
+      - The demo path is a real sequence of UI states, not a list of features
+      - Inventory of available screenshots covers every state that path needs
+      - Any state with no screenshot is called out now, not discovered at compose
+    success_criteria:
+      - Schema-valid brief artifact
+      - Brief lists the UI screens the demo will move through, in order
+
+  - name: script
+    skill: pipelines/screen-demo/script-director
+    required_artifacts_in:
+      - brief
+    optional_artifacts_in:
+      - source_media_review
+    produces:
+      - script
+    required_tools: []
+    optional_tools:
+      - tts_selector
+      - transcriber
+    tools_available:
+      - tts_selector
+      - transcriber
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - "Every line is tied to a UI event that PROVES it — a claim with no on-screen proof is cut"
+      - Narration is short declarative clauses, one claim per beat
+      - "No line describes what the viewer can already read on screen"
+    success_criteria:
+      - Schema-valid script artifact
+      - Every script beat names the UI state it plays over
+
+  - name: scene_plan
+    skill: pipelines/screen-demo/scene-director
+    required_artifacts_in:
+      - script
+    optional_artifacts_in:
+      - brief
+    produces:
+      - scene_plan
+    required_tools: []
+    optional_tools:
+      - frame_sampler
+    tools_available:
+      - frame_sampler
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - "THIS IS A CAMERA PLAN, not a crop list: every beat states where the camera starts, where it ends, and how long the move takes"
+      - "Scale travel is 15-40% per move — a 2-4% push-in is the static look this pipeline exists to avoid"
+      - Cursor choreography is planned per interaction beat, with the click frame named
+      - Every UI state change is pinned to the frame of the click or keystroke that causes it
+      - Waiting states are speed-ramped, never held
+      - Consecutive beats differ in framing, not only in content
+      - "style_playbook is set and is product-demo-kinetic unless the user chose otherwise"
+    success_criteria:
+      - Schema-valid scene_plan artifact
+      - Every scene carries a camera move and a duration inside the playbook's pacing rules
+      - No scene both holds a fixed framing and has no UI state change
+
+  - name: assets
+    skill: pipelines/screen-demo/asset-director
+    required_artifacts_in:
+      - scene_plan
+    optional_artifacts_in:
+      - script
+    produces:
+      - asset_manifest
+    required_tools: []
+    optional_tools:
+      - subtitle_gen
+      - tts_selector
+      - image_selector
+      - audio_enhance
+    tools_available:
+      - subtitle_gen
+      - tts_selector
+      - image_selector
+      - audio_enhance
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Screenshots are at or above final render resolution — a camera push-in magnifies, so a source at 1x goes soft
+      - Window chrome, OS menu bar and any developer/agent chat panel are cropped or masked out of every source
+      - The cursor asset and click-ripple treatment are prepared once and reused
+      - Narration audio exists for every beat that has a line
+    success_criteria:
+      - Schema-valid asset_manifest artifact
+      - All referenced asset files exist on disk
+      - No source screenshot is smaller than the region the camera magnifies it to
+
+  - name: edit
+    skill: pipelines/screen-demo/edit-director
+    required_artifacts_in:
+      - scene_plan
+      - asset_manifest
+    optional_artifacts_in:
+      - script
+    produces:
+      - edit_decisions
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - "Cuts land ON the action (click, keystroke, state change) — never a beat after it"
+      - "Dead air is a defect here: no held spinner, no empty pause between beats"
+      - "Transitions are cuts, whip-pans or snap-zooms; a crossfade between UI states reads as two pictures instead of a response"
+      - Reveals land on the narrated word, never before it
+      - "render_runtime in edit_decisions matches proposal_packet — a silent swap is a CRITICAL governance violation"
+      - "style_playbook matches the one approved at scene_plan — a silent playbook swap is the same violation"
+    success_criteria:
+      - Schema-valid edit_decisions artifact
+      - All cuts reference valid source files and assets
+      - No cut holds a single framing longer than the playbook's max_scene_hold_seconds
+
+  - name: compose
+    skill: pipelines/screen-demo/compose-director
+    required_artifacts_in:
+      - edit_decisions
+      - asset_manifest
+    optional_artifacts_in:
+      - scene_plan
+    produces:
+      - render_report
+      - final_review
+    required_tools:
+      - video_compose
+      - audio_mixer
+    optional_tools:
+      - hyperframes_compose
+      - video_trimmer
+      - audio_enhance
+    tools_available:
+      - video_compose
+      - hyperframes_compose
+      - audio_mixer
+      - video_trimmer
+      - audio_enhance
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - "render_runtime='hyperframes' is the expected path — the camera rig is a CSS transform over the screenshot; lint+validate must pass before render"
+      - "QA sampled frames, not just the plan: pull a frame from EVERY scene and look at it"
+      - UI text is still legible after the camera magnifies it
+      - Nothing overlaps the app's own chrome or a caption band
+      - "Sampled QA frames go in the project's .scratch/ — never /tmp"
+      - Audio is clear and the click/keystroke SFX sit on the frames they belong to
+    success_criteria:
+      - Schema-valid render_report artifact
+      - Output file exists and passes ffprobe validation
+      - A QA frame from every scene was inspected and no two consecutive frames share a framing
+
+  - name: publish
+    skill: pipelines/screen-demo/publish-director
+    required_artifacts_in:
+      - render_report
+      - final_review
+    optional_artifacts_in:
+      - brief
+    produces:
+      - publish_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Metadata names the product and the job demonstrated
+      - Thumbnail concept is a real UI moment, not a title card
+    success_criteria:
+      - Schema-valid publish_log artifact
+      - Export directory contains video, metadata, and thumbnail concept

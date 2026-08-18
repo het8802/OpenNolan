@@ -16,16 +16,10 @@ from lib import app_paths
 
 PIPELINE_DEFS_DIR = Path(__file__).resolve().parent.parent / "pipeline_defs"
 
-# The packaged Mac app ships a SINGLE pipeline. A dev checkout keeps them all.
-# The bundle still contains every manifest (they are inert data); this list is
-# what the app actually offers/validates/uses when running as the packaged app.
-PACKAGED_PIPELINES: tuple[str, ...] = ("instagram-fast-reel",)
-SCHEMA_PATH = (
-    Path(__file__).resolve().parent.parent
-    / "schemas"
-    / "pipelines"
-    / "pipeline_manifest.schema.json"
-)
+# What the packaged Mac app offers; a dev checkout keeps them all. Order is not
+# preference — with >1 entry the agent picks per project (agent_runner._project_context).
+PACKAGED_PIPELINES: tuple[str, ...] = ("instagram-fast-reel", "product-demo")
+SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schemas" / "pipelines" / "pipeline_manifest.schema.json"
 
 
 def _load_manifest_schema() -> dict:
@@ -116,11 +110,7 @@ def get_stage_sub_stages(
         sub_stages = list(stage.get("sub_stages", []))
         if include_inactive:
             return sub_stages
-        return [
-            sub_stage
-            for sub_stage in sub_stages
-            if _condition_is_active(sub_stage.get("condition"), context)
-        ]
+        return [sub_stage for sub_stage in sub_stages if _condition_is_active(sub_stage.get("condition"), context)]
     return []
 
 
@@ -184,6 +174,7 @@ def get_stage_review_focus(manifest: dict, stage_name: str) -> list[str]:
 # Capability-Extension Enforcement
 # ---------------------------------------------------------------------------
 
+
 class ExtensionNotPermitted(PermissionError):
     """Raised when a capability extension is used but not permitted by the pipeline."""
 
@@ -204,10 +195,7 @@ def check_extension_permitted(
     """
     valid_extensions = {"custom_scripts", "custom_playbooks", "custom_skills", "custom_tools"}
     if extension_type not in valid_extensions:
-        raise ValueError(
-            f"Unknown extension type {extension_type!r}. "
-            f"Valid types: {sorted(valid_extensions)}"
-        )
+        raise ValueError(f"Unknown extension type {extension_type!r}. Valid types: {sorted(valid_extensions)}")
 
     extensions = manifest.get("extensions", {})
     if not extensions.get(extension_type, False):

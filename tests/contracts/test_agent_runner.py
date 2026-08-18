@@ -229,6 +229,25 @@ def test_sandbox_bash_allows_quoted_in_bounds_path_with_spaces(tmp_path):
     assert bash_path_escape_reason('cat "/Users/someone/secret file.txt"', sb) is not None
 
 
+def test_sandbox_bash_allows_pathlib_join_in_embedded_script(tmp_path):
+    """Regression: a heredoc'd Python script that builds an IN-BOUNDS path with pathlib's `/`
+    operator must not be flagged. `)` ends a shell token, so `projects_dir()/'launch-video-2'`
+    left a phantom `/launch-video-2` token that read as filesystem root."""
+    root = tmp_path / "projects"
+    root.mkdir()
+    sb = Sandbox(base=tmp_path, roots=(tmp_path.resolve(), root.resolve()))
+    for cmd in [
+        "python3 - <<'PY'\nproj=app_paths.projects_dir()/'launch-video-2'\nPY",  # glued
+        "python3 - <<'PY'\nproj = app_paths.projects_dir() / 'launch-video-2'\nPY",  # spaced
+        "python3 - <<'PY'\np=app_paths.home()/'projects'/'x'/'artifacts'\nPY",  # chained
+        "python3 - <<'PY'\nparts = name.split('/')\nPY",  # bare "/" operand
+    ]:
+        assert bash_path_escape_reason(cmd, sb) is None, cmd
+        assert decide_tool("Bash", {"command": cmd}, sb).action == ACTION_ALLOW, cmd
+    # an absolute path inside the SAME heredoc shape is still caught
+    assert bash_path_escape_reason("python3 - <<'PY'\nopen('/Users/someone/.ssh/id_rsa')\nPY", sb) is not None
+
+
 def test_build_sandbox_on_by_default_in_dev(monkeypatch, tmp_path):
     # OPN-10: the dev default deliberately FLIPPED from unsandboxed to sandboxed.
     monkeypatch.delenv("OPENNOLAN_CODE_ROOT", raising=False)
@@ -313,6 +332,62 @@ def test_store_asset_copies_non_temp_src(monkeypatch, tmp_path):
     asyncio.run(runner._store_asset("my-reel", {"kind": "image", "src": str(src)}))
     assert src.is_file()  # copied, not consumed — the file wasn't ours
     assert (projects / "my-reel" / "assets/images/keep.png").is_file()
+
+
+def test_store_asset_moves_src_from_the_projects_own_scratch(monkeypatch, tmp_path):
+    """.scratch is staging: without the move, the twin just relocates into the project."""
+    import server.agent_runner as ar
+
+    runner, projects = _runner_with_project(tmp_path)
+    monkeypatch.setattr(ar, "_temp_roots", lambda: (Path("/nonexistent-temp-root"),))
+    scratch = projects / "my-reel" / ".scratch"
+    scratch.mkdir(parents=True, exist_ok=True)
+    src = scratch / "frame.png"
+    src.write_bytes(b"png")
+    asyncio.run(runner._store_asset("my-reel", {"kind": "image", "src": str(src)}))
+    assert not src.exists()
+    assert (projects / "my-reel" / "assets/images/frame.png").is_file()
+
+
+def test_packaged_context_pins_a_lone_pipeline_but_offers_a_choice_from_many(monkeypatch, tmp_path):
+    """Pinning `PACKAGED_PIPELINES[0]` was correct only while the app shipped one; with
+    two it would silently render every product demo as a fast reel."""
+    import lib.app_paths as ap
+    import lib.pipeline_loader as pl
+
+    runner, _ = _runner_with_project(tmp_path)
+    monkeypatch.setattr(ap, "is_packaged", lambda: True)
+
+    monkeypatch.setattr(pl, "PACKAGED_PIPELINES", ("instagram-fast-reel",))
+    assert "using the 'instagram-fast-reel' pipeline" in runner._project_context("my-reel")
+
+    monkeypatch.setattr(pl, "PACKAGED_PIPELINES", ("instagram-fast-reel", "product-demo"))
+    ctx = runner._project_context("my-reel")
+    assert "using the 'instagram-fast-reel' pipeline" not in ctx, "silently pinned the first name"
+    assert "'product-demo'" in ctx and "'instagram-fast-reel'" in ctx
+    assert "pipeline_defs/" not in ctx, "packaged app must not offer the un-shipped catalogue"
+
+
+def test_system_prompt_names_the_scratch_dir_and_bans_tmp():
+    """The preamble carrying the absolute path runs ONLY on a fresh client's first turn.
+    The system prompt is the instruction present on EVERY turn, so it has to name the
+    convention too — otherwise the durable rule is just "a scratch path"."""
+    from server.agent_runner import AGENT_SYSTEM_PROMPT
+
+    assert ".scratch/" in AGENT_SYSTEM_PROMPT
+    assert "/tmp" in AGENT_SYSTEM_PROMPT  # named as forbidden, not merely omitted
+
+
+def test_project_context_names_the_scratch_dir_and_bans_tmp(tmp_path):
+    """The agent picks scratch paths by instruction, not by TMPDIR, so the preamble has
+    to name one — and the dir has to exist."""
+    runner, projects = _runner_with_project(tmp_path)
+    ctx = runner._project_context("my-reel")
+    scratch = projects / "my-reel" / ".scratch"
+    assert str(scratch) in ctx
+    assert "/tmp" in ctx  # named as forbidden, not merely omitted
+    assert scratch.is_dir()
+    assert scratch.name.startswith("."), "must stay hidden from the Assets browser"
 
 
 # --- PreToolUse hook: the boundary an allow rule cannot shadow ------------
@@ -438,6 +513,16 @@ def test_build_agent_options():
     assert opts.setting_sources == []
     assert opts.skills == "all"
     assert opts.plugins == [{"type": "local", "path": "/repo/.agents/app"}]
+
+
+def test_build_agent_options_sizes_the_stdout_buffer_for_frame_reads():
+    """A `Read` of a 1080p frame must not kill the turn: the CLI writes the base64 twice
+    per stdout line, so the ceiling has to clear a full image on DOUBLED accounting."""
+    opts = build_agent_options("/repo")
+    worst_case_image_bytes = 4 * 1024 * 1024  # the API's own image ceiling
+    line_bytes = 2 * (worst_case_image_bytes * 4 // 3)  # base64, written twice
+    assert opts.max_buffer_size is not None, "left at the SDK 1MB default; frame reads will die"
+    assert opts.max_buffer_size > line_bytes
 
 
 def test_build_agent_options_closes_the_tool_set():
@@ -812,17 +897,6 @@ def test_project_context_binds_to_project_id(tmp_path):
     assert "animated-explainer" in ctx
     assert "do NOT create a new project" in ctx
     assert "update_stage.py bind-me" in ctx
-
-
-def test_project_context_does_not_pin_pipeline_when_packaged(tmp_path, monkeypatch):
-    from lib.project import create_project
-
-    monkeypatch.setenv("OPENNOLAN_PACKAGED", "1")
-    create_project(tmp_path / "projects", "Open Brief")
-    runner = AgentRunner(repo_root=tmp_path)
-    ctx = runner._project_context("open-brief")
-    assert "instagram-fast-reel" not in ctx
-    assert "No pipeline_type has been chosen" in ctx
 
 
 def test_first_turn_preamble_includes_context_even_for_fresh_project(tmp_path):
