@@ -39,7 +39,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from lib import app_paths, qa_plan_diff, video_motion
+from lib import app_paths, qa_norms, qa_plan_diff, video_motion
 from tools.base_tool import (
     BaseTool,
     Determinism,
@@ -59,6 +59,9 @@ _LABEL_FONT = "assets/fonts/Inter/Inter-Variable.ttf"
 #: Analysis is done on a downscale — frame-difference energy needs relative
 #: change, not detail, and 128x72 makes a 33s pass take ~1s instead of ~45s.
 _ANALYSIS_SCALE = "128:72"
+# Canny thresholds for the detail curve. Low enough to register ordinary UI
+# text and chrome, so a frame losing them stands out.
+_EDGE_FILTER = "edgedetect=low=0.1:high=0.3"
 
 _SHEET_FPS = 1.0
 _STRIP_FPS = 12.0
@@ -208,7 +211,19 @@ class VisualQA(BaseTool):
                     "dark_threshold": {"type": "number", "minimum": 0},
                     "cut_threshold": {"type": "number", "minimum": 0},
                     "min_static_seconds": {"type": "number", "minimum": 0},
+                    "hook_seconds": {"type": "number", "minimum": 0},
                 },
+            },
+            "norms_profile": {
+                "type": "string",
+                "enum": ["short_form", "long_form"],
+                "default": "short_form",
+                "description": (
+                    "Which set of pacing norms `motion` judges against. "
+                    "short_form (default) = Reels/TikTok/Shorts, where a shot over ~2.5s "
+                    "reads as a slideshow. long_form = cinematic, where holds are "
+                    "intentional. Numbers live in lib/qa_norms.py."
+                ),
             },
             "output_dir": {
                 "type": "string",
@@ -264,6 +279,7 @@ class VisualQA(BaseTool):
         "max_tiles",
         "plan_path",
         "analysis",
+        "norms_profile",
     ]
     side_effects = ["writes frame images to output_dir", "writes sheet/strip images to output_path"]
     user_visible_verification = [
@@ -685,11 +701,16 @@ class VisualQA(BaseTool):
         return out
 
     def _measure(self, input_path: str, *, timeout: int = 900) -> dict[str, Any]:
-        """One decode pass -> three per-frame curves.
+        """One decode pass -> four per-frame curves.
 
         luma   = brightness (black / blown out)
         scd    = scdet scene-change score, 0..100 (hard cuts)
         motion = frame-difference energy after tblend (movement)
+        detail = edge density (how much the frame actually contains)
+
+        `detail` needs the ORIGINAL frames, but tblend consumes them and
+        edgedetect would replace them with an edge map, so it runs on its own
+        `split` branch rather than inline. Still one decode.
 
         `metadata=print:file=` is used rather than the detect filters' log lines
         because `-loglevel error` SILENTLY SUPPRESSES blackdetect/freezedetect
@@ -701,15 +722,19 @@ class VisualQA(BaseTool):
             lum_f = Path(tmp) / "luma.txt"
             scd_f = Path(tmp) / "scd.txt"
             mot_f = Path(tmp) / "motion.txt"
+            edge_f = Path(tmp) / "edge.txt"
             chain = (
-                f"scale={_ANALYSIS_SCALE}"
-                f",signalstats,metadata=print:key=lavfi.signalstats.YAVG"
+                f"scale={_ANALYSIS_SCALE},split=2[m][e];"
+                f"[m]signalstats,metadata=print:key=lavfi.signalstats.YAVG"
                 f":file={self._esc_filter(str(lum_f))}"
                 f",scdet=s=0,metadata=print:key=lavfi.scd.score"
                 f":file={self._esc_filter(str(scd_f))}"
                 f",tblend=all_mode=difference"
                 f",signalstats,metadata=print:key=lavfi.signalstats.YAVG"
-                f":file={self._esc_filter(str(mot_f))}"
+                f":file={self._esc_filter(str(mot_f))}[out];"
+                f"[e]{_EDGE_FILTER},signalstats"
+                f",metadata=print:key=lavfi.signalstats.YAVG"
+                f":file={self._esc_filter(str(edge_f))},nullsink"
             )
             self._run_ffmpeg(
                 [
@@ -721,8 +746,10 @@ class VisualQA(BaseTool):
                     "-i",
                     input_path,
                     "-an",
-                    "-vf",
+                    "-filter_complex",
                     chain,
+                    "-map",
+                    "[out]",
                     "-f",
                     "null",
                     self._null_device,
@@ -733,6 +760,7 @@ class VisualQA(BaseTool):
                 p.read_text(errors="replace") if p.is_file() else ""
             )
             luma, scd, motion = read(lum_f), read(scd_f), read(mot_f)
+            detail = read(edge_f)
 
         duration = info.get("duration")
         if not duration or duration <= 0:
@@ -740,7 +768,14 @@ class VisualQA(BaseTool):
             # better answer than 0, which would make every ratio meaningless.
             last = max((t for t, _ in luma), default=0.0)
             duration = last + (1.0 / info["fps"] if info.get("fps") else 0.0)
-        return {"info": info, "duration": float(duration), "luma": luma, "scd": scd, "motion": motion}
+        return {
+            "info": info,
+            "duration": float(duration),
+            "luma": luma,
+            "scd": scd,
+            "motion": motion,
+            "detail": detail,
+        }
 
     def _summary_for(self, inputs: dict[str, Any], measured: dict[str, Any]) -> dict[str, Any]:
         knobs = inputs.get("analysis") or {}
@@ -749,6 +784,8 @@ class VisualQA(BaseTool):
             luma=measured["luma"],
             scd=measured["scd"],
             duration=measured["duration"],
+            detail=measured.get("detail"),
+            hook_seconds=knobs.get("hook_seconds", video_motion.HOOK_SECONDS),
             static_threshold=knobs.get("static_threshold", video_motion.STATIC_THRESHOLD),
             dark_threshold=knobs.get("dark_threshold", video_motion.DARK_THRESHOLD),
             cut_threshold=knobs.get("cut_threshold", video_motion.CUT_THRESHOLD),
@@ -757,7 +794,12 @@ class VisualQA(BaseTool):
         )
 
     def _motion(self, inputs: dict[str, Any]) -> ToolResult:
-        """Measure motion over the whole video. No images, no opinions."""
+        """Measure motion over the whole video, then judge it against norms.
+
+        The measurement half stays opinion-free. The verdict half compares it
+        to a format's norms and says pass/fail, because a caller handed a bare
+        `cut_count` has no way to know whether the number is good.
+        """
         measured = self._measure(inputs["input_path"])
         if not measured["motion"]:
             return ToolResult(
@@ -768,12 +810,14 @@ class VisualQA(BaseTool):
                 ),
             )
         summary = self._summary_for(inputs, measured)
+        verdict = qa_norms.judge(summary, inputs.get("norms_profile"))
         return ToolResult(
             success=True,
             data={
                 "operation": "motion",
                 "input": inputs["input_path"],
                 "resolution": f"{measured['info'].get('width')}x{measured['info'].get('height')}",
+                "verdict": verdict,
                 **summary,
             },
         )

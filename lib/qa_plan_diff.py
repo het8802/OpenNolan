@@ -448,6 +448,20 @@ def expected_motion_windows(doc: dict[str, Any]) -> list[dict[str, Any]]:
 # --- measured half ----------------------------------------------------------
 
 
+def _planned_shot(doc: dict) -> float:
+    """Average shot length the edit doc was written at."""
+    cuts = doc.get("cuts") or []
+    total = sum(float(c.get("out_seconds", 0)) - float(c.get("in_seconds", 0)) for c in cuts)
+    return total / len(cuts) if cuts else 0.0
+
+
+def _perceived_shot(doc: dict, detected: int) -> float:
+    """Average shot length a viewer actually experiences."""
+    cuts = doc.get("cuts") or []
+    total = sum(float(c.get("out_seconds", 0)) - float(c.get("in_seconds", 0)) for c in cuts)
+    return total / (detected + 1) if total else 0.0
+
+
 def measured_findings(
     doc: dict[str, Any],
     *,
@@ -524,9 +538,18 @@ def measured_findings(
     undetected = [b for b in boundaries if not any(abs(b - c) <= cut_tolerance for c in cut_times)]
     if boundaries:
         if undetected:
+            share = len(undetected) / len(boundaries)
+            # Severity tracks how much of the edit is affected, NOT how sure the
+            # measurement is. Those are different axes, and collapsing them is
+            # what let a report say "8 of 14 cuts never register" at severity
+            # low, next to a passing grade. Each boundary on its own is weak
+            # evidence; most of them missing is not.
+            # A share needs a denominator to mean anything: 1-of-1 missing on a
+            # two-shot cut is one similar join, not an edit that fails to land.
+            severity = "high" if share >= 0.5 and len(undetected) >= 3 else "medium" if share >= 0.25 else "low"
             out.append(
                 _finding(
-                    "low",
+                    severity,
                     "cut-undetected",
                     "cuts",
                     f"{len(undetected)} of {len(boundaries)} derived HARD cut boundaries have "
@@ -534,16 +557,21 @@ def measured_findings(
                     f"{', '.join(f'{b:.2f}s' for b in undetected[:8])}"
                     f"{' …' if len(undetected) > 8 else ''}."
                     + (f" ({soft} soft transition(s) excluded — an xfade cannot spike.)" if soft else "")
-                    + " WEAK EVIDENCE — two visually similar shots cut together also score "
-                    "low on scene change, so this is a hint to look, not proof the cut is "
-                    "missing."
+                    + " Any ONE of these is weak evidence — two visually similar shots cut "
+                    "together also score low on scene change. The aggregate is not: a cut "
+                    "the viewer cannot see is not a cut, so this edit plays at roughly "
+                    f"{_perceived_shot(doc, len(cut_times)):.1f}s per shot rather than the "
+                    f"{_planned_shot(doc):.1f}s it was written at."
                     + (
                         ""
                         if _runtime(doc) == "ffmpeg"
-                        else " Weaker still on this runtime: the composition builds its own "
-                        "scene transitions, so a boundary the doc calls hard may render as a "
-                        "soft blend that cannot spike."
-                    ),
+                        else " On this runtime the composition builds its own scene "
+                        "transitions, so a boundary the doc calls hard may be rendering as a "
+                        "soft blend — which is still a finding: the plan and the render "
+                        "disagree about the join."
+                    )
+                    + " REQUIRED: run `strip` over the named boundaries and report what you "
+                    "saw at each. Do not clear this finding without that.",
                     declared=f"{len(boundaries)} hard boundaries",
                     measured=f"{len(cut_times)} detected peaks",
                 )

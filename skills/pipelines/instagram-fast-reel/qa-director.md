@@ -39,6 +39,24 @@ visual_qa operation="motion" input_path="renders/final.mp4"
 
 ~1s, no images, a few hundred tokens. Read, in this order:
 
+0. **`verdict`** — read this FIRST and treat it as the outcome of the step. It compares
+   the measurement against this format's pacing norms (`lib/qa_norms.py`) and returns
+   `pass` or `fail`. Every failure names the metric, what was measured, the norm, and
+   what it does to the viewer.
+
+   **`verdict.status == "fail"` means you may not report the video as good.** Not "note
+   it and pass" — the schema rejects a `final_review` whose `status` is `pass` while
+   `motion_check.norms_verdict` is `fail`. Your options are: fix the edit and re-measure,
+   or state the specific reason a norm does not apply to this video. "Looks fine to me"
+   is not that reason; you cannot see motion, which is why this measurement exists.
+
+   Pass `norms_profile="long_form"` only for genuinely long-form or cinematic work where
+   holds are the point. A reel judged as long-form is a reel that failed nothing.
+
+   Note what a passing verdict does and does not say: it says the edit is not broken and
+   not slow. It says nothing about whether the composition, easing, or type is any good.
+   Those still need your eye on the sheet and the strips.
+
 1. **`frozen_runs` / `findings`** — a FROZEN stretch is consecutive identical frames.
    Any freeze the edit did not deliberately ask for is a defect. A freeze **inside the
    hook window** is CRITICAL: stop and report.
@@ -47,8 +65,15 @@ visual_qa operation="motion" input_path="renders/final.mp4"
    the reel is a slide deck with music.
 3. **`dark_runs`** — black or near-black stretches.
 4. **`cut_count` + `cut_times`** — detected hard cuts. Far fewer than the edit planned
-   means the fast cutting didn't land.
-5. **`table`** — per-second motion. Scan it for flat rows; the first few seconds matter
+   means the fast cutting didn't land. A cut the viewer cannot see is not a cut, so what
+   matters is `duration / (cut_count + 1)` — the shot length actually experienced, which
+   the verdict reports as `perceived_shot_seconds`. An edit written at 2.2s per shot that
+   measures 4.7s is playing at half the speed it was cut for.
+5. **`detail_dropouts`** — frames where the picture briefly empties out and comes back,
+   usually a transition rendering a blank. These pass every other check: luma is normal
+   so no black-frame test fires, and at 1-3 frames long no contact sheet will ever land
+   on one. `strip` over the window to see it.
+6. **`table`** — per-second motion. Scan it for flat rows; the first few seconds matter
    most.
 
 **If the hook window (first ~3s, the duration of `cuts[0]`) is static or frozen, STOP**
@@ -135,9 +160,12 @@ the human never sees.
 `final_review` (schema-valid, `schemas/artifacts/final_review.schema.json`):
 - `status`: `pass` / `revise` / `fail`.
 - `checks`:
-  - `motion_check` — **record this.** `static_fraction`, `frozen_seconds`, `cut_count`,
-    `hook_static_seconds`, `declared_not_rendered` (count of `vs_plan` `not-rendered`
-    findings), `sheet_path`, `strip_paths` (every window you inspected), `issues`. This is
+  - `motion_check` — **record this.** `norms_verdict` + `norms_profile` +
+    `norms_failures` (one line per failed norm — each also goes in `issues_found`),
+    `perceived_shot_seconds`, `detail_dropout_count`, `static_fraction`, `frozen_seconds`,
+    `cut_count`, `hook_static_seconds`, `declared_not_rendered` (count of `vs_plan`
+    `not-rendered` findings), `sheet_path`, `strip_paths` (every window you inspected),
+    `issues`. This is
     the only place the measurement survives; `vs_plan` is advisory, so a finding you keep
     but don't write down is one the human never sees.
   - `technical_probe`, `visual_spotcheck` (`frames_sampled` = the **tile count** of the

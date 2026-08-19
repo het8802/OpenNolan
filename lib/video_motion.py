@@ -48,6 +48,29 @@ MIN_DARK_SECONDS = 0.2
 CUT_THRESHOLD = 10.0
 #: Two peaks closer than this are one cut.
 CUT_MERGE_SECONDS = 0.2
+#: A frame carrying less than this share of the surrounding detail has emptied
+#: out. Measured on a real dropout: baseline edge energy ~5.0, trough 0.43 (9%).
+DETAIL_DROP_RATIO = 0.35
+#: Longer than this and the blank is an intentional beat, not a hole in the edit.
+DETAIL_MAX_SECONDS = 0.25
+#: Window either side used for the local detail baseline. Wide enough that a
+#: few-frame hole cannot drag its own baseline down with it.
+DETAIL_WINDOW_SECONDS = 1.0
+#: Window just either side of a candidate used to read the shot's own detail
+#: level. Short, so it stays inside the neighbouring shot rather than the one
+#: after it.
+EDGE_LEVEL_SECONDS = 0.33
+#: How far the level after a candidate may differ from the level before it and
+#: still count as "the picture came back". Beyond this it is a cut to different
+#: content, not a hole in the middle of the same content.
+LEVEL_MATCH_RATIO = 0.5
+#: Below this the picture is genuinely flat everywhere (an all-black or plain
+#: card), so "share of surrounding detail" stops meaning anything.
+DETAIL_MIN_BASELINE = 1.0
+#: Mean motion over the opening is reported separately: the hook is the one
+#: window where being still is fatal rather than merely slow.
+HOOK_SECONDS = 1.5
+
 #: Analysis bucket. 0.5s smooths single-frame compression noise without hiding
 #: a half-second freeze.
 BUCKET_SECONDS = 0.5
@@ -227,6 +250,98 @@ def peaks_above(
     return peaks
 
 
+def find_detail_dropouts(
+    detail: Series,
+    *,
+    drop_ratio: float = DETAIL_DROP_RATIO,
+    max_seconds: float = DETAIL_MAX_SECONDS,
+    window_seconds: float = DETAIL_WINDOW_SECONDS,
+    min_baseline: float = DETAIL_MIN_BASELINE,
+) -> list[Run]:
+    """Frames where spatial detail collapses and then comes back.
+
+    This is the hole no other curve sees. An empty frame mid-transition keeps
+    normal luma (so no black-frame test fires), keeps its min/max spread (a
+    stray cursor or a clipped label is enough), and scores near zero on scene
+    change because the blank resembles the pale frames on either side. It is
+    also 1-3 frames long, so bucketing averages it away and a contact sheet
+    never lands on it.
+
+    What gives it away is that the picture briefly stops containing anything,
+    then contains it again. The recovery is the whole discriminator: a cut to a
+    genuinely sparse shot drops detail and STAYS down, which is a design
+    choice, not a defect.
+
+    Runs at the very start or end are skipped -- with nothing on one side there
+    is no baseline to fall from, or no recovery to confirm.
+    """
+    if len(detail) < 3:
+        return []
+
+    times = [t for t, _ in detail]
+    vals = [v for _, v in detail]
+
+    # Windows are taken in FRAMES, not by scanning timestamps: per-frame stats
+    # off one decode are evenly spaced, and rescanning every timestamp for every
+    # frame is quadratic -- 5.6s on a ten-minute video, on a op that advertises
+    # about one. Uneven spacing only shifts a median baseline slightly.
+    span = times[-1] - times[0]
+    fps = (len(times) - 1) / span if span > 0 else 30.0
+    half = max(1, round(window_seconds * fps))
+    edge = max(1, round(EDGE_LEVEL_SECONDS * fps))
+
+    flagged: list[bool] = []
+    for i, v in enumerate(vals):
+        base = percentile(vals[max(0, i - half) : i + half + 1], 0.5)
+        flagged.append(base >= min_baseline and v < drop_ratio * base)
+
+    def level(lo_idx: int, hi_idx: int) -> Optional[float]:
+        """Median detail over a short window, clamped to the series."""
+        lo, hi = max(0, lo_idx), min(len(vals), hi_idx)
+        return percentile(vals[lo:hi], 0.5) if hi > lo else None
+
+    out: list[Run] = []
+    i = 0
+    while i < len(flagged):
+        if not flagged[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(flagged) and flagged[j + 1]:
+            j += 1
+        # needs a normal frame on BOTH sides: one to fall from, one to recover to
+        if i > 0 and j < len(flagged) - 1:
+            start, end = times[i], times[j]
+            before = level(i - edge, i)
+            after = level(j + 1, j + 1 + edge)
+            run_vals = vals[i : j + 1]
+            peak = max(run_vals)
+            # The symmetric baseline above straddles cuts, so a low-detail shot
+            # sitting next to a high-detail one gets its last frames flagged --
+            # a title card before busy footage reads as a hole that is not one.
+            # A dropout falls from the surrounding content AND RETURNS TO IT;
+            # a cut lands somewhere else and stays. Requiring the level either
+            # side to match is what separates them.
+            returns = (
+                before is not None
+                and after is not None
+                and peak < drop_ratio * before
+                and peak < drop_ratio * after
+                and abs(after - before) <= LEVEL_MATCH_RATIO * max(before, after)
+            )
+            if returns and end - start <= max_seconds:
+                out.append(
+                    Run(
+                        start=round(start, 3),
+                        end=round(end, 3),
+                        mean=round(sum(run_vals) / len(run_vals), 4),
+                        kind="detail_dropout",
+                    )
+                )
+        i = j + 1
+    return out
+
+
 def window_stats(series: Series, start: float, end: float) -> dict[str, Any]:
     """mean/peak/frames of a curve inside ``[start, end)``.
 
@@ -235,9 +350,14 @@ def window_stats(series: Series, start: float, end: float) -> dict[str, Any]:
     """
     vals = [v for t, v in series if start <= t < end]
     if not vals:
-        return {"mean": None, "peak": None, "frames": 0}
+        return {"mean": None, "median": None, "peak": None, "frames": 0}
     return {
         "mean": round(sum(vals) / len(vals), 4),
+        # the median is the honest one for "is this window moving": a single
+        # spike at the start of an otherwise dead window drags the mean over
+        # any floor you set, and a hook that opens with a lurch and then coasts
+        # to a stop is exactly the shape that fools it.
+        "median": round(percentile(vals, 0.5), 4),
         "peak": round(max(vals), 4),
         "frames": len(vals),
     }
@@ -308,6 +428,8 @@ def summarize(
     luma: Series,
     scd: Series,
     duration: float,
+    detail: Optional[Series] = None,
+    hook_seconds: float = HOOK_SECONDS,
     static_threshold: float = STATIC_THRESHOLD,
     dark_threshold: float = DARK_THRESHOLD,
     cut_threshold: float = CUT_THRESHOLD,
@@ -336,6 +458,10 @@ def summarize(
     static = find_runs(mb, below=static_threshold, min_seconds=min_static_seconds, kind="static")
     dark = find_runs(lb, below=dark_threshold, min_seconds=MIN_DARK_SECONDS, kind="dark")
     cuts = peaks_above(scd, threshold=cut_threshold)
+    # measured on the RAW per-frame curve, never the buckets: a 3-frame hole is
+    # exactly what bucket_seconds is documented to smooth away.
+    dropouts = find_detail_dropouts(detail) if detail else []
+    hook = window_stats(motion, 0.0, hook_seconds)
 
     # A run's last bucket ends on a whole bucket_seconds boundary, which sits PAST
     # the end of any clip whose duration isn't a multiple of it. Left alone that
@@ -375,6 +501,13 @@ def summarize(
             )
     for r in dark:
         findings.append(f"DARK {r.start:.2f}-{r.end:.2f}s ({r.seconds:.2f}s) mean luma {r.mean:.1f}")
+    for r in dropouts:
+        findings.append(
+            f"EMPTY-FRAME {r.start:.2f}-{r.end:.2f}s — spatial detail falls to "
+            f"{r.mean:.2f} against a normal-content baseline, then returns. The picture "
+            f"briefly contains almost nothing; luma is unchanged, so no black-frame "
+            f"check sees this. Confirm with `strip` over the window."
+        )
 
     # A table bucket coarser than the analysis bucket keeps long videos readable.
     tb = table_bucket_seconds(duration)
@@ -411,6 +544,11 @@ def summarize(
         "dark_runs": [_run_dict(r) for r in dark],
         "cut_times": cuts,
         "cut_count": len(cuts),
+        "detail_dropouts": [
+            {**{k: v for k, v in _run_dict(r).items() if k != "mean_motion"}, "mean_detail": round(r.mean, 4)}
+            for r in dropouts
+        ],
+        "hook_motion": {**hook, "window_seconds": hook_seconds},
         "findings": findings,
         "table": timeline_table(
             table_motion,

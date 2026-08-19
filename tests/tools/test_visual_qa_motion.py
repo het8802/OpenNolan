@@ -12,13 +12,14 @@ that fails if the ffmpeg chain, the metadata parsing or the thresholds break.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from lib import qa_plan_diff, video_motion
+from lib import qa_norms, qa_plan_diff, video_motion
 from tools.analysis.visual_qa import VisualQA
 
 HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
@@ -112,6 +113,7 @@ def test_window_stats_reports_zero_frames_rather_than_zero_motion():
     series = [(0.0, 1.0), (5.0, 2.0)]
     assert video_motion.window_stats(series, 1.0, 2.0) == {
         "mean": None,
+        "median": None,
         "peak": None,
         "frames": 0,
     }
@@ -734,7 +736,7 @@ def test_soft_transitions_are_excluded_from_cut_detection():
     assert "soft transition(s) excluded" in hit[0]["message"]
 
 
-def test_cut_undetected_is_low_confidence_and_labelled_as_such():
+def test_cut_undetected_stays_honest_about_single_boundary_evidence():
     doc = _doc(
         cuts=[
             {"id": "a", "source": "x", "in_seconds": 0, "out_seconds": 2},
@@ -743,8 +745,11 @@ def test_cut_undetected_is_low_confidence_and_labelled_as_such():
     )
     found, _ = qa_plan_diff.measured_findings(doc, motion=[(0.0, 1.0)], cut_times=[], frozen_runs=[], duration=4.0)
     hit = [f for f in found if f["kind"] == "cut-undetected"]
-    assert hit and hit[0]["severity"] == "low"
-    assert "WEAK EVIDENCE" in hit[0]["message"]
+    # One missing boundary out of one is a similar join, not a broken edit:
+    # severity tracks how much of the edit is affected, and the message still
+    # says plainly that a single boundary proves nothing on its own.
+    assert hit and hit[0]["severity"] == "medium"
+    assert "Any ONE of these is weak evidence" in hit[0]["message"]
     # A detected peak near the boundary clears it.
     ok, _ = qa_plan_diff.measured_findings(doc, motion=[(0.0, 1.0)], cut_times=[2.1], frozen_runs=[], duration=4.0)
     assert [f for f in ok if f["kind"] == "cut-undetected"] == []
@@ -1092,3 +1097,295 @@ def test_vs_plan_end_to_end_flags_a_declared_animation_over_a_frozen_window(froz
     flat = [f for f in d["findings"] if f["kind"] == "flat"]
     assert flat, d["lines"]
     assert "rises" in flat[0]["message"]
+
+
+# --- detail dropouts (the hole no other curve sees) -------------------------
+#
+# Shapes are taken from a real failure: edge-density baseline ~5.0, a 3-frame
+# trough at 0.43 (9% of baseline) at 7.07s, then full recovery. Luma across the
+# same frames never moved, which is why no black-frame check saw it.
+
+
+def _flat(n: int, value: float, fps: float = 30.0) -> list[tuple[float, float]]:
+    return [(i / fps, value) for i in range(n)]
+
+
+def test_detail_dropout_found_when_detail_collapses_and_returns():
+    series = _flat(120, 5.0)
+    for i, v in ((60, 0.43), (61, 0.40), (62, 1.20)):
+        series[i] = (series[i][0], v)
+
+    runs = video_motion.find_detail_dropouts(series)
+
+    assert len(runs) == 1
+    assert runs[0].kind == "detail_dropout"
+    assert runs[0].start == pytest.approx(60 / 30, abs=1e-3)
+
+
+def test_detail_dropout_ignores_a_cut_to_a_genuinely_sparse_shot():
+    """Detail that drops and STAYS down is a design choice, not a hole."""
+    series = _flat(60, 5.0) + [((60 + i) / 30, 0.4) for i in range(60)]
+
+    assert video_motion.find_detail_dropouts(series) == []
+
+
+def test_detail_dropout_ignores_a_cut_from_a_plain_shot_to_a_busy_one():
+    """The false positive that a symmetric baseline window creates.
+
+    A title card (edge ~2.6) cut against busy footage (edge ~11): the baseline
+    around the last frames of the card straddles the cut and is dominated by
+    the busy side, so those frames look like a hole. They are not -- detail
+    never returns to 2.6, it lands at 11 and stays. A dropout comes back.
+    """
+    series = [(i / 30, 2.6) for i in range(45)] + [((45 + i) / 30, 11.0) for i in range(45)]
+
+    assert video_motion.find_detail_dropouts(series) == []
+
+
+def test_detail_dropout_ignores_a_blank_long_enough_to_be_intentional():
+    series = _flat(120, 5.0)
+    for i in range(50, 70):  # 0.66s — past DETAIL_MAX_SECONDS
+        series[i] = (series[i][0], 0.2)
+
+    assert video_motion.find_detail_dropouts(series) == []
+
+
+def test_detail_dropout_ignores_a_flat_video_with_no_baseline():
+    """Below DETAIL_MIN_BASELINE, 'share of surrounding detail' means nothing."""
+    series = _flat(120, 0.5)
+    series[60] = (60 / 30, 0.01)
+
+    assert video_motion.find_detail_dropouts(series) == []
+
+
+def test_detail_dropout_needs_a_normal_frame_on_both_sides():
+    """A drop at the very end has no recovery to confirm it was transient."""
+    series = _flat(60, 5.0) + [(60 / 30, 0.3)]
+
+    assert video_motion.find_detail_dropouts(series) == []
+
+
+def test_summarize_labels_dropout_energy_as_detail_not_motion():
+    """Run.mean on a dropout is edge density; calling it mean_motion misreads."""
+    detail = _flat(120, 5.0)
+    detail[60] = (60 / 30, 0.4)
+    out = video_motion.summarize(
+        motion=_flat(120, 1.0),
+        luma=_flat(120, 120.0),
+        scd=_flat(120, 0.0),
+        duration=4.0,
+        detail=detail,
+    )
+
+    assert out["detail_dropouts"], "the dropout should survive into the summary"
+    assert "mean_detail" in out["detail_dropouts"][0]
+    assert "mean_motion" not in out["detail_dropouts"][0]
+
+
+# --- window_stats median ----------------------------------------------------
+
+
+def test_window_median_is_not_rescued_by_an_opening_spike():
+    """The real hook shape: opens at 2.74, decays to 0.06 by 1.5s.
+
+    Its mean clears a 0.6 floor while the viewer is looking at a still frame.
+    """
+    hook = [(0.03, 1.4), (0.07, 1.3), (0.17, 2.1), (0.2, 2.74), (0.3, 1.35)]
+    hook += [(0.4 + i * 0.033, v) for i, v in enumerate([0.8, 0.5, 0.37, 0.28, 0.2, 0.14, 0.09, 0.06])]
+
+    stats = video_motion.window_stats(hook, 0.0, 1.5)
+
+    assert stats["mean"] > 0.6
+    assert stats["median"] < 0.6
+
+
+# --- norms: the scale that turns a number into a verdict --------------------
+
+
+def test_norms_fail_the_measured_shape_of_a_slow_reel():
+    """The exact numbers off a 33s reel that measured fine and read raw."""
+    summary = {
+        "duration_seconds": 33.0,
+        "cut_count": 6,  # -> 4.71s perceived shot vs a 2.5s norm
+        "static_fraction": 0.2576,
+        "static_runs": [
+            {"start": 4.5, "end": 7.0, "seconds": 2.5},
+            {"start": 29.0, "end": 33.0, "seconds": 4.0},
+        ],
+        "hook_motion": {"median": 0.389, "peak": 2.74, "frames": 44},
+        "detail_dropouts": [{"start": 7.067, "end": 7.1, "seconds": 0.033}],
+    }
+
+    v = qa_norms.judge(summary)
+    failed = {f["metric"] for f in v["failures"]}
+
+    assert v["status"] == "fail"
+    assert failed == {
+        "perceived_shot_seconds",
+        "static_fraction",
+        "longest_static_run_seconds",
+        "end_hold_seconds",
+        "hook_motion",
+        "detail_dropouts",
+    }
+
+
+def test_norms_report_a_frozen_tail_once_not_twice():
+    """A run touching the end is end_hold, not also longest_static_run."""
+    summary = {
+        "duration_seconds": 20.0,
+        "cut_count": 12,
+        "static_fraction": 0.1,
+        "static_runs": [{"start": 16.0, "end": 20.0, "seconds": 4.0}],
+        "hook_motion": {"median": 2.0, "peak": 3.0, "frames": 40},
+        "detail_dropouts": [],
+    }
+
+    failed = {f["metric"] for f in qa_norms.judge(summary)["failures"]}
+
+    assert failed == {"end_hold_seconds"}
+
+
+def test_norms_pass_a_well_cut_reel():
+    summary = {
+        "duration_seconds": 30.0,
+        "cut_count": 14,
+        "static_fraction": 0.08,
+        "static_runs": [{"start": 5.0, "end": 5.9, "seconds": 0.9}],
+        "hook_motion": {"median": 1.8, "peak": 4.0, "frames": 45},
+        "detail_dropouts": [],
+    }
+
+    assert qa_norms.judge(summary)["status"] == "pass"
+
+
+def test_norms_long_form_lets_shots_breathe():
+    """The same slow edit is not a defect when holds are the point."""
+    summary = {
+        "duration_seconds": 33.0,
+        "cut_count": 6,
+        "static_fraction": 0.26,
+        "static_runs": [{"start": 4.5, "end": 7.0, "seconds": 2.5}],
+        "hook_motion": {"median": 0.389, "peak": 2.74, "frames": 44},
+        "detail_dropouts": [],
+    }
+
+    assert qa_norms.judge(summary, "long_form")["status"] == "pass"
+    assert qa_norms.judge(summary, "short_form")["status"] == "fail"
+
+
+def test_norms_unknown_profile_is_unknown_not_pass():
+    """An unjudged video must never come back looking like a judged one."""
+    v = qa_norms.judge({"duration_seconds": 10.0, "cut_count": 8}, "cinema-verite")
+
+    assert v["status"] == "unknown"
+    assert "error" in v
+
+
+def test_norms_missing_measurements_do_not_manufacture_a_pass():
+    v = qa_norms.judge({})
+
+    assert [c["metric"] for c in v["checks"]] == ["detail_dropouts"]
+
+
+# --- cut-undetected severity tracks impact, not certainty -------------------
+
+
+def _hard_cut_doc(n_cuts: int, seconds: float = 2.0) -> dict:
+    return {
+        "version": "1.0",
+        "render_runtime": "ffmpeg",
+        "cuts": [
+            {
+                "id": f"sc{i:02d}",
+                "source": "a",
+                "in_seconds": 0.0,
+                "out_seconds": seconds,
+                "transition_in": "none",
+                "transition_out": "none",
+            }
+            for i in range(n_cuts)
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    "detected, expected",
+    [
+        (13, "low"),  # 1/14 missing
+        (10, "medium"),  # 4/14
+        (6, "high"),  # 8/14 — most of the edit does not land
+    ],
+)
+def test_cut_undetected_severity_scales_with_share_missing(detected, expected):
+    doc = _hard_cut_doc(15)
+    cut_times = [round(2.0 * i, 2) for i in range(1, detected + 1)]
+
+    found, _ = qa_plan_diff.measured_findings(
+        doc, motion=[(0.0, 1.0)], cut_times=cut_times, frozen_runs=[], duration=30.0
+    )
+    cut = [f for f in found if f["kind"] == "cut-undetected"]
+
+    assert cut and cut[0]["severity"] == expected
+
+
+def test_cut_undetected_names_the_perceived_shot_length():
+    """The sentence that makes the finding actionable rather than a statistic."""
+    doc = _hard_cut_doc(15)
+    found, _ = qa_plan_diff.measured_findings(
+        doc, motion=[(0.0, 1.0)], cut_times=[2.0 * i for i in range(1, 7)], frozen_runs=[], duration=30.0
+    )
+    msg = [f for f in found if f["kind"] == "cut-undetected"][0]["message"]
+
+    assert "4.3s per shot rather than the 2.0s" in msg
+    assert "REQUIRED" in msg
+
+
+# --- the schema is where "everything looks good" stops being available ------
+
+
+def _review(status: str, motion_check: dict) -> dict:
+    return {
+        "version": "1.0",
+        "output_path": "renders/final.mp4",
+        "status": status,
+        "checks": {
+            "technical_probe": {},
+            "visual_spotcheck": {},
+            "audio_spotcheck": {},
+            "promise_preservation": {},
+            "subtitle_check": {},
+            "motion_check": motion_check,
+        },
+    }
+
+
+@pytest.fixture(scope="module")
+def review_validator():
+    jsonschema = pytest.importorskip("jsonschema")
+    path = Path(__file__).resolve().parents[2] / "schemas/artifacts/final_review.schema.json"
+    schema = json.loads(path.read_text())
+    jsonschema.Draft202012Validator.check_schema(schema)
+    return jsonschema.Draft202012Validator(schema)
+
+
+def test_schema_rejects_a_pass_while_the_measured_verdict_fails(review_validator):
+    """The whole point. A reviewer that measured a failure cannot file a pass."""
+    doc = _review("pass", {"norms_verdict": "fail", "norms_failures": ["static_fraction: 0.26 vs 0.2"]})
+
+    assert list(review_validator.iter_errors(doc)), "a failing verdict must block status=pass"
+
+
+def test_schema_accepts_a_failing_verdict_reported_as_revise(review_validator):
+    doc = _review("revise", {"norms_verdict": "fail", "norms_failures": ["static_fraction: 0.26 vs 0.2"]})
+
+    assert not list(review_validator.iter_errors(doc))
+
+
+def test_schema_accepts_a_pass_when_the_verdict_passed(review_validator):
+    assert not list(review_validator.iter_errors(_review("pass", {"norms_verdict": "pass"})))
+
+
+def test_schema_leaves_reviews_written_before_the_verdict_existed_valid(review_validator):
+    """Old artifacts lack norms_verdict, so the rule must not match them."""
+    assert not list(review_validator.iter_errors(_review("pass", {"cut_count": 6})))
