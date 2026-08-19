@@ -18,19 +18,23 @@ visual_language:
 typography:
   headings:
     font: "Fraunces"
+    file: "assets/fonts/Fraunces/Fraunces-Variable.ttf"
     weight: 900
     tracking: "-0.04em"
     line_height: 0.9
   body:
     font: "Fraunces"
+    file: "assets/fonts/Fraunces/Fraunces-Variable.ttf"
     weight: 750
     tracking: "-0.025em"
     line_height: 0.96
   code:
     font: "Fira Code"
+    file: "assets/fonts/FiraCode/FiraCode-Variable.ttf"
     weight: 600
   stat_card:
     font: "Inter Tight"
+    file: "assets/fonts/InterTight/InterTight-Variable.ttf"
     weight: 850
     size_multiplier: 2.1
   scale_system: "major_third"

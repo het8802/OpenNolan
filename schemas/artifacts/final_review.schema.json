@@ -129,6 +129,75 @@
               "items": { "type": "string" }
             }
           }
+        },
+        "motion_check": {
+          "type": "object",
+          "description": "Optional but strongly preferred: MEASURED motion, from visual_qa operation='motion' (and 'vs_plan' when a plan exists). Stills cannot show motion, so without this a frozen hook or an animation that never ran passes review unnoticed. Not in checks.required, so older reviews stay valid — but a review that omits it has not actually checked whether the video moves. vs_plan is advisory: the agent decides what to record here, and any finding it keeps also belongs in issues_found.",
+          "properties": {
+            "static_fraction": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Share of the runtime whose frame-change energy sits below the static threshold. High values mean a slideshow, measured rather than self-reported."
+            },
+            "frozen_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Total seconds of effectively identical consecutive frames."
+            },
+            "cut_count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Scene-change peaks detected in the rendered file."
+            },
+            "hook_static_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Static seconds inside the opening hook window. The hook is the whole reel; a frozen hook is critical even when the rest moves."
+            },
+            "declared_not_rendered": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Count of vs_plan 'not-rendered' findings — declarations the render path provably ignores (e.g. cuts[].transform.animation on the ffmpeg path). These are certainties, not inferences."
+            },
+            "norms_verdict": {
+              "type": "string",
+              "enum": ["pass", "fail", "unknown"],
+              "description": "verdict.status from visual_qa operation='motion' — the measurement compared against this format's pacing norms (lib/qa_norms.py). This is the field that turns numbers into a judgement: a review that records cut_count without it is reporting a number nobody has a scale for. When this is 'fail', the review's top-level status MUST NOT be 'pass' — the schema enforces it."
+            },
+            "norms_profile": {
+              "type": "string",
+              "description": "Which norms profile was applied (short_form | long_form). Say so, because a long_form video judged as short_form fails for the wrong reason."
+            },
+            "norms_failures": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "One line per failed norm, as 'metric: measured vs norm'. Each one also belongs in issues_found."
+            },
+            "perceived_shot_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "description": "duration / (cut_count + 1) — the average shot length a VIEWER experiences, which is not the one the edit doc was written at when cuts join shots too similar to register."
+            },
+            "detail_dropout_count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Frames where spatial detail collapses and returns — the picture briefly empties out mid-transition. Invisible to luma checks and too short for a contact sheet to land on."
+            },
+            "sheet_path": {
+              "type": "string",
+              "description": "Contact sheet inspected (visual_qa operation='sheet')."
+            },
+            "strip_paths": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Filmstrips inspected for motion (visual_qa operation='strip'), one per window checked."
+            },
+            "issues": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -145,5 +214,23 @@
     },
     "metadata": { "type": "object" }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "if": {
+    "properties": {
+      "checks": {
+        "properties": {
+          "motion_check": {
+            "properties": { "norms_verdict": { "const": "fail" } },
+            "required": ["norms_verdict"]
+          }
+        },
+        "required": ["motion_check"]
+      }
+    },
+    "required": ["checks"]
+  },
+  "then": {
+    "properties": { "status": { "not": { "const": "pass" } } },
+    "$comment": "A measured norms failure cannot coexist with a passing review. Reviews written before norms_verdict existed do not match the 'if' and stay valid."
+  }
 }

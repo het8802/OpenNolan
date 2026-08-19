@@ -57,6 +57,7 @@ When the user asks to make, create, produce, or generate any video content — a
 3. **Run preflight.** Discover available tools via the registry. Present the capability menu.
 4. **Execute stage by stage.** For EACH stage, read the stage director skill (`skills/pipelines/<pipeline>/<stage>-director.md`) BEFORE doing any work in that stage.
 5. **Read Layer 3 skills before calling tools.** Before using any tool with an `agent_skills` field, read the referenced skill in `.agents/app/skills/`. These contain provider-specific prompting guidance, parameter optimization, and quality techniques that dramatically improve output.
+6. **QA the finished video before presenting it — always.** Never hand over a render you have not inspected. There are several QA tools and they catch different things, so use them together: `visual_qa operation="motion"` first (~1s, no images) for freezes, static stretches, empty frames and missing cuts; `sheet` for one whole-reel contact sheet; `strip` for every window that is supposed to move (a still cannot show motion); `vs_plan` to diff the plan against what actually rendered. Then `probe` and `audio_levels` for the technicals. **`motion` returns a `verdict` measured against this format's pacing norms — if it says `fail`, the video is not done, whatever it looks like to you.** A measurement with no scale is not a check: "6 cuts" is a fact, "6 cuts in 33s reads as a 4.7s shot in a genre that cuts every 2s" is a finding.
 
 **Do NOT:**
 - Write ad-hoc Python scripts to call tools directly
@@ -64,6 +65,7 @@ When the user asks to make, create, produce, or generate any video content — a
 - Generate assets without reading the stage director skill first
 - Use a tool without checking its Layer 3 skill for prompting guidance
 - Bypass preflight, checkpoints, or review
+- Present a finished video you have only reasoned about. A plan that reads well is not evidence the render is good — measure it
 
 The intelligence is in the skills, not in improvised code. An agent that reads the director skills and Layer 3 knowledge will produce significantly better output than one that calls tools directly with generic prompts.
 
@@ -254,7 +256,7 @@ To extend the library, append entries to `scripts/generate_educational_sfx.py` a
 |----------|----------|-----------|
 | `animated-explainer` | Topic to fully generated explainer | production |
 | `talking-head` | Footage-led speaker videos | beta |
-| `instagram-fast-reel` | Your talking-head clips → fast-paced vertical reel: tight jump cuts (dead air/filler removed), keyframe-animated overlays, meme GIFs, and word-by-word motion-graphic captions. Lean flow (idea→script→assets→edit→compose→qa) with a final QA gate that inspects the hook at 5 fps, the whole reel at 2 fps, and all technicals. Reuses the Edits-parity toolset; ffmpeg runtime default. | beta |
+| `instagram-fast-reel` | Your talking-head clips → fast-paced vertical reel: tight jump cuts (dead air/filler removed), keyframe-animated overlays, meme GIFs, and word-by-word motion-graphic captions. Lean flow (idea→script→assets→edit→compose→qa) with a final QA gate that MEASURES motion (freeze/static/cut detection), reviews a single contact sheet, filmstrips every window that claims to move, diffs the plan against the render, and checks all technicals. Reuses the Edits-parity toolset; ffmpeg runtime default. | beta |
 | `animation-talking-head-50-50` | Split-screen animated explainer: talking head bottom 45%, Greg-style animated panels top 55%, with full-frame modes per cut. HyperFrames + FFmpeg two-pass. Talking head video untouched (no color conversion). | beta |
 | `anthropic-style-animated-talking-head` | Creator talking-head explainers intercut with Anthropic-editorial motion graphics. Smart per-beat shot selection (full face / overlay / 50-50 split / full animation), claim-triggered research (finds a credible article + highlights the claim), VO copied through untouched. HyperFrames assets + FFmpeg segment-rebuild. | beta |
 | `screen-demo` | Screen recordings and walkthroughs | production |

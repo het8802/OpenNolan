@@ -220,6 +220,10 @@
       "required": ["font"],
       "properties": {
         "font": { "type": "string" },
+        "file": {
+          "type": "string",
+          "description": "Repo-relative path to a bundled font file (assets/fonts/<Family>/...), so the agent reads it directly instead of downloading/searching the filesystem. Optional: not every referenced font is bundled yet."
+        },
         "weight": { "type": "integer" },
         "tracking": { "type": "string" },
         "line_height": { "type": "number" },
