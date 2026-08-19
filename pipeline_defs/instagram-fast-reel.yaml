@@ -9,8 +9,10 @@ description: >
 
   Deliberately short: idea -> script -> assets -> edit -> compose -> qa (no separate research,
   scene_plan, or publish stage). scene planning is folded into `script` as a beat/cut/animation
-  map; export is folded into `compose`. A dedicated `qa` stage closes the pipeline: it inspects
-  the HOOK at 5 fps first, then the whole reel at 2 fps, plus a full technical probe.
+  map; export is folded into `compose`. A dedicated `qa` stage closes the pipeline: it MEASURES
+  motion first (freeze/static/cut detection, ~1s, no images), then looks via a single contact
+  sheet, then takes filmstrips of every window that claims to move, diffs the plan against the
+  render, and finishes with a full technical probe.
 
   Difference from anthropic-style-animated-talking-head: THIS pipeline is fast-cut-first. The
   talking head is CUT (jump cuts, silence removal) rather than kept byte-for-byte — audio is cut
@@ -246,15 +248,19 @@ stages:
     checkpoint_required: true
     human_approval_default: true
     review_focus:
-      - "STEP 1 — HOOK at 5 fps: sample the hook window (first ~3s, the duration of cuts[0]) at frame_sampler interval_seconds=0.2. If the hook fails (weak/broken/black first frame, late caption, no motion in the opening), STOP and report before wasting the full pass — the hook is the whole reel."
-      - "STEP 2 — FULL REEL at 2 fps: sample the entire output at frame_sampler interval_seconds=0.5. Scan every sampled frame for black/frozen frames, broken or missing overlays, GIFs that never appear, captions in the UI shadow zone or clipped off-frame, unreadable text."
-      - "STEP 3 — TECHNICALS: visual_qa probe with expected {width:1080, height:1920, has_audio:true} — container valid, resolution/fps/codec/pixel_format correct, duration matches the tightened edit (shorter than source); decode clean (no errors), no long black segments; visual_qa audio_levels — VO present + intelligible, music ducked, no clipping, no leftover dead air."
-      - "SYNC: using the sampled frames, confirm no animation/GIF/caption appears BEFORE its trigger word (early reveal = CRITICAL)."
+      - "STEP 1 — MEASURE FIRST: visual_qa operation='motion'. ~1s, no images. A still frame cannot show motion, so read the numbers before looking at anything: frozen_runs (consecutive identical frames — any freeze the edit did not ask for is a defect), static_fraction (the MEASURED slideshow number, not the self-reported slideshow_risk_score), dark_runs, cut_count vs the cuts the edit planned, and the per-second table. If the hook window (first ~3s, duration of cuts[0]) is static or frozen, STOP and report — the hook is the whole reel."
+      - "STEP 2 — LOOK ONCE: visual_qa operation='sheet' — ONE contact sheet of the whole reel with a timestamp burned into every tile (pass timestamps=scene midpoints for one tile per scene; a fixed-interval sheet can land tiles on transition frames that look like blanks). Scan for broken/missing overlays, GIFs that never appear or never leave, captions in the UI shadow zone or clipped off-frame, unreadable text. empty_cells is grid padding, NOT black frames."
+      - "STEP 3 — SEE THE MOTION: visual_qa operation='strip' over every window that claims to move — the hook always, plus each window motion flagged static/frozen, each keyframed overlay, each composition clip, and each caption/GIF trigger moment. Consecutive frames ~12/s side by side is the only way to judge whether motion progresses rather than jumping, stalling or never starting."
+      - "STEP 4 — DIFF THE PLAN: visual_qa operation='vs_plan' (ADVISORY — it reports the delta, the agent decides). 'not-rendered' findings are certainties derived from the renderer's own code (e.g. cuts[].transform.animation has no reader on the ffmpeg path, so a declared ken-burns renders static and silently) and are the most common cause of 'the animation I planned isn't in the video'. 'no-op-keyframes' = keyframes that never change value. Confirm 'flat' and 'cut-undetected' with a strip before acting — both are diluted/weak by construction."
+      - "STEP 5 — TECHNICALS: visual_qa probe with expected {width:1080, height:1920, has_audio:true} — container valid, resolution/fps/codec/pixel_format correct, duration matches the tightened edit (shorter than source); decode clean (no errors), no long black segments; visual_qa audio_levels — VO present + intelligible, music ducked, no clipping, no leftover dead air."
+      - "SYNC: confirm no animation/GIF/caption appears BEFORE its trigger word, using a strip over the trigger moment — a still cannot tell you whether a reveal is early (early reveal = CRITICAL)."
       - content_signal advisory score reviewed (informational, never a gate)
     success_criteria:
       - Schema-valid final_review artifact with status pass/revise/fail and recommended_action
-      - technical_probe, visual_spotcheck (hook @5fps + full @2fps), audio_spotcheck, and subtitle_check all completed; frame_paths recorded
-      - Any CRITICAL finding (bad hook, early reveal, black frames, wrong resolution, missing audio) sets status to revise/fail with a concrete next action (re_render / revise_edit / revise_assets)
+      - "checks.motion_check recorded: static_fraction, frozen_seconds, cut_count, hook_static_seconds, declared_not_rendered, sheet_path, strip_paths. vs_plan is advisory, so anything kept but not written down is a finding the human never sees."
+      - technical_probe, visual_spotcheck (frames_sampled = the sheet's TILE count, not the file count; frame_paths = sheet + strips), audio_spotcheck, and subtitle_check all completed
+      - A strip was taken for the hook and for every window that declares motion — motion is never signed off from stills alone
+      - Any CRITICAL finding (frozen/static hook, early reveal, black frames, wrong resolution, missing audio, a declared animation that provably did not render) sets status to revise/fail with a concrete next action (re_render / revise_edit / revise_assets)
 
 metadata:
   canvas: "1080x1920 (9:16)"
