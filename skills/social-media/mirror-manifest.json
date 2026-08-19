@@ -1,6 +1,6 @@
 {
   "destination": "skills/social-media",
-  "generated_at_utc": "2026-06-16T18:48:04Z",
+  "generated_at_utc": "2026-08-13T02:11:32Z",
   "mirrored": [
     {
       "skill": "daily-carousel-remix",
@@ -153,8 +153,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 21387,
-          "sha256": "bf0866084ba0e2a41fc976637f19857c1758692335d8a6185d8a678f116c0722"
+          "bytes": 22368,
+          "sha256": "01a33db196d263169407ae04ec9037f6cada710e49fa0912237d06e3ee0b5bbc"
         },
         {
           "path": "references/ai-tech-creator-research-strategy.md",
@@ -163,8 +163,8 @@
         },
         {
           "path": "references/apify-and-tool-roi.md",
-          "bytes": 3313,
-          "sha256": "f7d02f4171b0d18cf725b801aaddd4d6b54578179c631f4ed050a0d088dfe8d3"
+          "bytes": 5041,
+          "sha256": "6d5f20c1327a03ea99ec2fa042408e420934100b6b79344bd112f8aff3426a66"
         },
         {
           "path": "references/approval-recovery.md",

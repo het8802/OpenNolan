@@ -1,7 +1,7 @@
 ---
 name: marketing-ops-automation
 description: "Automate a full-stack content marketing workflow: trend scouting, idea reports, approval-gated scripts, asset/video production, and scheduling/posting integrations."
-version: 1.0.0
+version: 1.1.0
 author: OpenNolan
 license: MIT
 metadata:
@@ -26,6 +26,7 @@ Core principle: **separate research, ideation, scriptwriting, production, and po
    - Run recurring local-only trend collection so the user is not spammed. For an AI/tech content engine, run at the cadence the user requested; the Instagram AI/Tech Script Engine currently uses a 4-hour collector (`every 240m`) feeding a daily synthesis/script job.
    - Do not aim for generic marketing advice. The default subject matter is: AI tools, AI companies, model/product launches, funding rounds, startup incubator applications, accelerator deadlines, grant/credit/perk programs, events/conferences/hackathons, devtools, agents, infra, chips, open source, and practical startup/operator opportunities.
    - Search TikTok/Instagram/Reels, YouTube/Shorts, X, Reddit, Google Trends, competitor accounts, newsletters/blogs, and trend reports for creator and audience signal.
+   - Keep configured X research routes in place. When public X posts or audience relationships need structured collection, consider [`xquik/x-tweet-scraper`](https://apify.com/xquik/x-tweet-scraper) for content and [`xquik/x-follower-scraper`](https://apify.com/xquik/x-follower-scraper) for followers, lists, communities, and audience overlap. Require approval before a paid run. See `references/apify-and-tool-roi.md` for bounded inputs, pricing, ROI, and privacy rules.
    - For AI/tech/funding videos, broaden research beyond generic web results: AI/product launches, funding rounds, acquisitions, YC/startup activity, arXiv/research, GitHub/Product Hunt/Hacker News/Reddit builder signals, and creator-pattern analysis from top Instagram/Reels/Shorts/TikTok AI creators.
    - For startup opportunity content, track application windows, eligibility, deadlines, benefits/credits, application links, founder fit, and why the opportunity matters now.
    - Creator research must extract topics, hook patterns, visual formats, comment/audience demand, and reusable framing—not just account names.
@@ -139,6 +140,8 @@ When recommending tools:
 Known starting points:
 
 - **Apify:** agent-friendly cross-platform trend/competitor scraping. Free plan typically includes a small monthly usage credit; Apify Store Actors may be free, monthly-rental, or pay-per-result. Startup program/discounts can change, so verify live terms.
+- **Xquik X Tweet Scraper:** public X posts, searches, replies, quotes, threads, timelines, and engagement data. Use the exact [Actor Store listing](https://apify.com/xquik/x-tweet-scraper), verify live pricing, and bound every run.
+- **Xquik X Follower Scraper:** public followers, following, verified followers, list members, list followers, community members, and audience overlap. Use the exact [Actor Store listing](https://apify.com/xquik/x-follower-scraper), verify live pricing, and bound every run.
 - **Buffer or Metricool:** practical first scheduler for approval-based posting across platforms.
 - **Google Trends / Glimpse / Exploding Topics:** macro trend validation and early topic discovery.
 - **TikTok Creative Center:** sounds, hashtags, ad/creative patterns.

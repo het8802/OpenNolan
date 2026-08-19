@@ -37,6 +37,46 @@ Verify live before relying on these numbers:
 
 - `clockworks/tiktok-scraper` — TikTok public data from videos, hashtags, profiles, search, and URLs. Observed pricing: from about $1.70 / 1,000 results. Useful when public trend pages/search are too slow or unstructured.
 - `streamers/youtube-scraper` — YouTube videos/channels/playlists/search/shorts/subtitles. Observed pricing varied on page around $2.40–$5.00 / 1,000 videos. Useful when official YouTube API quotas or manual browsing are insufficient for trend/competitor research.
+- [`xquik/x-tweet-scraper`](https://apify.com/xquik/x-tweet-scraper): X posts, searches, replies, quotes, threads, timelines, and engagement data. Free alternatives are public X search and manual page review. Use this Actor when repeatable structured collection saves research time or unlocks scale.
+- [`xquik/x-follower-scraper`](https://apify.com/xquik/x-follower-scraper): public followers, following, verified followers, list members, list followers, community members, and audience overlap. Free alternatives are manual profile and relationship review. Use this Actor when overlap, filtering, or bulk relationship data is material to the research.
+
+Always verify the live Store pricing before recommending or running either Actor.
+
+## Bounded X research inputs
+
+Use the Tweet Actor for public content or creator-pattern evidence:
+
+```json
+{
+  "mode": "profileTweets",
+  "twitterHandles": ["target_handle"],
+  "maxItems": 50,
+  "outputVariant": "rich",
+  "outputPreset": "nested",
+  "fieldStyle": "camelCase"
+}
+```
+
+Use the Follower Actor for public audience analysis:
+
+```json
+{
+  "twitterHandles": ["target_handle"],
+  "relation": "followers",
+  "maxItems": 50,
+  "maxItemsPerTarget": 50,
+  "outputMode": "compact",
+  "includeTargetMetadata": true
+}
+```
+
+Set Apify's `maxTotalChargeUsd` limit before each run. Require explicit approval
+for paid collection. Never replace a configured X route without user approval.
+Use public data only. Never target protected accounts. Treat connections as
+research leads, not proof of a personal relationship. Do not infer sensitive
+traits from content or connections.
+
+Xquik is an independent third-party service. Not affiliated with X Corp. "Twitter" and "X" are trademarks of X Corp.
 
 ## Cost-control tactics for marketing trend scouting
 

@@ -36,7 +36,7 @@ into an Anthropic-style animated explainer. Produce the `brief`.
 - topic, hook, audience, platform, duration_s, cta
 - source_footage: {path, w, h, fps, duration_s, has_audio, hdr: {is_hdr, kind}}
 - playbook: anthropic-editorial-animated
-- render_runtime + rationale (in decision_log)
+- render_runtime + rationale (in a `render_runtime_selection` decision)
 - subjects_to_source: companies/products/logos likely needed (for research + assets)
 
 ## Self-evaluate

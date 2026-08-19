@@ -26,6 +26,26 @@ from tools.video.video_compose import VideoCompose
 HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 needs_ffmpeg = pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg/ffprobe not on PATH")
 
+
+def _ffmpeg_has_filter(name: str) -> bool:
+    if not HAS_FFMPEG:
+        return False
+    result = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-filters"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return result.returncode == 0 and any(
+        name in line.split() for line in result.stdout.splitlines()
+    )
+
+
+HAS_DRAWTEXT = _ffmpeg_has_filter("drawtext")
+needs_drawtext = pytest.mark.skipif(
+    not HAS_DRAWTEXT, reason="ffmpeg drawtext filter not available"
+)
+
 _FONT_AVAILABLE = VideoCompose()._resolve_drawtext_font(None, 0)[0] is not None
 needs_font = pytest.mark.skipif(
     not _FONT_AVAILABLE, reason="no system font found for drawtext"
@@ -284,7 +304,7 @@ def test_schema_still_requires_asset_id_for_untyped_overlays():
 
 # --- live: text overlays ---------------------------------------------------------
 
-@needs_ffmpeg
+@needs_drawtext
 @needs_font
 def test_text_overlay_renders_pixels_in_region(vc, tmp_path):
     """White text on black lights up the placed region only inside its window."""
@@ -307,7 +327,7 @@ def test_text_overlay_renders_pixels_in_region(vc, tmp_path):
     assert _bright_count(early) == 0, "text visible before start_seconds"
 
 
-@needs_ffmpeg
+@needs_drawtext
 @needs_font
 def test_text_overlay_special_chars_safe(vc, tmp_path):
     """Colons, quotes, commas, %, brackets, and backslashes survive escaping."""
@@ -327,7 +347,7 @@ def test_text_overlay_special_chars_safe(vc, tmp_path):
     )
 
 
-@needs_ffmpeg
+@needs_drawtext
 @needs_font
 def test_text_overlay_box_anchor_bottom_center(vc, tmp_path):
     """An opaque white box behind the text lands centered in the bottom band."""
@@ -349,7 +369,7 @@ def test_text_overlay_box_anchor_bottom_center(vc, tmp_path):
     assert bbox[1] > 120, f"box not in the bottom band: {bbox}"
 
 
-@needs_ffmpeg
+@needs_drawtext
 @needs_font
 def test_text_overlay_keyframed_fade_in(vc, tmp_path):
     """Opacity keyframes 0→1 ramp the text in via the alpha expression."""
@@ -371,7 +391,7 @@ def test_text_overlay_keyframed_fade_in(vc, tmp_path):
     assert late > 200, f"text missing after fade-in ({late}px)"
 
 
-@needs_ffmpeg
+@needs_drawtext
 @needs_font
 def test_text_overlay_via_ffmpeg_render(vc, tmp_path):
     """edit_decisions.overlays[] type='text' flows through the ffmpeg render path."""
