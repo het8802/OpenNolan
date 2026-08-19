@@ -18,6 +18,12 @@
 #   scripts/build-dmg.sh --publish    the full release: signed + notarized, then uploads the .dmg
 #                                     (human download) alongside electron-builder's .zip +
 #                                     latest-mac.yml (the auto-update feed). Needs GH_TOKEN.
+#   scripts/build-dmg.sh --bump-version         bump desktop/package.json patch, commit, tag, push
+#   scripts/build-dmg.sh --bump-version=minor   same, but minor / major / an explicit 1.2.3
+#
+# --bump-version runs BEFORE the build, so the .app and the .dmg filename carry the new number.
+# It pushes the tag, which triggers .github/workflows/release-mac.yml — CI then does its own
+# signed build and Release upload. Combining it with --publish means two builds of the same tag.
 #
 # A signed build always talks to Apple twice (once for the .app, once for the .dmg) and uploads
 # ~1 GB each time. For a quick local check use --dir or --unsigned; neither contacts Apple.
@@ -43,17 +49,52 @@ warn() { printf '%s\n' "${YEL}warning:${RST} $*" >&2; }
 die()  { printf '%s\n' "${RED}error:${RST} $*" >&2; exit 1; }
 
 # --- parse flags ---
-DIR_ONLY=0; PUBLISH=0; FORCE_UNSIGNED=0
+DIR_ONLY=0; PUBLISH=0; FORCE_UNSIGNED=0; BUMP=""
 for arg in "$@"; do
   case "$arg" in
     --dir)      DIR_ONLY=1 ;;
     --publish)  PUBLISH=1 ;;
     --unsigned) FORCE_UNSIGNED=1 ;;
+    --bump-version)   BUMP=patch ;;
+    --bump-version=*) BUMP="${arg#*=}" ;;   # minor | major | an explicit 1.2.3 — npm takes them all
     -h|--help)  awk 'NR>1 && /^#/{sub(/^# ?/,""); print; next} NR>1{exit}' "$0"; exit 0 ;;
     *) die "unknown flag: $arg (see --help)" ;;
   esac
 done
 [[ $DIR_ONLY == 1 && $PUBLISH == 1 ]] && die "--dir and --publish are mutually exclusive"
+[[ -n "$BUMP" && $DIR_ONLY == 1 ]] && die "--bump-version with --dir makes no sense: --dir is a local
+    smoke build, so this would tag + push a release for a .dmg you never packaged"
+
+# --- version bump (--bump-version) --------------------------------------------------------------
+# desktop/package.json is the single source of truth for the version: app.getVersion() reads it,
+# the DMG filename below is built from it, and release-mac.yml builds whatever v{version} tag it
+# was triggered by. This has to run BEFORE the build — electron-builder stamps the version into
+# the .app at package time, so bumping afterwards would ship the old number under the new tag.
+if [[ -n "$BUMP" ]]; then
+  step "Bumping version ($BUMP)"
+  git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "not a git repo: $REPO_ROOT"
+  # `git commit -am` stages every tracked modification, so anything dirty would be swallowed into
+  # the version commit. Untracked files are fine — -a does not touch them.
+  git -C "$REPO_ROOT" diff --quiet && git -C "$REPO_ROOT" diff --cached --quiet \
+    || die "working tree has tracked changes — commit or stash them first, or they land in the version commit"
+  BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD)"
+  # Derive the remote from the branch's upstream rather than hardcoding it — this repo's remote is
+  # named het8802, not origin.
+  UPSTREAM="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" \
+    || die "branch '$BRANCH' has no upstream — set one first: git push -u <remote> $BRANCH"
+  REMOTE="${UPSTREAM%%/*}"
+
+  TAG="$(npm --prefix "$DESKTOP" version "$BUMP" --no-git-tag-version)"   # prints e.g. v1.0.2
+  if git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+    git -C "$REPO_ROOT" checkout -- desktop/package.json desktop/package-lock.json
+    die "tag $TAG already exists — bump reverted, nothing changed"
+  fi
+  git -C "$REPO_ROOT" commit -qam "chore(desktop): $TAG"
+  git -C "$REPO_ROOT" tag "$TAG"
+  git -C "$REPO_ROOT" push "$REMOTE" "$BRANCH" --tags
+  info "${GRN}$TAG${RST} committed, tagged, pushed to $REMOTE/$BRANCH"
+  warn "$TAG is now pushed: release-mac.yml is building + publishing this tag in CI too"
+fi
 
 # --- preflight ---
 step "Preflight"
